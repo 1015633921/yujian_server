@@ -7,6 +7,7 @@ import sqlite3
 from datetime import datetime, timedelta
 from typing import Any
 
+from .bead_catalog import ensure_official_bead_catalog
 from .materials import MATERIAL_CATALOG
 from .repository import DB_PATH
 
@@ -100,6 +101,7 @@ class AdminService:
             if count == 0:
                 self._seed_materials(connection)
             self._ensure_default_white_quartz_series(connection)
+            ensure_official_bead_catalog(connection)
             block_count = connection.execute("SELECT COUNT(*) AS c FROM content_blocks").fetchone()["c"]
             if block_count == 0:
                 self._seed_blocks(connection)
