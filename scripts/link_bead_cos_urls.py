@@ -40,14 +40,15 @@ def update_urls(files: list[Path], base_url: str) -> int:
     with sqlite3.connect(DB_PATH) as connection:
         for path in files:
             series = series_name_from_file(path)
-            image_url = f"{base_url.rstrip('/')}/{quote(path.name)}"
+            object_name = f"{series}{path.suffix.lower()}"
+            image_url = f"{base_url.rstrip('/')}/{quote(object_name)}"
             cursor = connection.execute(
                 """
                 UPDATE managed_materials
                 SET image_path = ?, image_url = ?, updated_at = datetime('now')
                 WHERE top = 'bead' AND (series = ? OR name = ?)
                 """,
-                (path.name, image_url, series, series),
+                (object_name, image_url, series, series),
             )
             updated += cursor.rowcount
     return updated
