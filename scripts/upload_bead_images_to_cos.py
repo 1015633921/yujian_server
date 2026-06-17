@@ -39,7 +39,8 @@ def main() -> None:
 
     uploaded: list[tuple[str, str, str]] = []
     for path in files:
-        key = f"{args.prefix.strip('/')}/{path.name}"
+        prefix = args.prefix.strip("/")
+        key = f"{prefix}/{path.name}" if prefix else path.name
         client.upload_file(
             Bucket=args.bucket,
             LocalFilePath=str(path),

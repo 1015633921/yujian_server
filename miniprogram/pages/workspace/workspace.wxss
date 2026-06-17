@@ -206,9 +206,11 @@ page {
 }
 
 .circle-bead-image {
+  display: block;
   width: 100%;
   height: 100%;
   border-radius: 999rpx;
+  background: transparent;
 }
 
 .energy-section {
@@ -706,7 +708,8 @@ page {
 
 .material-image {
   display: block;
-  background: #edf0f2;
+  background: transparent;
+  object-fit: contain;
 }
 
 .material-name {

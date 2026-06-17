@@ -16,6 +16,7 @@ def main() -> None:
     parser.add_argument("--source", type=Path, default=DEFAULT_SOURCE_DIR, help="原始珠子图片目录")
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT_DIR, help="缩略图输出目录")
     parser.add_argument("--size", type=int, default=640, help="输出缩略图尺寸")
+    parser.add_argument("--transparent", action="store_true", help="将浅色拍摄背景处理为透明背景")
     args = parser.parse_args()
 
     source_dir = args.source
@@ -31,12 +32,12 @@ def main() -> None:
 
     for path in files:
         output_path = output_dir / f"{slug_from_name(path.stem)}.png"
-        crop_bead_image(path, output_path, args.size)
+        crop_bead_image(path, output_path, args.size, transparent=args.transparent)
 
     print(f"processed={len(files)} output={output_dir.resolve()}")
 
 
-def crop_bead_image(source: Path, output: Path, size: int) -> None:
+def crop_bead_image(source: Path, output: Path, size: int, transparent: bool = False) -> None:
     image = Image.open(source).convert("RGB")
     width, height = image.size
 
@@ -55,6 +56,8 @@ def crop_bead_image(source: Path, output: Path, size: int) -> None:
     left, top, right, bottom = pad_to_square(bbox, upper.size, padding_ratio=0.08)
     cropped = upper.crop((left, top, right, bottom))
     cropped.thumbnail((size, size), Image.Resampling.LANCZOS)
+    if transparent:
+        cropped = remove_light_background(cropped)
 
     canvas = Image.new("RGBA", (size, size), (255, 255, 255, 0))
     cropped_rgba = cropped.convert("RGBA")
@@ -62,6 +65,37 @@ def crop_bead_image(source: Path, output: Path, size: int) -> None:
     y = (size - cropped_rgba.height) // 2
     canvas.alpha_composite(cropped_rgba, (x, y))
     canvas.save(output)
+
+
+def remove_light_background(image: Image.Image) -> Image.Image:
+    rgba = image.convert("RGBA")
+    width, height = rgba.size
+    pixels = rgba.load()
+
+    corners = [
+        pixels[0, 0],
+        pixels[width - 1, 0],
+        pixels[0, height - 1],
+        pixels[width - 1, height - 1],
+    ]
+    bg = tuple(sum(color[i] for color in corners) // len(corners) for i in range(3))
+
+    for y in range(height):
+        for x in range(width):
+            r, g, b, a = pixels[x, y]
+            distance = ((r - bg[0]) ** 2 + (g - bg[1]) ** 2 + (b - bg[2]) ** 2) ** 0.5
+            brightness = (r + g + b) / 3
+            # Bright, background-like pixels become transparent; bead highlights stay visible
+            # because they differ more strongly from the sampled corner color.
+            if brightness > 210 and distance < 42:
+                alpha = 0
+            elif brightness > 190 and distance < 70:
+                alpha = int(min(255, max(0, (distance - 28) * 5)))
+            else:
+                alpha = a
+            pixels[x, y] = (r, g, b, alpha)
+
+    return rgba
 
 
 def find_non_background_bbox(image: Image.Image) -> tuple[int, int, int, int] | None:

@@ -19,7 +19,7 @@
           <view class="completion-sub">{{summary.count ? '轻触珠子调整顺序' : '点击下方材料开始串珠'}}</view>
         </view>
         <view wx:for="{{selectedItems}}" wx:key="index" class="circle-bead {{item.selected ? 'active' : ''}}" style="{{item.style}}" data-index="{{index}}" bindtap="selectBead" bindlongpress="removeItem">
-          <image wx:if="{{item.image_url}}" class="circle-bead-image" src="{{item.image_url}}" mode="aspectFill" data-id="{{item.id}}" binderror="onMaterialImageError"></image>
+          <image wx:if="{{item.image_url}}" class="circle-bead-image" src="{{item.image_url}}" mode="aspectFit" data-id="{{item.id}}" binderror="onMaterialImageError"></image>
           <view wx:else class="bead-glow"></view>
         </view>
       </view>
@@ -159,7 +159,7 @@
         <scroll-view class="material-scroll" scroll-y>
           <view class="material-grid">
             <view wx:for="{{visibleMaterials}}" wx:key="id" class="material-card" data-id="{{item.id}}" bindtap="addMaterial">
-              <image wx:if="{{item.image_url}}" class="material-sphere material-image" src="{{item.image_url}}" mode="aspectFill" data-id="{{item.id}}" binderror="onMaterialImageError"></image>
+              <image wx:if="{{item.image_url}}" class="material-sphere material-image" src="{{item.image_url}}" mode="aspectFit" data-id="{{item.id}}" binderror="onMaterialImageError"></image>
               <view wx:else class="material-sphere" style="background: radial-gradient(circle at 32% 26%, {{item.shine}} 0 10%, {{item.color}} 12% 58%, rgba(0,0,0,.22) 100%);"></view>
               <view class="material-name">{{item.name}}</view>
               <view class="material-effect">{{item.series && item.series !== item.name ? item.series + ' · ' : ''}}{{item.grade ? item.grade + ' · ' : ''}}{{item.effect}}</view>

@@ -85,8 +85,16 @@
   width: 92rpx;
   height: 92rpx;
   border-radius: 999rpx;
-  background: #edf0f2;
   box-shadow: inset -12rpx -14rpx 22rpx rgba(0, 0, 0, 0.14), 0 8rpx 16rpx rgba(0, 0, 0, 0.08);
+}
+
+.result-image {
+  display: block;
+  background: transparent;
+}
+
+.result-sphere {
+  background: #edf0f2;
 }
 
 .result-copy {

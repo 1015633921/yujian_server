@@ -21,7 +21,7 @@
     <view wx:elif="{{!results.length}}" class="card state-card">没有找到相关材料，换个关键词试试。</view>
     <view wx:else class="result-list">
       <view wx:for="{{results}}" wx:key="id" class="result-card card">
-        <image wx:if="{{item.image_url}}" class="result-image" src="{{item.image_url}}" mode="aspectFill" data-id="{{item.id}}" binderror="onImageError"></image>
+        <image wx:if="{{item.image_url}}" class="result-image" src="{{item.image_url}}" mode="aspectFit" data-id="{{item.id}}" binderror="onImageError"></image>
         <view wx:else class="result-sphere" style="background: radial-gradient(circle at 32% 26%, {{item.shine}} 0 10%, {{item.color}} 12% 58%, rgba(0,0,0,.22) 100%);"></view>
         <view class="result-copy">
           <view class="result-name">{{item.name}}</view>
