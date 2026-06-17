@@ -17,6 +17,11 @@ def main() -> None:
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT_DIR, help="缩略图输出目录")
     parser.add_argument("--size", type=int, default=640, help="输出缩略图尺寸")
     parser.add_argument("--transparent", action="store_true", help="将浅色拍摄背景处理为透明背景")
+    parser.add_argument("--circle-mask", action="store_true", help="keep only the round bead body")
+    parser.add_argument("--fixed-crop", action="store_true", help="use a fixed crop box for same-layout source images")
+    parser.add_argument("--crop-left", type=float, default=0.12, help="fixed crop left ratio")
+    parser.add_argument("--crop-top", type=float, default=0.04, help="fixed crop top ratio")
+    parser.add_argument("--crop-size", type=float, default=0.76, help="fixed square crop size ratio")
     args = parser.parse_args()
 
     source_dir = args.source
@@ -32,32 +37,62 @@ def main() -> None:
 
     for path in files:
         output_path = output_dir / f"{slug_from_name(path.stem)}.png"
-        crop_bead_image(path, output_path, args.size, transparent=args.transparent)
+        crop_bead_image(
+            path,
+            output_path,
+            args.size,
+            transparent=args.transparent,
+            circle_mask=args.circle_mask,
+            fixed_crop=args.fixed_crop,
+            crop_left=args.crop_left,
+            crop_top=args.crop_top,
+            crop_size=args.crop_size,
+        )
 
     print(f"processed={len(files)} output={output_dir.resolve()}")
 
 
-def crop_bead_image(source: Path, output: Path, size: int, transparent: bool = False) -> None:
+def crop_bead_image(
+    source: Path,
+    output: Path,
+    size: int,
+    transparent: bool = False,
+    circle_mask: bool = False,
+    fixed_crop: bool = False,
+    crop_left: float = 0.12,
+    crop_top: float = 0.04,
+    crop_size: float = 0.76,
+) -> None:
     image = Image.open(source).convert("RGB")
     width, height = image.size
 
-    # The source pack has the bead centered in the upper part and text at the bottom.
-    # Cropping to the upper 78% removes the name label before auto-trimming the bead area.
-    upper = image.crop((0, 0, width, int(height * 0.78)))
-    bbox = find_non_background_bbox(upper)
-    if bbox is None:
-        bbox = (
-            int(width * 0.14),
-            int(height * 0.08),
-            int(width * 0.86),
-            int(height * 0.78),
-        )
+    if fixed_crop:
+        side = int(min(width, height) * crop_size)
+        left = int(width * crop_left)
+        top = int(height * crop_top)
+        right = min(width, left + side)
+        bottom = min(height, top + side)
+        cropped = image.crop((left, top, right, bottom))
+    else:
+        # The source pack has the bead centered in the upper part and text at the bottom.
+        # Cropping to the upper 78% removes the name label before auto-trimming the bead area.
+        upper = image.crop((0, 0, width, int(height * 0.78)))
+        bbox = find_non_background_bbox(upper)
+        if bbox is None:
+            bbox = (
+                int(width * 0.14),
+                int(height * 0.08),
+                int(width * 0.86),
+                int(height * 0.78),
+            )
 
-    left, top, right, bottom = pad_to_square(bbox, upper.size, padding_ratio=0.08)
-    cropped = upper.crop((left, top, right, bottom))
+        left, top, right, bottom = pad_to_square(bbox, upper.size, padding_ratio=0.08)
+        cropped = upper.crop((left, top, right, bottom))
     cropped.thumbnail((size, size), Image.Resampling.LANCZOS)
     if transparent:
         cropped = remove_light_background(cropped)
+    if circle_mask:
+        cropped = apply_soft_circle_mask(cropped)
 
     canvas = Image.new("RGBA", (size, size), (255, 255, 255, 0))
     cropped_rgba = cropped.convert("RGBA")
@@ -65,6 +100,28 @@ def crop_bead_image(source: Path, output: Path, size: int, transparent: bool = F
     y = (size - cropped_rgba.height) // 2
     canvas.alpha_composite(cropped_rgba, (x, y))
     canvas.save(output)
+
+
+def apply_soft_circle_mask(image: Image.Image) -> Image.Image:
+    rgba = image.convert("RGBA")
+    width, height = rgba.size
+    pixels = rgba.load()
+    center_x = (width - 1) / 2
+    center_y = (height - 1) / 2
+    radius = min(width, height) * 0.425
+    feather = max(2.0, min(width, height) * 0.018)
+
+    for y in range(height):
+        for x in range(width):
+            r, g, b, alpha = pixels[x, y]
+            distance = ((x - center_x) ** 2 + (y - center_y) ** 2) ** 0.5
+            if distance >= radius:
+                alpha = 0
+            elif distance > radius - feather:
+                alpha = int(alpha * (radius - distance) / feather)
+            pixels[x, y] = (r, g, b, max(0, min(255, alpha)))
+
+    return rgba
 
 
 def remove_light_background(image: Image.Image) -> Image.Image:
