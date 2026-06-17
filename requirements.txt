@@ -5,6 +5,7 @@ pytest>=8.0,<9.0
 httpx>=0.28,<1.0
 cryptography>=42.0,<47.0
 Pillow>=10.0,<13.0
+cos-python-sdk-v5>=1.9,<2.0
 
 # Legacy Django service remains available during migration.
 Django>=5.0,<6.0
