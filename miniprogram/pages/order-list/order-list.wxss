@@ -1,0 +1,100 @@
+.order-list-page {
+  padding-bottom: 80rpx;
+}
+
+.list-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  margin-bottom: 22rpx;
+}
+
+.list-title {
+  color: #25222a;
+  font-size: 38rpx;
+  font-weight: 900;
+}
+
+.list-count {
+  color: #7a4e3a;
+  font-size: 24rpx;
+}
+
+.state-card,
+.empty-card {
+  padding: 28rpx;
+  color: #756f68;
+  font-size: 26rpx;
+}
+
+.order-list {
+  display: grid;
+  gap: 18rpx;
+}
+
+.order-card {
+  padding: 24rpx;
+}
+
+.order-card-head,
+.order-body {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20rpx;
+}
+
+.order-id {
+  min-width: 0;
+  overflow: hidden;
+  color: #2f2a26;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 26rpx;
+  font-weight: 900;
+}
+
+.order-status {
+  flex: 0 0 auto;
+  color: #7a4e3a;
+  font-size: 24rpx;
+  font-weight: 800;
+}
+
+.order-time,
+.order-desc,
+.order-arrow {
+  margin-top: 10rpx;
+  color: #8a8790;
+  font-size: 22rpx;
+}
+
+.order-price {
+  color: #111;
+  font-size: 32rpx;
+  font-weight: 900;
+}
+
+.order-arrow {
+  text-align: right;
+  color: #7a4e3a;
+}
+
+.empty-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.mini-action {
+  width: 136rpx;
+  min-height: 58rpx;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 8rpx;
+  color: #fff;
+  background: #7a4e3a;
+  font-size: 24rpx;
+  line-height: 58rpx;
+}

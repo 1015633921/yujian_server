@@ -1,0 +1,119 @@
+.hero {
+  overflow: hidden;
+}
+
+.hero-image {
+  height: 360rpx;
+  background: radial-gradient(circle at 35% 30%, #fff 0 10%, #b9d8df 11% 32%, #315f66 33% 100%);
+}
+
+.hero-image.gold {
+  background: radial-gradient(circle at 35% 30%, #fff6c7 0 10%, #d7b65d 11% 36%, #8e6c21 37% 100%);
+}
+
+.hero-image.pink {
+  background: radial-gradient(circle at 35% 30%, #fff 0 10%, #e6a7a4 11% 36%, #a65e62 37% 100%);
+}
+
+.hero-image.clear {
+  background: radial-gradient(circle at 35% 30%, #fff 0 10%, #e9edf0 11% 36%, #9aa8ad 37% 100%);
+}
+
+.hero-image.black {
+  background: radial-gradient(circle at 35% 30%, #e9edf0 0 10%, #41464b 11% 36%, #121416 37% 100%);
+}
+
+.hero-body {
+  padding: 26rpx;
+}
+
+.post-title {
+  font-size: 38rpx;
+  font-weight: 900;
+}
+
+.post-meta {
+  margin-top: 10rpx;
+  color: #8a8790;
+  font-size: 24rpx;
+}
+
+.tag-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10rpx;
+  margin-top: 18rpx;
+}
+
+.post-desc {
+  margin-top: 18rpx;
+  color: #4d4842;
+  font-size: 27rpx;
+  line-height: 1.6;
+}
+
+.content-card,
+.material-list {
+  margin-top: 18rpx;
+  padding: 24rpx;
+  color: #4d4842;
+  font-size: 27rpx;
+  line-height: 1.65;
+}
+
+.material-row {
+  display: flex;
+  align-items: center;
+  gap: 14rpx;
+  min-height: 66rpx;
+  border-bottom: 1rpx solid #f0e9df;
+}
+
+.material-row:last-child {
+  border-bottom: 0;
+}
+
+.material-dot {
+  width: 22rpx;
+  height: 22rpx;
+  border-radius: 999rpx;
+  background: #6faec0;
+}
+
+.material-dot.gold {
+  background: #d7b65d;
+}
+
+.material-dot.pink {
+  background: #e6a7a4;
+}
+
+.material-dot.clear {
+  background: #cbd4d9;
+}
+
+.material-dot.black {
+  background: #1f2327;
+}
+
+.bottom-actions {
+  position: sticky;
+  bottom: 0;
+  display: grid;
+  grid-template-columns: 220rpx 1fr;
+  gap: 16rpx;
+  margin: 24rpx -24rpx -24rpx;
+  padding: 18rpx 24rpx calc(18rpx + env(safe-area-inset-bottom));
+  background: rgba(246, 243, 238, 0.96);
+}
+
+.favorite-button {
+  min-height: 82rpx;
+  border: 1rpx solid rgba(122, 78, 58, 0.28);
+  border-radius: 8rpx;
+  color: #7a4e3a;
+  background: #fffdf9;
+  font-size: 27rpx;
+  font-weight: 800;
+  line-height: 82rpx;
+}

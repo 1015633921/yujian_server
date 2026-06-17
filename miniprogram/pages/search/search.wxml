@@ -1,0 +1,38 @@
+<view class="page search-page">
+  <view class="search-box">
+    <text class="search-icon">⌕</text>
+    <input class="search-input" placeholder="搜索水晶、功效、配饰" value="{{keyword}}" focus bindconfirm="submitSearch" bindinput="onKeywordInput" />
+    <button wx:if="{{keyword}}" class="clear-btn" bindtap="clearKeyword">×</button>
+  </view>
+
+  <view wx:if="{{!hasSearched}}" class="section">
+    <view class="section-title">常搜关键词</view>
+    <view class="keyword-row">
+      <view wx:for="{{hotKeywords}}" wx:key="*this" class="keyword-chip" data-keyword="{{item}}" bindtap="tapKeyword">{{item}}</view>
+    </view>
+  </view>
+
+  <view class="section">
+    <view class="section-head">
+      <view class="section-title">{{hasSearched ? '搜索结果' : '推荐材料'}}</view>
+      <view class="section-link">{{results.length}} 件</view>
+    </view>
+    <view wx:if="{{loading}}" class="card state-card">正在搜索...</view>
+    <view wx:elif="{{!results.length}}" class="card state-card">没有找到相关材料，换个关键词试试。</view>
+    <view wx:else class="result-list">
+      <view wx:for="{{results}}" wx:key="id" class="result-card card">
+        <image wx:if="{{item.image_url}}" class="result-image" src="{{item.image_url}}" mode="aspectFill" data-id="{{item.id}}" binderror="onImageError"></image>
+        <view wx:else class="result-sphere" style="background: radial-gradient(circle at 32% 26%, {{item.shine}} 0 10%, {{item.color}} 12% 58%, rgba(0,0,0,.22) 100%);"></view>
+        <view class="result-copy">
+          <view class="result-name">{{item.name}}</view>
+          <view class="result-meta">{{item.category}} · {{item.effect}}</view>
+          <view class="result-price">¥{{item.price}} / {{item.size}}mm</view>
+        </view>
+        <view class="result-actions">
+          <button data-id="{{item.id}}" bindtap="addToInspiration">收藏</button>
+          <button class="primary" data-id="{{item.id}}" bindtap="startDiy">DIY</button>
+        </view>
+      </view>
+    </view>
+  </view>
+</view>

@@ -1,0 +1,82 @@
+.sub {
+  margin-top: 8rpx;
+  color: #756f68;
+  font-size: 25rpx;
+}
+
+.post {
+  margin-top: 18rpx;
+  overflow: hidden;
+}
+
+.post-image {
+  height: 230rpx;
+  background: radial-gradient(circle at 35% 30%, #fff 0 10%, #b9d8df 11% 32%, #315f66 33% 100%);
+}
+
+.post-image.gold {
+  background: radial-gradient(circle at 35% 30%, #fff6c7 0 10%, #d7b65d 11% 36%, #8e6c21 37% 100%);
+}
+
+.post-image.pink {
+  background: radial-gradient(circle at 35% 30%, #fff 0 10%, #e6a7a4 11% 36%, #a65e62 37% 100%);
+}
+
+.post-image.clear {
+  background: radial-gradient(circle at 35% 30%, #fff 0 10%, #e9edf0 11% 36%, #9aa8ad 37% 100%);
+}
+
+.post-image.black {
+  background: radial-gradient(circle at 35% 30%, #e9edf0 0 10%, #41464b 11% 36%, #121416 37% 100%);
+}
+
+.post-body {
+  padding: 24rpx;
+}
+
+.post-title {
+  font-size: 32rpx;
+  font-weight: 800;
+}
+
+.post-author {
+  margin-top: 8rpx;
+  color: #8a8790;
+  font-size: 23rpx;
+}
+
+.post-desc {
+  margin-top: 16rpx;
+  color: #4d4842;
+  font-size: 26rpx;
+  line-height: 1.55;
+}
+
+.same-button {
+  margin-top: 22rpx;
+}
+
+.lesson-list {
+  margin-top: 18rpx;
+  padding: 24rpx;
+}
+
+.lesson {
+  padding: 18rpx 0;
+  border-bottom: 1rpx solid #f0e9df;
+}
+
+.lesson:last-child {
+  border-bottom: 0;
+}
+
+.lesson-title {
+  font-size: 28rpx;
+  font-weight: 800;
+}
+
+.lesson-desc {
+  margin-top: 8rpx;
+  color: #756f68;
+  font-size: 24rpx;
+}

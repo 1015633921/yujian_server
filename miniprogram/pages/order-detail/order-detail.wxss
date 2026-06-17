@@ -1,0 +1,145 @@
+.order-detail-page {
+  padding-bottom: 150rpx;
+}
+
+.status-card,
+.detail-card,
+.empty-card {
+  padding: 24rpx;
+  margin-bottom: 18rpx;
+}
+
+.status-text {
+  color: #7a4e3a;
+  font-size: 40rpx;
+  font-weight: 900;
+}
+
+.order-id {
+  margin-top: 10rpx;
+  color: #2f2a26;
+  font-size: 25rpx;
+  font-weight: 800;
+}
+
+.order-time,
+.logistics-source,
+.trace-sub {
+  margin-top: 8rpx;
+  color: #8a8790;
+  font-size: 22rpx;
+}
+
+.card-title {
+  margin-bottom: 18rpx;
+  color: #2f2a26;
+  font-size: 30rpx;
+  font-weight: 900;
+}
+
+.info-row,
+.material-row,
+.total-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 18rpx;
+  padding: 12rpx 0;
+  border-bottom: 1rpx solid #f0e9df;
+}
+
+.info-row:last-child,
+.material-row:last-child {
+  border-bottom: 0;
+}
+
+.info-row text,
+.material-row text,
+.total-row text {
+  flex: 0 0 auto;
+  color: #8a8790;
+  font-size: 24rpx;
+}
+
+.info-row view,
+.material-row view,
+.total-row view {
+  min-width: 0;
+  color: #2f2a26;
+  text-align: right;
+  font-size: 25rpx;
+  font-weight: 800;
+}
+
+.total-row {
+  margin-top: 12rpx;
+  border-bottom: 0;
+}
+
+.total-row view {
+  color: #111;
+  font-size: 34rpx;
+  font-weight: 900;
+}
+
+.logistics-status {
+  color: #7a4e3a;
+  font-size: 30rpx;
+  font-weight: 900;
+}
+
+.logistics-meta {
+  margin-top: 10rpx;
+  color: #2f2a26;
+  font-size: 24rpx;
+  font-weight: 800;
+}
+
+.trace-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: 28rpx 1fr;
+  gap: 14rpx;
+  padding: 22rpx 0 0;
+}
+
+.trace-dot {
+  width: 18rpx;
+  height: 18rpx;
+  margin-top: 8rpx;
+  border-radius: 999rpx;
+  background: #7a4e3a;
+}
+
+.trace-desc {
+  color: #2f2a26;
+  font-size: 25rpx;
+  font-weight: 800;
+  line-height: 1.45;
+}
+
+.action-bar {
+  position: fixed;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  display: flex;
+  justify-content: flex-end;
+  gap: 14rpx;
+  padding: 18rpx 24rpx calc(18rpx + env(safe-area-inset-bottom));
+  border-top: 1rpx solid #f0e9df;
+  background: rgba(255, 255, 255, 0.98);
+}
+
+.action-bar button {
+  min-width: 148rpx;
+  height: 64rpx;
+  margin: 0;
+  padding: 0 20rpx;
+  border: 1rpx solid rgba(122, 78, 58, 0.24);
+  border-radius: 999rpx;
+  color: #7a4e3a;
+  background: #fff8eb;
+  font-size: 24rpx;
+  font-weight: 800;
+  line-height: 64rpx;
+}

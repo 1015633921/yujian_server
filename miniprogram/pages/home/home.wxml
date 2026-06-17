@@ -1,0 +1,119 @@
+<view class="page home-page">
+  <view class="hero-section">
+    <view class="home-top">
+      <view class="brand">星灵水晶</view>
+      <view class="brand-mark">✦</view>
+    </view>
+    <view class="subtitle">
+      用
+      <text>五行</text>
+      <text>星盘</text>
+      <text>MBTI</text>
+      找到你的专属能量配方
+    </view>
+    <view class="search-bar" bindtap="onSearch">
+      <text class="search-icon">⌕</text>
+      <text class="search-placeholder">搜索水晶、功效、作品灵感</text>
+    </view>
+  </view>
+
+  <view class="entry-grid">
+    <view class="entry diy" bindtap="goToPage" data-url="/pages/workspace/workspace">
+      <view class="entry-orbit"></view>
+      <view class="entry-kicker">自由创造</view>
+      <view class="entry-title">开始自由 DIY</view>
+      <view class="entry-desc">挑选珠子、配件与手围，实时看价格和长度。</view>
+      <view class="entry-action">进入工作台 →</view>
+    </view>
+    <view class="entry assess" bindtap="goToPage" data-url="/pages/assessment/assessment">
+      <view class="entry-orbit"></view>
+      <view class="entry-kicker">深度定制</view>
+      <view class="entry-title">测一测专属水晶</view>
+      <view class="entry-desc">建立能量档案，一键生成推荐手串。</view>
+      <view class="entry-action">开始测算 →</view>
+    </view>
+  </view>
+
+  <view class="section daily card" bindtap="onDailyTap">
+    <view class="daily-head">
+      <view>
+        <view class="daily-title">每日能量补给站</view>
+        <view class="daily-date">今天适合温柔启动，先做一件小事。</view>
+      </view>
+      <view class="daily-score">{{daily.inspiration}}%</view>
+    </view>
+    <view class="energy-bars">
+      <view class="bar-row">
+        <text>活力值</text>
+        <view class="bar"><view class="fill vitality" style="width: {{daily.vitality}}%;"></view></view>
+        <text>{{daily.vitality}}%</text>
+      </view>
+      <view class="bar-row">
+        <text>灵感值</text>
+        <view class="bar"><view class="fill inspiration" style="width: {{daily.inspiration}}%;"></view></view>
+        <text>{{daily.inspiration}}%</text>
+      </view>
+    </view>
+    <view class="daily-guide">
+      <view class="guide-chip color-chip"><text class="muted">幸运色</text><text>{{daily.color}}</text></view>
+      <view class="guide-chip number-chip"><text class="muted">幸运数字</text><text>{{daily.number}}</text></view>
+      <view class="guide-chip stone-chip" catchtap="onDailyStoneTap"><text class="muted">宜佩戴</text><text>{{daily.stone}} →</text></view>
+    </view>
+  </view>
+
+  <view class="section">
+    <view class="section-head">
+      <view class="section-title">热门推荐</view>
+      <view class="section-link" bindtap="goToPage" data-url="/pages/workspace/workspace">去定制</view>
+    </view>
+    <scroll-view class="product-scroll" scroll-x enable-flex>
+      <view wx:for="{{bestSellers}}" wx:key="name" class="product card">
+        <view class="stone-visual {{item.tone}}"></view>
+        <view class="product-name">{{item.name}}</view>
+        <view class="product-desc">{{item.desc}}</view>
+        <view class="product-bottom">
+          <view class="product-price">¥{{item.price}}</view>
+          <button class="quick-add" data-name="{{item.name}}" catchtap="quickAddProduct">＋</button>
+        </view>
+      </view>
+    </scroll-view>
+    <view wx:if="{{inspirationCart.length}}" class="inspiration-tray" bindtap="viewInspirationCart">
+      <view>
+        <view class="tray-title">灵感单</view>
+        <view class="tray-sub">{{inspirationCart.length}} 件已收藏，可带入 DIY 工作台</view>
+      </view>
+      <view class="tray-action">查看</view>
+    </view>
+  </view>
+
+  <view class="section">
+    <view class="section-head">
+      <view class="section-title">社区灵感</view>
+      <view class="section-link" bindtap="goToPage" data-url="/pages/community/community">全部</view>
+    </view>
+    <view class="inspo-grid">
+      <view wx:for="{{inspirations}}" wx:key="id" class="inspo card" bindtap="openInspiration" data-id="{{item.id}}">
+        <view class="inspo-image {{item.tone}}"></view>
+        <view class="inspo-name">{{item.title}}</view>
+        <view class="inspo-meta">{{item.author}} · {{item.likes}} 喜欢</view>
+      </view>
+    </view>
+  </view>
+
+  <view wx:if="{{showStoneSheet}}" class="stone-sheet-mask" catchtap="closeStoneSheet">
+    <view class="stone-sheet" catchtap="noop">
+      <view class="sheet-grabber"></view>
+      <view class="stone-sheet-main">
+        <view class="stone-visual sheet-stone {{dailyStoneDetail.tone}}"></view>
+        <view class="sheet-copy">
+          <view class="sheet-title">{{dailyStoneDetail.name}}</view>
+          <view class="sheet-desc">{{dailyStoneDetail.desc}}</view>
+        </view>
+      </view>
+      <view class="sheet-actions">
+        <button class="sheet-secondary" bindtap="addDailyStoneToCart">加入灵感单</button>
+        <button class="sheet-primary" bindtap="startDailyStoneDiy">用它开始 DIY</button>
+      </view>
+    </view>
+  </view>
+</view>

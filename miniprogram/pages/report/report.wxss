@@ -1,0 +1,261 @@
+.report-hero {
+  padding: 30rpx;
+}
+
+.avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 88rpx;
+  height: 88rpx;
+  border-radius: 999rpx;
+  color: #fff;
+  background: #315f66;
+  font-size: 36rpx;
+  font-weight: 800;
+}
+
+.report-title {
+  margin-top: 24rpx;
+  font-size: 38rpx;
+  font-weight: 900;
+  line-height: 1.25;
+}
+
+.report-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12rpx;
+  margin-top: 20rpx;
+}
+
+.summary {
+  margin-top: 24rpx;
+  color: #4d4842;
+  font-size: 27rpx;
+  line-height: 1.65;
+}
+
+.solar-time {
+  margin-top: 18rpx;
+  color: #8a8790;
+  font-size: 23rpx;
+}
+
+.chart-card,
+.recipe-card {
+  margin-top: 18rpx;
+  padding: 26rpx;
+}
+
+.element-row {
+  display: grid;
+  grid-template-columns: 52rpx 1fr 64rpx;
+  align-items: center;
+  gap: 16rpx;
+  margin-bottom: 22rpx;
+  font-size: 26rpx;
+}
+
+.element-track {
+  height: 18rpx;
+  overflow: hidden;
+  border-radius: 999rpx;
+  background: #eee8df;
+}
+
+.element-fill {
+  height: 100%;
+  border-radius: 999rpx;
+}
+
+.element-value {
+  text-align: right;
+  color: #6e655d;
+}
+
+.chart-note {
+  padding-top: 4rpx;
+  color: #7a4e3a;
+  font-size: 25rpx;
+}
+
+.recipe-row {
+  display: grid;
+  grid-template-columns: 28rpx 1fr 90rpx;
+  align-items: center;
+  gap: 14rpx;
+  min-height: 70rpx;
+  border-bottom: 1rpx solid #f0e9df;
+}
+
+.recipe-row:last-of-type {
+  border-bottom: 0;
+}
+
+.recipe-dot {
+  width: 18rpx;
+  height: 18rpx;
+  border-radius: 999rpx;
+  background: #7a4e3a;
+}
+
+.recipe-name {
+  font-size: 28rpx;
+  font-weight: 700;
+}
+
+.recipe-ratio {
+  color: #756f68;
+  text-align: right;
+  font-size: 24rpx;
+}
+
+.recipe-copy {
+  margin-top: 22rpx;
+  color: #756f68;
+  font-size: 25rpx;
+  line-height: 1.55;
+}
+
+.recommend-card {
+  margin-top: 18rpx;
+  padding: 28rpx;
+}
+
+.recommend-title {
+  font-size: 30rpx;
+  font-weight: 900;
+}
+
+.recommend-copy {
+  margin-top: 14rpx;
+  color: #756f68;
+  font-size: 25rpx;
+  line-height: 1.6;
+}
+
+.modal-mask {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 20;
+  display: flex;
+  align-items: flex-end;
+  background: rgba(0, 0, 0, 0.42);
+}
+
+.wrist-modal {
+  width: 100%;
+  padding: 32rpx 28rpx calc(32rpx + env(safe-area-inset-bottom));
+  border-radius: 24rpx 24rpx 0 0;
+  background: #fffdf9;
+}
+
+.modal-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.modal-title {
+  font-size: 36rpx;
+  font-weight: 900;
+}
+
+.modal-sub {
+  margin-top: 8rpx;
+  color: #8a8790;
+  font-size: 24rpx;
+}
+
+.modal-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 58rpx;
+  height: 58rpx;
+  color: #756f68;
+  font-size: 44rpx;
+}
+
+.wrist-input-wrap {
+  display: flex;
+  align-items: center;
+  margin-top: 30rpx;
+  padding: 0 24rpx;
+  border: 2rpx solid #e4d8cd;
+  border-radius: 8rpx;
+  background: #fff;
+  font-size: 30rpx;
+}
+
+.wrist-input {
+  flex: 1;
+  height: 96rpx;
+  font-size: 38rpx;
+  font-weight: 800;
+}
+
+.wrist-options {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 10rpx;
+  margin-top: 18rpx;
+}
+
+.bead-size-label {
+  margin-top: 26rpx;
+  color: #6e655d;
+  font-size: 24rpx;
+  font-weight: 700;
+}
+
+.bead-size-options {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12rpx;
+  margin-top: 14rpx;
+}
+
+.bead-size-option {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 64rpx;
+  border: 1rpx solid #ece4da;
+  border-radius: 8rpx;
+  color: #6e655d;
+  background: #fff;
+  font-size: 24rpx;
+}
+
+.bead-size-option.active {
+  color: #fff;
+  border-color: #7a4e3a;
+  background: #7a4e3a;
+}
+
+.wrist-option {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 58rpx;
+  border: 1rpx solid #ece4da;
+  border-radius: 8rpx;
+  color: #6e655d;
+  background: #fff;
+  font-size: 23rpx;
+}
+
+.modal-button {
+  margin-top: 28rpx;
+}
+
+.empty-page {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}

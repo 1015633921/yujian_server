@@ -1,0 +1,43 @@
+<view class="page" wx:if="{{post}}">
+  <view class="hero card">
+    <view class="hero-image {{post.tone}}"></view>
+    <view class="hero-body">
+      <view class="post-title">{{post.title}}</view>
+      <view class="post-meta">{{post.author}} · {{post.likes}} 喜欢</view>
+      <view class="tag-row">
+        <text wx:for="{{post.tags}}" wx:key="*this" class="tag">{{item}}</text>
+      </view>
+      <view class="post-desc">{{post.desc}}</view>
+    </view>
+  </view>
+
+  <view class="section">
+    <view class="section-title">设计灵感</view>
+    <view class="card content-card">{{post.story}}</view>
+  </view>
+
+  <view class="section">
+    <view class="section-title">适合场景</view>
+    <view class="card content-card">{{post.scene}}</view>
+  </view>
+
+  <view class="section">
+    <view class="section-title">材料清单</view>
+    <view class="card material-list">
+      <view wx:for="{{post.materials}}" wx:key="*this" class="material-row">
+        <view class="material-dot {{post.tone}}"></view>
+        <view>{{item}}</view>
+      </view>
+    </view>
+  </view>
+
+  <view class="section">
+    <view class="section-title">作者备注</view>
+    <view class="card content-card">{{post.authorNote}}</view>
+  </view>
+
+  <view class="bottom-actions">
+    <button class="secondary-button favorite-button" bindtap="toggleFavorite">{{isFavorite ? '已收藏' : '收藏灵感'}}</button>
+    <button class="primary-button" bindtap="useSame">一键同款并修改</button>
+  </view>
+</view>

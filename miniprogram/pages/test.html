@@ -1,0 +1,927 @@
+
+<style>
+  :root {
+    --primary: #6C63D9;
+    --primary-light: #EEEDFE;
+    --primary-mid: #AFA9EC;
+    --accent: #B8A9F0;
+    --text-main: #1A1A2E;
+    --text-sub: #6B6B8A;
+    --text-hint: #A0A0BC;
+    --bg: #F7F6FF;
+    --bg-card: #FFFFFF;
+    --border: rgba(108,99,217,0.15);
+    --radius: 14px;
+    --radius-sm: 8px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'PingFang SC', 'Noto Sans SC', sans-serif; }
+
+  .app-wrap {
+    width: 375px;
+    min-height: 700px;
+    background: var(--bg);
+    border-radius: 20px;
+    border: 0.5px solid var(--border);
+    overflow: hidden;
+    position: relative;
+    margin: 0 auto;
+    font-size: 14px;
+    color: var(--text-main);
+  }
+
+  .screen {
+    display: none;
+    flex-direction: column;
+    min-height: 700px;
+    background: var(--bg);
+  }
+  .screen.active { display: flex; }
+
+  /* Status bar */
+  .status-bar {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 12px 20px 4px;
+    font-size: 12px; font-weight: 500;
+    background: transparent;
+    flex-shrink: 0;
+  }
+  .status-icons { display: flex; gap: 6px; align-items: center; }
+
+  /* Nav bar */
+  .nav-bar {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 6px 16px 10px;
+    background: transparent;
+    flex-shrink: 0;
+  }
+  .nav-bar .page-title { font-size: 17px; font-weight: 600; }
+  .nav-btn {
+    width: 34px; height: 34px; border-radius: 50%;
+    background: var(--bg-card); border: 0.5px solid var(--border);
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer; font-size: 16px;
+  }
+
+  /* Bottom tab bar */
+  .tab-bar {
+    display: flex;
+    border-top: 0.5px solid var(--border);
+    background: var(--bg-card);
+    padding: 8px 0 16px;
+    flex-shrink: 0;
+    margin-top: auto;
+  }
+  .tab-item {
+    flex: 1; display: flex; flex-direction: column; align-items: center;
+    gap: 3px; cursor: pointer; padding: 4px 0;
+  }
+  .tab-item i { font-size: 20px; color: var(--text-hint); }
+  .tab-item.active i { color: var(--primary); }
+  .tab-item span { font-size: 10px; color: var(--text-hint); }
+  .tab-item.active span { color: var(--primary); }
+
+  /* Scrollable content */
+  .scroll-body {
+    flex: 1; overflow-y: auto; padding: 0 16px 16px;
+    scrollbar-width: none;
+  }
+  .scroll-body::-webkit-scrollbar { display: none; }
+
+  /* Cards */
+  .card {
+    background: var(--bg-card);
+    border-radius: var(--radius);
+    border: 0.5px solid var(--border);
+    padding: 14px;
+    margin-bottom: 12px;
+  }
+  .card-title {
+    font-size: 13px; font-weight: 600; color: var(--text-sub);
+    display: flex; align-items: center; gap: 6px;
+    margin-bottom: 12px;
+  }
+  .card-title i { color: var(--primary); font-size: 16px; }
+
+  /* Hero cards */
+  .hero-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 14px; }
+  .hero-card {
+    border-radius: var(--radius);
+    padding: 18px 14px;
+    min-height: 130px;
+    display: flex; flex-direction: column; justify-content: space-between;
+    cursor: pointer;
+  }
+  .hero-card.diy { background: #C9A96E; }
+  .hero-card.calc { background: #7A83B8; }
+  .hero-card .hero-title { font-size: 18px; font-weight: 700; color: #fff; }
+  .hero-card .hero-sub { font-size: 11px; color: rgba(255,255,255,0.82); margin-top: 4px; line-height: 1.4; }
+  .hero-btn {
+    display: inline-flex; align-items: center; gap: 4px;
+    background: rgba(255,255,255,0.25); color: #fff;
+    border-radius: 20px; padding: 5px 12px; font-size: 12px; font-weight: 500;
+    width: fit-content; margin-top: 10px; border: none; cursor: pointer;
+  }
+
+  /* Vibrancy card */
+  .vibrancy-card {
+    background: var(--bg-card);
+    border-radius: var(--radius);
+    border: 0.5px solid var(--border);
+    padding: 14px; margin-bottom: 14px;
+  }
+  .vibrancy-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+  .vibrancy-label { font-size: 12px; color: var(--text-sub); display: flex; align-items: center; gap: 5px; }
+  .vibrancy-score { font-size: 22px; font-weight: 700; color: var(--primary); }
+  .vibrancy-bar { height: 6px; background: var(--primary-light); border-radius: 3px; margin-bottom: 10px; }
+  .vibrancy-fill { height: 100%; background: var(--primary); border-radius: 3px; width: 85%; }
+  .vibrancy-info { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .info-item .info-label { font-size: 11px; color: var(--text-hint); }
+  .info-item .info-val { font-size: 13px; font-weight: 600; color: var(--text-main); margin-top: 3px; }
+  .color-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: #9B72CF; margin-right: 5px; vertical-align: middle; }
+
+  /* Section header */
+  .sec-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+  .sec-title { font-size: 15px; font-weight: 600; }
+  .sec-link { font-size: 12px; color: var(--primary); cursor: pointer; }
+
+  /* Learning cards */
+  .learn-scroll { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 4px; margin-bottom: 14px; scrollbar-width: none; }
+  .learn-scroll::-webkit-scrollbar { display: none; }
+  .learn-card {
+    flex-shrink: 0; width: 160px; height: 95px; border-radius: 10px;
+    background: #8B9BC0; position: relative; overflow: hidden; cursor: pointer;
+  }
+  .learn-card.card2 { background: #B89CC0; }
+  .learn-badge { position: absolute; top: 8px; left: 8px; background: rgba(0,0,0,0.45); color: #fff; border-radius: 5px; padding: 2px 7px; font-size: 10px; }
+  .learn-card-title { position: absolute; bottom: 8px; left: 8px; right: 8px; font-size: 12px; font-weight: 600; color: #fff; line-height: 1.4; }
+
+  /* Inspo grid */
+  .inspo-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .inspo-card { border-radius: 10px; overflow: hidden; background: var(--bg-card); border: 0.5px solid var(--border); cursor: pointer; }
+  .inspo-img { width: 100%; height: 110px; background: #D4C5E8; display: flex; align-items: center; justify-content: center; position: relative; }
+  .inspo-img.c1 { background: linear-gradient(135deg, #c0d4e4 0%, #a8c0d6 100%); }
+  .inspo-img.c2 { background: linear-gradient(135deg, #e8d5e0 0%, #d4bcd0 100%); }
+  .inspo-img.c3 { background: linear-gradient(135deg, #e8d5c0 0%, #d4c0a8 100%); }
+  .inspo-img.c4 { background: linear-gradient(135deg, #c8d4c0 0%, #b0c0a8 100%); }
+  .like-badge { position: absolute; top: 6px; right: 6px; background: rgba(255,255,255,0.9); border-radius: 20px; padding: 2px 7px; font-size: 11px; display: flex; align-items: center; gap: 3px; color: var(--text-sub); }
+  .inspo-info { padding: 8px; }
+  .inspo-name { font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .inspo-author { font-size: 11px; color: var(--text-hint); margin-top: 2px; }
+
+  /* Crystal icon placeholder */
+  .crystal-icon { font-size: 36px; }
+
+  /* ---- Assessment Screen ---- */
+  .form-section { margin-bottom: 14px; }
+  .form-label { font-size: 13px; font-weight: 500; color: var(--text-sub); display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
+  .form-label i { color: var(--primary); font-size: 15px; }
+  .form-input {
+    width: 100%; padding: 11px 14px;
+    border: 0.5px solid var(--border); border-radius: var(--radius-sm);
+    background: var(--bg-card); font-size: 14px; color: var(--text-main);
+    outline: none;
+  }
+  .form-input::placeholder { color: var(--text-hint); }
+  .form-hint { font-size: 11px; color: var(--text-hint); margin-top: 5px; display: flex; align-items: center; gap: 4px; }
+  .gender-row { display: flex; gap: 8px; }
+  .gender-btn {
+    flex: 1; padding: 9px; border-radius: var(--radius-sm); text-align: center;
+    border: 0.5px solid var(--border); background: var(--bg-card);
+    font-size: 14px; cursor: pointer; transition: all 0.15s;
+  }
+  .gender-btn.selected { background: var(--primary-light); border-color: var(--primary); color: var(--primary); font-weight: 600; }
+  .date-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .mbti-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+  .mbti-btn {
+    padding: 8px 4px; border-radius: var(--radius-sm);
+    border: 0.5px solid var(--border); background: var(--bg-card);
+    text-align: center; cursor: pointer; font-size: 11px; font-weight: 600;
+    color: var(--text-sub);
+  }
+  .mbti-btn.selected { background: var(--primary); border-color: var(--primary); color: #fff; }
+  .mbti-sub { font-size: 9px; font-weight: 400; margin-top: 2px; opacity: 0.75; }
+  .start-btn {
+    width: 100%; padding: 16px; border-radius: 30px;
+    background: var(--primary); color: #fff; font-size: 16px; font-weight: 600;
+    border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px;
+  }
+
+  /* ---- Report Screen ---- */
+  .report-header { padding: 16px; background: var(--bg-card); border-radius: var(--radius); margin-bottom: 14px; }
+  .profile-row { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+  .avatar { width: 54px; height: 54px; border-radius: 50%; background: linear-gradient(135deg, #B89CC0, #7A83B8); display: flex; align-items: center; justify-content: center; font-size: 22px; }
+  .profile-name { font-size: 18px; font-weight: 700; }
+  .profile-sub { font-size: 12px; color: var(--text-sub); margin-top: 3px; display: flex; gap: 6px; flex-wrap: wrap; }
+  .tag { padding: 3px 9px; border-radius: 20px; font-size: 11px; font-weight: 500; }
+  .tag-fire { background: #FFE8E4; color: #C0502A; }
+  .tag-infp { background: #E8F4E4; color: #3A7A2A; }
+  .tag-high { background: #EDE8FF; color: #6040C8; }
+  .quote { font-size: 12px; color: var(--text-sub); line-height: 1.6; font-style: italic; border-left: 3px solid var(--accent); padding-left: 10px; }
+
+  /* Radar chart */
+  .radar-wrap { display: flex; justify-content: center; padding: 10px 0; }
+  svg.radar text { font-family: 'PingFang SC', sans-serif; }
+
+  /* Ingredient bars */
+  .ingredient-row { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+  .ingredient-icon { width: 32px; height: 32px; border-radius: 8px; background: var(--primary-light); display: flex; align-items: center; justify-content: center; }
+  .ingredient-icon i { color: var(--primary); font-size: 16px; }
+  .ingredient-info { flex: 1; }
+  .ingredient-name { font-size: 13px; font-weight: 600; }
+  .ingredient-sub { font-size: 11px; color: var(--text-hint); }
+  .ingredient-pct { font-size: 13px; font-weight: 700; color: var(--primary); width: 36px; text-align: right; }
+  .ingredient-bar { height: 4px; background: var(--primary-light); border-radius: 2px; margin-top: 5px; }
+  .ingredient-fill { height: 100%; background: var(--primary); border-radius: 2px; }
+
+  .generate-btn {
+    width: 100%; padding: 16px; border-radius: 30px;
+    background: var(--primary); color: #fff; font-size: 15px; font-weight: 600;
+    border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px;
+  }
+
+  /* ---- Community Screen ---- */
+  .tab-pills { display: flex; gap: 0; background: #EFECFF; border-radius: 24px; padding: 3px; margin-bottom: 14px; }
+  .tab-pill {
+    flex: 1; padding: 8px; border-radius: 20px; text-align: center;
+    font-size: 13px; font-weight: 500; cursor: pointer; color: var(--text-sub);
+  }
+  .tab-pill.active { background: #fff; color: var(--primary); font-weight: 600; }
+  .filter-scroll { display: flex; gap: 8px; overflow-x: auto; margin-bottom: 14px; padding-bottom: 2px; scrollbar-width: none; }
+  .filter-scroll::-webkit-scrollbar { display: none; }
+  .filter-chip {
+    flex-shrink: 0; padding: 6px 14px; border-radius: 20px;
+    font-size: 12px; font-weight: 500; cursor: pointer;
+    border: 0.5px solid var(--border); background: var(--bg-card); color: var(--text-sub);
+  }
+  .filter-chip.active { background: var(--primary); border-color: var(--primary); color: #fff; }
+  .community-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .comm-card { border-radius: 10px; overflow: hidden; background: var(--bg-card); border: 0.5px solid var(--border); cursor: pointer; }
+  .comm-img { width: 100%; height: 120px; display: flex; align-items: center; justify-content: center; position: relative; font-size: 32px; }
+  .comm-img.c1 { background: linear-gradient(135deg, #b8d4e8 0%, #90b8d8 100%); }
+  .comm-img.c2 { background: linear-gradient(135deg, #d8c8e4 0%, #c0a8d8 100%); }
+  .comm-img.c3 { background: linear-gradient(135deg, #e8c0b0 0%, #d09888 100%); }
+  .comm-img.c4 { background: linear-gradient(135deg, #c8d8c0 0%, #a8c098 100%); }
+  .comm-badge { position: absolute; top: 6px; left: 6px; background: rgba(0,0,0,0.45); color: #fff; border-radius: 5px; padding: 2px 7px; font-size: 10px; }
+  .heart-btn { position: absolute; top: 6px; right: 6px; width: 26px; height: 26px; border-radius: 50%; background: rgba(255,255,255,0.85); display: flex; align-items: center; justify-content: center; }
+  .heart-btn i { font-size: 14px; color: #C06080; }
+  .comm-info { padding: 8px; }
+  .comm-title { font-size: 12px; font-weight: 600; margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .comm-meta { display: flex; align-items: center; justify-content: space-between; font-size: 11px; color: var(--text-hint); }
+  .clone-btn { background: var(--primary-light); color: var(--primary); border: none; border-radius: 6px; padding: 5px 10px; font-size: 11px; font-weight: 600; cursor: pointer; margin-top: 6px; width: 100%; }
+
+  /* ---- Workspace ---- */
+  .ws-preview { background: var(--bg-card); border-radius: var(--radius); border: 0.5px solid var(--border); padding: 16px; margin-bottom: 14px; text-align: center; position: relative; }
+  .ws-bracelet { width: 160px; height: 160px; border-radius: 50%; border: 8px solid transparent; background: linear-gradient(var(--bg-card), var(--bg-card)) padding-box, linear-gradient(135deg, #B89CC0, #7AAFDC, #90C8A0) border-box; margin: 0 auto 10px; display: flex; align-items: center; justify-content: center; }
+  .ws-bracelet i { font-size: 28px; color: var(--primary); }
+  .ws-price { font-size: 20px; font-weight: 700; color: var(--primary); }
+  .ws-price-label { font-size: 11px; color: var(--text-hint); }
+  .ws-tabs { display: flex; gap: 4px; margin-bottom: 10px; }
+  .ws-tab { flex: 1; padding: 8px; border-radius: var(--radius-sm); text-align: center; font-size: 12px; font-weight: 500; cursor: pointer; border: 0.5px solid var(--border); background: var(--bg-card); color: var(--text-sub); }
+  .ws-tab.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+  .stone-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+  .stone-card { border-radius: 10px; border: 0.5px solid var(--border); background: var(--bg-card); padding: 10px; cursor: pointer; position: relative; }
+  .stone-card.selected { border-color: var(--primary); border-width: 1.5px; }
+  .stone-img { width: 100%; height: 70px; border-radius: 8px; margin-bottom: 6px; display: flex; align-items: center; justify-content: center; font-size: 28px; }
+  .stone-img.s1 { background: linear-gradient(135deg, #c8d8e8 0%, #a8c0d8 100%); }
+  .stone-img.s2 { background: linear-gradient(135deg, #f0c8c8 0%, #e0a8a8 100%); }
+  .stone-img.s3 { background: linear-gradient(135deg, #d0d8f0 0%, #b0b8e0 100%); }
+  .stone-img.s4 { background: linear-gradient(135deg, #f0e8c0 0%, #e0d0a0 100%); }
+  .stone-element { position: absolute; top: 6px; right: 8px; font-size: 10px; color: var(--text-hint); background: rgba(108,99,217,0.08); border-radius: 4px; padding: 1px 5px; }
+  .stone-name { font-size: 12px; font-weight: 600; }
+  .stone-price { font-size: 12px; color: var(--primary); font-weight: 700; margin-top: 2px; }
+  .ws-bottom { background: var(--bg-card); border-top: 0.5px solid var(--border); padding: 12px 16px; display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+  .ws-total { flex: 1; }
+  .ws-total-label { font-size: 11px; color: var(--text-hint); }
+  .ws-total-price { font-size: 18px; font-weight: 700; color: var(--primary); }
+  .cart-btn { padding: 10px 18px; border-radius: 24px; border: 1.5px solid var(--primary); background: var(--bg-card); color: var(--primary); font-size: 13px; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 4px; }
+  .order-btn { padding: 10px 20px; border-radius: 24px; background: var(--primary); color: #fff; font-size: 13px; font-weight: 600; border: none; cursor: pointer; }
+
+  /* ---- Checkout ---- */
+  .step-bar { display: flex; align-items: center; justify-content: center; gap: 0; margin-bottom: 16px; }
+  .step { display: flex; align-items: center; gap: 6px; }
+  .step-dot { width: 28px; height: 28px; border-radius: 50%; background: var(--primary); color: #fff; font-size: 12px; font-weight: 700; display: flex; align-items: center; justify-content: center; }
+  .step-dot.inactive { background: var(--primary-light); color: var(--primary-mid); }
+  .step-label { font-size: 11px; color: var(--text-sub); }
+  .step-line { width: 40px; height: 1px; background: var(--primary-light); margin: 0 4px; }
+  .order-item { display: flex; gap: 12px; }
+  .order-thumb { width: 64px; height: 64px; border-radius: 10px; background: linear-gradient(135deg, #d8c0e8 0%, #b8a0d0 100%); flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 26px; }
+  .order-item-info { flex: 1; }
+  .order-item-name { font-size: 13px; font-weight: 600; }
+  .order-item-sub { font-size: 11px; color: var(--text-hint); margin-top: 3px; }
+  .order-price { font-size: 14px; font-weight: 700; color: var(--primary); margin-top: 6px; }
+  .bom-list { margin-top: 12px; border-top: 0.5px solid var(--border); padding-top: 10px; }
+  .bom-row { display: flex; justify-content: space-between; font-size: 12px; color: var(--text-sub); padding: 3px 0; }
+  .bom-total { font-weight: 700; font-size: 13px; color: var(--primary); border-top: 0.5px solid var(--border); margin-top: 6px; padding-top: 6px; display: flex; justify-content: space-between; }
+  .service-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .service-btn { border: 0.5px solid var(--border); border-radius: 10px; padding: 10px 6px; text-align: center; cursor: pointer; background: var(--bg-card); }
+  .service-btn i { font-size: 20px; color: var(--primary); display: block; margin-bottom: 5px; }
+  .service-btn span { font-size: 12px; font-weight: 500; display: block; }
+  .service-btn small { font-size: 11px; color: var(--text-hint); }
+  .service-btn.selected { border-color: var(--primary); background: var(--primary-light); }
+  .textarea-input { width: 100%; padding: 10px 12px; border: 0.5px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-card); font-size: 13px; color: var(--text-main); resize: none; outline: none; font-family: inherit; min-height: 70px; }
+  .pay-bar { background: var(--bg-card); border-top: 0.5px solid var(--border); padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
+  .pay-total .pay-label { font-size: 11px; color: var(--text-hint); }
+  .pay-total .pay-amount { font-size: 20px; font-weight: 700; color: var(--primary); }
+  .pay-btn { padding: 12px 28px; border-radius: 30px; background: var(--primary); color: #fff; font-size: 15px; font-weight: 700; border: none; cursor: pointer; }
+
+  /* Hero title in assessment */
+  .assess-hero { text-align: center; padding: 16px 0 20px; }
+  .assess-hero h2 { font-size: 22px; font-weight: 700; color: var(--text-main); }
+  .assess-hero h2 span { color: var(--primary); }
+  .assess-hero p { font-size: 12px; color: var(--text-hint); margin-top: 6px; line-height: 1.6; }
+
+  /* Metric mini cards */
+  .mini-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 14px; }
+  .mini-card { background: var(--primary-light); border-radius: var(--radius-sm); padding: 12px; text-align: center; }
+  .mini-card .mc-val { font-size: 16px; font-weight: 700; color: var(--primary); }
+  .mini-card .mc-lab { font-size: 11px; color: var(--text-sub); margin-top: 3px; }
+
+  .section-divider { height: 6px; background: var(--bg); margin: 0 -16px 14px; }
+</style>
+
+<div class="app-wrap">
+
+  <!-- ===== HOME SCREEN ===== -->
+  <div class="screen active" id="screen-home">
+    <div class="status-bar">
+      <span>9:41</span>
+      <div class="status-icons">
+        <i class="ti ti-wifi" aria-hidden="true" style="font-size:14px"></i>
+        <i class="ti ti-battery" aria-hidden="true" style="font-size:14px"></i>
+      </div>
+    </div>
+    <div style="padding: 6px 16px 10px; display:flex; justify-content:space-between; align-items:center; flex-shrink:0;">
+      <div style="width:36px;height:36px;border-radius:10px;background:var(--primary);display:flex;align-items:center;justify-content:center;">
+        <i class="ti ti-bolt" aria-hidden="true" style="color:#fff;font-size:18px"></i>
+      </div>
+      <div style="flex:1;margin:0 10px;">
+        <div style="background:var(--bg-card);border-radius:20px;padding:8px 14px;font-size:13px;color:var(--text-hint);border:0.5px solid var(--border);">寻找你的能量共鸣...</div>
+      </div>
+      <i class="ti ti-search" aria-hidden="true" style="font-size:20px;color:var(--text-sub)"></i>
+    </div>
+
+    <div class="scroll-body">
+      <div class="hero-grid">
+        <div class="hero-card diy" onclick="navigate('workspace')">
+          <div>
+            <div class="hero-title">自由 DIY</div>
+            <div class="hero-sub">选择天然灵石，亲手编织专属能量配方</div>
+          </div>
+          <button class="hero-btn"><i class="ti ti-arrow-right" aria-hidden="true"></i> 立即开启</button>
+        </div>
+        <div class="hero-card calc" onclick="navigate('assessment')">
+          <div>
+            <div class="hero-title">能量测算</div>
+            <div class="hero-sub">测一测你的本命缺失，获取定制平衡建议</div>
+          </div>
+          <button class="hero-btn"><i class="ti ti-arrow-right" aria-hidden="true"></i> 立即开启</button>
+        </div>
+      </div>
+
+      <div class="vibrancy-card">
+        <div class="vibrancy-top">
+          <div class="vibrancy-label"><i class="ti ti-sparkles" aria-hidden="true" style="color:var(--primary)"></i> 每日能量指数 &nbsp;<span style="font-size:11px;color:var(--text-hint)">基于今日占星与个人气场</span></div>
+          <div class="vibrancy-score">85%</div>
+        </div>
+        <div class="vibrancy-bar"><div class="vibrancy-fill"></div></div>
+        <div class="vibrancy-info">
+          <div class="info-item">
+            <div class="info-label">今日幸运色</div>
+            <div class="info-val"><span class="color-dot"></span>紫水晶色</div>
+          </div>
+          <div class="info-item">
+            <div class="info-label">宜佩戴材质</div>
+            <div class="info-val" style="color:var(--primary);">老山檀木</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="sec-header">
+        <div class="sec-title">能量学堂</div>
+        <span class="sec-link">全部</span>
+      </div>
+      <div class="learn-scroll">
+        <div class="learn-card">
+          <span class="learn-badge">新手入门</span>
+          <div class="learn-card-title">如何根据直觉挑选第一块水晶？</div>
+        </div>
+        <div class="learn-card card2">
+          <span class="learn-badge">进阶知识</span>
+          <div class="learn-card-title">月光石与情绪疗愈的秘密</div>
+        </div>
+      </div>
+
+      <div class="sec-header">
+        <div class="sec-title">灵感工坊</div>
+        <div style="display:flex;gap:12px;font-size:12px;">
+          <span style="color:var(--primary);font-weight:600;cursor:pointer">热门</span>
+          <span style="color:var(--text-hint);cursor:pointer">最新</span>
+        </div>
+      </div>
+      <div class="inspo-grid">
+        <div class="inspo-card">
+          <div class="inspo-img c1"><div class="like-badge"><i class="ti ti-heart" aria-hidden="true" style="font-size:11px;color:#C06080"></i> 1.2k</div>💎</div>
+          <div class="inspo-info">
+            <div class="inspo-name">【治愈系】海蓝宝之梦</div>
+            <div class="inspo-author">小宁的能量</div>
+          </div>
+        </div>
+        <div class="inspo-card">
+          <div class="inspo-img c2"><div class="like-badge"><i class="ti ti-heart" aria-hidden="true" style="font-size:11px;color:#C06080"></i> 2.4k</div>📿</div>
+          <div class="inspo-info">
+            <div class="inspo-name">极简白水晶锁骨链</div>
+            <div class="inspo-author">素色生</div>
+          </div>
+        </div>
+        <div class="inspo-card">
+          <div class="inspo-img c3"><div class="like-badge"><i class="ti ti-heart" aria-hidden="true" style="font-size:11px;color:#C06080"></i> 856</div>🪨</div>
+          <div class="inspo-info">
+            <div class="inspo-name">招财转运·钛晶组合</div>
+            <div class="inspo-author">祥意工</div>
+          </div>
+        </div>
+        <div class="inspo-card">
+          <div class="inspo-img c4"><div class="like-badge"><i class="ti ti-heart" aria-hidden="true" style="font-size:11px;color:#C06080"></i> 1.1k</div>🟤</div>
+          <div class="inspo-info">
+            <div class="inspo-name">莫兰迪色系手串</div>
+            <div class="inspo-author">设计师</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="tab-bar">
+      <div class="tab-item active" onclick="switchTab('home')"><i class="ti ti-home"></i><span>首页</span></div>
+      <div class="tab-item" onclick="navigate('community')"><i class="ti ti-users"></i><span>社区</span></div>
+      <div class="tab-item" onclick="navigate('workspace')"><i class="ti ti-plus"></i><span>工作台</span></div>
+      <div class="tab-item"><i class="ti ti-user"></i><span>我的</span></div>
+    </div>
+  </div>
+
+  <!-- ===== ASSESSMENT SCREEN ===== -->
+  <div class="screen" id="screen-assessment">
+    <div class="status-bar"><span>9:41</span><div class="status-icons"><i class="ti ti-wifi" aria-hidden="true" style="font-size:14px"></i><i class="ti ti-battery" aria-hidden="true" style="font-size:14px"></i></div></div>
+    <div class="nav-bar">
+      <div class="nav-btn" onclick="navigate('home')"><i class="ti ti-arrow-left" aria-hidden="true" style="font-size:15px"></i></div>
+      <div class="page-title">测算信息录</div>
+      <div class="nav-btn"><i class="ti ti-share" aria-hidden="true" style="font-size:15px"></i></div>
+    </div>
+    <div class="scroll-body">
+      <div class="assess-hero">
+        <h2>连接你的<span>能量场</span></h2>
+        <p>请提供真实的出生信息，我们将通过星历数据与性格<br>维度，为你匹配最契合的水晶材质。</p>
+      </div>
+
+      <div class="card">
+        <div class="form-section">
+          <div class="form-label"><i class="ti ti-user" aria-hidden="true"></i> 姓名 / 昵称</div>
+          <input class="form-input" type="text" placeholder="请输入您的姓名" />
+          <div class="form-hint"><i class="ti ti-info-circle" aria-hidden="true" style="font-size:13px"></i> 用于生成专属报告抬头</div>
+        </div>
+
+        <div class="form-section">
+          <div class="form-label"><i class="ti ti-sparkles" aria-hidden="true"></i> 性别标识</div>
+          <div class="gender-row">
+            <div class="gender-btn" onclick="selectGender(this)">男</div>
+            <div class="gender-btn selected" onclick="selectGender(this)">女</div>
+            <div class="gender-btn" onclick="selectGender(this)">非二元</div>
+          </div>
+        </div>
+
+        <div class="form-section">
+          <div class="form-label"><i class="ti ti-map-pin" aria-hidden="true"></i> 出生地点</div>
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:11px 14px;border:0.5px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-card);">
+            <span style="font-size:14px;">上海市 黄浦区</span>
+            <i class="ti ti-chevron-right" aria-hidden="true" style="color:var(--text-hint)"></i>
+          </div>
+          <div class="form-hint"><i class="ti ti-info-circle" aria-hidden="true" style="font-size:13px"></i> 精确位置将提升星盘计算准确度</div>
+        </div>
+
+        <div class="form-section">
+          <div class="date-row">
+            <div>
+              <div class="form-label"><i class="ti ti-calendar" aria-hidden="true"></i> 出生日期</div>
+              <input class="form-input" type="text" value="1998-10-24" />
+            </div>
+            <div>
+              <div class="form-label"><i class="ti ti-clock" aria-hidden="true"></i> 具体时刻</div>
+              <input class="form-input" type="text" value="14:30" />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title"><i class="ti ti-sparkles"></i> MBTI 性格类型 <span style="font-size:11px;color:var(--primary);margin-left:auto;cursor:pointer">不确定？去测试</span></div>
+        <div class="mbti-grid" id="mbti-grid">
+          <div class="mbti-btn" onclick="selectMbti(this)">INTJ<div class="mbti-sub">建筑师</div></div>
+          <div class="mbti-btn" onclick="selectMbti(this)">INTP<div class="mbti-sub">逻辑学家</div></div>
+          <div class="mbti-btn" onclick="selectMbti(this)">ENTJ<div class="mbti-sub">指挥官</div></div>
+          <div class="mbti-btn" onclick="selectMbti(this)">ENTP<div class="mbti-sub">辩论家</div></div>
+          <div class="mbti-btn selected" onclick="selectMbti(this)">INFJ<div class="mbti-sub">提倡者</div></div>
+          <div class="mbti-btn" onclick="selectMbti(this)">INFP<div class="mbti-sub">调解者</div></div>
+          <div class="mbti-btn" onclick="selectMbti(this)">ENFJ<div class="mbti-sub">主人公</div></div>
+          <div class="mbti-btn" onclick="selectMbti(this)">ENFP<div class="mbti-sub">竞选者</div></div>
+          <div class="mbti-btn" onclick="selectMbti(this)">ISTJ<div class="mbti-sub">物流师</div></div>
+          <div class="mbti-btn" onclick="selectMbti(this)">ISFJ<div class="mbti-sub">守卫者</div></div>
+          <div class="mbti-btn" onclick="selectMbti(this)">ESTJ<div class="mbti-sub">总经理</div></div>
+          <div class="mbti-btn" onclick="selectMbti(this)">ESFJ<div class="mbti-sub">执政官</div></div>
+          <div class="mbti-btn" onclick="selectMbti(this)">ISTP<div class="mbti-sub">鉴赏家</div></div>
+          <div class="mbti-btn" onclick="selectMbti(this)">ISFP<div class="mbti-sub">探险家</div></div>
+          <div class="mbti-btn" onclick="selectMbti(this)">ESTP<div class="mbti-sub">企业家</div></div>
+          <div class="mbti-btn" onclick="selectMbti(this)">ESFP<div class="mbti-sub">表演者</div></div>
+        </div>
+      </div>
+
+      <button class="start-btn" onclick="navigate('report')">开始深度能量测算 <i class="ti ti-arrow-right" aria-hidden="true"></i></button>
+      <div style="text-align:center;font-size:11px;color:var(--text-hint);margin-top:8px;padding-bottom:8px;">点击即代表您同意《能量实验室隐私协议》</div>
+    </div>
+  </div>
+
+  <!-- ===== REPORT SCREEN ===== -->
+  <div class="screen" id="screen-report">
+    <div class="status-bar"><span>9:41</span><div class="status-icons"><i class="ti ti-wifi" aria-hidden="true" style="font-size:14px"></i><i class="ti ti-battery" aria-hidden="true" style="font-size:14px"></i></div></div>
+    <div class="nav-bar">
+      <div class="nav-btn" onclick="navigate('assessment')"><i class="ti ti-arrow-left" aria-hidden="true" style="font-size:15px"></i></div>
+      <div class="page-title">能量解析拓</div>
+      <div class="nav-btn"><i class="ti ti-sparkles" aria-hidden="true" style="font-size:15px;color:var(--primary)"></i></div>
+    </div>
+    <div class="scroll-body">
+      <div class="report-header">
+        <div class="profile-row">
+          <div class="avatar">🔥</div>
+          <div>
+            <div style="font-size:11px;color:var(--text-hint);margin-bottom:3px;">能量画像摘要</div>
+            <div class="profile-name">烈火中的治愈者</div>
+            <div class="profile-sub">
+              <span class="tag tag-fire">火系主导</span>
+              <span class="tag tag-infp">INFP 探索者</span>
+              <span class="tag tag-high">高灵敏度</span>
+            </div>
+          </div>
+        </div>
+        <div class="quote">"你的能量如跳动的火焰，虽炽热但内心保留着深邃的湖泊。火与水的交织让你拥有极强的创造力与同理心。"</div>
+      </div>
+
+      <div class="card">
+        <div class="card-title"><i class="ti ti-chart-radar"></i> 五行多维解析</div>
+        <div style="font-size:11px;color:var(--text-hint);margin:-8px 0 8px;">各元素能量分布状态</div>
+        <div class="radar-wrap">
+          <svg class="radar" width="220" height="200" viewBox="0 0 220 200">
+            <g transform="translate(110,100)">
+              <polygon points="0,-70 66,-22 41,57 -41,57 -66,-22" fill="none" stroke="#E0DCFF" stroke-width="1"/>
+              <polygon points="0,-50 47,-16 29,41 -29,41 -47,-16" fill="none" stroke="#E0DCFF" stroke-width="0.8"/>
+              <polygon points="0,-30 28,-9 18,25 -18,25 -28,-9" fill="none" stroke="#E0DCFF" stroke-width="0.6"/>
+              <line x1="0" y1="0" x2="0" y2="-70" stroke="#E0DCFF" stroke-width="0.8"/>
+              <line x1="0" y1="0" x2="66" y2="-22" stroke="#E0DCFF" stroke-width="0.8"/>
+              <line x1="0" y1="0" x2="41" y2="57" stroke="#E0DCFF" stroke-width="0.8"/>
+              <line x1="0" y1="0" x2="-41" y2="57" stroke="#E0DCFF" stroke-width="0.8"/>
+              <line x1="0" y1="0" x2="-66" y2="-22" stroke="#E0DCFF" stroke-width="0.8"/>
+              <polygon points="0,-60 58,-18 20,50 -26,45 -50,-10" fill="rgba(108,99,217,0.2)" stroke="#6C63D9" stroke-width="1.5"/>
+              <text x="0" y="-78" text-anchor="middle" fill="#6B6B8A" font-size="11">金（财富）</text>
+              <text x="76" y="-18" text-anchor="start" fill="#6B6B8A" font-size="11">木（健康）</text>
+              <text x="46" y="68" text-anchor="middle" fill="#6B6B8A" font-size="11">水（智慧）</text>
+              <text x="-46" y="68" text-anchor="middle" fill="#6B6B8A" font-size="11">火（热情）</text>
+              <text x="-80" y="-18" text-anchor="end" fill="#6B6B8A" font-size="11">土（平衡）</text>
+            </g>
+          </svg>
+        </div>
+        <div style="display:flex;gap:14px;font-size:11px;">
+          <div style="display:flex;align-items:center;gap:5px;"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#FF7060;"></span>最强：火元素 (120)</div>
+          <div style="display:flex;align-items:center;gap:5px;"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#70C870;"></span>偏弱：木元素 (45)</div>
+        </div>
+        <div style="font-size:11px;color:var(--text-hint);margin-top:4px;">建议通过生长型配方进行补足</div>
+      </div>
+
+      <div class="mini-grid">
+        <div class="mini-card" style="background:#FFE8E4;">
+          <div style="font-size:11px;color:#C06040;margin-bottom:6px;">核心色调</div>
+          <div style="width:28px;height:28px;border-radius:50%;background:#E84040;margin:0 auto 6px;"></div>
+          <div style="font-size:11px;color:#C06040;">活力·热情·真觉</div>
+        </div>
+        <div class="mini-card" style="background:#EDE8FF;">
+          <div style="font-size:11px;color:var(--primary);margin-bottom:4px;">灵魂频率</div>
+          <div style="font-size:18px;font-weight:700;color:var(--primary);">528 Hz</div>
+          <div style="font-size:11px;color:var(--text-sub);">修复·爱·平衡</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title" style="justify-content:space-between;"><span style="display:flex;align-items:center;gap:6px;"><i class="ti ti-receipt" aria-hidden="true" style="color:var(--primary)"></i> 定制配方指南</span><span style="font-size:11px;color:var(--primary);cursor:pointer;">成分详情</span></div>
+        <div class="ingredient-row">
+          <div class="ingredient-icon"><i class="ti ti-flame" aria-hidden="true"></i></div>
+          <div class="ingredient-info">
+            <div class="ingredient-name">红玛瑙</div>
+            <div class="ingredient-sub">增强行动力与热情</div>
+            <div class="ingredient-bar"><div class="ingredient-fill" style="width:60%"></div></div>
+          </div>
+          <div class="ingredient-pct">60%</div>
+        </div>
+        <div class="ingredient-row">
+          <div class="ingredient-icon"><i class="ti ti-waves" aria-hidden="true"></i></div>
+          <div class="ingredient-info">
+            <div class="ingredient-name">月光石</div>
+            <div class="ingredient-sub">平衡火象情绪</div>
+            <div class="ingredient-bar"><div class="ingredient-fill" style="width:25%"></div></div>
+          </div>
+          <div class="ingredient-pct">25%</div>
+        </div>
+        <div class="ingredient-row">
+          <div class="ingredient-icon"><i class="ti ti-sparkles" aria-hidden="true"></i></div>
+          <div class="ingredient-info">
+            <div class="ingredient-name">白水晶</div>
+            <div class="ingredient-sub">净化能量磁场</div>
+            <div class="ingredient-bar"><div class="ingredient-fill" style="width:15%"></div></div>
+          </div>
+          <div class="ingredient-pct">15%</div>
+        </div>
+      </div>
+
+      <button class="generate-btn" onclick="navigate('workspace')">一键生成专属手串 <i class="ti ti-arrow-right" aria-hidden="true"></i></button>
+      <div style="font-size:11px;color:var(--text-hint);margin-top:6px;text-align:center;padding-bottom:4px;">当前设计配方：定制手串 A-04</div>
+    </div>
+  </div>
+
+  <!-- ===== COMMUNITY SCREEN ===== -->
+  <div class="screen" id="screen-community">
+    <div class="status-bar"><span>9:41</span><div class="status-icons"><i class="ti ti-wifi" aria-hidden="true" style="font-size:14px"></i><i class="ti ti-battery" aria-hidden="true" style="font-size:14px"></i></div></div>
+    <div style="padding:6px 16px 10px;display:flex;justify-content:space-between;align-items:center;flex-shrink:0;">
+      <div class="page-title">探索社区</div>
+      <i class="ti ti-search" aria-hidden="true" style="font-size:20px;color:var(--text-sub)"></i>
+    </div>
+    <div class="scroll-body">
+      <div class="tab-pills">
+        <div class="tab-pill active">作品墙</div>
+        <div class="tab-pill">能量学堂</div>
+      </div>
+      <div class="filter-scroll">
+        <div class="filter-chip active">全部灵感</div>
+        <div class="filter-chip">水晶手串</div>
+        <div class="filter-chip">编织工艺</div>
+        <div class="filter-chip">星座定制</div>
+        <div class="filter-chip">招财</div>
+      </div>
+      <div class="community-grid">
+        <div class="comm-card">
+          <div class="comm-img c1">
+            <span class="comm-badge">治愈</span>
+            <div class="heart-btn"><i class="ti ti-heart" aria-hidden="true"></i></div>
+            💙
+          </div>
+          <div class="comm-info">
+            <div class="comm-title">海蓝之谜·冥想调频手...</div>
+            <div class="comm-meta"><span>清心居 · <i class="ti ti-heart" aria-hidden="true" style="font-size:11px;color:#C06080"></i> 128</span></div>
+            <button class="clone-btn"><i class="ti ti-copy" aria-hidden="true" style="font-size:12px"></i> 一键同款</button>
+          </div>
+        </div>
+        <div class="comm-card">
+          <div class="comm-img c2">
+            <span class="comm-badge">智慧</span>
+            <div class="heart-btn"><i class="ti ti-heart" aria-hidden="true"></i></div>
+            💜
+          </div>
+          <div class="comm-info">
+            <div class="comm-title">紫晶幻梦·开启灵感直...</div>
+            <div class="comm-meta"><span>Luna · <i class="ti ti-heart" aria-hidden="true" style="font-size:11px;color:#C06080"></i> 89</span></div>
+            <button class="clone-btn"><i class="ti ti-copy" aria-hidden="true" style="font-size:12px"></i> 一键同款</button>
+          </div>
+        </div>
+        <div class="comm-card">
+          <div class="comm-img c3">
+            <span class="comm-badge">守护</span>
+            <div class="heart-btn"><i class="ti ti-heart" aria-hidden="true"></i></div>
+            🔴
+          </div>
+          <div class="comm-info">
+            <div class="comm-title">烈焰朱砂·守护避邪系...</div>
+            <div class="comm-meta"><span>艾琳能量 · <i class="ti ti-heart" aria-hidden="true" style="font-size:11px;color:#C06080"></i> 256</span></div>
+            <button class="clone-btn"><i class="ti ti-copy" aria-hidden="true" style="font-size:12px"></i> 一键同款</button>
+          </div>
+        </div>
+        <div class="comm-card">
+          <div class="comm-img c4">
+            <span class="comm-badge">自然</span>
+            <div class="heart-btn"><i class="ti ti-heart" aria-hidden="true"></i></div>
+            💚
+          </div>
+          <div class="comm-info">
+            <div class="comm-title">自然之息·橄榄石编织...</div>
+            <div class="comm-meta"><span>森林呼 · <i class="ti ti-heart" aria-hidden="true" style="font-size:11px;color:#C06080"></i> 167</span></div>
+            <button class="clone-btn"><i class="ti ti-copy" aria-hidden="true" style="font-size:12px"></i> 一键同款</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="tab-bar">
+      <div class="tab-item" onclick="navigate('home')"><i class="ti ti-home"></i><span>首页</span></div>
+      <div class="tab-item active" onclick="navigate('community')"><i class="ti ti-users"></i><span>社区</span></div>
+      <div class="tab-item" onclick="navigate('workspace')"><i class="ti ti-plus"></i><span>工作台</span></div>
+      <div class="tab-item"><i class="ti ti-user"></i><span>我的</span></div>
+    </div>
+  </div>
+
+  <!-- ===== WORKSPACE SCREEN ===== -->
+  <div class="screen" id="screen-workspace">
+    <div class="status-bar"><span>9:41</span><div class="status-icons"><i class="ti ti-wifi" aria-hidden="true" style="font-size:14px"></i><i class="ti ti-battery" aria-hidden="true" style="font-size:14px"></i></div></div>
+    <div class="nav-bar">
+      <div class="nav-btn" onclick="navigate('home')"><i class="ti ti-arrow-left" aria-hidden="true" style="font-size:15px"></i></div>
+      <div class="page-title">我的灵感手</div>
+      <div style="display:flex;gap:8px;">
+        <div class="nav-btn"><i class="ti ti-bookmark" aria-hidden="true" style="font-size:15px"></i></div>
+        <div class="nav-btn"><i class="ti ti-share" aria-hidden="true" style="font-size:15px"></i></div>
+      </div>
+    </div>
+
+    <div class="scroll-body" style="flex:1;">
+      <div class="ws-preview">
+        <div style="font-size:11px;color:var(--text-hint);margin-bottom:4px;">当前预估总价</div>
+        <div style="font-size:20px;font-weight:700;color:var(--primary);margin-bottom:12px;">¥458</div>
+        <div class="ws-bracelet"><i class="ti ti-sparkles" aria-hidden="true"></i></div>
+        <div style="background:var(--primary-light);border-radius:var(--radius-sm);padding:8px 12px;display:inline-flex;align-items:center;gap:10px;font-size:12px;">
+          <span style="color:var(--text-sub);">长度: 16.5cm</span>
+          <span style="color:var(--primary);font-weight:700;">85%</span>
+          <span style="font-size:10px;color:var(--text-hint);">能量分布</span>
+        </div>
+      </div>
+
+      <div class="ws-tabs">
+        <div class="ws-tab active" onclick="selectWsTab(this, 'primary')">主石</div>
+        <div class="ws-tab" onclick="selectWsTab(this, 'spacer')">隔珠</div>
+        <div class="ws-tab" onclick="selectWsTab(this, 'pendant')">吊坠</div>
+      </div>
+
+      <div class="stone-grid">
+        <div class="stone-card selected">
+          <div class="stone-element">水</div>
+          <div class="stone-img s1">🪨</div>
+          <div class="stone-name">月光石</div>
+          <div class="stone-price">¥128</div>
+        </div>
+        <div class="stone-card">
+          <div class="stone-element">火</div>
+          <div class="stone-img s2">💎</div>
+          <div class="stone-name">草莓晶</div>
+          <div class="stone-price">¥98</div>
+        </div>
+        <div class="stone-card">
+          <div class="stone-element">木</div>
+          <div class="stone-img s3">🔷</div>
+          <div class="stone-name">蓝玛瑙</div>
+          <div class="stone-price">¥156</div>
+        </div>
+        <div class="stone-card">
+          <div class="stone-element">土</div>
+          <div class="stone-img s4">💛</div>
+          <div class="stone-name">黄水晶</div>
+          <div class="stone-price">¥188</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="ws-bottom">
+      <div class="ws-total">
+        <div class="ws-total-label">已选 12 颗</div>
+        <div class="ws-total-price">¥458.00 <i class="ti ti-chevron-right" aria-hidden="true" style="font-size:13px"></i></div>
+      </div>
+      <button class="cart-btn"><i class="ti ti-shopping-cart" aria-hidden="true" style="font-size:14px"></i> 加购</button>
+      <button class="order-btn" onclick="navigate('checkout')">立即下单</button>
+    </div>
+
+    <div class="tab-bar">
+      <div class="tab-item" onclick="navigate('home')"><i class="ti ti-home"></i><span>首页</span></div>
+      <div class="tab-item" onclick="navigate('community')"><i class="ti ti-users"></i><span>社区</span></div>
+      <div class="tab-item active"><i class="ti ti-plus"></i><span>工作台</span></div>
+      <div class="tab-item"><i class="ti ti-user"></i><span>我的</span></div>
+    </div>
+  </div>
+
+  <!-- ===== CHECKOUT SCREEN ===== -->
+  <div class="screen" id="screen-checkout">
+    <div class="status-bar"><span>9:41</span><div class="status-icons"><i class="ti ti-wifi" aria-hidden="true" style="font-size:14px"></i><i class="ti ti-battery" aria-hidden="true" style="font-size:14px"></i></div></div>
+    <div class="nav-bar">
+      <div class="nav-btn" onclick="navigate('workspace')"><i class="ti ti-arrow-left" aria-hidden="true" style="font-size:15px"></i></div>
+      <div class="page-title">订单确认</div>
+      <div class="nav-btn"><i class="ti ti-share" aria-hidden="true" style="font-size:15px"></i></div>
+    </div>
+    <div class="scroll-body">
+      <div class="step-bar" style="margin-bottom:16px;">
+        <div class="step">
+          <div class="step-dot">1</div>
+          <span class="step-label">确认订单</span>
+        </div>
+        <div class="step-line"></div>
+        <div class="step">
+          <div class="step-dot inactive">2</div>
+          <span class="step-label" style="color:var(--text-hint)">在线支付</span>
+        </div>
+        <div class="step-line"></div>
+        <div class="step">
+          <div class="step-dot inactive">3</div>
+          <span class="step-label" style="color:var(--text-hint)">等待收货</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title"><i class="ti ti-map-pin"></i> 收货地址 <span style="margin-left:auto;font-size:12px;color:var(--primary);cursor:pointer;">修改</span></div>
+        <div style="font-size:13px;font-weight:600;">张灵素 &nbsp;38 **** 9921 &nbsp;<span style="background:var(--primary-light);color:var(--primary);font-size:10px;border-radius:4px;padding:2px 6px;">默认</span></div>
+        <div style="font-size:12px;color:var(--text-sub);margin-top:4px;display:flex;align-items:center;justify-content:space-between;">浙江省杭州市西湖区灵隐街道云隐阁3号楼808室 <i class="ti ti-chevron-right" aria-hidden="true"></i></div>
+      </div>
+
+      <div class="card">
+        <div class="card-title"><i class="ti ti-package"></i> 商品明细</div>
+        <div class="order-item">
+          <div class="order-thumb">📿</div>
+          <div class="order-item-info">
+            <div class="order-item-name">灵愈·定制能量手串</div>
+            <div class="order-item-sub">核心能量：水属性·治愈</div>
+            <div class="order-price">¥528.00</div>
+          </div>
+        </div>
+        <div class="bom-list">
+          <div class="bom-row"><span>海蓝宝 8mm×8颗</span><span>¥160.00</span></div>
+          <div class="bom-row"><span>白水晶 8mm×6颗</span><span>¥90.00</span></div>
+          <div class="bom-row"><span>纯银 S925 隔珠×4枚</span><span>¥120.00</span></div>
+          <div class="bom-row"><span>手工弹力丝（含工费）×1条</span><span>¥158.00</span></div>
+          <div class="bom-total"><span>物料合计</span><span>¥528.00</span></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title" style="justify-content:space-between;"><span style="display:flex;align-items:center;gap:6px;"><i class="ti ti-gift" aria-hidden="true" style="color:var(--primary)"></i> 增值服务</span><span style="font-size:11px;color:var(--text-hint);">让礼物更有温度</span></div>
+        <div class="service-grid">
+          <div class="service-btn">
+            <i class="ti ti-box" aria-hidden="true"></i>
+            <span>精美礼盒</span>
+            <small>¥20</small>
+          </div>
+          <div class="service-btn selected">
+            <i class="ti ti-text-size" aria-hidden="true"></i>
+            <span>个性刻字</span>
+            <small>¥35</small>
+          </div>
+          <div class="service-btn">
+            <i class="ti ti-heart" aria-hidden="true"></i>
+            <span>手写贺卡</span>
+            <small>¥15</small>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title"><i class="ti ti-users"></i> 社交履约</div>
+        <div style="font-size:12px;color:var(--text-sub);margin-bottom:10px;display:flex;align-items:center;gap:6px;">
+          <div style="width:28px;height:28px;border-radius:50%;background:#B89CC0;display:flex;align-items:center;justify-content:center;font-size:14px;">👤</div>
+          <span>已有 14 位好友通过代付完成了订单</span>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+          <button style="padding:10px;border:0.5px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-card);font-size:12px;font-weight:500;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:5px;"><i class="ti ti-heart" aria-hidden="true" style="color:var(--primary)"></i> 找人代付</button>
+          <button style="padding:10px;border:1px solid #E06080;border-radius:var(--radius-sm);background:var(--bg-card);font-size:12px;font-weight:500;cursor:pointer;color:#C04060;display:flex;align-items:center;justify-content:center;gap:5px;"><i class="ti ti-wand" aria-hidden="true"></i> 生成心愿单</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title"><i class="ti ti-message"></i> 订单备注</div>
+        <textarea class="textarea-input" placeholder="有什么想叮嘱工作室的吗？"></textarea>
+        <div class="form-hint" style="margin-top:6px;"><i class="ti ti-info-circle" aria-hidden="true" style="font-size:13px"></i> 顺丰包邮，定制商品预计 48 小时内发货。</div>
+      </div>
+    </div>
+
+    <div class="pay-bar">
+      <div class="pay-total">
+        <div class="pay-label">共 1 件，实付</div>
+        <div class="pay-amount">¥528.00</div>
+      </div>
+      <button class="pay-btn">立即支付</button>
+    </div>
+  </div>
+
+</div>
+
+<script>
+function navigate(screen) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  const target = document.getElementById('screen-' + screen);
+  if (target) {
+    target.classList.add('active');
+    target.scrollTop = 0;
+  }
+}
+
+function selectGender(el) {
+  el.closest('.gender-row').querySelectorAll('.gender-btn').forEach(b => b.classList.remove('selected'));
+  el.classList.add('selected');
+}
+
+function selectMbti(el) {
+  el.closest('.mbti-grid').querySelectorAll('.mbti-btn').forEach(b => b.classList.remove('selected'));
+  el.classList.add('selected');
+}
+
+function selectWsTab(el, type) {
+  el.closest('.ws-tabs').querySelectorAll('.ws-tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+}
+
+function switchTab(tab) {}
+</script>

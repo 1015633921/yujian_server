@@ -1,0 +1,48 @@
+{
+  "pages": [
+    "pages/home/home",
+    "pages/search/search",
+    "pages/community/community",
+    "pages/community-detail/community-detail",
+    "pages/workspace/workspace",
+    "pages/profile/profile",
+    "pages/assessment/assessment",
+    "pages/report/report",
+    "pages/checkout/checkout",
+    "pages/order-list/order-list",
+    "pages/order-detail/order-detail"
+  ],
+  "window": {
+    "navigationBarTextStyle": "black",
+    "navigationBarTitleText": "星灵水晶",
+    "navigationBarBackgroundColor": "#F6F3EE",
+    "backgroundColor": "#F6F3EE"
+  },
+  "tabBar": {
+    "color": "#8A8790",
+    "selectedColor": "#2F2A26",
+    "backgroundColor": "#FFFFFF",
+    "borderStyle": "white",
+    "list": [
+      {
+        "pagePath": "pages/home/home",
+        "text": "首页"
+      },
+      {
+        "pagePath": "pages/community/community",
+        "text": "灵感"
+      },
+      {
+        "pagePath": "pages/workspace/workspace",
+        "text": "DIY"
+      },
+      {
+        "pagePath": "pages/profile/profile",
+        "text": "我的"
+      }
+    ]
+  },
+  "style": "v2",
+  "sitemapLocation": "sitemap.json",
+  "lazyCodeLoading": "requiredComponents"
+}

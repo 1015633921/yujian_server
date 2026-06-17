@@ -1,0 +1,28 @@
+<view class="page order-list-page">
+  <view class="list-head">
+    <view class="list-title">{{title}}</view>
+    <view class="list-count">{{filteredOrders.length}} 个订单</view>
+  </view>
+
+  <view wx:if="{{loading}}" class="card state-card">正在加载订单...</view>
+
+  <view wx:elif="{{filteredOrders.length}}" class="order-list">
+    <view wx:for="{{filteredOrders}}" wx:key="id" class="card order-card" data-id="{{item.id}}" bindtap="goDetail">
+      <view class="order-card-head">
+        <view class="order-id">{{item.id}}</view>
+        <view class="order-status">{{item.status}}</view>
+      </view>
+      <view class="order-time">{{item.createdAt}}</view>
+      <view class="order-body">
+        <view class="order-desc">{{item.sequence.length}} 件材料 · {{item.receiver.name || '未填写收货人'}}</view>
+        <view class="order-price">¥{{item.totalAmount}}</view>
+      </view>
+      <view class="order-arrow">查看详情 ></view>
+    </view>
+  </view>
+
+  <view wx:else class="card empty-card">
+    <view>暂无相关订单</view>
+    <button class="mini-action" bindtap="goWorkspace">去 DIY</button>
+  </view>
+</view>

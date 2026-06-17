@@ -1,0 +1,76 @@
+<view class="page">
+  <view class="nav-row">
+    <view class="icon-btn" bindtap="goBack">‹</view>
+    <view class="nav-title">能量档案</view>
+    <view class="icon-btn">·</view>
+  </view>
+
+  <view class="hero">
+    <view class="hero-title">测一测我的专属水晶</view>
+    <view class="hero-desc">填写基础信息后，系统会先生成五行能量画像。确认报告后，再填写手腕周长生成专属 DIY 手串。</view>
+  </view>
+
+  <view class="card form-card">
+    <view class="field">
+      <view class="label">昵称</view>
+      <input class="input" placeholder="例如：小羽" value="{{form.name}}" data-field="name" bindinput="onInput" />
+    </view>
+
+    <view class="field">
+      <view class="label">性别标识</view>
+      <view class="seg-row">
+        <view wx:for="{{genderOptions}}" wx:key="value" class="seg {{item.activeClass}}" data-value="{{item.value}}" bindtap="selectGender">{{item.label}}</view>
+      </view>
+    </view>
+
+    <view class="field-grid">
+      <view class="field">
+        <view class="label">出生日期</view>
+        <picker mode="date" value="{{form.birthDate}}" bindchange="onDateChange">
+          <view class="input">{{form.birthDate}}</view>
+        </picker>
+      </view>
+      <view class="field">
+        <view class="label">出生时刻</view>
+        <picker mode="time" value="{{form.birthTime}}" bindchange="onTimeChange">
+          <view class="input">{{birthTimeLabel}}</view>
+        </picker>
+      </view>
+    </view>
+
+    <view class="field compact-field">
+      <view class="seg-row">
+        <view class="seg small {{birthTimeUnknownClass}}" bindtap="setBirthTimeUnknown">时刻未知</view>
+      </view>
+    </view>
+
+    <view class="field">
+      <view class="label">出生地</view>
+      <picker mode="region" level="city" value="{{form.birthRegion}}" bindchange="onRegionChange">
+        <view class="input">{{form.birthRegion[0]}} {{form.birthRegion[1]}}</view>
+      </picker>
+    </view>
+  </view>
+
+  <view class="section">
+    <view class="section-head">
+      <view class="section-title">MBTI 类型</view>
+      <view class="section-link" bindtap="clearMbti">{{form.mbti ? '清除' : '可选'}}</view>
+    </view>
+    <view class="chip-grid">
+      <view wx:for="{{mbtiOptions}}" wx:key="value" class="chip {{item.activeClass}}" data-value="{{item.value}}" bindtap="selectMbti">{{item.label}}</view>
+    </view>
+  </view>
+
+  <view class="section">
+    <view class="section-head">
+      <view class="section-title">当前核心愿望</view>
+      <view class="section-link">最多选 3 项</view>
+    </view>
+    <view class="wish-grid">
+      <view wx:for="{{wishOptions}}" wx:key="value" class="wish {{item.activeClass}}" data-value="{{item.value}}" bindtap="toggleWish">{{item.label}}</view>
+    </view>
+  </view>
+
+  <button class="primary-button" loading="{{submitting}}" disabled="{{submitting}}" bindtap="startAssessment">计算我的五行能量</button>
+</view>

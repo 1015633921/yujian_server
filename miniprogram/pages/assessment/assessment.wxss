@@ -1,0 +1,101 @@
+.hero {
+  padding: 34rpx 0 12rpx;
+}
+
+.hero-title {
+  font-size: 46rpx;
+  font-weight: 900;
+}
+
+.hero-desc {
+  margin-top: 14rpx;
+  color: #756f68;
+  font-size: 26rpx;
+  line-height: 1.55;
+}
+
+.form-card {
+  margin-top: 24rpx;
+  padding: 28rpx;
+}
+
+.field {
+  margin-bottom: 26rpx;
+}
+
+.field:last-child {
+  margin-bottom: 0;
+}
+
+.compact-field {
+  margin-top: -14rpx;
+}
+
+.field-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18rpx;
+}
+
+.label {
+  margin-bottom: 12rpx;
+  color: #6e655d;
+  font-size: 24rpx;
+  font-weight: 700;
+}
+
+.input {
+  display: flex;
+  align-items: center;
+  min-height: 84rpx;
+  padding: 0 22rpx;
+  border: 1rpx solid #ece4da;
+  border-radius: 8rpx;
+  background: #fbf8f3;
+  font-size: 28rpx;
+}
+
+.seg-row,
+.chip-grid,
+.wish-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14rpx;
+}
+
+.seg,
+.chip,
+.wish {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 70rpx;
+  padding: 0 24rpx;
+  border: 1rpx solid #ece4da;
+  border-radius: 8rpx;
+  color: #6e655d;
+  background: #fffdf9;
+  font-size: 26rpx;
+}
+
+.seg.small {
+  min-height: 58rpx;
+  padding: 0 20rpx;
+  font-size: 24rpx;
+}
+
+.seg.active,
+.chip.active,
+.wish.active {
+  color: #fff;
+  border-color: #7a4e3a;
+  background: #7a4e3a;
+}
+
+.chip {
+  width: 150rpx;
+}
+
+.wish {
+  width: 212rpx;
+}
