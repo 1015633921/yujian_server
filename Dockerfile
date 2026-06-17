@@ -11,6 +11,7 @@ RUN pip install -i https://mirrors.cloud.tencent.com/pypi/simple --upgrade pip \
     && pip install -i https://mirrors.cloud.tencent.com/pypi/simple -r requirements.txt
 
 COPY app ./app
+COPY static ./static
 
 RUN mkdir -p /app/data
 
