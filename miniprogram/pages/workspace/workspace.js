@@ -106,8 +106,10 @@ Page({
     materials: DEFAULT_MATERIALS,
     visibleMaterials: [],
     categories: [],
+    categoriesByTop: {},
     seriesOptions: ['全部'],
     seriesByCategory: {},
+    filterSummary: '全部 · 全部 · 0 款',
     topTabs: TOP_TABS,
     activeTop: 'bead',
     activeCategory: '全部',
@@ -193,6 +195,7 @@ Page({
       this.setData({
         materials,
         topTabs: data.top_tabs || TOP_TABS,
+        categoriesByTop: data.categories_by_top || {},
         seriesByCategory: data.series_by_category || {}
       });
     } catch (error) {
@@ -379,7 +382,8 @@ Page({
 
   refreshFilters() {
     const pool = this.data.materials.filter(item => item.top === this.data.activeTop);
-    const categoryNames = ['全部', ...Array.from(new Set(pool.map(item => item.category)))];
+    const backendCategories = this.data.categoriesByTop[this.data.activeTop] || [];
+    const categoryNames = backendCategories.length ? backendCategories : ['全部', ...Array.from(new Set(pool.map(item => item.category)))];
     const activeCategory = categoryNames.includes(this.data.activeCategory) ? this.data.activeCategory : '全部';
     const categoryPool = pool.filter(item => activeCategory === '全部' || item.category === activeCategory);
     const seriesKey = `${this.data.activeTop}::${activeCategory}`;
@@ -391,7 +395,8 @@ Page({
       const series = item.series || item.name || '';
       return activeSeries === '全部' || series === activeSeries;
     });
-    this.setData({ categories: categoryNames, activeCategory, seriesOptions, activeSeries, visibleMaterials });
+    const filterSummary = `${activeCategory} · ${activeSeries} · ${visibleMaterials.length} 款`;
+    this.setData({ categories: categoryNames, activeCategory, seriesOptions, activeSeries, visibleMaterials, filterSummary });
   },
 
   selectTop(e) {

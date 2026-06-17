@@ -145,6 +145,7 @@
       </scroll-view>
 
       <view class="material-content">
+        <view class="filter-summary">{{filterSummary}}</view>
         <scroll-view wx:if="{{seriesOptions.length > 1}}" class="series-scroll" scroll-x enable-flex>
           <view class="series-tabs">
             <view wx:for="{{seriesOptions}}" wx:key="*this" class="series-tab {{activeSeries === item ? 'active' : ''}}" data-series="{{item}}" bindtap="selectSeries">{{item}}</view>

@@ -599,10 +599,21 @@ page {
   padding: 14rpx 18rpx 0;
 }
 
+.filter-summary {
+  height: 34rpx;
+  overflow: hidden;
+  color: #7a4e3a;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 20rpx;
+  font-weight: 800;
+  line-height: 34rpx;
+}
+
 .series-scroll {
   width: 100%;
   height: 48rpx;
-  margin-bottom: 10rpx;
+  margin: 6rpx 0 10rpx;
   white-space: nowrap;
 }
 
@@ -623,6 +634,7 @@ page {
   border-radius: 999rpx;
   color: #8f969a;
   background: #fffdf8;
+  box-shadow: 0 6rpx 14rpx rgba(73, 51, 33, 0.04);
   font-size: 21rpx;
   font-weight: 700;
 }
