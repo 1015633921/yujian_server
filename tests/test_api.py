@@ -1128,6 +1128,10 @@ def test_daily_options_and_live_tags_are_used_on_recalculation():
 
     assert options.status_code == 200
     assert options.json()["data"]["status_tags"]
+    first_status_tag = options.json()["data"]["status_tags"][0]
+    assert first_status_tag["short_label"]
+    assert "priority" in first_status_tag
+    assert "featured" in first_status_tag
     assert options.json()["data"]["scenes"]
     assert options.json()["data"]["goals"]
     assert checkin.status_code == 200

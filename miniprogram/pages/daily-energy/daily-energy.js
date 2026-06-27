@@ -50,11 +50,36 @@ const CRYSTAL_COLORS = {
   绿松石: '#66B9AD'
 };
 
+const STATUS_GROUPS = [
+  { key: 'emotion', label: '情绪' },
+  { key: 'energy', label: '精力' },
+  { key: 'social', label: '人际' },
+  { key: 'fortune', label: '运势' }
+];
+
 const MOOD_OPTIONS = [
-  { key: 'calm', label: '平静', emoji: '🫧', desc: '状态稳定，可以轻推进' },
-  { key: 'pressure', label: '压力山大', emoji: '🤯', desc: '脑子太满，需要降噪' },
-  { key: 'battery_low', label: '电量告急', emoji: '🔋', desc: '先省电，再推进' },
-  { key: 'money', label: '一心搞钱', emoji: '💰', desc: '目标明确，适合变现' }
+  { key: 'calm', label: '平静', short_label: '平静', emoji: '🫧', group: 'emotion', desc: '状态稳定，可以轻推进', priority: 0, featured: true },
+  { key: 'pressure', label: '压力山大', short_label: '压力', emoji: '🤯', group: 'emotion', desc: '脑子太满，需要降噪', priority: 1, featured: true },
+  { key: 'internal_loss', label: '严重内耗', short_label: '内耗', emoji: '🥱', group: 'energy', desc: '想太多，行动太少', priority: 2, featured: true },
+  { key: 'battery_low', label: '电量告急', short_label: '低电量', emoji: '🔋', group: 'energy', desc: '能量偏低，先省电', priority: 3, featured: false },
+  { key: 'money', label: '一心搞钱', short_label: '搞钱', emoji: '💰', group: 'fortune', desc: '目标明确，适合稳步变现', priority: 4, featured: true },
+  { key: 'need_focus', label: '需要专注', short_label: '专注', emoji: '🎯', group: 'energy', desc: '适合减少干扰', priority: 5, featured: true },
+  { key: 'emo', label: '随时 EMO', short_label: 'EMO', emoji: '🌧️', group: 'emotion', desc: '情绪起伏，需要被接住', priority: 6, featured: true },
+  { key: 'lost', label: '迷茫', short_label: '迷茫', emoji: '🌫️', group: 'emotion', desc: '方向感弱，先整理优先级', priority: 7, featured: false },
+  { key: 'procrastinate', label: '拖延晚期', short_label: '拖延', emoji: '⏳', group: 'energy', desc: '需要一点推进力', priority: 8, featured: false },
+  { key: 'inspiration_low', label: '灵感枯竭', short_label: '灵感', emoji: '💡', group: 'energy', desc: '先输入，再输出', priority: 9, featured: false },
+  { key: 'full_power', label: '满血复活', short_label: '满血', emoji: '🚀', group: 'energy', desc: '适合推进关键动作', priority: 10, featured: false },
+  { key: 'angry', label: '暴躁', short_label: '暴躁', emoji: '🔥', group: 'emotion', desc: '火气偏强，需要柔化', priority: 11, featured: false },
+  { key: 'hug', label: '抱抱自己', short_label: '抱抱', emoji: '🕊️', group: 'emotion', desc: '需要温柔修复', priority: 12, featured: false },
+  { key: 'social_anxiety', label: '社恐发作', short_label: '社恐', emoji: '🙈', group: 'social', desc: '保持边界，低压社交', priority: 13, featured: false },
+  { key: 'charm', label: '散发魅力', short_label: '魅力', emoji: '🧲', group: 'social', desc: '适合展示与见面', priority: 14, featured: false },
+  { key: 'protect', label: '自动退散', short_label: '防护', emoji: '🛡️', group: 'social', desc: '不想被打扰，需要防护感', priority: 15, featured: false },
+  { key: 'peach', label: '桃花绝缘体', short_label: '桃花', emoji: '🌸', group: 'social', desc: '想让关系更柔和', priority: 16, featured: false },
+  { key: 'noble', label: '求贵人', short_label: '贵人', emoji: '🤝', group: 'social', desc: '需要被看见与支持', priority: 17, featured: false },
+  { key: 'career', label: '搞事业', short_label: '事业', emoji: '💼', group: 'fortune', desc: '适合推进工作成果', priority: 18, featured: false },
+  { key: 'lucky', label: '锦鲤本鲤', short_label: '好运', emoji: '🐟', group: 'fortune', desc: '想要一点好运气', priority: 19, featured: false },
+  { key: 'exam', label: '逢考必过', short_label: '考试', emoji: '📚', group: 'fortune', desc: '需要专注和稳定输出', priority: 20, featured: false },
+  { key: 'anti_mercury', label: '水逆退散', short_label: '退散', emoji: '🧿', group: 'fortune', desc: '减少沟通误会与突发干扰', priority: 21, featured: false }
 ];
 
 const SCENE_OPTIONS = [
@@ -83,19 +108,89 @@ function decorateOptions(options, selectedKey) {
   }));
 }
 
-function decorateTagOptions(options, selectedKeys = []) {
-  return options.map(item => ({
+function normalizeStatusTag(item = {}, index = 0) {
+  const label = item.label || item.short_label || item.shortLabel || item.key || '';
+  const shortLabel = item.short_label || item.shortLabel || label;
+  const priority = Number.isFinite(Number(item.priority)) ? Number(item.priority) : index + 999;
+  return {
     ...item,
-    className: selectedKeys.includes(item.key) ? 'active' : ''
+    label,
+    shortLabel: String(shortLabel || label).slice(0, 5),
+    emoji: item.emoji || item.icon || '',
+    group: item.group || 'emotion',
+    desc: item.desc || '',
+    priority,
+    featured: item.featured === undefined ? false : !!item.featured
+  };
+}
+
+function sortStatusTags(options = []) {
+  return options.slice().sort((left, right) => {
+    const leftPriority = Number.isFinite(Number(left.priority)) ? Number(left.priority) : 999;
+    const rightPriority = Number.isFinite(Number(right.priority)) ? Number(right.priority) : 999;
+    if (leftPriority !== rightPriority) return leftPriority - rightPriority;
+    return String(left.label || '').localeCompare(String(right.label || ''), 'zh-Hans-CN');
+  });
+}
+
+function normalizeStatusGroups(groups = [], tags = []) {
+  const source = Array.isArray(groups) && groups.length ? groups : STATUS_GROUPS;
+  const usedGroups = new Set(tags.map(item => item.group).filter(Boolean));
+  const normalized = source
+    .filter(item => item && item.key)
+    .map(item => ({ key: item.key, label: item.label || item.key }))
+    .filter(item => !usedGroups.size || usedGroups.has(item.key));
+  return normalized.length ? normalized : STATUS_GROUPS;
+}
+
+function decorateStatusGroups(groups, selectedKey) {
+  return groups.map(item => ({
+    ...item,
+    className: item.key === selectedKey ? 'active' : ''
   }));
 }
 
+function decorateTagOptions(options, selectedKeys = [], activeGroup = '') {
+  return sortStatusTags(options)
+    .filter(item => !activeGroup || item.group === activeGroup)
+    .map(item => ({
+      ...item,
+      className: selectedKeys.includes(item.key) ? 'active' : ''
+    }));
+}
+
+function buildSelectedStatusView(options = [], selectedKeys = []) {
+  const selected = selectedKeys
+    .map(key => options.find(item => item.key === key))
+    .filter(Boolean);
+  if (!selected.length) {
+    return {
+      summary: '未选择',
+      desc: '可以选择 1-3 个最贴近当下的状态。',
+      items: []
+    };
+  }
+  return {
+    summary: selected.map(item => item.shortLabel || item.label).join(' · '),
+    desc: selected.map(item => item.desc).filter(Boolean).join('；'),
+    items: selected.map(item => ({
+      key: item.key,
+      label: item.label,
+      shortLabel: item.shortLabel || item.label,
+      emoji: item.emoji || ''
+    }))
+  };
+}
+
 function normalizeRuleOptions(payload = {}) {
-  const statusTags = Array.isArray(payload.status_tags) && payload.status_tags.length ? payload.status_tags : MOOD_OPTIONS;
+  const rawStatusTags = Array.isArray(payload.status_tags) && payload.status_tags.length ? payload.status_tags : MOOD_OPTIONS;
+  const statusTags = sortStatusTags(rawStatusTags.map((item, index) => normalizeStatusTag(item, index)));
+  const statusGroups = normalizeStatusGroups(payload.status_groups, statusTags);
   const scenes = Array.isArray(payload.scenes) && payload.scenes.length ? payload.scenes : SCENE_OPTIONS;
   const goals = Array.isArray(payload.goals) && payload.goals.length ? payload.goals : GOAL_OPTIONS;
   return {
     rulesVersion: payload.rules_version || '',
+    statusGroups,
     statusTags,
     scenes,
     goals
@@ -126,9 +221,13 @@ Page({
     viewDaily: null,
     rulesVersion: '',
     rawStatusOptions: MOOD_OPTIONS,
+    rawStatusGroups: STATUS_GROUPS,
     rawSceneOptions: SCENE_OPTIONS,
     rawGoalOptions: GOAL_OPTIONS,
-    moodOptions: decorateTagOptions(MOOD_OPTIONS, ['calm']),
+    activeStatusGroup: 'emotion',
+    statusGroups: decorateStatusGroups(STATUS_GROUPS, 'emotion'),
+    moodOptions: decorateTagOptions(MOOD_OPTIONS, ['calm'], 'emotion'),
+    selectedStatusView: buildSelectedStatusView(MOOD_OPTIONS, ['calm']),
     sceneOptions: decorateOptions(SCENE_OPTIONS, 'work'),
     goalOptions: decorateOptions(GOAL_OPTIONS, 'stable_expression'),
     selectedStatusTags: ['calm'],
@@ -153,6 +252,9 @@ Page({
         ? this.data.selectedStatusTags.filter(key => options.statusTags.some(item => item.key === key))
         : [];
       const nextStatusTags = selectedStatusTags.length ? selectedStatusTags : [options.statusTags[0]?.key].filter(Boolean);
+      const activeStatusGroup = options.statusGroups.some(item => item.key === this.data.activeStatusGroup)
+        ? this.data.activeStatusGroup
+        : (options.statusTags.find(item => nextStatusTags.includes(item.key))?.group || options.statusGroups[0]?.key || '');
       const selectedScene = options.scenes.some(item => item.key === this.data.selectedScene)
         ? this.data.selectedScene
         : options.scenes[0]?.key || '';
@@ -162,18 +264,29 @@ Page({
       this.setData({
         rulesVersion: options.rulesVersion,
         rawStatusOptions: options.statusTags,
+        rawStatusGroups: options.statusGroups,
         rawSceneOptions: options.scenes,
         rawGoalOptions: options.goals,
+        activeStatusGroup,
+        statusGroups: decorateStatusGroups(options.statusGroups, activeStatusGroup),
         selectedStatusTags: nextStatusTags,
+        selectedStatusView: buildSelectedStatusView(options.statusTags, nextStatusTags),
         selectedScene,
         selectedGoal,
-        moodOptions: decorateTagOptions(options.statusTags, nextStatusTags),
+        moodOptions: decorateTagOptions(options.statusTags, nextStatusTags, activeStatusGroup),
         sceneOptions: decorateOptions(options.scenes, selectedScene),
         goalOptions: decorateOptions(options.goals, selectedGoal)
       });
     } catch (error) {
+      const activeStatusGroup = STATUS_GROUPS.some(item => item.key === this.data.activeStatusGroup)
+        ? this.data.activeStatusGroup
+        : STATUS_GROUPS[0].key;
       this.setData({
-        moodOptions: decorateTagOptions(MOOD_OPTIONS, this.data.selectedStatusTags),
+        rawStatusGroups: STATUS_GROUPS,
+        activeStatusGroup,
+        statusGroups: decorateStatusGroups(STATUS_GROUPS, activeStatusGroup),
+        selectedStatusView: buildSelectedStatusView(MOOD_OPTIONS, this.data.selectedStatusTags),
+        moodOptions: decorateTagOptions(MOOD_OPTIONS, this.data.selectedStatusTags, activeStatusGroup),
         sceneOptions: decorateOptions(SCENE_OPTIONS, this.data.selectedScene),
         goalOptions: decorateOptions(GOAL_OPTIONS, this.data.selectedGoal)
       });
@@ -392,7 +505,7 @@ Page({
   },
 
   currentMood() {
-    return this.data.moodOptions.filter(item => this.data.selectedStatusTags.includes(item.key));
+    return (this.data.rawStatusOptions || MOOD_OPTIONS).filter(item => this.data.selectedStatusTags.includes(item.key));
   },
 
   currentScene() {
@@ -414,7 +527,17 @@ Page({
     selectedStatusTags = selectedStatusTags.slice(-3);
     this.setData({
       selectedStatusTags,
-      moodOptions: decorateTagOptions(this.data.rawStatusOptions || MOOD_OPTIONS, selectedStatusTags)
+      selectedStatusView: buildSelectedStatusView(this.data.rawStatusOptions || MOOD_OPTIONS, selectedStatusTags),
+      moodOptions: decorateTagOptions(this.data.rawStatusOptions || MOOD_OPTIONS, selectedStatusTags, this.data.activeStatusGroup)
+    });
+  },
+
+  selectStatusGroup(e) {
+    const activeStatusGroup = e.currentTarget.dataset.key;
+    this.setData({
+      activeStatusGroup,
+      statusGroups: decorateStatusGroups(this.data.rawStatusGroups || STATUS_GROUPS, activeStatusGroup),
+      moodOptions: decorateTagOptions(this.data.rawStatusOptions || MOOD_OPTIONS, this.data.selectedStatusTags, activeStatusGroup)
     });
   },
 

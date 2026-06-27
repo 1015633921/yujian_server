@@ -12,7 +12,7 @@ DAILY_RULES_SETTING_KEY = "daily_energy_rules"
 
 DEFAULT_DAILY_ENERGY_RULES: dict[str, Any] = {
     "schema_version": 1,
-    "content_version": 3,
+    "content_version": 4,
     "scoring": {
         "starter_base": 66,
         "personalized_base": 68,
@@ -29,10 +29,10 @@ DEFAULT_DAILY_ENERGY_RULES: dict[str, Any] = {
         "土": ["smoky_quartz", "citrine", "gold_rutilated_quartz"],
     },
     "status_groups": [
-        {"key": "emotion", "label": "情绪与心理"},
-        {"key": "energy", "label": "精力与行动"},
-        {"key": "social", "label": "人际与社交"},
-        {"key": "fortune", "label": "搞钱与运势"},
+        {"key": "emotion", "label": "情绪"},
+        {"key": "energy", "label": "精力"},
+        {"key": "social", "label": "人际"},
+        {"key": "fortune", "label": "运势"},
     ],
     "status_tags": [
         {"key": "pressure", "label": "压力山大", "emoji": "🤯", "group": "emotion", "desc": "脑子太满，需要降噪", "support_elements": ["水", "土"], "dimension_delta": {"softness": 8, "stability": 6}, "score_delta": -5, "crystal_codes": ["aquamarine", "smoky_quartz"], "keywords": ["降噪", "稳住"]},
@@ -83,6 +83,66 @@ DEFAULT_DAILY_ENERGY_RULES: dict[str, Any] = {
 }
 
 
+DEFAULT_STATUS_SHORT_LABELS = {
+    "calm": "平静",
+    "pressure": "压力",
+    "internal_loss": "内耗",
+    "battery_low": "低电量",
+    "money": "搞钱",
+    "need_focus": "专注",
+    "emo": "EMO",
+    "lost": "迷茫",
+    "procrastinate": "拖延",
+    "inspiration_low": "灵感",
+    "full_power": "满血",
+    "angry": "暴躁",
+    "hug": "抱抱",
+    "social_anxiety": "社恐",
+    "charm": "魅力",
+    "protect": "防护",
+    "peach": "桃花",
+    "noble": "贵人",
+    "career": "事业",
+    "lucky": "好运",
+    "exam": "考试",
+    "anti_mercury": "退散",
+}
+
+
+DEFAULT_STATUS_PRIORITY = {
+    key: index
+    for index, key in enumerate(
+        [
+            "calm",
+            "pressure",
+            "internal_loss",
+            "battery_low",
+            "money",
+            "need_focus",
+            "emo",
+            "lost",
+            "procrastinate",
+            "inspiration_low",
+            "full_power",
+            "angry",
+            "hug",
+            "social_anxiety",
+            "charm",
+            "protect",
+            "peach",
+            "noble",
+            "career",
+            "lucky",
+            "exam",
+            "anti_mercury",
+        ]
+    )
+}
+
+
+FEATURED_STATUS_KEYS = {"calm", "pressure", "internal_loss", "money", "need_focus", "emo"}
+
+
 def default_daily_energy_rules() -> dict[str, Any]:
     return copy.deepcopy(DEFAULT_DAILY_ENERGY_RULES)
 
@@ -113,6 +173,27 @@ def _number_map(value: Any, allowed_keys: set[str] | None = None) -> dict[str, f
         except (TypeError, ValueError):
             continue
     return result
+
+
+def _safe_int(value: Any, fallback: int = 999) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return fallback
+
+
+def _safe_bool(value: Any, fallback: bool = False) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {"true", "1", "yes", "y", "on"}:
+            return True
+        if lowered in {"false", "0", "no", "n", "off"}:
+            return False
+    if value is None:
+        return fallback
+    return bool(value)
 
 
 def normalize_daily_energy_rules(raw: Any | None) -> dict[str, Any]:
@@ -148,6 +229,7 @@ def normalize_daily_energy_rules(raw: Any | None) -> dict[str, Any]:
         result = {
             "key": key,
             "label": label,
+            "priority": _safe_int(item.get("priority"), 999),
             "emoji": str(item.get("emoji") or item.get("icon") or ""),
             "icon": str(item.get("icon") or item.get("emoji") or ""),
             "group": str(item.get("group") or ""),
@@ -158,6 +240,10 @@ def normalize_daily_energy_rules(raw: Any | None) -> dict[str, Any]:
             "keywords": [str(word) for word in _as_list(item.get("keywords")) if str(word)],
         }
         if kind == "status":
+            short_label = str(item.get("short_label") or item.get("shortLabel") or DEFAULT_STATUS_SHORT_LABELS.get(key) or label[:4])
+            result["short_label"] = short_label.strip()[:6] or label[:4]
+            result["priority"] = _safe_int(item.get("priority"), DEFAULT_STATUS_PRIORITY.get(key, 999))
+            result["featured"] = _safe_bool(item.get("featured"), key in FEATURED_STATUS_KEYS)
             result["support_elements"] = _valid_elements(item.get("support_elements") or item.get("target_elements"))
         elif kind == "scene":
             result["element_bias"] = _number_map(item.get("element_bias"), set(ELEMENTS))
@@ -172,6 +258,8 @@ def normalize_daily_energy_rules(raw: Any | None) -> dict[str, Any]:
             normalized = [normalize_rule(item, kind) for item in raw[source_key] if isinstance(item, dict)]
             normalized = [item for item in normalized if item]
             if normalized:
+                if source_key == "status_tags":
+                    normalized.sort(key=lambda item: (int(item.get("priority") or 999), str(item.get("label") or "")))
                 merged[source_key] = normalized
     return merged
 
@@ -183,16 +271,19 @@ def daily_rules_version(rules: dict[str, Any]) -> str:
 
 def public_daily_rules_payload(rules: dict[str, Any]) -> dict[str, Any]:
     return {
-        "content_version": int(rules.get("content_version") or 3),
+        "content_version": int(rules.get("content_version") or 4),
         "rules_version": daily_rules_version(rules),
         "status_groups": rules.get("status_groups") or [],
         "status_tags": [
             {
                 "key": item.get("key"),
                 "label": item.get("label"),
+                "short_label": item.get("short_label") or item.get("label"),
                 "emoji": item.get("emoji") or item.get("icon") or "",
                 "group": item.get("group") or "",
                 "desc": item.get("desc") or "",
+                "priority": item.get("priority") or 999,
+                "featured": bool(item.get("featured")),
             }
             for item in rules.get("status_tags", [])
         ],

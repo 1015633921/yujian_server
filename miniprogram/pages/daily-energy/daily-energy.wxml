@@ -39,18 +39,44 @@
         <button class="yu-button yu-button-secondary yu-btn-mini refresh-button" loading="{{refreshing}}" disabled="{{refreshing}}" bindtap="refreshDaily">更新</button>
       </view>
 
-      <view class="choice-group">
-        <view class="choice-label">状态</view>
-        <view class="choice-list">
+      <view class="choice-group status-choice-group">
+        <view class="choice-label-row">
+          <view>
+            <view class="choice-label">状态</view>
+            <view class="choice-helper">最多选 3 个，先点最贴近当下的感受</view>
+          </view>
+          <view class="selected-count">{{selectedStatusTags.length}}/3</view>
+        </view>
+
+        <view class="selected-status-row">
+          <text>已选</text>
+          <view wx:if="{{selectedStatusView.items.length}}" class="selected-status-chips">
+            <text wx:for="{{selectedStatusView.items}}" wx:key="key">{{item.shortLabel}}</text>
+          </view>
+          <view wx:else class="selected-status-empty">未选择</view>
+        </view>
+        <view class="selected-status-desc">{{selectedStatusView.desc}}</view>
+
+        <scroll-view class="status-group-tabs" scroll-x enable-flex>
+          <view
+            wx:for="{{statusGroups}}"
+            wx:key="key"
+            class="status-group-tab {{item.className}}"
+            data-key="{{item.key}}"
+            bindtap="selectStatusGroup"
+          >{{item.label}}</view>
+        </scroll-view>
+
+        <view class="choice-list status-list">
           <view
             wx:for="{{moodOptions}}"
             wx:key="key"
-            class="choice-chip {{item.className}}"
+            class="choice-chip status-chip {{item.className}}"
             data-key="{{item.key}}"
             bindtap="selectMood"
           >
-            <text>{{item.label}}</text>
-            <view>{{item.desc}}</view>
+            <text wx:if="{{item.emoji}}" class="status-emoji">{{item.emoji}}</text>
+            <text class="status-label">{{item.shortLabel}}</text>
           </view>
         </view>
       </view>
