@@ -785,6 +785,8 @@ Page({
     this.pendingRecommendedRecipe = false;
     this.stopPhysics();
     this.pushHistory();
+    wx.setStorageSync('recommendedWristSize', wristSize);
+    wx.setStorageSync('workspaceWristConfirmed', true);
     this.setData({
       wristSize,
       selected,
@@ -821,11 +823,14 @@ Page({
       title: payload.bracelet_plan.title || ''
     };
     this.sourceContext = sourceContext;
+    const wristSize = Number(payload.wrist_size_cm) || Number(wx.getStorageSync('recommendedWristSize')) || this.data.wristSize || 16;
     this.pendingBackendRecommendation = false;
     this.stopPhysics();
     this.pushHistory();
+    wx.setStorageSync('recommendedWristSize', wristSize);
+    wx.setStorageSync('workspaceWristConfirmed', true);
     this.setData({
-      wristSize: Number(payload.wrist_size_cm) || 16,
+      wristSize,
       selected,
       placements: this.normalizePlacements(selected),
       isLooseMode: false,
@@ -2396,6 +2401,9 @@ Page({
 
   promptInitialWristSize() {
     if (wx.getStorageSync('workspaceWristConfirmed')) return;
+    if (this.pendingBackendRecommendation || this.pendingRecommendedRecipe) return;
+    const workspacePreset = wx.getStorageSync('workspacePreset');
+    if (workspacePreset === 'backend-recommended' || workspacePreset === 'recommended') return;
     this.openWristSetting();
   },
 

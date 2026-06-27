@@ -420,6 +420,7 @@ Page({
       });
       wx.setStorageSync('energyReport', result);
       wx.setStorageSync('recommendedWristSize', wristSize);
+      wx.setStorageSync('workspaceWristConfirmed', true);
       wx.setStorageSync('diyWorkbenchPayload', result.workbench_payload);
       wx.setStorageSync('workspacePreset', 'backend-recommended');
       this.setData({ showWristModal: false });
