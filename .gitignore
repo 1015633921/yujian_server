@@ -21,6 +21,9 @@ outputs/
 miniprogram/assets/
 miniprogram/project.private.config.json
 miniprogram/node_modules/
+# CDN-hosted media assets. Keep code in Git, keep generated/material images in COS/CDN.
+static/materials/
+static/uploads/
 cloudflared.stdout.log
 cloudflared.stderr.log
 deploy-package.zip
