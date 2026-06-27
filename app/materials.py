@@ -23,6 +23,7 @@ def material_cdn_base_url() -> str:
 CDN_BASE_URL = material_cdn_base_url()
 MATERIAL_CACHE_TTL_SECONDS = 60
 _MATERIAL_PAYLOAD_CACHE: dict[tuple, dict] = {}
+MATERIAL_SORT_POLICY_VERSION = "featured-v1"
 
 
 FEATURED_MATERIAL_PRIORITY_KEYWORDS: tuple[tuple[int, tuple[str, ...]], ...] = (
@@ -343,7 +344,7 @@ def material_catalog_version() -> dict:
     except Exception:
         DB_PATH = None
     if not use_mysql() and (not DB_PATH or not DB_PATH.exists()):
-        return {"version": "static-v1", "updated_at": ""}
+        return {"version": f"static-v1:{MATERIAL_SORT_POLICY_VERSION}", "updated_at": ""}
     try:
         with connect_database() as connection:
             row = connection.execute(
@@ -353,10 +354,10 @@ def material_catalog_version() -> dict:
                 """
             ).fetchone()
     except Exception:
-        return {"version": "static-v1", "updated_at": ""}
+        return {"version": f"static-v1:{MATERIAL_SORT_POLICY_VERSION}", "updated_at": ""}
     total = int(row["total"] or 0)
     updated_at = str(row["updated_at"] or "")
-    return {"version": f"{total}:{updated_at}", "updated_at": updated_at}
+    return {"version": f"{total}:{updated_at}:{MATERIAL_SORT_POLICY_VERSION}", "updated_at": updated_at}
 
 
 def list_db_materials(
