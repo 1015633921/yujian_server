@@ -182,6 +182,41 @@ function buildSelectedStatusView(options = [], selectedKeys = []) {
   };
 }
 
+function optimizeRemoteImageUrl(url) {
+  if (!url || !/^https:\/\/.+(?:myqcloud\.com|yustream\.cn)\//.test(url)) return url || '';
+  if (url.includes('/materials/beads/real/')) return url;
+  if (url.includes('imageMogr2/')) return url;
+  const separator = url.includes('?') ? '&' : '?';
+  return `${url}${separator}imageMogr2/thumbnail/360x360/format/webp/quality/88`;
+}
+
+function imagePoolFrom(...sources) {
+  const pool = [];
+  sources.filter(Boolean).forEach(source => {
+    ['image_urls', 'image_pool', 'imageUrls', 'imagePool'].forEach(key => {
+      if (Array.isArray(source[key])) {
+        source[key].forEach(url => {
+          const optimized = optimizeRemoteImageUrl(url);
+          if (optimized) pool.push(optimized);
+        });
+      }
+    });
+    const direct = optimizeRemoteImageUrl(source.image_url || source.imageUrl || source.cover_url || source.coverUrl);
+    if (direct) pool.unshift(direct);
+  });
+  const seen = {};
+  return pool.filter(url => {
+    if (seen[url]) return false;
+    seen[url] = true;
+    return true;
+  });
+}
+
+function imageUrlFrom(sources, index = 0) {
+  const pool = imagePoolFrom(...sources);
+  return pool.length ? pool[Math.abs(index) % pool.length] : '';
+}
+
 function normalizeRuleOptions(payload = {}) {
   const rawStatusTags = Array.isArray(payload.status_tags) && payload.status_tags.length ? payload.status_tags : MOOD_OPTIONS;
   const statusTags = sortStatusTags(rawStatusTags.map((item, index) => normalizeStatusTag(item, index)));
@@ -398,13 +433,19 @@ Page({
       return ['main', 'support', 'balance', 'accent']
         .map(key => combo[key])
         .filter(Boolean)
-        .map((item, index) => ({
-          ...item,
-          index: index + 1,
-          label: item.label || ['主石', '辅石', '平衡石', '点缀'][index],
-          color: this.crystalColor(item.name, crystals[index]),
-          orbStyle: this.orbStyle(this.crystalColor(item.name, crystals[index]))
-        }));
+        .map((item, index) => {
+          const crystal = crystals[index] || {};
+          const color = this.crystalColor(item.name, crystal || item);
+          const imageUrl = imageUrlFrom([item, crystal], index);
+          return {
+            ...item,
+            index: index + 1,
+            label: item.label || ['主石', '辅石', '平衡石', '点缀'][index],
+            color,
+            imageUrl,
+            orbStyle: this.orbStyle(color)
+          };
+        });
     }
     const fallback = crystals.length ? crystals : [
       { name: '海蓝宝', reason: '表达、沟通、舒缓紧张感' },
@@ -418,6 +459,7 @@ Page({
       role: item.role || item.reason || '适合今日状态',
       reason: item.reason || '',
       color: this.crystalColor(item.name, item),
+      imageUrl: imageUrlFrom([item], index),
       orbStyle: this.orbStyle(this.crystalColor(item.name, item))
     })).concat([{
       index: 4,
@@ -425,6 +467,7 @@ Page({
       name: '银色隔片 / 透明隔珠',
       role: '让整体更清爽',
       color: '#CBD0D2',
+      imageUrl: '',
       orbStyle: this.orbStyle('#CBD0D2')
     }]);
   },
@@ -474,19 +517,27 @@ Page({
   },
 
   buildPlanVisuals(crystals, combo) {
+    const visualSources = [
+      ...crystals.filter(item => imagePoolFrom(item).length),
+      ...combo.filter(item => imagePoolFrom(item).length)
+    ];
     const names = [
       ...combo.map(item => item.name).filter(Boolean),
       ...crystals.map(item => item.name).filter(Boolean)
     ];
     const fallback = ['海蓝宝', '白水晶', '月光石', '白水晶', '海蓝宝'];
-    const source = names.length ? names : fallback;
+    const source = visualSources.length ? visualSources : (names.length ? names : fallback);
     return Array.from({ length: 9 }, (_, index) => {
-      const name = source[index % source.length];
+      const item = source[index % source.length];
+      const name = typeof item === 'string' ? item : item.name;
+      const imageUrl = typeof item === 'string' ? '' : imageUrlFrom([item], index);
+      const color = (typeof item === 'string' ? CRYSTAL_COLORS[name] : this.crystalColor(name, item)) || '#E6ECEB';
       return {
         index,
         name,
-        color: CRYSTAL_COLORS[name] || '#E6ECEB',
-        style: `background: radial-gradient(circle at 30% 24%, #fff 0 10%, ${CRYSTAL_COLORS[name] || '#E6ECEB'} 22% 62%, rgba(35,35,35,.22) 100%);`
+        imageUrl,
+        color,
+        style: `background: radial-gradient(circle at 30% 24%, #fff 0 10%, ${color} 22% 62%, rgba(35,35,35,.22) 100%);`
       };
     });
   },

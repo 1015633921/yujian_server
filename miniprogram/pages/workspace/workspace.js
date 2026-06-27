@@ -639,14 +639,23 @@ Page({
   buildBackendRecommendationSelected(payload = {}) {
     const plan = payload.bracelet_plan || {};
     const sizeByCode = {};
+    const materialByCode = {};
     (plan.items || []).forEach(item => {
       if (item && item.code) sizeByCode[item.code] = Number(item.bead_size_mm) || Number(plan.bead_size_mm) || 8;
+      if (item && item.code && (item.material_id || item.source_material_id || item.id)) {
+        materialByCode[item.code] = item.material_id || item.source_material_id || item.id;
+      }
     });
     return (plan.layout || [])
-      .map(item => this.resolveBackendCrystalMaterialId(
-        item.crystal_code,
-        sizeByCode[item.crystal_code] || Number(plan.bead_size_mm) || Number(payload.bead_size_mm) || 8
-      ))
+      .map(item => {
+        const explicitId = item.material_id || item.source_material_id || materialByCode[item.crystal_code] || '';
+        const resolvedExplicitId = explicitId ? this.resolveMaterialId(explicitId) : '';
+        if (resolvedExplicitId && this.hasMaterial(resolvedExplicitId)) return resolvedExplicitId;
+        return this.resolveBackendCrystalMaterialId(
+          item.crystal_code,
+          sizeByCode[item.crystal_code] || Number(item.bead_size_mm) || Number(plan.bead_size_mm) || Number(payload.bead_size_mm) || 8
+        );
+      })
       .filter(Boolean);
   },
 

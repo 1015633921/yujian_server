@@ -6,6 +6,7 @@ from typing import Any
 
 from .daily_rules import daily_rules_version, normalize_daily_energy_rules
 from .energy import ELEMENTS, WISH_MAPPING, normalized_profile
+from .materials import list_materials
 from .recommendation import CRYSTAL_CATALOG, SUPPORTING_BY_ELEMENT
 
 WORKBENCH_CRYSTAL_CODES = {
@@ -23,7 +24,47 @@ WORKBENCH_CRYSTAL_CODES = {
     "hematite",
 }
 
-DAILY_ENERGY_CONTENT_VERSION = 3
+DAILY_ENERGY_CONTENT_VERSION = 4
+
+CRYSTAL_MATERIAL_SKUS = {
+    "titanium_quartz": ["titaniumQuartz", "goldRutilatedQuartz", "citrine"],
+    "citrine": ["citrine", "goldRutilatedQuartz"],
+    "gold_rutilated_quartz": ["goldRutilatedQuartz", "titaniumQuartz", "citrine"],
+    "rhodochrosite": ["rhodochrosite", "roseQuartz", "garnet"],
+    "strawberry_quartz": ["strawberryQuartz", "roseQuartz", "garnet"],
+    "rose_quartz": ["roseQuartz", "strawberryQuartz", "rhodochrosite"],
+    "blue_rutilated_quartz": ["blueRutilatedQuartz", "aquamarine"],
+    "obsidian": ["obsidian", "blackAgate", "blackRutilatedQuartz"],
+    "black_rutilated_quartz": ["blackRutilatedQuartz", "obsidian"],
+    "green_phantom": ["greenPhantom", "greenRutilatedQuartz"],
+    "clear_quartz": ["clearQuartz", "whiteQuartz", "milkyQuartz", "doubleAClearQuartz"],
+    "aquamarine": ["aquamarine", "blueRutilatedQuartz"],
+    "turquoise": ["turquoise", "greenPhantom"],
+    "garnet": ["garnet"],
+    "smoky_quartz": ["smokyQuartz", "citrine"],
+    "hematite": ["hematite", "silverRutilatedQuartz"],
+}
+
+CRYSTAL_MATERIAL_ALIASES = {
+    "titanium_quartz": ["钛晶", "金发晶", "黄水晶", "黄晶"],
+    "citrine": ["黄水晶", "黄晶", "金发晶", "钛晶"],
+    "gold_rutilated_quartz": ["金发晶", "钛晶", "黄水晶", "黄晶"],
+    "rhodochrosite": ["红纹石", "粉晶", "粉水晶", "南红玛瑙", "红玛瑙"],
+    "strawberry_quartz": ["草莓晶", "粉晶", "粉水晶", "南红玛瑙", "红玛瑙"],
+    "rose_quartz": ["粉晶", "粉水晶", "红纹石", "草莓晶"],
+    "blue_rutilated_quartz": ["蓝发晶", "海蓝宝", "蓝晶石", "青金石"],
+    "obsidian": ["黑曜石", "黑耀石", "曜石", "黑发晶", "黑玛瑙"],
+    "black_rutilated_quartz": ["黑发晶", "黑曜石", "黑耀石", "曜石", "黑玛瑙"],
+    "green_phantom": ["绿幽灵", "绿发晶", "东陵玉", "橄榄石"],
+    "clear_quartz": ["白水晶", "白晶", "透明水晶", "水晶"],
+    "aquamarine": ["海蓝宝", "蓝发晶", "蓝晶石"],
+    "turquoise": ["绿松石", "绿幽灵", "东陵玉"],
+    "garnet": ["石榴石", "南红玛瑙", "红玛瑙", "红发晶"],
+    "smoky_quartz": ["茶晶", "烟晶", "黄水晶"],
+    "hematite": ["赤铁矿", "银发晶", "白水晶", "黑曜石"],
+}
+
+ELEMENT_TO_MATERIAL_KEY = {"金": "metal", "木": "wood", "水": "water", "火": "fire", "土": "earth"}
 
 SEASON_ELEMENT = {
     1: "水", 2: "木", 3: "木", 4: "木",
@@ -440,6 +481,137 @@ class DailyEnergyCalculator:
                 return code
         return "clear_quartz"
 
+    @staticmethod
+    def material_search_text(material: dict[str, Any]) -> str:
+        return " ".join(
+            str(material.get(key) or "")
+            for key in ("id", "skuId", "sku", "name", "category", "series", "grade", "effect", "element")
+        ).lower()
+
+    @staticmethod
+    def material_element_key(material: dict[str, Any]) -> str:
+        element = str(material.get("element") or "")
+        if element in ELEMENT_TO_MATERIAL_KEY:
+            return ELEMENT_TO_MATERIAL_KEY[element]
+        text = DailyEnergyCalculator.material_search_text(material)
+        if any(word in text for word in ("金", "银", "白", "钛", "发晶", "铁", "曜", "耀")):
+            return "metal"
+        if any(word in text for word in ("绿", "木", "松", "幽灵", "东陵")):
+            return "wood"
+        if any(word in text for word in ("蓝", "海", "水", "黑")):
+            return "water"
+        if any(word in text for word in ("红", "南红", "玛瑙", "石榴", "火", "粉", "草莓")):
+            return "fire"
+        if any(word in text for word in ("黄", "茶", "烟", "土", "虎眼")):
+            return "earth"
+        return ""
+
+    @staticmethod
+    def choose_closest_material(candidates: list[dict[str, Any]], preferred_size: float = 8) -> dict[str, Any] | None:
+        if not candidates:
+            return None
+        target_size = float(preferred_size or 8)
+
+        def rank(material: dict[str, Any]) -> tuple[float, int, int, str]:
+            try:
+                size = float(material.get("size") or target_size)
+            except (TypeError, ValueError):
+                size = target_size
+            stock = int(float(material.get("stock") or 0))
+            has_image = 0 if (material.get("image_url") or material.get("image_urls") or material.get("image_pool")) else 1
+            sort_order = int(float(material.get("sort_order") or material.get("sortOrder") or 0))
+            return (abs(size - target_size), -stock, has_image, f"{sort_order:08d}{material.get('id') or ''}")
+
+        return min(candidates, key=rank)
+
+    @staticmethod
+    def material_image_pool(material: dict[str, Any]) -> list[str]:
+        pool: list[str] = []
+        for value in (material.get("image_urls"), material.get("image_pool")):
+            if isinstance(value, list):
+                pool.extend(str(url) for url in value if str(url))
+        if material.get("image_url"):
+            pool.insert(0, str(material.get("image_url")))
+        result = []
+        seen = set()
+        for url in pool:
+            if url in seen:
+                continue
+            seen.add(url)
+            result.append(url)
+        return result
+
+    @staticmethod
+    def material_snapshot(material: dict[str, Any] | None) -> dict[str, Any]:
+        if not material:
+            return {}
+        image_pool = DailyEnergyCalculator.material_image_pool(material)
+        image_url = material.get("image_url") or (image_pool[0] if image_pool else "")
+        return {
+            "material_id": material.get("id") or "",
+            "source_material_id": material.get("id") or "",
+            "sku": material.get("skuId") or material.get("sku") or "",
+            "skuId": material.get("skuId") or material.get("sku") or "",
+            "top": material.get("top") or "bead",
+            "category": material.get("category") or "",
+            "series": material.get("series") or material.get("name") or "",
+            "grade": material.get("grade") or "",
+            "material_name": material.get("name") or "",
+            "effect": material.get("effect") or "",
+            "price": float(material.get("price") or 0),
+            "size": float(material.get("size") or 8),
+            "weight": float(material.get("weight") or 0),
+            "color": material.get("color") or "",
+            "shine": material.get("shine") or "",
+            "image_url": image_url,
+            "image_urls": image_pool,
+            "image_pool": image_pool,
+        }
+
+    @staticmethod
+    def resolve_crystal_material(code: str, crystal: dict[str, Any], preferred_size: float = 8) -> dict[str, Any] | None:
+        try:
+            payload = list_materials(top="bead", compact=True)
+        except Exception:
+            payload = {}
+        catalog = [
+            item for item in payload.get("materials", [])
+            if str(item.get("top") or "bead") == "bead" and bool(item.get("enabled", True))
+        ]
+        if not catalog:
+            return None
+        in_stock = [item for item in catalog if int(float(item.get("stock") or 0)) > 0]
+        source = in_stock or catalog
+
+        sku_candidates = {
+            str(sku).lower()
+            for sku in CRYSTAL_MATERIAL_SKUS.get(code, [])
+            if str(sku)
+        }
+        exact_matches = [
+            item for item in source
+            if str(item.get("skuId") or item.get("sku") or "").lower() in sku_candidates
+        ]
+        exact_match = DailyEnergyCalculator.choose_closest_material(exact_matches, preferred_size)
+        if exact_match:
+            return exact_match
+
+        aliases = [crystal.get("name") or "", *CRYSTAL_MATERIAL_ALIASES.get(code, [])]
+        alias_matches = [
+            item for item in source
+            if any(str(alias).lower() in DailyEnergyCalculator.material_search_text(item) for alias in aliases if str(alias))
+        ]
+        alias_match = DailyEnergyCalculator.choose_closest_material(alias_matches, preferred_size)
+        if alias_match:
+            return alias_match
+
+        target_element = ELEMENT_TO_MATERIAL_KEY.get(str(crystal.get("element") or ""))
+        element_matches = [
+            item for item in source
+            if target_element and DailyEnergyCalculator.material_element_key(item) == target_element
+        ]
+        return DailyEnergyCalculator.choose_closest_material(element_matches, preferred_size)
+
     def commercial_payload(
         self,
         result: dict[str, Any],
@@ -454,6 +626,9 @@ class DailyEnergyCalculator:
         context_codes = set(context.get("crystal_codes") or [])
         for index, code in enumerate(codes):
             item = CRYSTAL_CATALOG[code]
+            material = self.resolve_crystal_material(code, item, preferred_size=8)
+            material_snapshot = self.material_snapshot(material)
+            display_name = material_snapshot.get("material_name") or item["name"]
             role = "今日主石" if index == 0 else ("平衡辅石" if index == 1 else "净化点缀")
             if index == 0 and code in context_codes:
                 reason = "匹配你今天选择的状态与目标，适合作为主石随身佩戴"
@@ -466,12 +641,14 @@ class DailyEnergyCalculator:
             recommended_crystals.append({
                 "crystal_code": code,
                 "code": code,
-                "name": item["name"],
+                "name": display_name,
+                "crystal_name": item["name"],
                 "element": item["element"],
-                "color": item["color"],
+                "color": material_snapshot.get("color") or item["color"],
                 "effects": item["effects"],
                 "role": role,
                 "reason": reason,
+                **material_snapshot,
             })
 
         primary = recommended_crystals[0]
@@ -497,8 +674,9 @@ class DailyEnergyCalculator:
             for _ in range(repeat):
                 layout.append({
                     **crystal,
+                    "id": crystal.get("material_id") or crystal.get("id") or crystal["crystal_code"],
                     "position": len(layout) + 1,
-                    "crystal_name": crystal["name"],
+                    "crystal_name": crystal.get("crystal_name") or crystal["name"],
                     "bead_size_mm": 8,
                     "repeat_hint": repeat,
                 })
@@ -660,25 +838,30 @@ class DailyEnergyCalculator:
         main = recommended_crystals[0] if recommended_crystals else {}
         support = recommended_crystals[1] if len(recommended_crystals) > 1 else main
         balance = recommended_crystals[2] if len(recommended_crystals) > 2 else support
+
+        def combo_item(source: dict[str, Any], label: str, fallback_name: str, role: str) -> dict[str, Any]:
+            return {
+                "label": label,
+                "name": source.get("name", fallback_name),
+                "crystal_name": source.get("crystal_name") or source.get("name", fallback_name),
+                "role": role,
+                "reason": source.get("reason", ""),
+                "material_id": source.get("material_id") or "",
+                "skuId": source.get("skuId") or source.get("sku") or "",
+                "category": source.get("category") or "",
+                "series": source.get("series") or "",
+                "price": source.get("price") or 0,
+                "size": source.get("size") or 8,
+                "image_url": source.get("image_url") or "",
+                "image_urls": source.get("image_urls") or source.get("image_pool") or [],
+                "image_pool": source.get("image_pool") or source.get("image_urls") or [],
+                "color": source.get("color") or "",
+            }
+
         return {
-            "main": {
-                "label": "主石",
-                "name": main.get("name", "海蓝宝"),
-                "role": "表达、沟通、舒缓紧张感",
-                "reason": main.get("reason", ""),
-            },
-            "support": {
-                "label": "辅石",
-                "name": support.get("name", "白水晶"),
-                "role": "清透、放大整体能量、增强干净感",
-                "reason": support.get("reason", ""),
-            },
-            "balance": {
-                "label": "平衡石",
-                "name": balance.get("name", "月光石"),
-                "role": "柔和情绪、增加稳定陪伴感",
-                "reason": balance.get("reason", ""),
-            },
+            "main": combo_item(main, "主石", "海蓝宝", "表达、沟通、舒缓紧张感"),
+            "support": combo_item(support, "辅石", "白水晶", "清透、放大整体能量、增强干净感"),
+            "balance": combo_item(balance, "平衡石", "月光石", "柔和情绪、增加稳定陪伴感"),
             "accent": {
                 "label": "点缀建议",
                 "name": "银色隔片 / 透明隔珠 / 少量淡粉色",
@@ -742,7 +925,17 @@ class DailyEnergyCalculator:
                 "quantity": quantity,
                 "bead_size_mm": 8,
                 "reason": crystal["reason"],
-                "image_url": "",
+                "material_id": crystal.get("material_id") or "",
+                "sku": crystal.get("sku") or crystal.get("skuId") or "",
+                "skuId": crystal.get("skuId") or crystal.get("sku") or "",
+                "category": crystal.get("category") or "",
+                "series": crystal.get("series") or "",
+                "price": crystal.get("price") or 0,
+                "size": crystal.get("size") or 8,
+                "weight": crystal.get("weight") or 0,
+                "image_url": crystal.get("image_url") or "",
+                "image_urls": crystal.get("image_urls") or crystal.get("image_pool") or [],
+                "image_pool": crystal.get("image_pool") or crystal.get("image_urls") or [],
             })
         return items
 

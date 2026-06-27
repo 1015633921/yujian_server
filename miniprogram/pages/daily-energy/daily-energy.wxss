@@ -585,7 +585,14 @@
   width: 54rpx;
   height: 54rpx;
   border-radius: 50%;
+  background: rgba(255,255,255,.84);
   box-shadow: 0 8rpx 16rpx rgba(35,35,35,.12), inset 0 0 0 1rpx rgba(255,255,255,.52);
+}
+
+.crystal-orb-image {
+  display: block;
+  border: 2rpx solid rgba(255,255,255,.86);
+  box-shadow: 0 10rpx 18rpx rgba(35,35,35,.13);
 }
 
 .combo-name {
@@ -718,7 +725,13 @@
   height: 48rpx;
   margin: 34rpx -4rpx 0 0;
   border-radius: 50%;
+  background: rgba(255,255,255,.86);
   box-shadow: 0 8rpx 16rpx rgba(35,35,35,.12), inset 0 0 0 1rpx rgba(255,255,255,.55);
+}
+
+.plan-orb-image {
+  border: 2rpx solid rgba(255,255,255,.86);
+  box-shadow: 0 9rpx 18rpx rgba(35,35,35,.14);
 }
 
 .plan-tags text {

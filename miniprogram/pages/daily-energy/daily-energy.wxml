@@ -126,7 +126,8 @@
       <view class="combo-list">
         <view class="combo-item" wx:for="{{viewDaily.combo}}" wx:key="label">
           <view class="combo-index" style="background: {{item.color}};">{{item.index}}</view>
-          <view class="crystal-orb" style="{{item.orbStyle}}"></view>
+          <image wx:if="{{item.imageUrl}}" class="crystal-orb crystal-orb-image" src="{{item.imageUrl}}" mode="aspectFill"></image>
+          <view wx:else class="crystal-orb" style="{{item.orbStyle}}"></view>
           <view class="combo-copy">
             <view class="combo-name">{{item.label}}：{{item.name}}</view>
             <view class="combo-role">{{item.role}}</view>
@@ -176,7 +177,10 @@
         <view class="plan-mark">DIY</view>
       </view>
       <view class="plan-visual">
-        <view class="plan-orb" wx:for="{{viewDaily.plan.visuals}}" wx:key="index" style="{{item.style}}"></view>
+        <block wx:for="{{viewDaily.plan.visuals}}" wx:key="index">
+          <image wx:if="{{item.imageUrl}}" class="plan-orb plan-orb-image" src="{{item.imageUrl}}" mode="aspectFill"></image>
+          <view wx:else class="plan-orb" style="{{item.style}}"></view>
+        </block>
       </view>
       <view class="plan-desc">{{viewDaily.plan.description}}</view>
       <view class="plan-tags">

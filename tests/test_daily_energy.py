@@ -26,6 +26,10 @@ def test_starter_result_is_deterministic_for_same_user_and_day():
     assert first["mode"] == "starter"
     assert first["guide"]["button_text"] == "开始专属测算"
     assert first["state_context"]["source"] == "live_selection"
+    assert first["recommended_crystals"][0]["material_id"]
+    assert first["recommended_crystals"][0]["image_url"]
+    assert first["workbench_payload"]["bracelet_plan"]["items"][0]["image_url"]
+    assert first["workbench_payload"]["bracelet_plan"]["layout"][0]["material_id"]
 
 
 def test_interaction_tags_change_daily_recommendation():
