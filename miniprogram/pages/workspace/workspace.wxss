@@ -1031,11 +1031,84 @@ page {
 }
 
 .material-load-state {
-  height: 52rpx;
-  color: #aaa29a;
+  min-height: 42rpx;
+  margin: 6rpx 0 10rpx;
+  padding: 8rpx 14rpx;
+  border-radius: 999rpx;
+  color: #8a8179;
+  background: rgba(255, 255, 255, 0.68);
   text-align: center;
-  font-size: 19rpx;
-  line-height: 52rpx;
+  font-size: 18rpx;
+  line-height: 26rpx;
+}
+
+.material-load-warning {
+  color: #9b6a2e;
+  background: rgba(255, 248, 219, 0.9);
+}
+
+.material-empty-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 190rpx;
+  border: 1rpx dashed rgba(145, 137, 128, 0.24);
+  border-radius: 18rpx;
+  color: #a19a92;
+  background: rgba(255, 255, 255, 0.58);
+  font-size: 22rpx;
+}
+
+.material-skeleton-card {
+  pointer-events: none;
+}
+
+.material-skeleton-sphere,
+.material-skeleton-line,
+.material-skeleton-meta view {
+  background: linear-gradient(90deg, rgba(238, 232, 222, 0.72), rgba(255, 255, 255, 0.92), rgba(238, 232, 222, 0.72));
+  background-size: 200% 100%;
+  animation: materialSkeleton 1.1s ease-in-out infinite;
+}
+
+.material-skeleton-sphere {
+  box-shadow: none;
+}
+
+.material-skeleton-line {
+  width: 76%;
+  height: 22rpx;
+  margin-top: 12rpx;
+  border-radius: 999rpx;
+}
+
+.material-skeleton-line.strong {
+  width: 62%;
+  height: 26rpx;
+  margin-top: 10rpx;
+}
+
+.material-skeleton-meta {
+  display: flex;
+  align-items: center;
+  gap: 10rpx;
+  margin-top: 14rpx;
+}
+
+.material-skeleton-meta view {
+  width: 70rpx;
+  height: 28rpx;
+  border-radius: 999rpx;
+}
+
+@keyframes materialSkeleton {
+  0% {
+    background-position: 100% 0;
+  }
+
+  100% {
+    background-position: -100% 0;
+  }
 }
 
 .material-card {

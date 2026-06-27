@@ -11,6 +11,10 @@ let Events;
 const MATERIAL_PAGE_SIZE = 24;
 const MATERIAL_CACHE_TTL = 30 * 60 * 1000;
 const MATERIAL_CACHE_KEY = 'workspaceMaterialCatalogV5';
+const MAX_WORKSPACE_BEADS = 40;
+const MAX_MATERIAL_FLIGHT_QUEUE = 6;
+const MATERIAL_TAP_GUARD_MS = 80;
+const MATERIAL_QUEUE_TOAST_GUARD_MS = 1200;
 const STRINGED_BEAD_GAP_RPX = 0.5;
 const WORKSPACE_SOUND_URLS = {
   collisionSoft: assetUrl('sounds/bead-duang-soft-quick.wav'),
@@ -170,6 +174,9 @@ Page({
   data: {
     visibleMaterials: [],
     hasMoreMaterials: false,
+    materialsLoading: true,
+    materialsErrorText: '',
+    materialSkeletons: [1, 2, 3, 4],
     categories: [],
     seriesOptions: ['全部'],
     filterSummary: '全部 · 全部 · 0 款',
@@ -254,6 +261,8 @@ Page({
     this.filteredMaterialCatalog = [];
     this.flightQueue = [];
     this.flightActive = false;
+    this.lastMaterialTapAt = 0;
+    this.lastQueueToastAt = 0;
     this.physicsBodies = [];
     this.physicsFramePending = false;
     this.soundEnabled = true;
@@ -400,9 +409,10 @@ Page({
 
   async loadMaterials() {
     let cachedPayload = null;
+    this.setData({ materialsLoading: true, materialsErrorText: '' });
     if (materialCache && Date.now() - materialCacheAt < MATERIAL_CACHE_TTL) {
       cachedPayload = materialCache;
-      this.applyMaterialPayload(cachedPayload);
+      this.applyMaterialPayload(cachedPayload, { keepLoading: true });
     }
     if (!cachedPayload) {
       const stored = await new Promise(resolve => {
@@ -416,7 +426,7 @@ Page({
         cachedPayload = stored.payload;
         materialCache = cachedPayload;
         materialCacheAt = Number(stored.savedAt) || Date.now();
-        this.applyMaterialPayload(cachedPayload);
+        this.applyMaterialPayload(cachedPayload, { keepLoading: true });
       }
     }
     try {
@@ -432,9 +442,15 @@ Page({
       });
       if (!cachedPayload || serverVersion !== cachedVersion) {
         this.applyMaterialPayload(optimized);
+      } else {
+        this.setData({ materialsLoading: false, materialsErrorText: '' });
       }
     } catch (error) {
       console.warn('load materials fallback:', error.message || error);
+      this.setData({
+        materialsLoading: false,
+        materialsErrorText: cachedPayload ? '已使用本地缓存，最新珠材稍后自动同步' : '珠材加载失败，请稍后重试'
+      });
     }
   },
 
@@ -462,7 +478,7 @@ Page({
     return `${url}${separator}imageMogr2/thumbnail/360x360/format/webp/quality/88`;
   },
 
-  applyMaterialPayload(data) {
+  applyMaterialPayload(data, options = {}) {
     const previousCatalog = this.materialCatalog || DEFAULT_MATERIALS;
     const nextCatalog = data.materials && data.materials.length ? data.materials : DEFAULT_MATERIALS;
     const topTabs = (data.top_tabs || TOP_TABS).filter(item => item.key !== 'incense');
@@ -496,7 +512,14 @@ Page({
           || this.pickMaterialImageUrl(this.findMaterialById(id) || {})
       };
     });
-    this.setData({ topTabs, activeTop, selected, placements });
+    this.setData({
+      topTabs,
+      activeTop,
+      selected,
+      placements,
+      materialsLoading: !!options.keepLoading,
+      materialsErrorText: ''
+    });
     this.refreshFilters();
     if (this.pendingBackendRecommendation && this.applyBackendRecommendation({ silent: true, keepPendingOnEmpty: true })) {
       return;
@@ -1138,6 +1161,7 @@ Page({
       });
       this.canvasImageCache = this.canvasImageCache || {};
       this.scheduleCanvasRender();
+      this.preloadVisibleCanvasImages(this.data.visibleMaterials);
     });
   },
 
@@ -1317,6 +1341,16 @@ Page({
     };
     image.src = url;
     return null;
+  },
+
+  preloadVisibleCanvasImages(materials = []) {
+    if (!this.data.useCanvasRenderer || !this.braceletCanvasState || !this.braceletCanvasState.canvas) return;
+    const preloadCount = this.isLowPerformanceDevice ? 4 : 8;
+    (materials || [])
+      .slice(0, preloadCount)
+      .forEach(item => {
+        if (item && item.image_url) this.getCanvasImage(item.image_url);
+      });
   },
 
   getCanvasBeadTexture(item = {}, size = 64) {
@@ -2140,7 +2174,7 @@ Page({
       visibleMaterials,
       hasMoreMaterials: visibleMaterials.length < filteredMaterials.length,
       filterSummary
-    });
+    }, () => this.preloadVisibleCanvasImages(visibleMaterials));
   },
 
   loadMoreMaterials() {
@@ -2507,17 +2541,42 @@ Page({
     this.recalculate();
   },
 
+  showMaterialQueueToast(title) {
+    const now = Date.now();
+    if (now - (this.lastQueueToastAt || 0) < MATERIAL_QUEUE_TOAST_GUARD_MS) return;
+    this.lastQueueToastAt = now;
+    wx.showToast({ title, icon: 'none' });
+  },
+
   addMaterial(e) {
     if (this.data.isShuffling) {
-      wx.showToast({ title: '正在成串，请稍候', icon: 'none' });
+      this.showMaterialQueueToast('正在成串，请稍候');
       return;
     }
     const id = e.currentTarget.dataset.id;
     const cardIndex = Number(e.currentTarget.dataset.index);
     if (!id) return;
+    const now = Date.now();
+    if (now - (this.lastMaterialTapAt || 0) < MATERIAL_TAP_GUARD_MS) return;
+    this.lastMaterialTapAt = now;
+    const material = this.findMaterialById(id);
+    if (!material) {
+      this.showMaterialQueueToast(this.data.materialsLoading ? '珠材加载中，请稍候' : '材料暂不可用');
+      return;
+    }
+    const pendingCount = this.data.selected.length + this.flightQueue.length;
+    if (pendingCount >= MAX_WORKSPACE_BEADS) {
+      this.showMaterialQueueToast('珠子已经很多了，先整理一下');
+      return;
+    }
+    const maxQueue = this.isLowPerformanceDevice ? 4 : MAX_MATERIAL_FLIGHT_QUEUE;
+    if (this.flightQueue.length >= maxQueue) {
+      this.showMaterialQueueToast('慢一点，珠子正在入盘');
+      return;
+    }
     const queuedPlacements = this.flightQueue.map(task => task.placement);
     const placement = this.createLoosePlacement(
-      this.data.selected.length + this.flightQueue.length,
+      pendingCount,
       id,
       [...this.data.placements, ...queuedPlacements]
     );

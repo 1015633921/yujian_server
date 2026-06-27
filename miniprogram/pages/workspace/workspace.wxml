@@ -161,9 +161,11 @@
           <text>长按材料可查看实拍图，点击即可投入圆盘</text>
           <text class="tip-close" bindtap="closeTip">×</text>
         </view>
+        <view wx:if="{{materialsLoading}}" class="material-load-state">正在同步最新珠材，图片加载时会先显示柔光占位</view>
+        <view wx:if="{{materialsErrorText}}" class="material-load-state material-load-warning">{{materialsErrorText}}</view>
 
         <scroll-view class="material-scroll" scroll-y bindscrolltolower="loadMoreMaterials">
-          <view class="material-grid">
+          <view wx:if="{{visibleMaterials.length}}" class="material-grid">
             <view
               wx:for="{{visibleMaterials}}"
               wx:for-index="index"
@@ -173,7 +175,7 @@
               data-index="{{index}}"
               bindtap="addMaterial"
             >
-              <image wx:if="{{item.image_url}}" class="material-sphere material-image" src="{{item.image_url}}" mode="aspectFit" data-id="{{item.id}}" binderror="onMaterialImageError"></image>
+              <image wx:if="{{item.image_url}}" class="material-sphere material-image" src="{{item.image_url}}" mode="aspectFit" lazy-load="{{true}}" webp="{{true}}" fade-in="{{false}}" data-id="{{item.id}}" binderror="onMaterialImageError"></image>
               <view wx:else class="material-sphere" style="background: radial-gradient(circle at 32% 26%, {{item.shine}} 0 10%, {{item.color}} 12% 58%, rgba(0,0,0,.22) 100%);"></view>
               <view class="material-name">{{item.name}}</view>
               <view class="material-effect">{{item.effectText}}</view>
@@ -182,6 +184,21 @@
                 <view class="size-pill">{{item.size}}mm</view>
               </view>
             </view>
+          </view>
+          <view wx:elif="{{materialsLoading}}" class="material-grid material-skeleton-grid">
+            <view wx:for="{{materialSkeletons}}" wx:key="*this" class="material-card material-skeleton-card">
+              <view class="material-sphere material-skeleton-sphere"></view>
+              <view class="material-skeleton-line strong"></view>
+              <view class="material-skeleton-line"></view>
+              <view class="material-skeleton-meta">
+                <view></view>
+                <view></view>
+              </view>
+            </view>
+          </view>
+          <view wx:else class="material-empty-state">
+            <text wx:if="{{materialsErrorText}}">{{materialsErrorText}}</text>
+            <text wx:else>暂无可用珠材</text>
           </view>
           <view wx:if="{{hasMoreMaterials}}" class="load-more-hint">上滑加载更多材料</view>
         </scroll-view>
