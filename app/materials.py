@@ -25,6 +25,72 @@ MATERIAL_CACHE_TTL_SECONDS = 60
 _MATERIAL_PAYLOAD_CACHE: dict[tuple, dict] = {}
 
 
+FEATURED_MATERIAL_PRIORITY_KEYWORDS: tuple[tuple[int, tuple[str, ...]], ...] = (
+    (0, ("粉水晶", "粉晶", "粉兔毛", "粉幽灵", "粉萤石", "粉色", "粉")),
+    (1, ("白水晶", "白晶", "奶白水晶", "白阿塞", "双A白水", "净体白水晶", "白兔毛", "白幽灵", "白月光", "白色", "透明", "冰种")),
+    (2, ("海蓝宝", "海蓝", "蓝水晶", "蓝发晶", "蓝兔毛", "蓝月光", "蓝虎眼", "蓝纹石", "天河石", "蓝色", "冰蓝")),
+    (3, ("发晶", "金发晶", "银发晶", "彩发晶", "钛晶", "铜发", "黑发晶", "绿发晶")),
+    (4, ("兔毛", "红兔毛", "黄兔毛", "白兔毛", "彩兔毛", "紫兔毛", "蓝兔毛", "灰兔毛", "绿兔毛")),
+    (5, ("幽灵", "满天星", "四季幽灵", "绿幽灵", "白幽灵", "彩幽灵", "红幽灵", "黄幽灵", "紫幽灵", "千层幽灵")),
+)
+
+
+def material_display_text(item: dict) -> str:
+    return "".join(
+        str(item.get(key, "") or "")
+        for key in ("category", "series", "name", "skuId", "id", "effect")
+    )
+
+
+def parse_hex_color(value: str | None) -> tuple[int, int, int] | None:
+    text = str(value or "").strip().lstrip("#")
+    if len(text) == 3:
+        text = "".join(ch * 2 for ch in text)
+    if len(text) != 6:
+        return None
+    try:
+        return int(text[0:2], 16), int(text[2:4], 16), int(text[4:6], 16)
+    except ValueError:
+        return None
+
+
+def material_color_priority(item: dict) -> int:
+    rgb = parse_hex_color(item.get("color"))
+    if not rgb:
+        return 99
+    red, green, blue = rgb
+    brightness = (red + green + blue) / 3
+    spread = max(rgb) - min(rgb)
+    if brightness >= 220 and spread <= 36:
+        return 11
+    if red >= 190 and blue >= 145 and green >= 105 and red >= green + 18:
+        return 10
+    if blue >= 165 and green >= 120 and blue >= red + 16:
+        return 12
+    return 99
+
+
+def featured_material_rank(item: dict) -> int:
+    text = material_display_text(item)
+    for rank, keywords in FEATURED_MATERIAL_PRIORITY_KEYWORDS:
+        if any(keyword and keyword in text for keyword in keywords):
+            return rank
+    return material_color_priority(item)
+
+
+def material_customer_sort_key(item: dict) -> tuple:
+    rank = featured_material_rank(item)
+    sort_order = int(float(item.get("sort_order") or item.get("sortOrder") or 0))
+    size = float(item.get("size") or 0)
+    name = str(item.get("series") or item.get("name") or item.get("category") or "")
+    item_id = str(item.get("id") or item.get("skuId") or "")
+    return (rank, sort_order, name, size, item_id)
+
+
+def sort_materials_for_customer(materials: list[dict]) -> list[dict]:
+    return sorted(materials, key=material_customer_sort_key)
+
+
 MATERIAL_CATALOG: list[dict] = [
     {"id": "clearQuartz8", "skuId": "clearQuartz", "top": "bead", "category": "白水晶", "name": "喜马拉雅白水晶", "effect": "净化与放大", "element": "金", "price": 5, "size": 8, "weight": 1.2, "color": "#dfe3e5", "shine": "#ffffff", "image_path": "beads/clear-quartz-8.png"},
     {"id": "clearQuartz10", "skuId": "clearQuartz", "top": "bead", "category": "白水晶", "name": "喜马拉雅白水晶", "effect": "净化与放大", "element": "金", "price": 10, "size": 10, "weight": 1.6, "color": "#d6dbde", "shine": "#ffffff", "image_path": "beads/clear-quartz-10.png"},
@@ -237,7 +303,7 @@ def filter_static_materials(top: str | None = None, keyword: str | None = None) 
         if search_terms and not any(term in haystack for term in search_terms):
             continue
         materials.append(with_cdn_url(item))
-    return materials
+    return sort_materials_for_customer(materials)
 
 
 def build_material_payload(materials: list[dict], version: dict | None = None) -> dict:
@@ -320,13 +386,13 @@ def list_db_materials(
     try:
         with connect_database() as connection:
             sql = f"SELECT * FROM managed_materials WHERE {' AND '.join(clauses)} ORDER BY sort_order ASC, updated_at DESC"
-            if limit:
-                sql += " LIMIT ?"
-                params.append(limit)
             rows = connection.execute(sql, params).fetchall()
     except Exception:
         return None
-    return [normalize_db_material(dict(row)) for row in rows]
+    materials = sort_materials_for_customer([normalize_db_material(dict(row)) for row in rows])
+    if limit:
+        materials = materials[:limit]
+    return materials
 
 
 def normalize_db_material(row: dict) -> dict:
