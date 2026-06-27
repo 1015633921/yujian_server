@@ -1,0 +1,12 @@
+{
+  "platform": "ide",
+  "project_path": "C:\\Users\\10156\\PycharmProjects\\yujian_server\\miniprogram",
+  "dev_tool_path": "C:\\Program Files (x86)\\Tencent\\微信web开发者工具\\cli.bat",
+  "close_ide": false,
+  "auto_relaunch": false,
+  "auto_capture": "error",
+  "enable_app_log": true,
+  "request_timeout": 60,
+  "test_port": 9420,
+  "outputs": "C:\\Users\\10156\\PycharmProjects\\yujian_server\\outputs\\minium"
+}

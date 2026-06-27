@@ -1,102 +1,160 @@
-<view class="page home-page">
-  <view class="hero-section">
-    <view class="home-top">
-      <view class="brand">星灵水晶</view>
-      <view class="brand-mark">✦</view>
-    </view>
-    <view class="subtitle">
-      用
-      <text>五行</text>
-      <text>星盘</text>
-      <text>MBTI</text>
-      找到你的专属能量配方
-    </view>
-    <view class="search-bar" bindtap="onSearch">
-      <text class="search-icon">⌕</text>
-      <text class="search-placeholder">搜索水晶、功效、作品灵感</text>
-    </view>
+<view class="lab-home yu-page">
+  <view class="home-topbar">
+    <view class="home-brand">宇涧水晶</view>
   </view>
 
-  <view class="entry-grid">
-    <view class="entry diy" bindtap="goToPage" data-url="/pages/workspace/workspace">
-      <view class="entry-orbit"></view>
-      <view class="entry-kicker">自由创造</view>
-      <view class="entry-title">开始自由 DIY</view>
-      <view class="entry-desc">挑选珠子、配件与手围，实时看价格和长度。</view>
-      <view class="entry-action">进入工作台 →</view>
-    </view>
-    <view class="entry assess" bindtap="goToPage" data-url="/pages/assessment/assessment">
-      <view class="entry-orbit"></view>
-      <view class="entry-kicker">深度定制</view>
-      <view class="entry-title">测一测专属水晶</view>
-      <view class="entry-desc">建立能量档案，一键生成推荐手串。</view>
-      <view class="entry-action">开始测算 →</view>
-    </view>
-  </view>
-
-  <view class="section daily card" bindtap="onDailyTap">
-    <view class="daily-head">
-      <view>
-        <view class="daily-title">每日能量补给站</view>
-        <view class="daily-date">今天适合温柔启动，先做一件小事。</view>
-      </view>
-      <view class="daily-score">{{daily.inspiration}}%</view>
-    </view>
-    <view class="energy-bars">
-      <view class="bar-row">
-        <text>活力值</text>
-        <view class="bar"><view class="fill vitality" style="width: {{daily.vitality}}%;"></view></view>
-        <text>{{daily.vitality}}%</text>
-      </view>
-      <view class="bar-row">
-        <text>灵感值</text>
-        <view class="bar"><view class="fill inspiration" style="width: {{daily.inspiration}}%;"></view></view>
-        <text>{{daily.inspiration}}%</text>
-      </view>
-    </view>
-    <view class="daily-guide">
-      <view class="guide-chip color-chip"><text class="muted">幸运色</text><text>{{daily.color}}</text></view>
-      <view class="guide-chip number-chip"><text class="muted">幸运数字</text><text>{{daily.number}}</text></view>
-      <view class="guide-chip stone-chip" catchtap="onDailyStoneTap"><text class="muted">宜佩戴</text><text>{{daily.stone}} →</text></view>
-    </view>
-  </view>
-
-  <view class="section">
-    <view class="section-head">
-      <view class="section-title">热门推荐</view>
-      <view class="section-link" bindtap="goToPage" data-url="/pages/workspace/workspace">去定制</view>
-    </view>
-    <scroll-view class="product-scroll" scroll-x enable-flex>
-      <view wx:for="{{bestSellers}}" wx:key="name" class="product card">
-        <view class="stone-visual {{item.tone}}"></view>
-        <view class="product-name">{{item.name}}</view>
-        <view class="product-desc">{{item.desc}}</view>
-        <view class="product-bottom">
-          <view class="product-price">¥{{item.price}}</view>
-          <button class="quick-add" data-name="{{item.name}}" catchtap="quickAddProduct">＋</button>
+  <swiper
+    class="hero-swiper"
+    circular
+    autoplay
+    interval="4200"
+    duration="520"
+    indicator-dots
+    indicator-color="rgba(255,255,255,.34)"
+    indicator-active-color="#ffffff"
+    bindchange="onBannerChange"
+  >
+    <swiper-item wx:for="{{homeBanners}}" wx:key="id">
+      <view class="hero-lab yu-card yu-card-pressable hero-theme-{{item.theme}}" bindtap="openHomeBanner" data-index="{{index}}">
+        <image wx:if="{{item.image_url}}" class="hero-banner-image" src="{{item.image_url}}" mode="aspectFill" lazy-load="{{true}}"></image>
+        <view wx:else class="hero-photo">
+          <view class="photo-table"></view>
+          <view class="photo-tray"></view>
+          <view class="photo-bracelet">
+            <image wx:for="{{heroBeads}}" wx:key="index" class="photo-bead" src="{{item.src}}" mode="aspectFill" style="{{item.style}}"></image>
+          </view>
+          <image class="photo-loose loose-one" src="{{homeAssets.clearQuartz}}" mode="aspectFit"></image>
+          <image class="photo-loose loose-two" src="{{homeAssets.amethyst}}" mode="aspectFit"></image>
+          <image class="photo-loose loose-three" src="{{homeAssets.citrine}}" mode="aspectFit"></image>
+        </view>
+        <view class="hero-shade"></view>
+        <view class="hero-copy">
+          <view class="hero-eyebrow">{{item.eyebrow}}</view>
+          <view class="hero-title">{{item.title}}</view>
+          <view class="hero-subtitle">{{item.subtitle}}</view>
+          <button class="hero-cta yu-pressable" catchtap="openHomeBanner" data-index="{{index}}">{{item.actionText}}</button>
         </view>
       </view>
-    </scroll-view>
-    <view wx:if="{{inspirationCart.length}}" class="inspiration-tray" bindtap="viewInspirationCart">
-      <view>
-        <view class="tray-title">灵感单</view>
-        <view class="tray-sub">{{inspirationCart.length}} 件已收藏，可带入 DIY 工作台</view>
+    </swiper-item>
+  </swiper>
+
+  <view class="workshop-section yu-section">
+    <view class="section-row">
+      <view class="section-title">定制工坊</view>
+      <view class="section-dots"><text></text><text></text><text class="active"></text></view>
+    </view>
+
+    <scroll-view class="workshop-flow-scroll" scroll-x enable-flex show-scrollbar="{{false}}">
+    <view class="workshop-flow">
+      <view class="flow-line"></view>
+      <view class="flow-item blue" bindtap="goToPage" data-url="/pages/assessment/assessment">
+        <view class="flow-dot">01</view>
+        <view class="flow-step">INPUT</view>
+        <view class="flow-title">填写测算</view>
+        <view class="flow-desc">出生信息 / 愿望偏好</view>
       </view>
-      <view class="tray-action">查看</view>
+      <view class="flow-item green" bindtap="goToPage" data-url="/pages/assessment/assessment">
+        <view class="flow-dot">02</view>
+        <view class="flow-step">PROFILE</view>
+        <view class="flow-title">生成画像</view>
+        <view class="flow-desc">五行分布 / 能量方向</view>
+      </view>
+      <view class="flow-item yellow" bindtap="goToPage" data-url="/pages/workspace/workspace">
+        <view class="flow-dot">03</view>
+        <view class="flow-step">RECIPE</view>
+        <view class="flow-title">推荐配方</view>
+        <view class="flow-desc">主石 / 辅石 / 风格</view>
+      </view>
+      <view class="flow-item red" bindtap="goToPage" data-url="/pages/workspace/workspace">
+        <view class="flow-dot">04</view>
+        <view class="flow-step">DESIGN</view>
+        <view class="flow-title">DIY 排布</view>
+        <view class="flow-desc">腕围 / 顺序 / 预览</view>
+      </view>
+      <view class="flow-item violet" bindtap="goToPage" data-url="/pages/checkout/checkout">
+        <view class="flow-dot">05</view>
+        <view class="flow-step">ORDER</view>
+        <view class="flow-title">确认下单</view>
+        <view class="flow-desc">方案清单 / 收货备注</view>
+      </view>
+      <view class="flow-item dark" bindtap="goToPage" data-url="/pages/order-list/order-list">
+        <view class="flow-dot">06</view>
+        <view class="flow-step">CRAFT</view>
+        <view class="flow-title">制作发货</view>
+        <view class="flow-desc">手作履约 / 物流追踪</view>
+      </view>
+    </view>
+    </scroll-view>
+  </view>
+
+  <view class="daily-lab-card yu-card yu-card-pressable" bindtap="onDailyTap">
+    <view class="daily-card-glow"></view>
+    <view class="daily-card-spark spark-a">✦</view>
+    <view class="daily-card-spark spark-b">✧</view>
+    <view class="daily-copy">
+      <view class="daily-kicker">TODAY ENERGY</view>
+      <view class="daily-title">今日能量建议</view>
+      <view class="daily-subtitle">看看今天适合戴什么</view>
+      <view class="daily-tags">
+        <text wx:for="{{daily.keywords}}" wx:key="*this">{{item}}</text>
+      </view>
+      <view class="daily-text">{{daily.summary}}</view>
+      <view class="daily-recommend">今日推荐：{{daily.recommendedNames}}</view>
+    </view>
+    <view class="daily-score">
+      <view class="daily-score-halo"></view>
+      <text>{{daily.inspiration}}</text>
+      <view>能量指数</view>
     </view>
   </view>
 
-  <view class="section">
-    <view class="section-head">
-      <view class="section-title">社区灵感</view>
-      <view class="section-link" bindtap="goToPage" data-url="/pages/community/community">全部</view>
+  <view class="recommend-section yu-section">
+    <view class="section-row">
+      <view class="section-title">热门灵感</view>
+      <view class="section-link" bindtap="goToPage" data-url="/pages/community/community">进入灵感广场 →</view>
     </view>
-    <view class="inspo-grid">
-      <view wx:for="{{inspirations}}" wx:key="id" class="inspo card" bindtap="openInspiration" data-id="{{item.id}}">
-        <view class="inspo-image {{item.tone}}"></view>
-        <view class="inspo-name">{{item.title}}</view>
-        <view class="inspo-meta">{{item.author}} · {{item.likes}} 喜欢</view>
+    <scroll-view class="plan-scroll" scroll-x enable-flex show-scrollbar="{{false}}">
+      <view wx:for="{{inspirations}}" wx:key="id" class="plan-card yu-card-pressable" data-id="{{item.id}}" bindtap="openInspiration">
+        <view class="plan-visual product-{{item.tone}}">
+          <image wx:if="{{item.coverImage}}" class="plan-cover" src="{{item.coverImage}}" mode="aspectFill" lazy-load="{{true}}"></image>
+          <view wx:else class="mini-bracelet">
+            <image wx:for="{{item.visualBeads}}" wx:for-item="bead" wx:key="index" class="mini-bead" src="{{bead.src}}" mode="aspectFill" lazy-load="{{true}}" style="{{bead.style}}"></image>
+          </view>
+        </view>
+        <view class="plan-name">{{item.shortName}}</view>
+        <view class="plan-desc">{{item.shortDesc}}</view>
       </view>
+    </scroll-view>
+  </view>
+
+  <view wx:if="{{shoppingCart.length}}" class="inspiration-tray yu-card yu-card-pressable" bindtap="viewShoppingCart">
+    <view>
+      <view class="tray-title">购物车</view>
+      <view class="tray-sub">{{shoppingCart.length}} 个定制方案待结算</view>
+    </view>
+    <view class="tray-action">查看</view>
+  </view>
+
+  <view class="lab-tabbar {{labTabbarClass}}">
+    <view class="lab-tab active" bindtap="goToPage" data-url="/pages/home/home">
+      <view class="tab-icon">▣</view>
+      <text>首页</text>
+    </view>
+    <view class="lab-tab" bindtap="goToPage" data-url="/pages/assessment/assessment">
+      <view class="tab-icon">✦</view>
+      <text>测算</text>
+    </view>
+    <view class="lab-tab center" bindtap="goToPage" data-url="/pages/workspace/workspace">
+      <view class="tab-icon">＋</view>
+      <text>DIY</text>
+    </view>
+    <view class="lab-tab" bindtap="viewShoppingCart">
+      <view class="tab-icon">车</view>
+      <text>购物车</text>
+    </view>
+    <view class="lab-tab" bindtap="goToPage" data-url="/pages/profile/profile">
+      <view class="tab-icon">♙</view>
+      <text>我的</text>
     </view>
   </view>
 
@@ -104,14 +162,22 @@
     <view class="stone-sheet" catchtap="noop">
       <view class="sheet-grabber"></view>
       <view class="stone-sheet-main">
-        <view class="stone-visual sheet-stone {{dailyStoneDetail.tone}}"></view>
+        <view class="sheet-stone {{dailyStoneDetail.tone}}">
+          <image src="{{dailyStoneDetail.image}}" mode="aspectFit"></image>
+        </view>
         <view class="sheet-copy">
           <view class="sheet-title">{{dailyStoneDetail.name}}</view>
           <view class="sheet-desc">{{dailyStoneDetail.desc}}</view>
         </view>
       </view>
+      <view wx:if="{{dailyStoneDetail.crystals && dailyStoneDetail.crystals.length}}" class="sheet-crystals">
+        <view wx:for="{{dailyStoneDetail.crystals}}" wx:key="code" class="sheet-crystal">
+          <view class="sheet-crystal-name">{{item.role}} · {{item.name}}</view>
+          <view class="sheet-crystal-reason">{{item.reason}}</view>
+        </view>
+      </view>
       <view class="sheet-actions">
-        <button class="sheet-secondary" bindtap="addDailyStoneToCart">加入灵感单</button>
+        <button class="sheet-secondary" bindtap="addDailyStoneToCart">收藏灵感</button>
         <button class="sheet-primary" bindtap="startDailyStoneDiy">用它开始 DIY</button>
       </view>
     </view>

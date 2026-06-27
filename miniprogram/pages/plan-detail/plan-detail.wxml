@@ -1,0 +1,147 @@
+<view class="recommend-page yu-page" wx:if="{{currentPlan}}">
+  <view class="recommend-nav">
+    <view class="nav-back yu-pressable" bindtap="goBack">‹</view>
+    <view class="nav-title">为你推荐的方案</view>
+    <view class="nav-placeholder"></view>
+  </view>
+
+  <view class="recommend-tabs">
+    <view
+      wx:for="{{tabs}}"
+      wx:key="key"
+      class="tab-item {{activeTab === item.key ? 'active' : ''}}"
+      data-key="{{item.key}}"
+      bindtap="switchTab"
+    >
+      {{item.label}}
+    </view>
+  </view>
+
+  <view class="main-card yu-card yu-card-lg">
+    <view class="main-image-wrap">
+      <image
+        wx:if="{{currentPlan.imageUrl}}"
+        class="main-image"
+        mode="aspectFill"
+        src="{{currentPlan.imageUrl}}"
+        data-id="{{currentPlan.id}}"
+        binderror="onImageError"
+      />
+      <view wx:else class="bracelet-preview">
+        <view class="bracelet-center"></view>
+        <image
+          wx:for="{{currentPlan.visualBeads}}"
+          wx:key="style"
+          class="preview-bead"
+          src="{{item.src}}"
+          style="{{item.style}}"
+          mode="aspectFill"
+        />
+      </view>
+      <view class="main-badge">推荐</view>
+    </view>
+
+    <view class="main-content">
+      <view class="main-title-row">
+        <view>
+          <view class="main-title">{{currentPlan.name}}</view>
+          <view class="main-subtitle">{{currentPlan.subtitle}}</view>
+        </view>
+        <view class="like-btn {{isSaved ? 'saved' : ''}}" bindtap="toggleSave">♡</view>
+      </view>
+
+      <view class="tag-row">
+        <view wx:for="{{currentPlan.tags}}" wx:key="*this" class="plan-tag">{{item}}</view>
+      </view>
+
+      <view class="main-footer">
+        <view class="price">¥{{currentPlan.price}}</view>
+        <view class="footer-hint">可进入 DIY 后继续调整</view>
+      </view>
+    </view>
+  </view>
+
+  <view class="section-block">
+    <view class="section-head">
+      <view class="section-title">更多可选方案</view>
+      <view class="section-action" bindtap="viewMore">查看更多</view>
+    </view>
+    <view class="plan-grid">
+      <view
+        wx:for="{{visiblePlans}}"
+        wx:key="id"
+        class="small-plan yu-card yu-card-pressable"
+        data-id="{{item.id}}"
+        bindtap="selectPlan"
+      >
+        <view class="small-preview-wrap">
+          <image
+            wx:if="{{item.imageUrl}}"
+            class="small-image"
+            mode="aspectFill"
+            src="{{item.imageUrl}}"
+            data-id="{{item.id}}"
+            binderror="onImageError"
+          />
+          <view wx:else class="small-bracelet">
+            <image
+              wx:for="{{item.miniBeads}}"
+              wx:key="style"
+              class="small-bead"
+              src="{{item.src}}"
+              style="{{item.style}}"
+              mode="aspectFill"
+            />
+          </view>
+        </view>
+        <view class="small-title">{{item.name}}</view>
+        <view class="small-subtitle">{{item.subtitle}}</view>
+        <view class="small-price">¥{{item.price}}</view>
+      </view>
+    </view>
+  </view>
+
+  <view class="section-block">
+    <view class="section-head">
+      <view class="section-title">方案解读</view>
+    </view>
+    <view class="story-card yu-card">
+      <view class="story-title">为什么推荐这套</view>
+      <view class="story-copy">{{currentPlan.designStory}}</view>
+      <view class="story-divider"></view>
+      <view class="story-title">设计逻辑</view>
+      <view class="story-copy">{{currentPlan.designReason}}</view>
+    </view>
+  </view>
+
+  <view class="section-block" wx:if="{{currentPlan.materials.length}}">
+    <view class="section-head">
+      <view class="section-title">材料组成</view>
+    </view>
+    <view class="material-list">
+      <view wx:for="{{currentPlan.materials}}" wx:key="name" class="material-card yu-card">
+        <view class="material-orb tone-{{currentPlan.tone}}"></view>
+        <view class="material-info">
+          <view class="material-name">{{item.name}}</view>
+          <view class="material-role">{{item.role}}</view>
+          <view class="material-reason">{{item.reason}}</view>
+        </view>
+      </view>
+    </view>
+  </view>
+
+  <view class="bottom-actions">
+    <button class="save-button {{isSaved ? 'saved' : ''}}" bindtap="toggleSave">
+      {{isSaved ? '已收藏' : '收藏'}}
+    </button>
+    <button class="diy-button" bindtap="startDiy">按此方案开始 DIY</button>
+  </view>
+</view>
+
+<view class="empty-page yu-page" wx:else>
+  <view class="empty-card yu-card">
+    <view class="yu-spinner" wx:if="{{loading}}"></view>
+    <view class="empty-title">{{loading ? '正在加载方案' : '暂无推荐方案'}}</view>
+    <view class="empty-desc">如果网络暂时不可用，将自动使用本地推荐数据。</view>
+  </view>
+</view>

@@ -2,6 +2,7 @@ const auth = require('../../utils/auth');
 const env = require('../../config/env');
 const {
   getOrders,
+  getOrder,
   payOrder,
   mockPayOrder,
   mockShipOrder,
@@ -15,8 +16,10 @@ const ORDER_TABS = [
   { key: 'pay', icon: '¥', label: '待付款', count: 0 },
   { key: 'ship', icon: '发', label: '待发货', count: 0 },
   { key: 'receive', icon: '收', label: '待收货', count: 0 },
+  { key: 'done', icon: '✓', label: '已完成', count: 0, showCount: false },
   { key: 'after', icon: '售', label: '售后退款', count: 0 }
 ];
+const TAB_BAR_PAGES = ['/pages/home/home', '/pages/assessment/assessment', '/pages/workspace/workspace', '/pages/profile/profile'];
 
 Page({
   data: {
@@ -33,33 +36,87 @@ Page({
     showLogisticsModal: false,
     logisticsDetail: null,
     profileDraft: { nickname: '', avatar_url: '' },
-    phoneDraft: '',
+    profileAvatarChanged: false,
     profile: {},
     draft: null,
-    avatarChar: '星',
+    avatarChar: '',
     draftCount: 0,
-    couponCount: 0,
-    inspirationCartCount: 0,
+    shoppingCartCount: 0,
     communityFavoriteCount: 0,
-    inspirationStats: [],
+    profileStats: [],
     orders: [],
     filteredOrders: [],
     activeOrderStatus: 'all',
-    orderStats: ORDER_TABS
+    orderStats: ORDER_TABS,
+    labTabbarClass: ''
   },
 
   onShow() {
+    this.hideNativeTabBar();
+    this.lastProfileScrollTop = 0;
+    if (this.data.labTabbarClass) {
+      this.setData({ labTabbarClass: '' });
+    }
     this.refreshPage();
     this.refreshOrdersFromServer();
+  },
+
+  onHide() {
+    clearTimeout(this.tabbarSetDataTimer);
+    this.restoreNativeTabBar();
+  },
+
+  onUnload() {
+    clearTimeout(this.tabbarSetDataTimer);
+    this.restoreNativeTabBar();
+  },
+
+  onPageScroll(e) {
+    const currentTop = Number(e.scrollTop) || 0;
+    const previousTop = this.lastProfileScrollTop || 0;
+    const delta = currentTop - previousTop;
+    this.lastProfileScrollTop = currentTop;
+
+    if (Math.abs(delta) < 12) return;
+
+    const shouldHide = delta > 0 && currentTop > 80;
+    const nextClass = shouldHide ? 'is-hidden' : '';
+    if (nextClass === this.data.labTabbarClass) return;
+
+    clearTimeout(this.tabbarSetDataTimer);
+    this.tabbarSetDataTimer = setTimeout(() => {
+      this.setData({ labTabbarClass: nextClass });
+    }, 16);
+  },
+
+  hideNativeTabBar() {
+    if (!wx.hideTabBar) return;
+    wx.hideTabBar({ animation: false, fail: () => {} });
+  },
+
+  restoreNativeTabBar() {
+    if (!wx.showTabBar) return;
+    wx.showTabBar({ animation: false, fail: () => {} });
   },
 
   refreshPage() {
     const user = auth.getStoredUser();
     const profile = wx.getStorageSync('energyProfile') || {};
     const draft = wx.getStorageSync('currentDesign') || null;
-    const draftCount = draft && draft.summary ? draft.summary.count : 0;
-    const inspirationCart = wx.getStorageSync('inspirationCart') || [];
-    const communityFavorites = wx.getStorageSync('communityFavorites') || [];
+    const draftCount = draft && Array.isArray(draft.selected) ? draft.selected.length : 0;
+    const shoppingCart = wx.getStorageSync('diyDesignCart') || [];
+    const storedCommunityFavorites = wx.getStorageSync('communityFavorites') || [];
+    const favoriteIds = new Set();
+    const communityFavorites = storedCommunityFavorites.filter(item => {
+      if (!item || !item.id || favoriteIds.has(item.id)) return false;
+      favoriteIds.add(item.id);
+      return true;
+    });
+    if (communityFavorites.length !== storedCommunityFavorites.length) {
+      wx.setStorageSync('communityFavorites', communityFavorites);
+    }
+    const localOrders = wx.getStorageSync('orders') || [];
+    const favoriteCount = communityFavorites.length;
     this.setData({
       user,
       isLoggedIn: !!(user && user.user_id),
@@ -69,20 +126,20 @@ Page({
         nickname: (user && user.nickname) || '',
         avatar_url: (user && user.avatar_url) || ''
       },
-      phoneDraft: (user && user.phone_number) || '',
+      profileAvatarChanged: false,
       profile,
       draft,
       avatarChar: this.avatarChar(user, profile),
       draftCount,
-      couponCount: wx.getStorageSync('couponCount') || 0,
-      inspirationCartCount: inspirationCart.length,
+      shoppingCartCount: shoppingCart.length,
       communityFavoriteCount: communityFavorites.length,
-      inspirationStats: [
-        { key: 'draft', icon: 'DIY', title: '我的 DIY', desc: draftCount ? '继续编辑最近的手串草稿' : '还没有草稿，去做第一条手串', count: draftCount ? `${draftCount} 颗` : '去创建' },
-        { key: 'cart', icon: '收', title: '灵感单收藏', desc: inspirationCart.length ? '首页加入的推荐和每日水晶' : '首页加号收藏后会出现在这里', count: `${inspirationCart.length} 件` },
-        { key: 'community', icon: '社', title: '社区收藏', desc: communityFavorites.length ? '你收藏过的搭配灵感' : '看到喜欢的作品可以先收藏', count: `${communityFavorites.length} 篇` }
+      profileStats: [
+        { key: 'plans', value: draftCount, label: '我的方案' },
+        { key: 'orders', value: localOrders.length, label: '我的订单' },
+        { key: 'cart', value: shoppingCart.length, label: '购物车' },
+        { key: 'energy', value: profile && Object.keys(profile).length ? Object.keys(profile).length : 0, label: '能量记录' }
       ],
-      orders: wx.getStorageSync('orders') || []
+      orders: localOrders
     });
     this.refreshOrderView();
   },
@@ -122,10 +179,10 @@ Page({
   },
 
   statusKey(order) {
-    const status = order.status || order.rawStatus;
+    const status = order.rawStatus || order.status;
     if (status === 'pending_ship') return 'ship';
     if (status === 'shipped') return 'receive';
-    if (status === 'after_sale' || status === 'refund_requested' || status === 'refunded') return 'after';
+    if (status === 'after_sale' || status === 'refund_requested') return 'after';
     if (order.payment_status === 'unpaid' || order.paymentStatus === 'unpaid' || status === 'pending_payment') return 'pay';
     return 'done';
   },
@@ -147,10 +204,10 @@ Page({
   refreshOrderView() {
     const orders = (this.data.orders || []).map(order => ({
       ...order,
-      statusKey: order.statusKey || this.statusKey(order),
+      statusKey: this.statusKey(order),
       status: order.status || this.statusText(order)
     }));
-    const counts = { all: orders.length, pay: 0, ship: 0, receive: 0, after: 0 };
+    const counts = { all: orders.length, pay: 0, ship: 0, receive: 0, done: 0, after: 0 };
     orders.forEach(order => {
       if (counts[order.statusKey] !== undefined) counts[order.statusKey] += 1;
     });
@@ -158,11 +215,15 @@ Page({
     const filteredOrders = active === 'all' ? orders : orders.filter(order => order.statusKey === active);
     this.setData({
       filteredOrders,
-      orderStats: ORDER_TABS.map(item => ({ ...item, count: counts[item.key] || 0 }))
+      orderStats: ORDER_TABS.map(item => ({ ...item, count: counts[item.key] || 0 })),
+      profileStats: (this.data.profileStats || []).map(item => (
+        item.key === 'orders' ? { ...item, value: orders.length } : item
+      ))
     });
   },
 
   avatarChar(user, profile) {
+    if (!user || !user.user_id) return '';
     if (user && user.nickname) return user.nickname.slice(0, 1);
     if (profile && profile.name) return profile.name.slice(0, 1);
     return '星';
@@ -182,7 +243,8 @@ Page({
         profileDraft: {
           nickname: user.nickname || '',
           avatar_url: user.avatar_url || ''
-        }
+        },
+        profileAvatarChanged: false
       });
       wx.showToast({ title: '登录成功', icon: 'success' });
       this.refreshOrdersFromServer();
@@ -208,6 +270,34 @@ Page({
     this.setData({ showProfileModal: false, nicknameFocus: false });
   },
 
+  confirmLogout() {
+    wx.showModal({
+      title: '退出登录',
+      content: '退出后，当前设备上的账号信息和订单缓存将被清除。',
+      confirmText: '退出',
+      confirmColor: '#C65B55',
+      success: result => {
+        if (!result.confirm) return;
+        auth.logout();
+        this.setData({
+          user: null,
+          isLoggedIn: false,
+          hasProfile: false,
+          hasPhone: false,
+          showProfileModal: false,
+          profileDraft: { nickname: '', avatar_url: '' },
+          profileAvatarChanged: false,
+          avatarChar: '',
+          orders: [],
+          filteredOrders: [],
+          activeOrderStatus: 'all',
+          orderStats: ORDER_TABS.map(item => ({ ...item, count: 0 }))
+        });
+        wx.showToast({ title: '已退出登录', icon: 'success' });
+      }
+    });
+  },
+
   noop() {},
 
   focusNicknameInput() {
@@ -218,12 +308,11 @@ Page({
     this.setData({ nicknameFocus: false });
   },
 
-  onPhoneInput(e) {
-    this.setData({ phoneDraft: e.detail.value });
-  },
-
   onChooseAvatar(e) {
-    this.setData({ 'profileDraft.avatar_url': e.detail.avatarUrl });
+    this.setData({
+      'profileDraft.avatar_url': e.detail.avatarUrl,
+      profileAvatarChanged: true
+    });
   },
 
   async saveBasicProfile() {
@@ -241,7 +330,8 @@ Page({
     try {
       const user = await auth.updateBasicProfile({
         nickname: draft.nickname.trim(),
-        avatar_url: draft.avatar_url
+        avatar_url: draft.avatar_url,
+        avatar_changed: this.data.profileAvatarChanged
       });
       this.setData({
         user,
@@ -251,7 +341,8 @@ Page({
         profileDraft: {
           nickname: user.nickname || draft.nickname,
           avatar_url: user.avatar_url || draft.avatar_url
-        }
+        },
+        profileAvatarChanged: false
       });
       wx.showToast({ title: '资料已保存', icon: 'success' });
     } catch (error) {
@@ -269,38 +360,19 @@ Page({
       return;
     }
     this.setData({ phoneLoading: true });
-    wx.showLoading({ title: '绑定手机号' });
+    wx.showLoading({ title: '微信快捷绑定' });
     try {
       const user = await auth.bindWechatPhone(e);
       this.setData({ user, hasPhone: !!user.has_phone });
-      wx.showToast({ title: '手机号已绑定', icon: 'success' });
+      wx.showToast({ title: '微信手机号已绑定', icon: 'success' });
     } catch (error) {
       console.error('bind phone failed:', error);
-      wx.showToast({ title: error.message || '绑定失败', icon: 'none' });
-    } finally {
-      wx.hideLoading();
-      this.setData({ phoneLoading: false });
-    }
-  },
-
-  async saveManualPhone() {
-    if (!this.data.isLoggedIn) {
-      wx.showToast({ title: '请先登录', icon: 'none' });
-      return;
-    }
-    const phoneNumber = this.data.phoneDraft.trim();
-    if (!/^1\d{10}$/.test(phoneNumber)) {
-      wx.showToast({ title: '请填写 11 位手机号', icon: 'none' });
-      return;
-    }
-    this.setData({ phoneLoading: true });
-    wx.showLoading({ title: '保存手机号' });
-    try {
-      const user = await auth.bindManualPhone(phoneNumber);
-      this.setData({ user, hasPhone: !!user.has_phone, phoneDraft: user.phone_number || phoneNumber });
-      wx.showToast({ title: '手机号已保存', icon: 'success' });
-    } catch (error) {
-      wx.showToast({ title: error.message || '保存失败', icon: 'none' });
+      wx.showModal({
+        title: '手机号授权失败',
+        content: error.message || '微信未能完成手机号授权，请确认小程序已开通手机号快速验证能力后重试。',
+        showCancel: false,
+        confirmText: '知道了'
+      });
     } finally {
       wx.hideLoading();
       this.setData({ phoneLoading: false });
@@ -379,7 +451,7 @@ Page({
           carrier: logistics.carrier || '物流信息',
           trackingNo: logistics.tracking_no || '',
           statusText: logistics.status_text || '待更新',
-          source: logistics.source === 'kuaidi100' ? '快递100实时查询' : '本地物流记录',
+          source: logistics.source === 'kuaidi100' ? '物流轨迹已更新' : '商家发货记录',
           message: logistics.message || '',
           traces: traces.length ? traces : [
             { time: '', location: '', desc: '商家尚未发货，暂时没有物流轨迹。' }
@@ -405,7 +477,14 @@ Page({
       const payment = result.payment || {};
       if (payment.available && payment.pay_params) {
         await this.requestWechatPayment(payment.pay_params);
-        await this.runOrderAction(() => mockPayOrder(orderId, userId), '支付完成');
+        wx.showLoading({ title: '确认支付结果' });
+        const paid = await this.waitForPaidStatus(orderId, userId);
+        wx.hideLoading();
+        wx.showToast({
+          title: paid ? '支付成功' : '支付结果确认中',
+          icon: paid ? 'success' : 'none'
+        });
+        await this.refreshOrdersFromServer();
         return;
       }
       if (this.data.isLocalApi) {
@@ -424,6 +503,21 @@ Page({
       wx.hideLoading();
       wx.showToast({ title: error.message || '支付失败', icon: 'none' });
     }
+  },
+
+  async waitForPaidStatus(orderId, userId) {
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      if (attempt > 0) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+      try {
+        const order = await getOrder(orderId, userId);
+        if (order.payment_status === 'paid') return true;
+      } catch (error) {
+        console.warn('payment status refresh failed:', error.message || error);
+      }
+    }
+    return false;
   },
 
   requestWechatPayment(payParams) {
@@ -445,37 +539,68 @@ Page({
     }
   },
 
-  goCoupons() {
-    wx.showToast({ title: '优惠券功能准备中', icon: 'none' });
+  openPrivacyContract() {
+    if (!wx.openPrivacyContract) {
+      wx.showToast({ title: '请升级微信后查看隐私指引', icon: 'none' });
+      return;
+    }
+    wx.openPrivacyContract({
+      fail(error) {
+        wx.showToast({ title: error.errMsg || '隐私指引暂不可用', icon: 'none' });
+      }
+    });
   },
 
   handleInspiration(e) {
     const type = e.currentTarget.dataset.type;
-    if (type === 'draft') return this.goWorkspace();
-    if (type === 'cart') return this.viewInspirationCart();
-    this.goCommunity();
+    if (type === 'draft') return this.viewMyPlans();
+    if (type === 'cart') return this.viewShoppingCart();
+    this.viewCommunityFavorites();
   },
 
-  viewInspirationCart() {
-    const cart = wx.getStorageSync('inspirationCart') || [];
-    if (!cart.length) {
-      wx.showToast({ title: '先去首页收藏灵感', icon: 'none' });
+  viewMyPlans() {
+    wx.navigateTo({ url: '/pages/my-plans/my-plans' });
+  },
+
+  viewShoppingCart() {
+    wx.navigateTo({ url: '/pages/inspiration-cart/inspiration-cart' });
+  },
+
+  viewCommunityFavorites() {
+    wx.navigateTo({ url: '/pages/community-favorites/community-favorites' });
+  },
+
+  viewAddress() {
+    wx.showToast({ title: '收货地址会在下单时填写', icon: 'none' });
+  },
+
+  viewCoupons() {
+    wx.showToast({ title: '优惠券功能准备中', icon: 'none' });
+  },
+
+  contactCustomer() {
+    wx.showToast({ title: '可通过订单详情联系商家', icon: 'none' });
+  },
+
+  openSettings() {
+    this.openPrivacyContract();
+  },
+
+  goToPage(e) {
+    const url = e.currentTarget.dataset.url;
+    if (!url) return;
+    if (url === '/pages/assessment/assessment') {
+      wx.setStorageSync('customMode', {
+        id: 'wuxing',
+        title: '五行定制',
+        selectedAt: Date.now()
+      });
+    }
+    if (TAB_BAR_PAGES.includes(url)) {
+      wx.switchTab({ url });
       return;
     }
-    wx.showModal({
-      title: `灵感单 ${cart.length} 件`,
-      content: cart.map(item => item.name).join('、'),
-      confirmText: '带入 DIY',
-      cancelText: '知道了',
-      success: res => {
-        if (res.confirm) {
-          const first = cart[0];
-          wx.setStorageSync('recommendedRecipe', first.recipe || ['clearQuartz']);
-          wx.setStorageSync('workspacePreset', 'recommended');
-          this.goWorkspace();
-        }
-      }
-    });
+    wx.navigateTo({ url });
   },
 
   goAssessment() {
@@ -483,7 +608,7 @@ Page({
       wx.showToast({ title: '请先登录', icon: 'none' });
       return;
     }
-    wx.navigateTo({ url: '/pages/assessment/assessment' });
+    wx.switchTab({ url: '/pages/assessment/assessment' });
   },
 
   goWorkspace() {
@@ -491,6 +616,6 @@ Page({
   },
 
   goCommunity() {
-    wx.switchTab({ url: '/pages/community/community' });
+    wx.navigateTo({ url: '/pages/community/community' });
   }
 });

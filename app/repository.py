@@ -1,28 +1,31 @@
 from __future__ import annotations
 
 import json
-import sqlite3
 import threading
 from pathlib import Path
 from typing import Any
 
-BASE_DIR = Path(__file__).resolve().parent.parent
-DB_PATH = BASE_DIR / "data" / "yujian_fastapi.db"
+from .database import DEFAULT_SQLITE_PATH, connect_database, use_mysql
+
+DB_PATH = DEFAULT_SQLITE_PATH
 
 
 class AssessmentRepository:
     def __init__(self, db_path: Path = DB_PATH):
         self.db_path = db_path
+        self._force_sqlite = db_path != DB_PATH
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
         self._init_db()
 
-    def connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.db_path, check_same_thread=False)
-        connection.row_factory = sqlite3.Row
-        return connection
+    def connect(self):
+        return connect_database(self.db_path if self._force_sqlite else None)
 
     def _init_db(self) -> None:
+        if use_mysql() and not self._force_sqlite:
+            with self.connect():
+                pass
+            return
         with self.connect() as connection:
             connection.execute(
                 """
@@ -166,18 +169,26 @@ class AssessmentRepository:
         return json.loads(row["result_json"]) if row else None
 
     def save_daily_energy(self, result: dict[str, Any]) -> None:
-        with self._lock, self.connect() as connection:
-            connection.execute(
-                """
+        if use_mysql() and not self._force_sqlite:
+            sql = """
+                INSERT INTO daily_energies
+                (user_id, energy_date, mode, assessment_id, result_json, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON DUPLICATE KEY UPDATE mode=VALUES(mode), assessment_id=VALUES(assessment_id),
+                result_json=VALUES(result_json), updated_at=VALUES(updated_at)
+            """
+        else:
+            sql = """
                 INSERT INTO daily_energies
                 (user_id, energy_date, mode, assessment_id, result_json, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(user_id, energy_date) DO UPDATE SET
-                    mode = excluded.mode,
-                    assessment_id = excluded.assessment_id,
-                    result_json = excluded.result_json,
-                    updated_at = excluded.updated_at
-                """,
+                    mode = excluded.mode, assessment_id = excluded.assessment_id,
+                    result_json = excluded.result_json, updated_at = excluded.updated_at
+            """
+        with self._lock, self.connect() as connection:
+            connection.execute(
+                sql,
                 (
                     result["user_id"],
                     result["date"],
@@ -190,18 +201,26 @@ class AssessmentRepository:
             )
 
     def save_checkin(self, checkin: dict[str, Any]) -> None:
-        with self._lock, self.connect() as connection:
-            connection.execute(
-                """
+        if use_mysql() and not self._force_sqlite:
+            sql = """
+                INSERT INTO daily_checkins
+                (user_id, checkin_date, mood, sleep, stress, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON DUPLICATE KEY UPDATE mood=VALUES(mood), sleep=VALUES(sleep),
+                stress=VALUES(stress), updated_at=VALUES(updated_at)
+            """
+        else:
+            sql = """
                 INSERT INTO daily_checkins
                 (user_id, checkin_date, mood, sleep, stress, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(user_id, checkin_date) DO UPDATE SET
-                    mood = excluded.mood,
-                    sleep = excluded.sleep,
-                    stress = excluded.stress,
+                    mood = excluded.mood, sleep = excluded.sleep, stress = excluded.stress,
                     updated_at = excluded.updated_at
-                """,
+            """
+        with self._lock, self.connect() as connection:
+            connection.execute(
+                sql,
                 (
                     checkin["user_id"],
                     checkin["date"],
@@ -229,14 +248,19 @@ class AssessmentRepository:
         ]
 
     def upsert_user(self, user: dict[str, Any]) -> dict[str, Any]:
-        with self._lock, self.connect() as connection:
-            existing = connection.execute(
-                "SELECT * FROM users WHERE user_id = ?",
-                (user["user_id"],),
-            ).fetchone()
-            created_at = user["updated_at"] if existing is None else existing["created_at"]
-            connection.execute(
-                """
+        if use_mysql() and not self._force_sqlite:
+            sql = """
+                INSERT INTO users
+                (user_id, openid, unionid, nickname, avatar_url, gender, phone_number, source, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON DUPLICATE KEY UPDATE
+                    openid=COALESCE(VALUES(openid), openid), unionid=COALESCE(VALUES(unionid), unionid),
+                    nickname=COALESCE(VALUES(nickname), nickname), avatar_url=COALESCE(VALUES(avatar_url), avatar_url),
+                    gender=COALESCE(VALUES(gender), gender), phone_number=COALESCE(VALUES(phone_number), phone_number),
+                    source=VALUES(source), updated_at=VALUES(updated_at)
+            """
+        else:
+            sql = """
                 INSERT INTO users
                 (user_id, openid, unionid, nickname, avatar_url, gender, phone_number, source, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -247,9 +271,16 @@ class AssessmentRepository:
                     avatar_url = COALESCE(excluded.avatar_url, users.avatar_url),
                     gender = COALESCE(excluded.gender, users.gender),
                     phone_number = COALESCE(excluded.phone_number, users.phone_number),
-                    source = excluded.source,
-                    updated_at = excluded.updated_at
-                """,
+                    source = excluded.source, updated_at = excluded.updated_at
+            """
+        with self._lock, self.connect() as connection:
+            existing = connection.execute(
+                "SELECT * FROM users WHERE user_id = ?",
+                (user["user_id"],),
+            ).fetchone()
+            created_at = user["updated_at"] if existing is None else existing["created_at"]
+            connection.execute(
+                sql,
                 (
                     user["user_id"],
                     user.get("openid"),
@@ -272,3 +303,72 @@ class AssessmentRepository:
                 (user_id,),
             ).fetchone()
         return dict(row) if row else None
+
+    def get_user_by_openid(self, openid: str | None) -> dict[str, Any] | None:
+        if not openid:
+            return None
+        with self.connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM users WHERE openid = ? ORDER BY created_at ASC LIMIT 1",
+                (openid,),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def user_id_exists(self, user_id: str) -> bool:
+        with self.connect() as connection:
+            row = connection.execute(
+                "SELECT 1 FROM users WHERE user_id = ? LIMIT 1",
+                (user_id,),
+            ).fetchone()
+        return row is not None
+
+    def reassign_user_id(self, old_user_id: str, new_user_id: str, updated_at: str) -> dict[str, Any]:
+        if old_user_id == new_user_id:
+            user = self.get_user(new_user_id)
+            if not user:
+                raise ValueError("user not found")
+            return user
+        with self._lock, self.connect() as connection:
+            existing = connection.execute(
+                "SELECT * FROM users WHERE user_id = ?",
+                (old_user_id,),
+            ).fetchone()
+            if existing is None:
+                raise ValueError("user not found")
+            collision = connection.execute(
+                "SELECT 1 FROM users WHERE user_id = ? LIMIT 1",
+                (new_user_id,),
+            ).fetchone()
+            if collision is not None:
+                raise ValueError("new user_id already exists")
+            for table in (
+                "energy_assessments",
+                "daily_energies",
+                "daily_checkins",
+                "orders",
+                "diy_designs",
+                "cart_items",
+                "user_addresses",
+                "user_coupons",
+            ):
+                if not self.table_exists(connection, table):
+                    continue
+                connection.execute(
+                    f"UPDATE {table} SET user_id = ? WHERE user_id = ?",
+                    (new_user_id, old_user_id),
+                )
+            connection.execute(
+                "UPDATE users SET user_id = ?, updated_at = ? WHERE user_id = ?",
+                (new_user_id, updated_at, old_user_id),
+            )
+        return self.get_user(new_user_id)
+
+    def table_exists(self, connection, table: str) -> bool:
+        if use_mysql() and not self._force_sqlite:
+            row = connection.execute("SHOW TABLES LIKE ?", (table,)).fetchone()
+            return row is not None
+        row = connection.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
+            (table,),
+        ).fetchone()
+        return row is not None

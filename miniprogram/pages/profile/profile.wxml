@@ -1,38 +1,43 @@
-<view class="page">
-  <view class="profile-card card">
-    <view wx:if="{{user && user.avatar_url}}" class="avatar avatar-image">
-      <image src="{{user.avatar_url}}" mode="aspectFill"></image>
+<view class="profile-page yu-page">
+  <view class="profile-hero yu-card">
+    <view class="hero-main">
+      <view wx:if="{{isLoggedIn && user && user.avatar_url}}" class="profile-avatar avatar-image">
+        <image src="{{user.avatar_url}}" mode="aspectFill"></image>
+      </view>
+      <view wx:elif="{{!isLoggedIn}}" class="profile-avatar default-avatar empty-avatar" bindtap="loginWithWechat">
+      </view>
+      <view wx:else class="profile-avatar default-avatar">
+        <text>{{avatarChar}}</text>
+      </view>
+
+      <view class="profile-copy">
+        <view class="name-row">
+          <view wx:if="{{isLoggedIn}}" class="profile-name">{{user.nickname || profile.name || '未设置昵称'}}</view>
+          <view wx:else class="profile-name login-name" bindtap="loginWithWechat">点击登录</view>
+          <view wx:if="{{isLoggedIn}}" class="vip-badge">VIP</view>
+        </view>
+        <view wx:if="{{isLoggedIn}}" class="profile-id">ID：{{user.user_id}}</view>
+        <view wx:else class="profile-id">未登录</view>
+        <view class="profile-subtitle">{{isLoggedIn ? (profile.title || '温柔直觉型守护者') : '登录后开启测算、方案与订单同步'}}</view>
+      </view>
+
+      <button wx:if="{{isLoggedIn}}" class="edit-profile" bindtap="openProfileModal">编辑</button>
     </view>
-    <view wx:else class="avatar default-avatar">
-      <text class="avatar-star">✦</text>
-      <text class="avatar-crystal">◇</text>
-    </view>
-    <view class="profile-info">
-      <view class="profile-name">{{user.nickname || profile.name || '新朋友'}}</view>
-      <view class="profile-title">{{isLoggedIn ? (profile.title || '温柔直觉型守护者') : '登录后同步你的专属能量档案'}}</view>
-      <view wx:if="{{isLoggedIn && (!hasProfile || !hasPhone)}}" class="profile-nudge" bindtap="openProfileModal">您的能量档案还差一步解锁，立即完善资料 ></view>
+
+    <button wx:if="{{!isLoggedIn}}" class="login-button" loading="{{authLoading}}" bindtap="loginWithWechat">微信快捷登录</button>
+    <view wx:if="{{isLoggedIn && (!hasProfile || !hasPhone)}}" class="profile-nudge" bindtap="openProfileModal">资料还差一步，完善昵称、头像和手机号 ></view>
+
+    <view class="stat-grid">
+      <view wx:for="{{profileStats}}" wx:key="key" class="stat-item">
+        <view class="stat-value">{{item.value}}</view>
+        <view class="stat-label">{{item.label}}</view>
+      </view>
     </view>
   </view>
 
-  <view wx:if="{{!isLoggedIn}}" class="login-panel card">
+  <view wx:if="{{!isLoggedIn}}" class="login-panel yu-card">
     <view class="login-title">登录后开启个性化服务</view>
-    <view class="login-desc">测算记录、每日能量、DIY 草稿和订单会归档到你的账号。</view>
-    <button class="primary-button" loading="{{authLoading}}" bindtap="loginWithWechat">微信快捷登录</button>
-  </view>
-
-  <view class="asset-grid card">
-    <view class="asset-item" bindtap="goAssessment">
-      <text>能量档案</text>
-      <view>查看 / 重测</view>
-    </view>
-    <view class="asset-item" bindtap="goWorkspace">
-      <text>设计草稿</text>
-      <view>{{draftCount}} 件材料</view>
-    </view>
-    <view class="asset-item" bindtap="goCoupons">
-      <text>优惠券</text>
-      <view>{{couponCount}} 张可用</view>
-    </view>
+    <view class="login-desc">测算记录、DIY 草稿、我的方案和订单进度都会归档到你的账号。</view>
   </view>
 
   <view class="section">
@@ -40,78 +45,163 @@
       <view class="section-title">我的订单</view>
       <view class="section-link" bindtap="showAllOrders">全部订单 ></view>
     </view>
-    <view class="card order-status-grid">
+    <view class="order-status-card yu-card">
       <view wx:for="{{orderStats}}" wx:key="key" class="order-status-item" data-key="{{item.key}}" bindtap="handleOrderStatus">
         <view class="order-icon">{{item.icon}}</view>
         <view class="order-label">{{item.label}}</view>
-        <view wx:if="{{item.count}}" class="order-badge">{{item.count}}</view>
+        <view wx:if="{{item.showCount !== false && item.count}}" class="order-badge">{{item.count}}</view>
       </view>
     </view>
   </view>
 
-  <view class="section">
-    <view class="section-head">
-      <view class="section-title">我的灵感</view>
-      <view class="section-link" bindtap="goCommunity">去逛灵感</view>
-    </view>
-    <view class="inspiration-list">
-      <view wx:for="{{inspirationStats}}" wx:key="key" class="inspiration-item card" data-type="{{item.key}}" bindtap="handleInspiration">
-        <view class="inspiration-icon {{item.key}}">{{item.icon}}</view>
-        <view class="inspiration-copy">
-          <view class="inspiration-title">{{item.title}}</view>
-          <view class="inspiration-desc">{{item.desc}}</view>
+  <view class="menu-card yu-card">
+    <view class="menu-row" bindtap="viewMyPlans">
+      <view class="menu-left">
+        <view class="menu-icon plans">方</view>
+        <view>
+          <view class="menu-title">我的方案</view>
+          <view class="menu-desc">已保存、已下单和已完成的定制方案</view>
         </view>
-        <view class="inspiration-count">{{item.count}}</view>
       </view>
+      <view class="menu-right">{{draftCount}} 个 ></view>
+    </view>
+    <view class="menu-divider"></view>
+    <view class="menu-row" bindtap="viewShoppingCart">
+      <view class="menu-left">
+        <view class="menu-icon cart">车</view>
+        <view>
+          <view class="menu-title">购物车</view>
+          <view class="menu-desc">从 DIY 工作台加入的待结算方案</view>
+        </view>
+      </view>
+      <view class="menu-right">{{shoppingCartCount}} 件 ></view>
+    </view>
+    <view class="menu-divider"></view>
+    <view class="menu-row" bindtap="viewAddress">
+      <view class="menu-left">
+        <view class="menu-icon address">地</view>
+        <view>
+          <view class="menu-title">收货地址</view>
+          <view class="menu-desc">下单时填写或同步微信地址</view>
+        </view>
+      </view>
+      <view class="menu-arrow">></view>
+    </view>
+    <view class="menu-divider"></view>
+    <view class="menu-row" bindtap="viewCoupons">
+      <view class="menu-left">
+        <view class="menu-icon coupon">券</view>
+        <view>
+          <view class="menu-title">优惠券</view>
+          <view class="menu-desc">活动优惠与专属权益</view>
+        </view>
+      </view>
+      <view class="menu-arrow">></view>
     </view>
   </view>
 
-  <view wx:if="{{showProfileModal}}" class="modal-mask" catchtap="closeProfileModal">
+  <view class="menu-card yu-card">
+    <view class="menu-row" bindtap="contactCustomer">
+      <view class="menu-left">
+        <view class="menu-icon help">客</view>
+        <view>
+          <view class="menu-title">帮助与客服</view>
+          <view class="menu-desc">订单、支付和定制问题协助</view>
+        </view>
+      </view>
+      <view class="menu-arrow">></view>
+    </view>
+    <view class="menu-divider"></view>
+    <view class="menu-row" bindtap="openSettings">
+      <view class="menu-left">
+        <view class="menu-icon settings">设</view>
+        <view>
+          <view class="menu-title">设置</view>
+          <view class="menu-desc">隐私保护指引与账号设置</view>
+        </view>
+      </view>
+      <view class="menu-arrow">></view>
+    </view>
+    <view wx:if="{{isLoggedIn}}" class="menu-divider"></view>
+    <view wx:if="{{isLoggedIn}}" class="menu-row logout-row" bindtap="confirmLogout">
+      <view class="menu-left">
+        <view class="menu-icon logout">退</view>
+        <view>
+          <view class="menu-title">退出登录</view>
+          <view class="menu-desc">清除当前设备上的账号登录状态</view>
+        </view>
+      </view>
+      <view class="menu-arrow">></view>
+    </view>
+  </view>
+
+  <view class="lab-tabbar {{labTabbarClass}}">
+    <view class="lab-tab" bindtap="goToPage" data-url="/pages/home/home">
+      <view class="tab-icon">▣</view>
+      <text>首页</text>
+    </view>
+    <view class="lab-tab" bindtap="goToPage" data-url="/pages/assessment/assessment">
+      <view class="tab-icon">✦</view>
+      <text>测算</text>
+    </view>
+    <view class="lab-tab center" bindtap="goToPage" data-url="/pages/workspace/workspace">
+      <view class="tab-icon">＋</view>
+      <text>DIY</text>
+    </view>
+    <view class="lab-tab" bindtap="goToPage" data-url="/pages/inspiration-cart/inspiration-cart">
+      <view class="tab-icon">车</view>
+      <text>购物车</text>
+    </view>
+    <view class="lab-tab active" bindtap="goToPage" data-url="/pages/profile/profile">
+      <view class="tab-icon">♙</view>
+      <text>我的</text>
+    </view>
+  </view>
+
+  <view wx:if="{{showProfileModal}}" class="modal-mask" catchtap="closeProfileModal" catchtouchmove="noop">
     <view class="profile-modal" catchtap="noop">
       <view class="modal-header">
         <view>
-          <view class="modal-title">完善个人资料</view>
-          <view class="modal-desc">头像、昵称可以从微信选择，也可以手动补充。</view>
+          <view class="modal-title">编辑个人资料</view>
+          <view class="modal-desc">完善头像、昵称和联系方式，便于同步订单与售后。</view>
         </view>
         <button class="modal-close" bindtap="closeProfileModal">×</button>
       </view>
 
-      <view class="form-row avatar-row">
-        <view class="field-copy">
-          <view class="field-label">头像</view>
-          <view class="field-hint">调用微信头像选择</view>
-        </view>
-        <button class="avatar-picker" open-type="chooseAvatar" bindchooseavatar="onChooseAvatar">
-          <image wx:if="{{profileDraft.avatar_url}}" src="{{profileDraft.avatar_url}}" mode="aspectFill"></image>
-          <text wx:else>{{avatarChar}}</text>
-        </button>
-      </view>
-
-      <view class="form-field">
-        <view class="field-header">
-          <view class="field-label">昵称</view>
-          <button class="field-action" bindtap="focusNicknameInput">选择微信昵称</button>
-        </view>
-        <input class="nickname-input" type="nickname" placeholder="填写昵称，或选择微信昵称" value="{{profileDraft.nickname}}" data-field="nickname" focus="{{nicknameFocus}}" bindinput="onProfileInput" bindblur="onNicknameBlur" />
-        <view class="field-hint">点击输入框或右侧按钮后，在微信候选昵称中选择。</view>
-      </view>
-
-      <view class="form-field">
-        <view class="field-label">手机号</view>
-        <view wx:if="{{hasPhone}}" class="phone-value">{{user.phone_number}}</view>
-        <button wx:else class="secondary-button phone-auth-button" loading="{{phoneLoading}}" open-type="getPhoneNumber" bindgetphonenumber="onGetPhoneNumber">授权当前微信手机号</button>
-        <block wx:if="{{isLocalApi && !hasPhone}}">
-          <view class="phone-manual-row">
-            <input class="nickname-input phone-input" type="number" maxlength="11" placeholder="本地调试手机号" value="{{phoneDraft}}" bindinput="onPhoneInput" />
-            <button class="secondary-button phone-save-button" loading="{{phoneLoading}}" bindtap="saveManualPhone">保存</button>
+      <scroll-view class="profile-modal-body" scroll-y enhanced show-scrollbar="{{false}}">
+        <view class="profile-form-card">
+          <view class="form-row avatar-row">
+            <view class="field-copy">
+              <view class="field-label">头像</view>
+              <view class="field-hint">点击右侧头像更换</view>
+            </view>
+            <button class="avatar-picker" open-type="chooseAvatar" bindchooseavatar="onChooseAvatar">
+              <image wx:if="{{profileDraft.avatar_url}}" src="{{profileDraft.avatar_url}}" mode="aspectFill"></image>
+              <text wx:else>{{avatarChar}}</text>
+            </button>
           </view>
-          <view class="field-hint">本地调试可手动填写，正式版使用微信手机号授权。</view>
-        </block>
-      </view>
+
+          <view class="form-field">
+            <view class="field-header">
+              <view class="field-label">昵称</view>
+              <button class="field-action" bindtap="focusNicknameInput">选择微信昵称</button>
+            </view>
+            <input class="nickname-input" type="nickname" placeholder="填写昵称" value="{{profileDraft.nickname}}" data-field="nickname" focus="{{nicknameFocus}}" adjust-position="{{true}}" cursor-spacing="160" bindinput="onProfileInput" bindblur="onNicknameBlur" />
+          </view>
+        </view>
+
+        <view class="profile-form-card phone-form-card">
+          <view class="form-field phone-form-field">
+            <view class="field-label">手机号</view>
+            <view wx:if="{{hasPhone}}" class="phone-value">{{user.phone_number}}</view>
+            <button wx:else class="secondary-button phone-auth-button" loading="{{phoneLoading}}" open-type="getPhoneNumber" bindgetphonenumber="onGetPhoneNumber">微信授权手机号</button>
+          </view>
+        </view>
+      </scroll-view>
 
       <view class="modal-actions">
-        <button class="secondary-button" bindtap="closeProfileModal">稍后再说</button>
-        <button class="primary-button" loading="{{savingProfile}}" bindtap="saveBasicProfile">保存头像昵称</button>
+        <button class="secondary-button modal-action-button" bindtap="closeProfileModal">取消</button>
+        <button class="primary-button modal-action-button" loading="{{savingProfile}}" bindtap="saveBasicProfile">保存资料</button>
       </view>
     </view>
   </view>

@@ -1,24 +1,65 @@
-<view class="studio-page {{deviceClass}}">
+<view class="studio-page {{deviceClass}}" style="{{workspaceLayoutStyle}}">
   <view class="studio-top">
+    <view class="studio-title-overlay">
+      <view class="title title-premium"></view>
+      <view class="title-en">CRYSTAL STUDIO</view>
+    </view>
     <view class="title-row">
-      <view class="back-btn" bindtap="goBack">‹</view>
+      <view class="back-btn" bindtap="goBack"></view>
       <view class="title">手串定制</view>
       <button class="save-nav" bindtap="saveDraft">保存</button>
     </view>
   </view>
 
   <view class="canvas-area">
-    <view class="count-badge {{summary.count > 18 ? 'over' : ''}}">
-      <text>已串</text>
-      <view>{{summary.count}}/18 颗</view>
+    <view class="studio-count-pill {{countOverClass}}" bindtap="openWristSetting">
+      <view class="count-gem"></view>
+      <text class="count-prefix"></text>
+      <view class="count-main">{{summary.count}}/18</view>
+      <text class="count-wrist">{{wristSize}}cm</text>
     </view>
 
     <view class="bracelet-stage">
-      <view class="bracelet-circle">
-        <view class="completion-watermark">
-          <view class="completion-sub">{{summary.count ? '轻触珠子调整顺序' : '点击下方材料开始串珠'}}</view>
+      <view class="bracelet-circle {{isShuffling ? 'shuffling' : ''}}">
+        <image class="bracelet-tray-image" src="{{trayImageUrl}}" mode="aspectFill"></image>
+        <view class="bracelet-string {{braceletStringClass}}" style="{{stringStyle}}"></view>
+        <canvas
+          wx:if="{{useCanvasRenderer}}"
+          id="braceletCanvas"
+          class="bracelet-canvas"
+          type="2d"
+          canvas-id="braceletCanvas"
+          catchtouchstart="onBraceletCanvasTouchStart"
+          catchtouchmove="onBraceletCanvasTouchMove"
+          catchtouchend="onBraceletCanvasTouchEnd"
+          catchtouchcancel="onBraceletCanvasTouchEnd"
+        ></canvas>
+        <view
+          wx:if="{{useCanvasRenderer}}"
+          class="bracelet-touch-layer"
+          catchtouchstart="onBraceletCanvasTouchStart"
+          catchtouchmove="onBraceletCanvasTouchMove"
+          catchtouchend="onBraceletCanvasTouchEnd"
+          catchtouchcancel="onBraceletCanvasTouchEnd"
+        ></view>
+        <view class="completion-watermark {{completionWatermarkClass}}">
+          <view class="studio-compass">✦</view>
+          <view class="completion-sub"></view>
         </view>
-        <view wx:for="{{selectedItems}}" wx:key="index" class="circle-bead {{item.selected ? 'active' : ''}}" style="{{item.style}}" data-index="{{index}}" bindtap="selectBead" bindlongpress="removeItem">
+        <view
+          wx:if="{{!useCanvasRenderer}}"
+          wx:for="{{selectedItems}}"
+          wx:key="index"
+          class="circle-bead {{item.className}}"
+          style="{{item.style}}"
+          data-index="{{index}}"
+          bindtap="selectBead"
+          bindlongpress="removeItem"
+          catchtouchstart="onBeadTouchStart"
+          catchtouchmove="onBeadTouchMove"
+          catchtouchend="onBeadTouchEnd"
+          catchtouchcancel="onBeadTouchEnd"
+        >
           <image wx:if="{{item.image_url}}" class="circle-bead-image" src="{{item.image_url}}" mode="aspectFit" data-id="{{item.id}}" binderror="onMaterialImageError"></image>
           <view wx:else class="bead-glow"></view>
         </view>
@@ -26,25 +67,52 @@
     </view>
 
     <view class="tool-strip">
-      <view class="tool-item" bindtap="undo">
-        <view class="tool-icon undo-icon">↶</view>
-        <view class="tool-label">撤回</view>
-      </view>
-      <view class="tool-item" bindtap="saveDraft">
-        <view class="tool-icon">✓</view>
-        <view class="tool-label">保存</view>
+      <view class="tool-item {{canUndo ? '' : 'disabled'}}" bindtap="undo">
+        <view class="tool-icon tool-undo"></view>
+        <view class="tool-label">撤销</view>
       </view>
       <view class="tool-item" bindtap="openWristSetting">
-        <view class="tool-icon">◉</view>
+        <view class="tool-icon tool-wrist"></view>
         <view class="tool-label">手围</view>
       </view>
-      <view class="tool-item" bindtap="openToolbox">
-        <view class="tool-icon">▣</view>
-        <view class="tool-label">工具</view>
+      <view class="tool-item {{shuffleButtonClass}}" bindtap="shuffleDesign">
+        <view class="tool-icon tool-string"></view>
+        <view class="tool-label">{{isLooseMode ? '成串' : '重串'}}</view>
       </view>
-      <view class="tool-item" bindtap="confirmClearDesign">
-        <view class="tool-icon">×</view>
+      <view wx:if="{{!isLooseMode}}" class="tool-item {{releaseButtonClass}}" bindtap="releaseString">
+        <view class="tool-icon tool-release"></view>
+        <view class="tool-label">解串</view>
+      </view>
+      <view class="tool-item {{showEnergyPanel ? 'active' : ''}}" bindtap="toggleEnergyPanel">
+        <view class="tool-icon tool-energy"></view>
+        <view class="tool-label">五行</view>
+      </view>
+      <view class="tool-item" bindtap="saveDraft">
+        <view class="tool-icon tool-save"></view>
+        <view class="tool-label">保存</view>
+      </view>
+      <view class="tool-item danger" bindtap="confirmClearDesign">
+        <view class="tool-icon tool-clear"></view>
         <view class="tool-label">清空</view>
+      </view>
+    </view>
+
+    <view wx:if="{{showEnergyPanel}}" class="energy-floating-card">
+      <view class="energy-floating-head" bindtap="openEnergyModal">
+        <view>
+          <text class="energy-floating-title">五行占比</text>
+          <text class="energy-floating-sub">当前方案</text>
+        </view>
+        <view class="energy-floating-action">详情</view>
+      </view>
+      <view class="energy-mini-bars">
+        <view wx:for="{{summary.energy}}" wx:key="key" class="energy-mini-row">
+          <text class="energy-mini-name">{{item.name}}</text>
+          <view class="energy-mini-track">
+            <view class="energy-mini-fill" style="width:{{item.value}}%;background:{{item.color}};"></view>
+          </view>
+          <text class="energy-mini-value">{{item.value}}%</text>
+        </view>
       </view>
     </view>
 
@@ -56,119 +124,66 @@
         <button class="danger" data-index="{{selectedBeadIndex}}" bindtap="removeItem">删除</button>
       </view>
     </view>
-
-    <view class="design-status">
-      <view class="status-cell">
-        <view class="status-icon">⌁</view>
-        <view>
-          <text>长度</text>
-          <view>{{summary.length}} / {{wristSize}}cm</view>
-        </view>
-      </view>
-      <view class="status-cell">
-        <view class="status-icon">◎</view>
-        <view>
-          <text>戴法</text>
-          <view bindtap="toggleWearStyle">{{wearStyle === 'single' ? '单圈' : '双圈'}}</view>
-        </view>
-      </view>
-      <view class="status-cell">
-        <view class="status-icon">⚖</view>
-        <view>
-          <text>重量</text>
-          <view>{{summary.weight}}g</view>
-        </view>
-      </view>
-      <view class="status-cell">
-        <view class="status-icon">●</view>
-        <view>
-          <text>珠子数量</text>
-          <view>已串 {{summary.count}} / 18 颗</view>
-        </view>
-      </view>
-      <view class="status-cell">
-        <view class="status-icon">⌘</view>
-        <view>
-          <text>主珠尺寸范围</text>
-          <view>8 - 14 mm</view>
-        </view>
-      </view>
-      <view class="status-cell">
-        <view class="status-icon">▤</view>
-        <view>
-          <text>线材规格</text>
-          <view>弹力线 0.8mm</view>
-        </view>
-      </view>
-    </view>
   </view>
 
-  <view class="energy-section">
-    <view class="energy-board">
-      <view class="energy-board-copy">
-        <view class="energy-board-title">五行能量</view>
-        <view class="energy-board-sub">{{energyChart.hasProfile ? '匹配 ' + energyChart.matchText : '已串 ' + summary.count + '/18 颗'}}</view>
-      </view>
-      <view class="energy-chart-shell">
-        <view class="star-chart">
-          <view class="star-grid p1"></view>
-          <view class="star-grid p2"></view>
-          <view class="star-grid p3"></view>
-          <view class="star-grid p4"></view>
-          <view class="star-grid p5"></view>
-          <view wx:for="{{energyChart.lines}}" wx:key="key" class="star-line" style="{{item.style}}"></view>
-          <view wx:for="{{energyChart.targetPoints}}" wx:key="key" class="target-dot" style="{{item.style}}"></view>
-          <view wx:for="{{energyChart.currentPoints}}" wx:key="key" class="current-dot" style="{{item.style}}"></view>
-          <view class="star-label label-wood">木</view>
-          <view class="star-label label-fire">火</view>
-          <view class="star-label label-earth">土</view>
-          <view class="star-label label-metal">金</view>
-          <view class="star-label label-water">水</view>
-        </view>
-      </view>
-    </view>
-    <view class="quick-hint {{selectedBeadIndex > -1 ? 'active' : ''}}">
-      {{selectedBeadIndex > -1 ? '已选第 ' + (selectedBeadIndex + 1) + ' 颗，可调整顺序或删除' : '点选珠子后可调整顺序，长按材料可查看实拍图'}}
-    </view>
+  <canvas
+    wx:if="{{useCanvasRenderer}}"
+    id="workspaceFlightCanvas"
+    class="workspace-flight-canvas {{canvasFlightActive ? 'active' : ''}}"
+    type="2d"
+    canvas-id="workspaceFlightCanvas"
+  ></canvas>
+
+  <view wx:if="{{flightBead && !useCanvasRenderer}}" class="flight-bead" style="{{flightBead.style}}" animation="{{flightBead.animation}}">
+    <image wx:if="{{flightBead.image_url}}" class="flight-bead-image" src="{{flightBead.image_url}}" mode="aspectFit"></image>
+    <view wx:else class="flight-bead-fallback" style="background: radial-gradient(circle at 32% 26%, {{flightBead.shine}} 0 10%, {{flightBead.color}} 12% 58%, rgba(0,0,0,.22) 100%);"></view>
   </view>
 
   <view class="material-drawer">
     <view class="top-tabs">
-      <view wx:for="{{topTabs}}" wx:key="key" class="top-tab {{activeTop === item.key ? 'active' : ''}}" data-top="{{item.key}}" bindtap="selectTop">{{item.label}}</view>
-      <view class="tab-icon">⌕</view>
-      <view class="tab-icon">≛</view>
+      <view wx:for="{{topTabs}}" wx:key="key" class="top-tab {{item.className}}" data-top="{{item.value}}" bindtap="selectTop">{{item.label}}</view>
     </view>
 
     <view class="drawer-body">
       <scroll-view class="category-rail" scroll-y>
-        <view wx:for="{{categories}}" wx:key="*this" class="category-item {{activeCategory === item ? 'active' : ''}}" data-category="{{item}}" bindtap="selectCategory">{{item}}</view>
+        <view wx:for="{{categories}}" wx:key="value" class="category-item {{item.className}}" data-category="{{item.value}}" bindtap="selectCategory">{{item.label}}</view>
       </scroll-view>
 
       <view class="material-content">
         <view class="filter-summary">{{filterSummary}}</view>
         <scroll-view wx:if="{{seriesOptions.length > 1}}" class="series-scroll" scroll-x enable-flex>
           <view class="series-tabs">
-            <view wx:for="{{seriesOptions}}" wx:key="*this" class="series-tab {{activeSeries === item ? 'active' : ''}}" data-series="{{item}}" bindtap="selectSeries">{{item}}</view>
+            <view wx:for="{{seriesOptions}}" wx:key="value" class="series-tab {{item.className}}" data-series="{{item.value}}" bindtap="selectSeries">{{item.label}}</view>
           </view>
         </scroll-view>
         <view wx:if="{{showTip}}" class="tip-bar">
           <text class="tip-icon">💡</text>
-          <text>长按材料可查看实拍图</text>
+          <text>长按材料可查看实拍图，点击即可投入圆盘</text>
           <text class="tip-close" bindtap="closeTip">×</text>
         </view>
-        <scroll-view class="material-scroll" scroll-y>
+
+        <scroll-view class="material-scroll" scroll-y bindscrolltolower="loadMoreMaterials">
           <view class="material-grid">
-            <view wx:for="{{visibleMaterials}}" wx:key="id" class="material-card" data-id="{{item.id}}" bindtap="addMaterial">
+            <view
+              wx:for="{{visibleMaterials}}"
+              wx:for-index="index"
+              wx:key="id"
+              class="material-card {{item.cardClass}}"
+              data-id="{{item.id}}"
+              data-index="{{index}}"
+              bindtap="addMaterial"
+            >
               <image wx:if="{{item.image_url}}" class="material-sphere material-image" src="{{item.image_url}}" mode="aspectFit" data-id="{{item.id}}" binderror="onMaterialImageError"></image>
               <view wx:else class="material-sphere" style="background: radial-gradient(circle at 32% 26%, {{item.shine}} 0 10%, {{item.color}} 12% 58%, rgba(0,0,0,.22) 100%);"></view>
               <view class="material-name">{{item.name}}</view>
-              <view class="material-effect">{{item.series && item.series !== item.name ? item.series + ' · ' : ''}}{{item.grade ? item.grade + ' · ' : ''}}{{item.effect}}</view>
+              <view class="material-effect">{{item.effectText}}</view>
               <view class="material-meta">
                 <view class="material-price">¥{{item.price}}</view>
                 <view class="size-pill">{{item.size}}mm</view>
               </view>
             </view>
           </view>
+          <view wx:if="{{hasMoreMaterials}}" class="load-more-hint">上滑加载更多材料</view>
         </scroll-view>
       </view>
     </view>
@@ -184,7 +199,7 @@
           </view>
           <view class="checkout-metric" bindtap="toggleWearStyle">
             <text>戴法</text>
-            <view>{{wearStyle === 'single' ? '单圈' : '双圈'}}</view>
+            <view>{{wearStyleText}}</view>
           </view>
           <view class="checkout-metric">
             <text>重量</text>
@@ -192,7 +207,70 @@
           </view>
         </view>
       </view>
-      <button class="finish-btn" bindtap="goToCheckout">完成定制 ></button>
+      <view class="checkout-actions">
+        <button class="cart-btn" bindtap="addDesignToCart">加入购物车</button>
+        <button class="finish-btn" bindtap="goToCheckout">完成定制 →</button>
+      </view>
+    </view>
+  </view>
+
+  <view wx:if="{{showWristPicker}}" class="wrist-picker-mask" bindtap="closeWristSetting">
+    <view class="wrist-picker" catchtap="stopPropagation">
+      <view class="wrist-picker-head">
+        <view>
+          <view class="wrist-picker-title">选择手围</view>
+          <view class="wrist-picker-subtitle">切换后会同步更新圆盘刻度和当前方案适配参考。</view>
+        </view>
+        <view class="wrist-picker-close" bindtap="closeWristSetting">×</view>
+      </view>
+      <view class="wrist-ruler-value">
+        <text class="wrist-ruler-number">{{wristRulerValue}}</text>
+        <text class="wrist-ruler-unit">cm</text>
+      </view>
+      <view class="wrist-ruler-caption">左右滑动软尺，松手后自动吸附到 0.1cm</view>
+      <view class="wrist-ruler-wrap">
+        <view class="wrist-ruler-pointer"></view>
+        <view class="wrist-ruler-fade left"></view>
+        <view class="wrist-ruler-fade right"></view>
+        <scroll-view
+          class="wrist-ruler-scroll"
+          scroll-x
+          enhanced="{{true}}"
+          bounces="{{true}}"
+          show-scrollbar="{{false}}"
+          scroll-left="{{wristRulerScrollLeft}}"
+          bindtouchstart="onWristRulerTouchStart"
+          bindtouchend="onWristRulerTouchEnd"
+          bindtouchcancel="onWristRulerTouchEnd"
+          bindscroll="onWristRulerScroll"
+        >
+          <view class="wrist-ruler-track" style="padding-left:{{wristRulerSidePadding}}px;padding-right:{{wristRulerSidePadding}}px;">
+            <view
+              wx:for="{{wristRulerTicks}}"
+              wx:key="index"
+              class="wrist-ruler-tick {{item.className}}"
+              style="width:{{wristRulerTickWidth}}px;"
+            >
+              <view class="tick-line"></view>
+              <view wx:if="{{item.label}}" class="tick-label">{{item.label}}</view>
+            </view>
+          </view>
+        </scroll-view>
+      </view>
+      <view class="wrist-ruler-range">{{wristRulerRangeText}}</view>
+      <button class="wrist-ruler-confirm" bindtap="confirmWristRuler">确认手围</button>
+    </view>
+  </view>
+
+  <view wx:if="{{showEnergyModal}}" class="energy-modal-mask" bindtap="closeEnergyModal">
+    <view class="energy-modal" catchtap="stopPropagation">
+      <view class="energy-modal-head">
+        <view class="energy-modal-title">五行能量图</view>
+        <view class="energy-modal-close" bindtap="closeEnergyModal">×</view>
+      </view>
+      <view class="energy-modal-body">
+        <image class="energy-modal-svg" src="{{energyChartSvgUrl}}" mode="widthFix"></image>
+      </view>
     </view>
   </view>
 </view>

@@ -7,24 +7,16 @@
   grid-template-columns: 46rpx 1fr 54rpx;
   align-items: center;
   gap: 10rpx;
-  min-height: 78rpx;
+  min-height: 82rpx;
   padding: 0 18rpx;
   border: 1rpx solid rgba(79, 59, 44, 0.08);
-  border-radius: 8rpx;
-  background: #fffdf9;
+  border-radius: 18rpx;
+  background: #fcfbf8;
   box-shadow: 0 8rpx 22rpx rgba(73, 51, 33, 0.05);
 }
 
-.search-icon {
-  color: #7a4e3a;
-  text-align: center;
-  font-size: 34rpx;
-}
-
-.search-input {
-  min-height: 76rpx;
-  font-size: 27rpx;
-}
+.search-icon { color: #7f8977; text-align: center; font-size: 34rpx; }
+.search-input { min-height: 80rpx; font-size: 27rpx; }
 
 .clear-btn {
   width: 48rpx;
@@ -32,133 +24,121 @@
   min-height: 48rpx;
   padding: 0;
   border: 0;
-  border-radius: 999rpx;
-  color: #8a8790;
-  background: #f6f3ee;
-  font-size: 34rpx;
-  line-height: 44rpx;
-}
-
-.keyword-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 14rpx;
-  margin-top: 18rpx;
-}
-
-.keyword-chip {
-  padding: 12rpx 20rpx;
-  border: 1rpx solid rgba(122, 78, 58, 0.14);
-  border-radius: 999rpx;
-  color: #7a4e3a;
-  background: #fffdf9;
-  font-size: 24rpx;
-  font-weight: 800;
-}
-
-.state-card {
-  margin-top: 18rpx;
-  padding: 28rpx;
-  color: #756f68;
-  font-size: 25rpx;
-}
-
-.result-list {
-  display: grid;
-  gap: 16rpx;
-  margin-top: 18rpx;
-}
-
-.result-card {
-  display: grid;
-  grid-template-columns: 92rpx minmax(0, 1fr) 96rpx;
-  align-items: center;
-  gap: 14rpx;
-  width: 100%;
-  padding: 18rpx 16rpx;
-  box-sizing: border-box;
-  overflow: hidden;
-}
-
-.result-image,
-.result-sphere {
-  width: 92rpx;
-  height: 92rpx;
-  border-radius: 999rpx;
-  box-shadow: inset -12rpx -14rpx 22rpx rgba(0, 0, 0, 0.14), 0 8rpx 16rpx rgba(0, 0, 0, 0.08);
-}
-
-.result-image {
-  display: block;
-  background: transparent;
-}
-
-.result-sphere {
-  background: #edf0f2;
-}
-
-.result-copy {
-  min-width: 0;
-  overflow: hidden;
-}
-
-.result-name {
-  overflow: hidden;
-  color: #2f2a26;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 27rpx;
-  font-weight: 900;
-}
-
-.result-meta {
-  margin-top: 6rpx;
-  overflow: hidden;
-  color: #756f68;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 22rpx;
-  line-height: 1.35;
-}
-
-.result-price {
-  margin-top: 8rpx;
-  color: #7a4e3a;
-  font-size: 24rpx;
-  font-weight: 800;
-}
-
-.result-actions {
-  display: grid;
-  gap: 8rpx;
-  width: 96rpx;
-  justify-self: end;
-  min-width: 0;
-}
-
-.result-actions button {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 96rpx;
-  min-height: 46rpx;
-  margin: 0;
-  padding: 0;
-  border: 1rpx solid rgba(122, 78, 58, 0.22);
-  border-radius: 999rpx;
-  color: #7a4e3a;
-  background: #fffdf9;
-  font-size: 21rpx;
-  font-weight: 800;
+  border-radius: 50%;
+  color: #898b86;
+  background: #f1ece6;
+  font-size: 32rpx;
   line-height: 46rpx;
 }
 
-.result-actions button::after {
-  border: 0;
+.clear-btn::after,
+.discover-button::after { border: 0; }
+
+.keyword-section { margin-top: 34rpx; }
+.keyword-row { display: flex; flex-wrap: wrap; gap: 14rpx; margin-top: 18rpx; }
+.keyword-chip {
+  padding: 13rpx 22rpx;
+  border: 1rpx solid rgba(122,78,58,.14);
+  border-radius: 999rpx;
+  color: #7f8977;
+  background: #fcfbf8;
+  font-size: 24rpx;
+  font-weight: 700;
 }
 
-.result-actions .primary {
-  border: 0;
-  color: #fff;
-  background: #111;
+.section-subtitle {
+  margin-top: 7rpx;
+  color: #94847a;
+  font-size: 22rpx;
 }
+
+.inspiration-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18rpx;
+  margin-top: 18rpx;
+}
+
+.inspiration-card,
+.inspiration-result-card {
+  overflow: hidden;
+  border-radius: 24rpx;
+  background: #fcfbf8;
+  box-shadow: 0 10rpx 26rpx rgba(69,50,38,.07);
+}
+
+.inspiration-image,
+.result-inspiration-image {
+  background: radial-gradient(circle at 35% 30%, #fff 0 10%, #b9d8df 11% 32%, #315f66 33% 100%);
+}
+.inspiration-image { height: 190rpx; }
+.inspiration-image.gold,.result-inspiration-image.gold { background: radial-gradient(circle at 35% 30%, #fff6c7 0 10%, #d7b65d 11% 36%, #8e6c21 37% 100%); }
+.inspiration-image.violet,.result-inspiration-image.violet { background: radial-gradient(circle at 35% 30%, #f4efff 0 10%, #9f83b8 11% 36%, #64456d 37% 100%); }
+.inspiration-image.pink,.result-inspiration-image.pink { background: radial-gradient(circle at 35% 30%, #fff 0 10%, #e6a7a4 11% 36%, #a65e62 37% 100%); }
+.inspiration-image.clear,.result-inspiration-image.clear { background: radial-gradient(circle at 35% 30%, #fff 0 10%, #e9edf0 11% 36%, #9aa8ad 37% 100%); }
+.inspiration-image.black,.result-inspiration-image.black { background: radial-gradient(circle at 35% 30%, #e9edf0 0 10%, #41464b 11% 36%, #121416 37% 100%); }
+
+.inspiration-copy { padding: 20rpx; }
+.inspiration-title { font-size: 27rpx; font-weight: 800; color: #342720; }
+.inspiration-meta { margin-top: 7rpx; font-size: 20rpx; color: #96867c; }
+.inspiration-link { margin-top: 13rpx; font-size: 21rpx; font-weight: 700; color: #7f8977; }
+
+.result-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 32rpx 4rpx 0;
+  color: #99887e;
+  font-size: 22rpx;
+}
+.result-keyword { color: #49352b; font-size: 30rpx; font-weight: 800; }
+.result-label { margin-left: 8rpx; }
+.result-section { margin-top: 36rpx; }
+
+.state-card {
+  margin-top: 18rpx;
+  padding: 34rpx;
+  border-radius: 24rpx;
+  color: #8c7c72;
+  background: rgba(255,253,249,.76);
+  font-size: 24rpx;
+  text-align: center;
+}
+
+.inspiration-result-list { display: flex; flex-direction: column; gap: 18rpx; margin-top: 18rpx; }
+.inspiration-result-card { display: flex; min-height: 210rpx; }
+.result-inspiration-image { flex: 0 0 210rpx; width: 210rpx; }
+.result-inspiration-copy { min-width: 0; flex: 1; padding: 22rpx; }
+.inspiration-type { font-size: 19rpx; letter-spacing: 2rpx; color: #a38370; }
+.inspiration-desc { display: -webkit-box; margin-top: 10rpx; overflow: hidden; color: #74655c; font-size: 22rpx; line-height: 1.45; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+
+/* 星灵自然疗愈主题 */
+.search-page { padding-top: 18rpx; }
+.search-box {
+  min-height: 76rpx;
+  border-color: rgba(140,145,133,.14);
+  border-radius: 999rpx;
+  background: rgba(255,255,255,.72);
+  box-shadow: 0 10rpx 28rpx rgba(76,73,65,.05);
+}
+.search-icon,
+.inspiration-link { color: #7f8977; }
+.keyword-chip {
+  border-color: rgba(128,139,119,.2);
+  color: #66705f;
+  background: rgba(255,255,255,.62);
+  font-weight: 500;
+}
+.inspiration-card,
+.inspiration-result-card,
+.state-card {
+  border: 1rpx solid rgba(140,145,133,.12);
+  border-radius: 24rpx;
+  background: rgba(255,255,255,.7);
+  box-shadow: 0 12rpx 28rpx rgba(76,73,65,.05);
+}
+.inspiration-title,
+.result-keyword { color: #343633; }
+.inspiration-meta,
+.inspiration-desc,
+.section-subtitle { color: #858782; }

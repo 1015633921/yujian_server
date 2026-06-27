@@ -1,27 +1,35 @@
 {
   "pages": [
     "pages/home/home",
+    "pages/custom-mode/custom-mode",
     "pages/search/search",
+    "pages/plan-detail/plan-detail",
     "pages/community/community",
     "pages/community-detail/community-detail",
+    "pages/community-favorites/community-favorites",
+    "pages/inspiration-cart/inspiration-cart",
+    "pages/my-plans/my-plans",
     "pages/workspace/workspace",
     "pages/profile/profile",
+    "pages/daily-energy/daily-energy",
     "pages/assessment/assessment",
     "pages/report/report",
     "pages/checkout/checkout",
+    "pages/order-success/order-success",
     "pages/order-list/order-list",
     "pages/order-detail/order-detail"
   ],
   "window": {
     "navigationBarTextStyle": "black",
-    "navigationBarTitleText": "星灵水晶",
-    "navigationBarBackgroundColor": "#F6F3EE",
-    "backgroundColor": "#F6F3EE"
+    "navigationBarTitleText": "宇涧水晶",
+    "navigationBarBackgroundColor": "#FBFAF7",
+    "backgroundColor": "#F8F6F1"
   },
   "tabBar": {
-    "color": "#8A8790",
-    "selectedColor": "#2F2A26",
-    "backgroundColor": "#FFFFFF",
+    "custom": true,
+    "color": "#8A8D87",
+    "selectedColor": "#87947E",
+    "backgroundColor": "#FBFAF7",
     "borderStyle": "white",
     "list": [
       {
@@ -29,8 +37,8 @@
         "text": "首页"
       },
       {
-        "pagePath": "pages/community/community",
-        "text": "灵感"
+        "pagePath": "pages/assessment/assessment",
+        "text": "测算"
       },
       {
         "pagePath": "pages/workspace/workspace",
@@ -43,6 +51,10 @@
     ]
   },
   "style": "v2",
+  "__usePrivacyCheck__": true,
+  "requiredPrivateInfos": [
+    "chooseAddress"
+  ],
   "sitemapLocation": "sitemap.json",
   "lazyCodeLoading": "requiredComponents"
 }

@@ -1,0 +1,186 @@
+<view class="daily-page yu-page">
+  <view class="daily-nav">
+    <view class="daily-back yu-pressable" bindtap="goBack">‹</view>
+    <view class="daily-nav-title">今日能量建议</view>
+    <view></view>
+  </view>
+
+  <view wx:if="{{viewDaily}}" class="daily-content">
+    <view class="daily-hero-card yu-card">
+      <view class="hero-glow"></view>
+      <view class="hero-spark spark-one">✦</view>
+      <view class="hero-spark spark-two">✧</view>
+      <view class="daily-hero-top">
+        <view>
+          <view class="daily-date">{{viewDaily.dateText}}</view>
+          <view class="daily-hero-title">{{viewDaily.title}}</view>
+        </view>
+        <view class="daily-status">{{viewDaily.status}}</view>
+      </view>
+
+      <view class="score-row">
+        <view class="score-number">{{viewDaily.score}}</view>
+        <view class="score-unit">/100</view>
+      </view>
+
+      <view class="keyword-row">
+        <text wx:for="{{viewDaily.keywords}}" wx:key="*this">{{item}}</text>
+      </view>
+
+      <view class="hero-summary">{{viewDaily.summary}}</view>
+    </view>
+
+    <view class="choice-card yu-card">
+      <view class="card-head">
+        <view>
+          <view class="card-title"><text class="title-icon">✨</text>今天你想怎么调整？</view>
+          <view class="card-sub">选择后会重新生成今日建议</view>
+        </view>
+        <button class="yu-button yu-button-secondary yu-btn-mini refresh-button" loading="{{refreshing}}" disabled="{{refreshing}}" bindtap="refreshDaily">更新</button>
+      </view>
+
+      <view class="choice-group">
+        <view class="choice-label">状态</view>
+        <view class="choice-list">
+          <view
+            wx:for="{{moodOptions}}"
+            wx:key="key"
+            class="choice-chip {{item.className}}"
+            data-key="{{item.key}}"
+            bindtap="selectMood"
+          >
+            <text>{{item.label}}</text>
+            <view>{{item.desc}}</view>
+          </view>
+        </view>
+      </view>
+
+      <view class="choice-group">
+        <view class="choice-label">场景</view>
+        <view class="choice-list compact">
+          <view
+            wx:for="{{sceneOptions}}"
+            wx:key="key"
+            class="choice-chip compact {{item.className}}"
+            data-key="{{item.key}}"
+            bindtap="selectScene"
+          >{{item.label}}</view>
+        </view>
+      </view>
+
+      <view class="choice-group">
+        <view class="choice-label">目标</view>
+        <view class="choice-list compact">
+          <view
+            wx:for="{{goalOptions}}"
+            wx:key="key"
+            class="choice-chip compact {{item.className}}"
+            data-key="{{item.key}}"
+            bindtap="selectGoal"
+          >{{item.label}}</view>
+        </view>
+      </view>
+    </view>
+
+    <view class="dimension-card yu-card">
+      <view class="card-title"><text class="title-icon blue">▥</text>今日能量维度</view>
+      <view class="dimension-row" wx:for="{{viewDaily.dimensions}}" wx:key="key">
+        <view class="dimension-icon" style="color: {{item.color}};">{{item.icon}}</view>
+        <view class="dimension-name">{{item.name}}</view>
+        <view class="dimension-track">
+          <view class="dimension-fill" style="width: {{item.width}}; background: {{item.color}};"></view>
+        </view>
+        <view class="dimension-value">{{item.value}}</view>
+      </view>
+      <view class="dimension-copy">{{viewDaily.dimensionCommentary}}</view>
+    </view>
+
+    <view class="crystal-card yu-card">
+      <view class="card-title"><text class="title-icon purple">✦</text>今日水晶建议</view>
+      <view class="combo-list">
+        <view class="combo-item" wx:for="{{viewDaily.combo}}" wx:key="label">
+          <view class="combo-index" style="background: {{item.color}};">{{item.index}}</view>
+          <view class="crystal-orb" style="{{item.orbStyle}}"></view>
+          <view class="combo-copy">
+            <view class="combo-name">{{item.label}}：{{item.name}}</view>
+            <view class="combo-role">{{item.role}}</view>
+            <view wx:if="{{item.reason}}" class="combo-reason">{{item.reason}}</view>
+          </view>
+        </view>
+      </view>
+    </view>
+
+    <view class="wear-card yu-card">
+      <view class="card-title"><text class="title-icon green">☘</text>今日佩戴建议</view>
+      <view class="wear-line">
+        <text>佩戴</text>
+        <view>{{viewDaily.wearing.hand}}</view>
+      </view>
+      <view class="wear-line">
+        <text>适合颜色</text>
+        <view class="color-dot-row">
+          <text wx:for="{{viewDaily.wearing.colorDots}}" wx:key="name" style="background: {{item.color}};"></text>
+          <view>{{viewDaily.wearing.colorsText}}</view>
+        </view>
+      </view>
+      <view class="wear-line">
+        <text>适合场景</text>
+        <view>{{viewDaily.wearing.scenesText}}</view>
+      </view>
+      <view class="wear-line">
+        <text>避免搭配</text>
+        <view>{{viewDaily.wearing.avoid}}</view>
+      </view>
+    </view>
+
+    <view class="action-card yu-card">
+      <view class="card-title"><text class="title-icon yellow">☑</text>今日行动建议</view>
+      <view class="action-item" wx:for="{{viewDaily.actions}}" wx:key="index">
+        <view class="action-dot">{{item.index}}</view>
+        <view>{{item.text}}</view>
+      </view>
+    </view>
+
+    <view class="plan-card yu-card">
+      <view class="plan-head">
+        <view>
+          <view class="card-title">{{viewDaily.plan.title}}</view>
+          <view class="plan-style">{{viewDaily.plan.style}}</view>
+        </view>
+        <view class="plan-mark">DIY</view>
+      </view>
+      <view class="plan-visual">
+        <view class="plan-orb" wx:for="{{viewDaily.plan.visuals}}" wx:key="index" style="{{item.style}}"></view>
+      </view>
+      <view class="plan-desc">{{viewDaily.plan.description}}</view>
+      <view class="plan-tags">
+        <text wx:for="{{viewDaily.plan.mainColors}}" wx:key="*this">{{item}}</text>
+        <text wx:for="{{viewDaily.plan.beadSizes}}" wx:key="*this">{{item}}</text>
+      </view>
+      <view class="plan-hint">{{viewDaily.plan.wristHint}}</view>
+    </view>
+
+    <view class="season-card yu-card">
+      <view class="card-title"><text class="title-icon notice">ⓘ</text>近期能量提示</view>
+      <view class="season-summary">{{viewDaily.seasonHint.summary}}</view>
+      <view class="season-line" wx:if="{{viewDaily.seasonHint.drainPoint}}">
+        <text>流失点</text>
+        <view>{{viewDaily.seasonHint.drainPoint}}</view>
+      </view>
+      <view class="season-line" wx:if="{{viewDaily.seasonHint.suggestion}}">
+        <text>建议</text>
+        <view>{{viewDaily.seasonHint.suggestion}}</view>
+      </view>
+    </view>
+  </view>
+
+  <view wx:else class="loading-card yu-card">
+    <view class="loading-title">正在生成今日建议</view>
+    <view class="loading-sub">会结合今日状态与五行方向生成可进入 DIY 的方案</view>
+  </view>
+
+  <view class="daily-bottom">
+    <button class="yu-button yu-button-secondary bottom-secondary" bindtap="refreshDaily" loading="{{refreshing}}" disabled="{{refreshing}}">更新今日建议</button>
+    <button class="yu-button yu-button-primary bottom-primary" bindtap="generateDailyDiy">生成今日手串方案</button>
+  </view>
+</view>

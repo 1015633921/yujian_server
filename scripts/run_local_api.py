@@ -11,6 +11,10 @@ LOG_FILE = ROOT / "local-api.runner.log"
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(SITE_PACKAGES))
 
+from scripts.local_env import load_env_file  # noqa: E402
+
+load_env_file(ROOT)
+
 import uvicorn  # noqa: E402
 
 

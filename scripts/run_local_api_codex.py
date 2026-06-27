@@ -12,6 +12,10 @@ LOG_FILE = ROOT / "local-api.out.log"
 
 sys.path.insert(0, str(ROOT))
 
+from scripts.local_env import load_env_file  # noqa: E402
+
+load_env_file(ROOT)
+
 
 if __name__ == "__main__":
     try:

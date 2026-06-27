@@ -1,4 +1,7 @@
 {
-  "navigationBarTitleText": "工作台",
-  "navigationStyle": "custom"
+    "navigationBarTitleText":  "工作台",
+    "navigationStyle":  "custom",
+    "navigationBarBackgroundColor":  "#FBFAF7",
+    "backgroundColor":  "#F8F6F1",
+    "navigationBarTextStyle":  "black"
 }

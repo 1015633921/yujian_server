@@ -1,31 +1,154 @@
-<view class="page">
-  <view class="nav-row">
+<view class="community-page yu-page">
+  <view class="community-nav">
+    <view class="nav-back yu-pressable" bindtap="goBack">‹</view>
+    <view class="nav-title">灵感库</view>
+    <view class="nav-tools">
+      <view class="nav-dot">•••</view>
+      <view class="nav-circle"></view>
+    </view>
+  </view>
+
+  <view class="search-card yu-card">
+    <view class="search-icon">⌕</view>
+    <input
+      class="search-input"
+      value="{{keyword}}"
+      placeholder="搜索灵感 / 材质 / 功效"
+      placeholder-class="search-placeholder"
+      confirm-type="search"
+      bindinput="onKeywordInput"
+      bindconfirm="submitSearch"
+    />
+    <view wx:if="{{keyword}}" class="search-clear" bindtap="clearKeyword">×</view>
+    <view class="filter-button" bindtap="toggleFilterHint">筛选</view>
+  </view>
+
+  <scroll-view class="topic-scroll" scroll-x enable-flex show-scrollbar="{{false}}">
+    <view
+      wx:for="{{topics}}"
+      wx:key="key"
+      class="topic-chip {{activeTopic === item.key ? 'active' : ''}}"
+      data-key="{{item.key}}"
+      bindtap="selectTopic"
+    >
+      {{item.label}}
+    </view>
+  </scroll-view>
+
+  <view class="section-head">
     <view>
-      <view class="nav-title">灵感社区</view>
-      <view class="sub">分享设计理念、佩戴感受与水晶知识</view>
+      <view class="section-title">今日灵感</view>
+      <view class="section-subtitle">从真实搭配里挑选可直接带入 DIY 的方案</view>
     </view>
+    <view class="result-count">{{filteredPosts.length}} 款</view>
   </view>
 
-  <view class="section">
-    <view class="section-title">DIY 作品墙</view>
-    <view wx:for="{{posts}}" wx:key="id" class="post card" data-id="{{item.id}}" bindtap="openPost">
-      <view class="post-image {{item.tone}}"></view>
+  <view wx:if="{{loading}}" class="yu-loading">
+    <view class="yu-spinner"></view>
+    <view>正在同步灵感内容</view>
+  </view>
+
+  <view wx:elif="{{!filteredPosts.length}}" class="empty-card yu-card">
+    <view class="empty-title">暂时没有匹配的灵感</view>
+    <view class="empty-desc">换一个关键词，或者先看看推荐方案。</view>
+    <button class="empty-button yu-button yu-button-primary" bindtap="resetFilters">查看推荐</button>
+  </view>
+
+  <view wx:else class="post-list">
+    <view
+      wx:for="{{filteredPosts}}"
+      wx:key="id"
+      class="post-card yu-card yu-card-pressable"
+      data-id="{{item.id}}"
+      bindtap="openPost"
+    >
+      <view class="post-media tone-{{item.tone}}">
+        <image
+          wx:if="{{item.imageUrl}}"
+          class="post-cover"
+          src="{{item.imageUrl}}"
+          mode="aspectFill"
+          lazy-load="{{true}}"
+          data-id="{{item.id}}"
+          binderror="onImageError"
+        />
+        <view wx:else class="bracelet-preview">
+          <image
+            wx:for="{{item.visualBeads}}"
+            wx:for-item="bead"
+            wx:key="index"
+            class="preview-bead"
+            src="{{bead.src}}"
+            mode="aspectFill"
+            lazy-load="{{true}}"
+            style="{{bead.style}}"
+          />
+        </view>
+        <view class="media-shade"></view>
+        <view class="hot-pill">♡ {{item.heatText}}</view>
+        <view class="post-copy">
+          <view class="post-title">{{item.title}}</view>
+          <view class="post-desc">{{item.desc}}</view>
+        </view>
+      </view>
+
       <view class="post-body">
-        <view class="post-title">{{item.title}}</view>
-        <view class="post-author">{{item.author}} · {{item.likes}} 喜欢</view>
-        <view class="post-desc">{{item.desc}}</view>
-        <button class="secondary-button same-button" data-id="{{item.id}}" catchtap="useSame">一键同款并修改</button>
+        <view class="post-meta">
+          <view class="author-dot"></view>
+          <view>{{item.author}}</view>
+          <view class="meta-divider"></view>
+          <view>{{item.sceneText}}</view>
+        </view>
+        <view class="tag-row">
+          <text wx:for="{{item.displayTags}}" wx:key="*this" class="yu-tag">{{item}}</text>
+        </view>
+        <view class="post-actions">
+          <view class="detail-link">查看搭配故事 →</view>
+          <button class="use-button" data-id="{{item.id}}" catchtap="useSame">带入 DIY</button>
+        </view>
       </view>
     </view>
   </view>
 
-  <view class="section">
-    <view class="section-title">水晶百科 / 能量学堂</view>
-    <view class="lesson-list card">
-      <view wx:for="{{lessons}}" wx:key="title" class="lesson">
-        <view class="lesson-title">{{item.title}}</view>
-        <view class="lesson-desc">{{item.desc}}</view>
+  <view class="lesson-section yu-card">
+    <view class="lesson-head">
+      <view>
+        <view class="lesson-kicker">CRYSTAL NOTES</view>
+        <view class="lesson-title-main">水晶小课</view>
       </view>
+      <view class="lesson-badge">LAB</view>
+    </view>
+    <view class="lesson-list">
+      <view wx:for="{{lessons}}" wx:key="title" class="lesson-item">
+        <view class="lesson-index">0{{index + 1}}</view>
+        <view class="lesson-copy">
+          <view class="lesson-title">{{item.title}}</view>
+          <view class="lesson-desc">{{item.desc}}</view>
+        </view>
+      </view>
+    </view>
+  </view>
+
+  <view class="lab-tabbar {{labTabbarClass}}">
+    <view class="lab-tab" bindtap="goToPage" data-url="/pages/home/home">
+      <view class="tab-icon">⌂</view>
+      <text>首页</text>
+    </view>
+    <view class="lab-tab" bindtap="goToPage" data-url="/pages/assessment/assessment">
+      <view class="tab-icon">✦</view>
+      <text>测算</text>
+    </view>
+    <view class="lab-tab center" bindtap="goToPage" data-url="/pages/workspace/workspace">
+      <view class="tab-icon">＋</view>
+      <text>DIY</text>
+    </view>
+    <view class="lab-tab" bindtap="goToPage" data-url="/pages/inspiration-cart/inspiration-cart">
+      <view class="tab-icon">车</view>
+      <text>购物车</text>
+    </view>
+    <view class="lab-tab" bindtap="goToPage" data-url="/pages/profile/profile">
+      <view class="tab-icon">♙</view>
+      <text>我的</text>
     </view>
   </view>
 </view>

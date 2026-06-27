@@ -1,0 +1,33 @@
+<view class="custom-mode-page yu-page">
+  <view class="mode-nav">
+    <view class="nav-back yu-pressable" bindtap="goBack">‹</view>
+    <view class="nav-title">选择定制方式</view>
+    <view class="nav-capsule"><text>•••</text><text class="capsule-dot">◎</text></view>
+  </view>
+
+  <view class="mode-heading">
+    <view class="mode-eyebrow">CUSTOM PATH</view>
+    <view class="mode-title">选择一种方式，开启你的专属定制</view>
+    <view class="mode-desc">可以先测算，也可以直接进入 DIY。每一种入口都会保留真实业务路径。</view>
+  </view>
+
+  <view class="mode-list">
+    <view wx:for="{{modes}}" wx:key="id" class="mode-card {{item.tone}} yu-card yu-card-pressable" bindtap="selectMode" data-id="{{item.id}}">
+      <view class="mode-copy">
+        <view class="mode-card-title">{{item.title}}</view>
+        <view class="mode-card-desc">{{item.desc}}</view>
+      </view>
+      <view class="mode-badge">
+        <text>{{item.badge}}</text>
+      </view>
+    </view>
+  </view>
+
+  <view class="mode-note yu-card">
+    <view class="note-dot"></view>
+    <view>
+      <view class="note-title">定制说明</view>
+      <view class="note-desc">五行、星座和 MBTI 会进入测算流程；审美定制会进入灵感库；自由 DIY 会直接打开工作台。</view>
+    </view>
+  </view>
+</view>

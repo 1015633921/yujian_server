@@ -1,6 +1,8 @@
 const { calculateEnergy } = require('../../utils/api');
 const auth = require('../../utils/auth');
 
+const TAB_BAR_PAGES = ['/pages/home/home', '/pages/assessment/assessment', '/pages/workspace/workspace', '/pages/profile/profile'];
+
 const DEFAULT_WISH = '情绪平衡';
 const GENDER_OPTIONS = [
   { value: 'female', label: '女' },
@@ -22,9 +24,36 @@ const WISH_MAPPING = {
   专注灵感: '健康护身/保持专注',
   守护辟邪: '辟邪防小人/消除焦虑'
 };
+const MODE_COPY = {
+  wuxing: {
+    navTitle: '五行测算',
+    kicker: 'BASIC PROFILE',
+    title: '建立你的五行能量档案',
+    desc: '填写出生日期、时间和地点后，先生成能量分布，再进入专属手串推荐。'
+  },
+  astro: {
+    navTitle: '星座灵感',
+    kicker: 'ASTRO PROFILE',
+    title: '结合星座气质做灵感推荐',
+    desc: '出生信息会帮助系统理解你的阶段状态，并生成更适合的水晶搭配方向。'
+  },
+  mbti: {
+    navTitle: 'MBTI 定制',
+    kicker: 'MBTI PROFILE',
+    title: '用性格偏好辅助配色与主石',
+    desc: '你可以补充 MBTI 与当下愿望，让推荐方案更贴近日常佩戴场景。'
+  }
+};
+const STEPS = [
+  { key: 'basic', index: 1, label: '基础信息', activeClass: 'active' },
+  { key: 'analysis', index: 2, label: '能量分析', activeClass: '' },
+  { key: 'recommend', index: 3, label: '推荐方案', activeClass: '' }
+];
 
 Page({
   data: {
+    modeCopy: MODE_COPY.wuxing,
+    steps: STEPS,
     form: {
       name: '',
       gender: 'female',
@@ -42,11 +71,70 @@ Page({
     mbtiOptions: [],
     wishOptions: [],
     selectedWishMap: {},
-    submitting: false
+    submitting: false,
+    labTabbarClass: ''
   },
 
-  onLoad() {
+  onLoad(options = {}) {
+    const storedMode = wx.getStorageSync('customMode') || {};
+    const modeId = options.mode || storedMode.id || 'wuxing';
+    this.setData({ modeCopy: MODE_COPY[modeId] || MODE_COPY.wuxing });
     this.refreshOptionState();
+  },
+
+  onShow() {
+    this.hideNativeTabBar();
+    this.lastAssessmentScrollTop = 0;
+    if (this.data.labTabbarClass) {
+      this.setData({ labTabbarClass: '' });
+    }
+    const storedMode = wx.getStorageSync('customMode') || {};
+    const modeId = storedMode.id || 'wuxing';
+    this.setData({ modeCopy: MODE_COPY[modeId] || MODE_COPY.wuxing });
+  },
+
+  onHide() {
+    clearTimeout(this.tabbarSetDataTimer);
+    this.restoreNativeTabBar();
+  },
+
+  onUnload() {
+    this.restoreNativeTabBar();
+  },
+
+  onPageScroll(e) {
+    const currentTop = Number(e.scrollTop) || 0;
+    const previousTop = this.lastAssessmentScrollTop || 0;
+    const delta = currentTop - previousTop;
+    this.lastAssessmentScrollTop = currentTop;
+
+    if (Math.abs(delta) < 12) return;
+
+    const shouldHide = delta > 0 && currentTop > 80;
+    const nextClass = shouldHide ? 'is-hidden' : '';
+    if (nextClass === this.data.labTabbarClass) return;
+
+    clearTimeout(this.tabbarSetDataTimer);
+    this.tabbarSetDataTimer = setTimeout(() => {
+      this.setData({ labTabbarClass: nextClass });
+    }, 16);
+  },
+
+  hideNativeTabBar() {
+    if (!wx.hideTabBar) return;
+    wx.hideTabBar({
+      animation: false,
+      fail: () => {}
+    });
+  },
+
+  restoreNativeTabBar() {
+    clearTimeout(this.tabbarSetDataTimer);
+    if (!wx.showTabBar) return;
+    wx.showTabBar({
+      animation: false,
+      fail: () => {}
+    });
   },
 
   refreshOptionState() {
@@ -176,6 +264,25 @@ Page({
   },
 
   goBack() {
-    wx.navigateBack();
+    const pages = getCurrentPages();
+    if (pages.length > 1) {
+      wx.navigateBack();
+      return;
+    }
+    wx.switchTab({ url: '/pages/home/home' });
+  },
+
+  goToPage(e) {
+    const url = e.currentTarget.dataset.url;
+    if (!url || url === '/pages/assessment/assessment') return;
+    if (TAB_BAR_PAGES.includes(url)) {
+      wx.switchTab({ url });
+      return;
+    }
+    wx.navigateTo({ url });
+  },
+
+  viewShoppingCart() {
+    wx.navigateTo({ url: '/pages/inspiration-cart/inspiration-cart' });
   }
 });

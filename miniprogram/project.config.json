@@ -2,7 +2,12 @@
   "compileType": "miniprogram",
   "libVersion": "3.16.1",
   "packOptions": {
-    "ignore": [],
+    "ignore": [
+      {
+        "type": "folder",
+        "value": "assets"
+      }
+    ],
     "include": []
   },
   "setting": {

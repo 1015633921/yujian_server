@@ -1,76 +1,171 @@
-<view class="page">
-  <view class="nav-row">
-    <view class="icon-btn" bindtap="goBack">‹</view>
-    <view class="nav-title">能量档案</view>
-    <view class="icon-btn">·</view>
+<view class="assessment-page yu-page">
+  <view class="assessment-nav">
+    <view class="nav-back yu-pressable" bindtap="goBack">‹</view>
+    <view class="nav-title">{{modeCopy.navTitle}}</view>
+    <view class="nav-more">···</view>
   </view>
 
-  <view class="hero">
-    <view class="hero-title">测一测我的专属水晶</view>
-    <view class="hero-desc">填写基础信息后，系统会先生成五行能量画像。确认报告后，再填写手腕周长生成专属 DIY 手串。</view>
-  </view>
-
-  <view class="card form-card">
-    <view class="field">
-      <view class="label">昵称</view>
-      <input class="input" placeholder="例如：小羽" value="{{form.name}}" data-field="name" bindinput="onInput" />
-    </view>
-
-    <view class="field">
-      <view class="label">性别标识</view>
-      <view class="seg-row">
-        <view wx:for="{{genderOptions}}" wx:key="value" class="seg {{item.activeClass}}" data-value="{{item.value}}" bindtap="selectGender">{{item.label}}</view>
-      </view>
-    </view>
-
-    <view class="field-grid">
-      <view class="field">
-        <view class="label">出生日期</view>
-        <picker mode="date" value="{{form.birthDate}}" bindchange="onDateChange">
-          <view class="input">{{form.birthDate}}</view>
-        </picker>
-      </view>
-      <view class="field">
-        <view class="label">出生时刻</view>
-        <picker mode="time" value="{{form.birthTime}}" bindchange="onTimeChange">
-          <view class="input">{{birthTimeLabel}}</view>
-        </picker>
-      </view>
-    </view>
-
-    <view class="field compact-field">
-      <view class="seg-row">
-        <view class="seg small {{birthTimeUnknownClass}}" bindtap="setBirthTimeUnknown">时刻未知</view>
-      </view>
-    </view>
-
-    <view class="field">
-      <view class="label">出生地</view>
-      <picker mode="region" level="city" value="{{form.birthRegion}}" bindchange="onRegionChange">
-        <view class="input">{{form.birthRegion[0]}} {{form.birthRegion[1]}}</view>
-      </picker>
+  <view class="assessment-stepper">
+    <view
+      wx:for="{{steps}}"
+      wx:key="key"
+      class="step-item {{item.activeClass}}"
+    >
+      <view class="step-dot">{{item.index}}</view>
+      <view class="step-label">{{item.label}}</view>
     </view>
   </view>
 
-  <view class="section">
-    <view class="section-head">
-      <view class="section-title">MBTI 类型</view>
-      <view class="section-link" bindtap="clearMbti">{{form.mbti ? '清除' : '可选'}}</view>
+  <view class="assessment-hero">
+    <view class="hero-kicker">{{modeCopy.kicker}}</view>
+    <view class="hero-title">{{modeCopy.title}}</view>
+    <view class="hero-desc">{{modeCopy.desc}}</view>
+  </view>
+
+  <view class="form-panel yu-card yu-card-lg">
+    <view class="panel-head">
+      <view>
+        <view class="panel-title">请填写你的出生信息</view>
+        <view class="panel-desc">用于计算你的五行能量分布</view>
+      </view>
+      <view class="panel-badge">基础信息</view>
+    </view>
+
+    <view class="form-row">
+      <view class="row-label">昵称</view>
+      <input
+        class="row-input"
+        placeholder="例如：小羽"
+        value="{{form.name}}"
+        data-field="name"
+        bindinput="onInput"
+      />
+      <view class="row-required">*</view>
+    </view>
+
+    <view class="form-row gender-row">
+      <view class="row-label">性别标识</view>
+      <view class="gender-options">
+        <view
+          wx:for="{{genderOptions}}"
+          wx:key="value"
+          class="gender-seg {{item.activeClass}}"
+          data-value="{{item.value}}"
+          bindtap="selectGender"
+        >
+          {{item.label}}
+        </view>
+      </view>
+    </view>
+
+    <picker mode="date" value="{{form.birthDate}}" bindchange="onDateChange">
+      <view class="form-row picker-row">
+        <view class="row-label">出生日期</view>
+        <view class="row-value">{{form.birthDate}}</view>
+        <view class="row-arrow">›</view>
+      </view>
+    </picker>
+
+    <picker mode="time" value="{{form.birthTime}}" bindchange="onTimeChange">
+      <view class="form-row picker-row">
+        <view class="row-label">出生时刻</view>
+        <view class="row-value">{{birthTimeLabel}}</view>
+        <view class="row-arrow">›</view>
+      </view>
+    </picker>
+
+    <view class="unknown-row">
+      <view class="seg small {{birthTimeUnknownClass}}" bindtap="setBirthTimeUnknown">时刻未知</view>
+      <text>不确定时，将按中午 12:00 估算。</text>
+    </view>
+
+    <picker mode="region" level="city" value="{{form.birthRegion}}" bindchange="onRegionChange">
+      <view class="form-row picker-row last-row">
+        <view class="row-label">出生地点</view>
+        <view class="row-value">{{form.birthRegion[0]}} {{form.birthRegion[1]}}</view>
+        <view class="row-arrow">›</view>
+      </view>
+    </picker>
+  </view>
+
+  <view class="option-section">
+    <view class="option-head">
+      <view>
+        <view class="option-title">MBTI 类型</view>
+        <view class="option-desc">可选，用于辅助理解偏好与表达方式。</view>
+      </view>
+      <view class="option-action" bindtap="clearMbti">{{form.mbti ? '清除' : '可选'}}</view>
     </view>
     <view class="chip-grid">
-      <view wx:for="{{mbtiOptions}}" wx:key="value" class="chip {{item.activeClass}}" data-value="{{item.value}}" bindtap="selectMbti">{{item.label}}</view>
+      <view
+        wx:for="{{mbtiOptions}}"
+        wx:key="value"
+        class="chip {{item.activeClass}}"
+        data-value="{{item.value}}"
+        bindtap="selectMbti"
+      >
+        {{item.label}}
+      </view>
     </view>
   </view>
 
-  <view class="section">
-    <view class="section-head">
-      <view class="section-title">当前核心愿望</view>
-      <view class="section-link">最多选 3 项</view>
+  <view class="option-section">
+    <view class="option-head">
+      <view>
+        <view class="option-title">当前核心愿望</view>
+        <view class="option-desc">最多选择 3 项，帮助推荐更贴近你的手作方案。</view>
+      </view>
+      <view class="option-action">最多 3 项</view>
     </view>
     <view class="wish-grid">
-      <view wx:for="{{wishOptions}}" wx:key="value" class="wish {{item.activeClass}}" data-value="{{item.value}}" bindtap="toggleWish">{{item.label}}</view>
+      <view
+        wx:for="{{wishOptions}}"
+        wx:key="value"
+        class="wish {{item.activeClass}}"
+        data-value="{{item.value}}"
+        bindtap="toggleWish"
+      >
+        {{item.label}}
+      </view>
     </view>
   </view>
 
-  <button class="primary-button" loading="{{submitting}}" disabled="{{submitting}}" bindtap="startAssessment">计算我的五行能量</button>
+  <view class="privacy-note">
+    <view class="note-dot"></view>
+    <view>信息仅用于本次能量测算与方案推荐，不会展示给其他用户。</view>
+  </view>
+
+  <view class="assessment-bottom">
+    <button
+      class="yu-button yu-button-primary assessment-submit"
+      loading="{{submitting}}"
+      disabled="{{submitting}}"
+      bindtap="startAssessment"
+    >
+      下一步
+    </button>
+  </view>
+
+  <view class="lab-tabbar {{labTabbarClass}}">
+    <view class="lab-tab" bindtap="goToPage" data-url="/pages/home/home">
+      <view class="tab-icon">⌂</view>
+      <text>首页</text>
+    </view>
+    <view class="lab-tab active" bindtap="goToPage" data-url="/pages/assessment/assessment">
+      <view class="tab-icon">✧</view>
+      <text>测算</text>
+    </view>
+    <view class="lab-tab center" bindtap="goToPage" data-url="/pages/workspace/workspace">
+      <view class="tab-icon">＋</view>
+      <text>DIY</text>
+    </view>
+    <view class="lab-tab" bindtap="viewShoppingCart">
+      <view class="tab-icon">▤</view>
+      <text>购物车</text>
+    </view>
+    <view class="lab-tab" bindtap="goToPage" data-url="/pages/profile/profile">
+      <view class="tab-icon">♙</view>
+      <text>我的</text>
+    </view>
+  </view>
 </view>

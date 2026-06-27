@@ -16,14 +16,14 @@
 }
 
 .list-count {
-  color: #7a4e3a;
+  color: #7f8977;
   font-size: 24rpx;
 }
 
 .state-card,
 .empty-card {
   padding: 28rpx;
-  color: #756f68;
+  color: #858782;
   font-size: 26rpx;
 }
 
@@ -44,19 +44,56 @@
   gap: 20rpx;
 }
 
+.order-id-row {
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.order-id-label {
+  flex: 0 0 auto;
+  color: #8b8f88;
+  font-size: 21rpx;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
 .order-id {
   min-width: 0;
+  max-width: 360rpx;
   overflow: hidden;
-  color: #2f2a26;
+  color: #303230;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 26rpx;
-  font-weight: 900;
+  font-size: 21rpx;
+  font-weight: 760;
+}
+
+.order-copy-btn {
+  flex: 0 0 auto;
+  min-width: 58rpx;
+  height: 40rpx;
+  padding: 0 12rpx;
+  border: 1rpx solid rgba(32, 32, 31, .08);
+  border-radius: 999rpx;
+  color: #647c70;
+  background: rgba(100, 124, 112, .08);
+  text-align: center;
+  font-size: 19rpx;
+  font-weight: 760;
+  line-height: 40rpx;
+}
+
+.order-copy-btn:active {
+  opacity: .78;
+  transform: scale(.96);
 }
 
 .order-status {
   flex: 0 0 auto;
-  color: #7a4e3a;
+  color: #7f8977;
   font-size: 24rpx;
   font-weight: 800;
 }
@@ -65,8 +102,88 @@
 .order-desc,
 .order-arrow {
   margin-top: 10rpx;
-  color: #8a8790;
+  color: #898b86;
   font-size: 22rpx;
+}
+
+.order-card-content {
+  display: flex;
+  align-items: stretch;
+  gap: 20rpx;
+  margin-top: 18rpx;
+}
+
+.order-card-copy {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.order-card-content .order-time {
+  margin-top: 0;
+}
+
+.order-ring-preview {
+  position: relative;
+  flex: 0 0 142rpx;
+  width: 142rpx;
+  height: 130rpx;
+  overflow: hidden;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 48% 36%, rgba(255,255,255,.96) 0 18%, rgba(255,255,255,.58) 36%, rgba(255,255,255,0) 62%),
+    radial-gradient(circle at 50% 52%, #f1eee7 0 58%, #e4ded2 100%);
+  box-shadow:
+    inset 0 -10rpx 24rpx rgba(111, 105, 91, .12),
+    0 10rpx 24rpx rgba(46, 45, 40, .08);
+}
+
+.order-ring-plate {
+  position: absolute;
+  left: 16rpx;
+  top: 12rpx;
+  right: 16rpx;
+  bottom: 12rpx;
+  border: 1rpx solid rgba(104, 101, 91, .12);
+  border-radius: 50%;
+}
+
+.order-preview-image {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.order-ring-track {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 92rpx;
+  height: 92rpx;
+  border: 2rpx solid rgba(83, 82, 76, .14);
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.order-ring-bead {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  margin-left: -12rpx;
+  margin-top: -12rpx;
+  overflow: hidden;
+  border: 2rpx solid rgba(255,255,255,.9);
+  border-radius: 50%;
+  background: radial-gradient(circle at 32% 24%, #fff 0 12%, #d8ddd4 18% 62%, rgba(0,0,0,.16) 100%);
+  box-shadow:
+    inset -3rpx -5rpx 9rpx rgba(30,30,30,.13),
+    0 4rpx 10rpx rgba(32,32,31,.12);
+}
+
+.order-ring-bead image {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
 }
 
 .order-price {
@@ -77,7 +194,7 @@
 
 .order-arrow {
   text-align: right;
-  color: #7a4e3a;
+  color: #7f8977;
 }
 
 .empty-card {
@@ -94,7 +211,55 @@
   border: 0;
   border-radius: 8rpx;
   color: #fff;
-  background: #7a4e3a;
+  background: #7f8977;
   font-size: 24rpx;
   line-height: 58rpx;
+}
+
+/* 星灵自然疗愈主题 */
+.list-title {
+  color: #303230;
+  font-family: "STKaiti", "KaiTi", serif;
+  font-weight: 600;
+}
+.list-count,
+.order-status,
+.order-arrow { color: #7f8977; }
+.order-card,
+.state-card,
+.empty-card {
+  border-radius: 24rpx;
+  background: rgba(255,255,255,.72);
+}
+.order-id { color: #303230; }
+.mini-action {
+  border-radius: 999rpx;
+  background: linear-gradient(135deg, #a8b29d, #8f9b84);
+}
+
+/* WeUI-like order list button. */
+.mini-action {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: auto;
+  min-width: 136rpx;
+  min-height: 62rpx;
+  padding: 0 22rpx;
+  border: 0;
+  border-radius: 999rpx;
+  color: #fff;
+  background: linear-gradient(135deg, #2f322f 0%, #141614 100%);
+  box-shadow: 0 10rpx 22rpx rgba(26, 28, 25, .12);
+  font-weight: 780;
+  line-height: 1;
+}
+
+.mini-action::after {
+  border: 0;
+}
+
+.mini-action:active {
+  opacity: .86;
+  transform: scale(.985);
 }

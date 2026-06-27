@@ -10,10 +10,6 @@ App({
       wx.cloud.init(cloudOptions);
     }
 
-    const logs = wx.getStorageSync('logs') || [];
-    logs.unshift(Date.now());
-    wx.setStorageSync('logs', logs);
-
     if (!wx.getStorageSync('energyProfile')) {
       wx.setStorageSync('energyProfile', {
         name: '新朋友',
@@ -27,9 +23,13 @@ App({
       });
     }
 
-    auth.silentLogin().catch((error) => {
-      console.warn('silent login skipped:', error.message || error);
-    });
+    // 先让首页完成首屏绘制，再刷新登录态，避免新用户首次进入时
+    // 登录请求和图片、页面脚本同时争用网络与主线程。
+    setTimeout(() => {
+      auth.silentLogin().catch((error) => {
+        console.warn('silent login skipped:', error.message || error);
+      });
+    }, 1200);
   },
   globalData: {
     userInfo: null

@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from .daily_energy import DailyEnergyCalculator
+from .daily_energy import DAILY_ENERGY_CONTENT_VERSION, DailyEnergyCalculator
 from .repository import AssessmentRepository
 from .schemas import DailyCheckInRequest
 
@@ -24,7 +24,7 @@ class DailyEnergyService:
     ) -> tuple[dict, bool]:
         if not force_recalculate:
             existing = self.repository.get_daily_energy(user_id, target_date.isoformat())
-            if existing:
+            if existing and existing.get("content_version") == DAILY_ENERGY_CONTENT_VERSION:
                 return existing, True
 
         assessment = self.repository.latest_for_user(user_id)

@@ -1,6 +1,10 @@
 const env = require('../config/env');
 
 function getBaseUrl() {
+  const info = wx.getSystemInfoSync ? wx.getSystemInfoSync() : {};
+  if (info.platform && info.platform !== 'devtools' && env.deviceBaseUrl) {
+    return env.deviceBaseUrl;
+  }
   return env.fallbackBaseUrl;
 }
 
@@ -101,6 +105,119 @@ function saveUserProfile(payload) {
   return request('/api/v1/auth/profile', { method: 'POST', data: payload });
 }
 
+function isDomainListError(errMsg = '') {
+  return errMsg.indexOf('url not in domain list') > -1 || errMsg.indexOf('domain list') > -1;
+}
+
+function inferAvatarFileName(filePath = '') {
+  const clean = String(filePath).split('?')[0].split('#')[0];
+  const name = clean.split('/').pop() || 'avatar.jpg';
+  return /\.[a-z0-9]+$/i.test(name) ? name : 'avatar.jpg';
+}
+
+function inferAvatarContentType(filePath = '') {
+  const lower = String(filePath).toLowerCase();
+  if (lower.indexOf('.png') > -1) return 'image/png';
+  if (lower.indexOf('.webp') > -1) return 'image/webp';
+  if (lower.indexOf('.gif') > -1) return 'image/gif';
+  return 'image/jpeg';
+}
+
+function readFileBase64(filePath) {
+  return new Promise((resolve, reject) => {
+    const fs = wx.getFileSystemManager && wx.getFileSystemManager();
+    if (!fs || !fs.readFile) {
+      reject(new Error('当前微信版本不支持读取头像文件'));
+      return;
+    }
+    fs.readFile({
+      filePath,
+      encoding: 'base64',
+      success(res) {
+        resolve(res.data);
+      },
+      fail(error) {
+        reject(new Error(error.errMsg || '读取头像文件失败'));
+      }
+    });
+  });
+}
+
+async function uploadAvatarByBase64(filePath, userId) {
+  const contentBase64 = await readFileBase64(filePath);
+  return request('/api/v1/auth/avatar-base64', {
+    method: 'POST',
+    data: {
+      user_id: userId,
+      content_base64: contentBase64,
+      content_type: inferAvatarContentType(filePath),
+      filename: inferAvatarFileName(filePath)
+    }
+  });
+}
+
+function uploadAvatar(filePath, userId) {
+  if (!filePath) return Promise.reject(new Error('请选择头像'));
+  if (env.useAnyService && wx.cloud && wx.cloud.uploadFile) {
+    return uploadAvatarByBase64(filePath, userId);
+  }
+  const url = `${getBaseUrl()}/api/v1/auth/avatar`;
+  return new Promise((resolve, reject) => {
+    wx.uploadFile({
+      url,
+      filePath,
+      name: 'file',
+      formData: { user_id: userId },
+      timeout: 15000,
+      success(res) {
+        try {
+          const body = typeof res.data === 'string' ? JSON.parse(res.data) : res.data;
+          resolve(unwrapResponse(res.statusCode, body));
+        } catch (error) {
+          console.error('avatar upload response failed:', { url, statusCode: res.statusCode, data: res.data, error });
+          reject(error);
+        }
+      },
+      fail(error) {
+        let errMsg = error.errMsg || '头像上传失败';
+        if (isDomainListError(errMsg)) {
+          uploadAvatarByBase64(filePath, userId).then(resolve).catch(reject);
+          return;
+        }
+        console.error('wx.uploadFile failed:', { url, error });
+        reject(new Error(errMsg));
+      }
+    });
+  });
+}
+
+function uploadDesignPreview(filePath, userId) {
+  if (!filePath) return Promise.reject(new Error('请选择方案预览图'));
+  const url = `${getBaseUrl()}/api/v1/diy-designs/preview`;
+  return new Promise((resolve, reject) => {
+    wx.uploadFile({
+      url,
+      filePath,
+      name: 'file',
+      formData: { user_id: userId },
+      timeout: 15000,
+      success(res) {
+        try {
+          const body = typeof res.data === 'string' ? JSON.parse(res.data) : res.data;
+          resolve(unwrapResponse(res.statusCode, body));
+        } catch (error) {
+          console.error('design preview upload response failed:', { url, statusCode: res.statusCode, data: res.data, error });
+          reject(error);
+        }
+      },
+      fail(error) {
+        console.error('wx.uploadFile design preview failed:', { url, error });
+        reject(new Error(error.errMsg || '方案预览图上传失败'));
+      }
+    });
+  });
+}
+
 function bindPhone(payload) {
   return request('/api/v1/auth/phone', { method: 'POST', data: payload });
 }
@@ -112,19 +229,62 @@ function getTodayDailyEnergy(userId, options = {}) {
   return request(`/api/v1/daily-energy/today?${query.join('&')}`);
 }
 
+function checkInDailyEnergy(payload) {
+  return request('/api/v1/daily-energy/check-in', { method: 'POST', data: payload });
+}
+
 function getMaterials(options = {}) {
   const query = [];
   if (options.top) query.push(`top=${encodeURIComponent(options.top)}`);
   if (options.keyword) query.push(`keyword=${encodeURIComponent(options.keyword)}`);
+  if (options.compact) query.push('compact=true');
+  if (options.limit) query.push(`limit=${encodeURIComponent(options.limit)}`);
   return request(`/api/v1/materials${query.length ? `?${query.join('&')}` : ''}`);
+}
+
+function getCommunityPosts(options = {}) {
+  const query = [];
+  if (options.limit) query.push(`limit=${encodeURIComponent(options.limit)}`);
+  return request(`/api/v1/community-posts${query.length ? `?${query.join('&')}` : ''}`);
+}
+
+function getHomeBanners(options = {}) {
+  const query = [];
+  if (options.limit) query.push(`limit=${encodeURIComponent(options.limit)}`);
+  return request(`/api/v1/home-banners${query.length ? `?${query.join('&')}` : ''}`);
+}
+
+function getCommunityPost(postId) {
+  return request(`/api/v1/community-posts/${encodeURIComponent(postId)}`);
+}
+
+function getRecommendationPlans(options = {}) {
+  const query = [];
+  if (options.homeHot !== undefined) query.push(`home_hot=${options.homeHot ? 'true' : 'false'}`);
+  if (options.limit) query.push(`limit=${encodeURIComponent(options.limit)}`);
+  return request(`/api/v1/recommendation-plans${query.length ? `?${query.join('&')}` : ''}`);
+}
+
+function getRecommendationPlan(planId) {
+  return request(`/api/v1/recommendation-plans/${encodeURIComponent(planId)}`);
 }
 
 function createOrder(payload) {
   return request('/api/v1/orders', { method: 'POST', data: payload });
 }
 
+function saveDIYDesign(payload) {
+  return request('/api/v1/diy-designs', { method: 'POST', data: payload });
+}
+
 function getOrders(userId) {
   return request(`/api/v1/orders?user_id=${encodeURIComponent(userId)}`);
+}
+
+function getOrder(orderId, userId) {
+  return request(
+    `/api/v1/orders/${encodeURIComponent(orderId)}?user_id=${encodeURIComponent(userId)}`
+  );
 }
 
 function payOrder(orderId, userId) {
@@ -161,6 +321,20 @@ function confirmReceipt(orderId, userId) {
   });
 }
 
+function cancelOrder(orderId, userId, reason = '') {
+  return request(`/api/v1/orders/${encodeURIComponent(orderId)}/cancel`, {
+    method: 'POST',
+    data: { user_id: userId, reason }
+  });
+}
+
+function updateOrderReceiver(orderId, userId, receiver) {
+  return request(`/api/v1/orders/${encodeURIComponent(orderId)}/receiver`, {
+    method: 'PUT',
+    data: { user_id: userId, receiver }
+  });
+}
+
 function requestAfterSale(orderId, userId, reason = '') {
   return request(`/api/v1/orders/${encodeURIComponent(orderId)}/after-sale`, {
     method: 'POST',
@@ -188,15 +362,27 @@ module.exports = {
   wechatLogin,
   getUserProfile,
   saveUserProfile,
+  uploadAvatar,
+  uploadDesignPreview,
   bindPhone,
   getTodayDailyEnergy,
+  checkInDailyEnergy,
   getMaterials,
+  getHomeBanners,
+  getCommunityPosts,
+  getCommunityPost,
+  getRecommendationPlans,
+  getRecommendationPlan,
+  saveDIYDesign,
   createOrder,
   getOrders,
+  getOrder,
   payOrder,
   mockPayOrder,
   mockShipOrder,
   confirmReceipt,
+  cancelOrder,
+  updateOrderReceiver,
   requestAfterSale,
   refundOrder,
   getOrderLogistics

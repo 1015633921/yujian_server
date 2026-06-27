@@ -1,3 +1,5 @@
 {
-  "navigationBarTitleText": "星灵水晶"
+  "navigationStyle": "custom",
+  "backgroundColor": "#F6F4EF",
+  "navigationBarTextStyle": "white"
 }

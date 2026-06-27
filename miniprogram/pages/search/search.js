@@ -80,7 +80,7 @@ Page({
     const exists = cart.some(entry => entry.materialId === item.id || entry.name === item.name);
     const nextCart = exists ? cart : [nextItem, ...cart];
     wx.setStorageSync('inspirationCart', nextCart);
-    wx.showToast({ title: exists ? '灵感单里已有' : '已加入灵感单', icon: 'none' });
+    wx.showToast({ title: exists ? '已在收藏中' : '已收藏灵感', icon: 'none' });
   },
 
   startDiy(e) {

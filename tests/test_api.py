@@ -1,7 +1,9 @@
 from fastapi.testclient import TestClient
+import pytest
 from uuid import uuid4
 
 from app.main import app
+from app.order_service import OrderService, generate_numeric_order_no, now_iso
 
 client = TestClient(app)
 
@@ -24,12 +26,405 @@ def test_options_support_form_rendering():
     assert len(response.json()["data"]["mbti_options"]) == 16
 
 
-def test_wechat_login_profile_and_phone_flow_without_secret():
-    login = client.post("/api/v1/auth/wechat-login", json={"code": f"unit-test-login-code-{uuid4()}"})
+def test_compact_material_search_omits_catalog_metadata_and_honors_limit():
+    response = client.get("/api/v1/materials?compact=true&limit=2")
+    data = response.json()["data"]
+
+    assert response.status_code == 200
+    assert set(data) == {"materials"}
+    assert len(data["materials"]) <= 2
+    assert all(isinstance(item.get("image_urls"), list) for item in data["materials"])
+
+
+def test_admin_material_accepts_multiple_image_urls(tmp_path):
+    from app.admin_service import AdminService
+
+    service = AdminService(tmp_path / "multi-image-materials.db")
+    saved = service.save_material(
+        {
+            "id": "multiImageBead8",
+            "skuId": "multiImageBead",
+            "top": "bead",
+            "category": "测试晶石",
+            "name": "多图测试珠",
+            "effect": "随机珠面",
+            "element": "火",
+            "price": 1,
+            "size": 8,
+            "weight": 1,
+            "color": "#b95858",
+            "shine": "#ffe1df",
+            "image_url": "https://cdn-test.yustream.cn/materials/beads/a.png",
+            "image_urls": [
+                "https://cdn-test.yustream.cn/materials/beads/b.png",
+                "https://cdn-test.yustream.cn/materials/beads/c.png",
+            ],
+        }
+    )
+
+    assert saved["image_url"].endswith("/a.png")
+    assert saved["image_urls"] == [
+        "https://cdn-test.yustream.cn/materials/beads/b.png",
+        "https://cdn-test.yustream.cn/materials/beads/c.png",
+        "https://cdn-test.yustream.cn/materials/beads/a.png",
+    ]
+
+
+def test_material_cdn_url_deduplicates_materials_prefix(monkeypatch):
+    from app.materials import clean_image_urls, material_url_from_path
+
+    monkeypatch.setenv("APP_ENV", "test")
+    monkeypatch.delenv("TENCENT_COS_CDN_BASE_URL", raising=False)
+
+    assert material_url_from_path("materials/beads/wps-circle-v2/a.png") == (
+        "https://cdn-test.yustream.cn/materials/beads/wps-circle-v2/a.png"
+    )
+    assert material_url_from_path("beads/wps-circle-v2/a.png") == (
+        "https://cdn-test.yustream.cn/materials/beads/wps-circle-v2/a.png"
+    )
+    assert clean_image_urls(["https://cdn-test.yustream.cn/materials/materials/beads/a.png"]) == [
+        "https://cdn-test.yustream.cn/materials/beads/a.png"
+    ]
+    assert clean_image_urls(["https://yujian-1258267288.cos.ap-guangzhou.myqcloud.com/materials/beads/a.png"]) == [
+        "https://cdn-test.yustream.cn/materials/beads/a.png"
+    ]
+    assert clean_image_urls(
+        [
+            "https://cdn-test.yustream.cn/materials/beads/wps-circle-v2/南红玛瑙.png",
+            "https://cdn-test.yustream.cn/materials/beads/wps-circle-v2/%E5%8D%97%E7%BA%A2%E7%8E%9B%E7%91%99.png",
+        ]
+    ) == [
+        "https://cdn-test.yustream.cn/materials/beads/wps-circle-v2/%E5%8D%97%E7%BA%A2%E7%8E%9B%E7%91%99.png"
+    ]
+
+
+def test_admin_material_autogenerates_id_sku_and_disables_zero_stock(tmp_path):
+    from app.admin_service import AdminService
+
+    service = AdminService(tmp_path / "auto-materials.db")
+    saved = service.save_material(
+        {
+            "top": "bead",
+            "category": "test",
+            "name": "Auto Bead",
+            "effect": "focus",
+            "element": "water",
+            "price": 1,
+            "size": 8,
+            "weight": 1,
+            "stock": 0,
+            "enabled": True,
+        }
+    )
+    duplicate = service.save_material(
+        {
+            "top": "bead",
+            "category": "test",
+            "name": "Auto Bead",
+            "effect": "focus",
+            "element": "water",
+            "price": 1,
+            "size": 8,
+            "weight": 1,
+            "stock": 5,
+            "enabled": True,
+        }
+    )
+
+    assert saved["id"].startswith("mat_")
+    assert saved["skuId"].startswith("bead-auto-bead-8mm")
+    assert saved["enabled"] is False
+    assert duplicate["skuId"] != saved["skuId"]
+    assert duplicate["enabled"] is True
+
+
+def test_material_catalog_exposes_cache_version():
+    response = client.get("/api/v1/materials")
+    data = response.json()["data"]
+
+    assert response.status_code == 200
+    assert "version" in data
+    assert "updated_at" in data
+
+
+def test_order_rejects_stale_material_price(tmp_path):
+    from app.admin_service import AdminService
+
+    db_path = tmp_path / "stale-material-price.db"
+    admin = AdminService(db_path)
+    saved = admin.save_material(
+        {
+            "id": "priceCheckBead8",
+            "skuId": "priceCheckBead8",
+            "top": "bead",
+            "category": "test",
+            "name": "Price Check Bead",
+            "effect": "focus",
+            "element": "water",
+            "price": 2,
+            "size": 8,
+            "weight": 1,
+            "stock": 10,
+            "enabled": True,
+        }
+    )
+    service = OrderService(db_path)
+    service.get_user = lambda _user_id: None
+
+    with pytest.raises(ValueError, match="珠材价格已更新"):
+        service.create_order(
+            {
+                "user_id": "price-check-user",
+                "receiver": {
+                    "name": "Test User",
+                    "phone": "13800000000",
+                    "address": "Test Address",
+                },
+                "design": {"summary": {"price": 1}},
+                "sequence": [{"id": saved["id"], "sku": saved["skuId"], "name": saved["name"], "price": 1}],
+                "bom": [],
+            }
+        )
+
+
+def test_order_repairs_legacy_zero_price_without_snapshot(tmp_path, monkeypatch):
+    from app.admin_service import AdminService
+
+    monkeypatch.setenv("WECHAT_PAY_TEST_MODE", "false")
+    db_path = tmp_path / "legacy-zero-price.db"
+    admin = AdminService(db_path)
+    saved = admin.save_material(
+        {
+            "id": "legacyZeroBead8",
+            "skuId": "legacyZeroBead8",
+            "top": "bead",
+            "category": "test",
+            "name": "Legacy Zero Bead",
+            "effect": "focus",
+            "element": "water",
+            "price": 0.01,
+            "size": 8,
+            "weight": 1,
+            "stock": 10,
+            "enabled": True,
+        }
+    )
+    service = OrderService(db_path)
+    service.get_user = lambda _user_id: None
+
+    result = service.create_order(
+        {
+            "user_id": "legacy-zero-user",
+            "receiver": {
+                "name": "Test User",
+                "phone": "13800000000",
+                "address": "Test Address",
+            },
+            "design": {"summary": {"price": 0}},
+            "sequence": [{"id": saved["id"], "sku": saved["skuId"], "name": saved["name"], "price": 0}],
+            "bom": [],
+        }
+    )
+    order = result["order"]
+
+    assert order["total_amount"] == 0.01
+    assert order["sequence"][0]["price"] == 0.01
+
+
+def test_order_uses_current_material_price_snapshot(tmp_path, monkeypatch):
+    from app.admin_service import AdminService
+
+    monkeypatch.setenv("WECHAT_PAY_TEST_MODE", "false")
+    db_path = tmp_path / "current-material-price.db"
+    admin = AdminService(db_path)
+    saved = admin.save_material(
+        {
+            "id": "currentPriceBead8",
+            "skuId": "currentPriceBead8",
+            "top": "bead",
+            "category": "test",
+            "name": "Current Price Bead",
+            "effect": "focus",
+            "element": "water",
+            "price": 3.5,
+            "size": 8,
+            "weight": 1,
+            "stock": 10,
+            "enabled": True,
+        }
+    )
+    service = OrderService(db_path)
+    service.get_user = lambda _user_id: None
+    result = service.create_order(
+        {
+            "user_id": "current-price-user",
+            "receiver": {
+                "name": "Test User",
+                "phone": "13800000000",
+                "address": "Test Address",
+            },
+            "design": {"summary": {"price": 999}},
+            "sequence": [{"id": saved["id"], "sku": saved["skuId"], "name": saved["name"], "price": 3.5}],
+            "bom": [],
+        }
+    )
+
+    assert result["order"]["total_amount"] == 3.5
+    assert result["order"]["bom"][0]["qty"] == 1
+
+
+def test_order_material_snapshot_survives_material_update_and_delete(tmp_path, monkeypatch):
+    from app.admin_service import AdminService
+
+    monkeypatch.setenv("WECHAT_PAY_TEST_MODE", "false")
+    db_path = tmp_path / "order-material-snapshot.db"
+    admin = AdminService(db_path)
+    saved = admin.save_material(
+        {
+            "id": "snapshotBead8",
+            "skuId": "snapshotBead",
+            "top": "bead",
+            "category": "original-category",
+            "series": "Original Series",
+            "name": "Original Snapshot Bead",
+            "effect": "original effect",
+            "element": "water",
+            "price": 8.8,
+            "size": 8,
+            "weight": 1.2,
+            "stock": 10,
+            "enabled": True,
+            "image_url": "https://cdn-test.yustream.cn/materials/beads/original.png",
+            "image_urls": [
+                "https://cdn-test.yustream.cn/materials/beads/original.png",
+                "https://cdn-test.yustream.cn/materials/beads/original-side.png",
+            ],
+        }
+    )
+    service = OrderService(db_path)
+    service.get_user = lambda _user_id: None
+    result = service.create_order(
+        {
+            "user_id": "snapshot-user",
+            "receiver": {
+                "name": "Test User",
+                "phone": "13800000000",
+                "address": "Test Address",
+            },
+            "design": {"summary": {"price": 999}},
+            "sequence": [{"id": saved["id"], "sku": saved["skuId"], "name": "Frontend Name", "price": 8.8}],
+            "bom": [],
+        }
+    )
+    order_id = result["order"]["order_id"]
+
+    admin.save_material(
+        {
+            **saved,
+            "name": "Changed Bead",
+            "category": "changed-category",
+            "series": "Changed Series",
+            "effect": "changed effect",
+            "element": "fire",
+            "price": 99,
+            "image_url": "https://cdn-test.yustream.cn/materials/beads/changed.png",
+            "image_urls": ["https://cdn-test.yustream.cn/materials/beads/changed.png"],
+            "stock": 10,
+            "enabled": True,
+        }
+    )
+    admin.delete_material(saved["id"])
+
+    user_order = service.get_order(order_id)
+    admin_order = admin.get_order(order_id)
+    for order in (user_order, admin_order):
+        item = order["sequence"][0]
+        bom = order["bom"][0]
+        assert order["total_amount"] == 8.8
+        assert item["name"] == "Original Snapshot Bead"
+        assert item["category"] == "original-category"
+        assert item["series"] == "Original Series"
+        assert item["effect"] == "original effect"
+        assert item["element"] == "water"
+        assert item["price"] == 8.8
+        assert item["image_url"].endswith("/original.png")
+        assert item["image_urls"] == [
+            "https://cdn-test.yustream.cn/materials/beads/original.png",
+            "https://cdn-test.yustream.cn/materials/beads/original-side.png",
+        ]
+        assert bom["name"] == "Original Snapshot Bead"
+        assert bom["price"] == 8.8
+
+
+def test_generated_order_numbers_are_numeric_fixed_length_and_unique():
+    values = {generate_numeric_order_no() for _ in range(2000)}
+
+    assert len(values) == 2000
+    assert all(value.isdigit() and len(value) == 20 for value in values)
+
+
+def test_created_order_uses_same_numeric_id_for_payment_trade_no(tmp_path):
+    service = OrderService(tmp_path / "orders.db")
+    service.get_user = lambda _user_id: None
+    result = service.create_order(
+        {
+            "user_id": "numeric-order-user",
+            "receiver": {
+                "name": "测试用户",
+                "phone": "13800000000",
+                "address": "测试地址",
+            },
+            "design": {"summary": {"price": 18}},
+            "sequence": [{"name": "测试珠子", "price": 18}],
+            "bom": [],
+        }
+    )
+    order = result["order"]
+
+    assert order["order_id"].isdigit()
+    assert len(order["order_id"]) == 20
+    assert order["out_trade_no"] == order["order_id"]
+
+
+def test_wechat_pay_test_mode_forces_one_cent(tmp_path, monkeypatch):
+    monkeypatch.setenv("WECHAT_PAY_TEST_MODE", "true")
+    service = OrderService(tmp_path / "orders-test-pay.db")
+    service.get_user = lambda _user_id: None
+    result = service.create_order(
+        {
+            "user_id": "one-cent-user",
+            "receiver": {
+                "name": "测试用户",
+                "phone": "13800000000",
+                "address": "测试地址",
+            },
+            "design": {"summary": {"price": 999}},
+            "sequence": [{"name": "测试珠子", "price": 999}],
+            "bom": [],
+        }
+    )
+
+    assert result["order"]["total_amount"] == 0.01
+    assert result["order"]["total_fee"] == 1
+
+
+def test_wechat_login_profile_and_phone_flow_without_secret(monkeypatch):
+    from app.api import auth_service
+
+    class DisabledAvatarStorage:
+        enabled = False
+
+    monkeypatch.setattr(auth_service, "avatar_storage", DisabledAvatarStorage())
+    monkeypatch.setattr(auth_service, "app_id", None)
+    monkeypatch.setattr(auth_service, "app_secret", None)
+    monkeypatch.setenv("ALLOW_MANUAL_PHONE_BIND", "true")
+    login_code = f"unit-test-login-code-{uuid4()}"
+    login = client.post("/api/v1/auth/wechat-login", json={"code": login_code})
     user = login.json()["data"]
 
     assert login.status_code == 200
-    assert user["user_id"].startswith("dev_")
+    assert user["user_id"].isdigit()
+    assert user["openid"].startswith("dev_")
     assert user["has_profile"] is False
 
     profile = client.post(
@@ -54,6 +449,551 @@ def test_wechat_login_profile_and_phone_flow_without_secret():
 
     assert phone.status_code == 200
     assert phone.json()["data"]["has_phone"] is True
+
+    repeat = client.post("/api/v1/auth/wechat-login", json={"code": login_code})
+    repeat_user = repeat.json()["data"]
+
+    assert repeat.status_code == 200
+    assert repeat_user["user_id"] == user["user_id"]
+
+
+def test_profile_avatar_is_persisted_to_cos_when_storage_enabled(tmp_path):
+    from app.auth_service import WechatAuthService
+    from app.avatar_storage import AvatarUploadResult
+    from app.repository import AssessmentRepository
+    from app.schemas import UserProfileUpdateRequest
+
+    class FakeAvatarStorage:
+        enabled = True
+
+        def is_managed_url(self, url):
+            return False
+
+        def upload_url(self, user_id, avatar_url):
+            assert user_id == "avatar-user"
+            assert avatar_url == "https://thirdwx.qlogo.cn/avatar.png"
+            return AvatarUploadResult(
+                key="users/avatars/avatar-user/avatar.webp",
+                avatar_url="https://cdn-test.yustream.cn/users/avatars/avatar-user/avatar.webp",
+            )
+
+    service = WechatAuthService(
+        AssessmentRepository(tmp_path / "avatar-profile.db"),
+        avatar_storage=FakeAvatarStorage(),
+    )
+    user = service.update_profile(
+        UserProfileUpdateRequest(
+            user_id="avatar-user",
+            nickname="头像用户",
+            avatar_url="https://thirdwx.qlogo.cn/avatar.png",
+        )
+    )
+
+    assert user["avatar_url"] == "https://cdn-test.yustream.cn/users/avatars/avatar-user/avatar.webp"
+
+
+def test_admin_user_avatar_sync_updates_legacy_avatar_url(tmp_path, monkeypatch):
+    import app.admin_service as admin_service_module
+    from app.admin_service import AdminService
+    from app.avatar_storage import AvatarUploadResult
+    from app.repository import AssessmentRepository
+
+    class FakeAvatarStorage:
+        enabled = True
+
+        def is_managed_url(self, url):
+            return "cdn-test.yustream.cn/users/avatars" in url
+
+        def upload_url(self, user_id, avatar_url):
+            assert user_id == "legacy-avatar-user"
+            assert avatar_url == "https://thirdwx.qlogo.cn/legacy.png"
+            return AvatarUploadResult(
+                key="users/avatars/legacy-avatar-user/avatar.webp",
+                avatar_url="https://cdn-test.yustream.cn/users/avatars/legacy-avatar-user/avatar.webp",
+            )
+
+    monkeypatch.setattr(admin_service_module, "AvatarStorage", FakeAvatarStorage)
+    db_path = tmp_path / "admin-avatar-sync.db"
+    AssessmentRepository(db_path)
+    service = AdminService(db_path)
+    timestamp = now_iso()
+    with service.connect() as connection:
+        connection.execute(
+            """
+            INSERT INTO users
+            (user_id, openid, nickname, avatar_url, source, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "legacy-avatar-user",
+                "openid-legacy-avatar",
+                "旧头像用户",
+                "https://thirdwx.qlogo.cn/legacy.png",
+                "wechat",
+                timestamp,
+                timestamp,
+            ),
+        )
+
+    result = service.sync_user_avatars_to_cos(limit=10)
+    with service.connect() as connection:
+        row = connection.execute(
+            "SELECT avatar_url FROM users WHERE user_id = ?",
+            ("legacy-avatar-user",),
+        ).fetchone()
+
+    assert result["synced"] == 1
+    assert result["skipped"] == 0
+    assert result["failed"] == []
+    assert row["avatar_url"] == "https://cdn-test.yustream.cn/users/avatars/legacy-avatar-user/avatar.webp"
+
+
+def test_legacy_openid_user_id_is_migrated_to_numeric(tmp_path):
+    from app.auth_service import WechatAuthService
+    from app.repository import AssessmentRepository
+
+    repository = AssessmentRepository(tmp_path / "legacy-user-id.db")
+    service = WechatAuthService(repository)
+    legacy_user_id = "ov_legacy_openid_user"
+    now = service.now()
+    repository.upsert_user(
+        {
+            "user_id": legacy_user_id,
+            "openid": legacy_user_id,
+            "source": "wechat",
+            "updated_at": now,
+        }
+    )
+    with repository.connect() as connection:
+        connection.execute(
+            """
+            INSERT INTO energy_assessments
+            (assessment_id, user_id, fingerprint, name, core_wish, result_json, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("legacy-assessment", legacy_user_id, "legacy-fp", "Legacy", "Wish", "{}", now),
+        )
+
+    numeric_user_id = service.resolve_numeric_user_id({"openid": legacy_user_id}, service.now())
+
+    assert numeric_user_id.isdigit()
+    assert repository.get_user_by_openid(legacy_user_id)["user_id"] == numeric_user_id
+    assert repository.get_user(legacy_user_id) is None
+    with repository.connect() as connection:
+        row = connection.execute(
+            "SELECT user_id FROM energy_assessments WHERE assessment_id = ?",
+            ("legacy-assessment",),
+        ).fetchone()
+    assert row["user_id"] == numeric_user_id
+
+
+def test_manual_phone_binding_is_disabled_by_default(monkeypatch):
+    from app.api import auth_service
+
+    monkeypatch.delenv("ALLOW_MANUAL_PHONE_BIND", raising=False)
+    monkeypatch.setattr(auth_service, "app_id", None)
+    monkeypatch.setattr(auth_service, "app_secret", None)
+    login = client.post("/api/v1/auth/wechat-login", json={"code": f"manual-phone-{uuid4()}"})
+    user = login.json()["data"]
+
+    response = client.post(
+        "/api/v1/auth/phone",
+        json={"user_id": user["user_id"], "phone_number": "13800000000"},
+    )
+
+    assert response.status_code == 400
+    assert "仅支持微信授权手机号" in response.json()["detail"]
+
+
+def test_order_detail_checks_owner(tmp_path):
+    service = OrderService(tmp_path / "order-detail.db")
+    service.get_user = lambda _user_id: None
+    result = service.create_order(
+        {
+            "user_id": "detail-owner",
+            "receiver": {"name": "测试用户", "phone": "13800000000", "address": "测试地址"},
+            "design": {"summary": {"price": 18}},
+            "sequence": [{"name": "测试珠子", "price": 18}],
+            "bom": [],
+        }
+    )
+    order = result["order"]
+
+    service.ensure_order_owner(service.get_order(order["order_id"]), "detail-owner")
+    try:
+        service.ensure_order_owner(service.get_order(order["order_id"]), "another-user")
+    except ValueError as exc:
+        assert "无权操作" in str(exc)
+    else:
+        raise AssertionError("another user should not access the order")
+
+
+def test_pending_order_can_be_cancelled(tmp_path):
+    service = OrderService(tmp_path / "order-cancel.db")
+    service.get_user = lambda _user_id: None
+    result = service.create_order(
+        {
+            "user_id": "cancel-owner",
+            "receiver": {"name": "测试用户", "phone": "13800000000", "address": "测试地址"},
+            "design": {"summary": {"price": 18}},
+            "sequence": [{"name": "测试珠子", "price": 18}],
+            "bom": [],
+        }
+    )
+
+    cancelled = service.cancel_order(
+        result["order"]["order_id"],
+        "cancel-owner",
+        "用户改变主意",
+    )
+
+    assert cancelled["status"] == "closed"
+    assert cancelled["payment_status"] == "cancelled"
+    assert cancelled["status_history"][-1]["status"] == "closed"
+
+
+def test_order_receiver_can_only_change_before_shipping(tmp_path, monkeypatch):
+    monkeypatch.setenv("WECHAT_PAY_TEST_MODE", "true")
+    service = OrderService(tmp_path / "order-receiver.db")
+    service.get_user = lambda _user_id: None
+    result = service.create_order(
+        {
+            "user_id": "receiver-owner",
+            "receiver": {"name": "测试用户", "phone": "13800000000", "address": "旧地址"},
+            "design": {"summary": {"price": 18}},
+            "sequence": [{"name": "测试珠子", "price": 18}],
+            "bom": [],
+        }
+    )
+    order_id = result["order"]["order_id"]
+
+    pending = service.update_order_receiver(
+        order_id,
+        "receiver-owner",
+        {"name": "测试用户", "phone": "13800000001", "address": "待付款新地址"},
+    )
+    assert pending["receiver"]["address"] == "待付款新地址"
+
+    service.mark_paid_for_dev(order_id, "receiver-owner")
+    paid = service.update_order_receiver(
+        order_id,
+        "receiver-owner",
+        {"name": "测试用户", "phone": "13800000002", "address": "待发货新地址"},
+    )
+    assert paid["receiver"]["address"] == "待发货新地址"
+
+    service.mark_shipped_for_dev(order_id, "receiver-owner", phone_tail="0002")
+    with pytest.raises(ValueError, match="订单已发货"):
+        service.update_order_receiver(
+            order_id,
+            "receiver-owner",
+            {"name": "测试用户", "phone": "13800000003", "address": "已发货新地址"},
+        )
+
+
+def test_admin_approval_submits_wechat_refund_and_marks_order_refunded(tmp_path, monkeypatch):
+    monkeypatch.setenv("WECHAT_PAY_TEST_MODE", "true")
+    service = OrderService(tmp_path / "order-refund.db")
+    service.get_user = lambda _user_id: None
+    result = service.create_order(
+        {
+            "user_id": "refund-owner",
+            "receiver": {"name": "测试用户", "phone": "13800000000", "address": "测试地址"},
+            "design": {"summary": {"price": 18}},
+            "sequence": [{"name": "测试珠子", "price": 18}],
+            "bom": [],
+        }
+    )
+    order_id = result["order"]["order_id"]
+    service.mark_paid_for_dev(order_id, "refund-owner")
+    requested = service.request_refund(order_id, "refund-owner", "用户取消定制")
+
+    assert requested["status"] == "refund_requested"
+    assert requested["refund"]["reason"] == "用户取消定制"
+
+    class FakeWechatPayConfig:
+        ready = True
+        missing: list[str] = []
+
+    monkeypatch.setattr("app.order_service.WechatPayConfig", FakeWechatPayConfig)
+    refund_calls = []
+
+    def fake_wechat_refund(order, out_refund_no, refund_fee, total_fee, reason, config):
+        refund_calls.append(
+            {
+                "order_id": order["order_id"],
+                "out_refund_no": out_refund_no,
+                "refund_fee": refund_fee,
+                "total_fee": total_fee,
+                "reason": reason,
+                "config": config,
+            }
+        )
+        return {"status": "SUCCESS", "refund_id": "wx-refund-001"}
+
+    monkeypatch.setattr(service, "create_wechat_refund", fake_wechat_refund)
+    approved = service.approve_refund(order_id, operator="admin", note="核实后同意")
+
+    assert approved["status"] == "refunded"
+    assert approved["payment_status"] == "refunded"
+    assert approved["refund_status"] == "success"
+    assert approved["refund"]["wechat_response"]["refund_id"] == "wx-refund-001"
+    assert approved["refund"]["approved_by"] == "admin"
+    assert refund_calls[0]["refund_fee"] == approved["total_fee"]
+
+
+def test_wechat_refund_notify_marks_processing_order_refunded(tmp_path, monkeypatch):
+    monkeypatch.setenv("WECHAT_PAY_TEST_MODE", "true")
+    service = OrderService(tmp_path / "order-refund-notify.db")
+    service.get_user = lambda _user_id: None
+    result = service.create_order(
+        {
+            "user_id": "refund-notify-owner",
+            "receiver": {"name": "测试用户", "phone": "13800000000", "address": "测试地址"},
+            "design": {"summary": {"price": 18}},
+            "sequence": [{"name": "测试珠子", "price": 18}],
+            "bom": [],
+        }
+    )
+    order_id = result["order"]["order_id"]
+    paid = service.mark_paid_for_dev(order_id, "refund-notify-owner")
+    requested = service.request_refund(order_id, "refund-notify-owner", "用户取消定制")
+
+    class FakeWechatPayConfig:
+        mch_id = "1746874094"
+        api_v3_key = "0" * 32
+
+    refund_result = {
+        "mchid": "1746874094",
+        "out_trade_no": paid["out_trade_no"],
+        "transaction_id": "wx-transaction-001",
+        "out_refund_no": requested["refund"]["out_refund_no"] if requested["refund"].get("out_refund_no") else f"RF{order_id}",
+        "refund_id": "wx-refund-001",
+        "refund_status": "SUCCESS",
+        "success_time": "2026-06-26T12:00:00+08:00",
+        "amount": {
+            "total": requested["total_fee"],
+            "refund": requested["total_fee"],
+            "payer_refund": requested["total_fee"],
+        },
+    }
+
+    monkeypatch.setattr("app.order_service.WechatPayConfig", FakeWechatPayConfig)
+    monkeypatch.setattr(service, "verify_wechat_notify_signature", lambda *args, **kwargs: None)
+    monkeypatch.setattr(service, "decrypt_wechat_resource", lambda _resource, _key: refund_result)
+
+    service.handle_wechat_refund_notify(
+        {
+            "wechatpay-serial": "PUB_KEY_ID_TEST",
+            "wechatpay-timestamp": "1790000000",
+            "wechatpay-nonce": "nonce",
+            "wechatpay-signature": "signature",
+        },
+        '{"resource":{"ciphertext":"mock"}}',
+    )
+    updated = service.get_order(order_id)
+
+    assert updated["status"] == "refunded"
+    assert updated["payment_status"] == "refunded"
+    assert updated["refund_status"] == "success"
+    assert updated["refund"]["wechat_status"] == "SUCCESS"
+    assert updated["refund"]["refund_id"] == "wx-refund-001"
+
+
+def test_sync_wechat_refund_accepts_query_status_field(tmp_path, monkeypatch):
+    monkeypatch.setenv("WECHAT_PAY_TEST_MODE", "true")
+    service = OrderService(tmp_path / "order-refund-sync-status.db")
+    service.get_user = lambda _user_id: None
+    result = service.create_order(
+        {
+            "user_id": "refund-sync-owner",
+            "receiver": {"name": "测试用户", "phone": "13800000000", "address": "测试地址"},
+            "design": {"summary": {"price": 18}},
+            "sequence": [{"name": "测试珠子", "price": 18}],
+            "bom": [],
+        }
+    )
+    order_id = result["order"]["order_id"]
+    paid = service.mark_paid_for_dev(order_id, "refund-sync-owner")
+    requested = service.request_refund(order_id, "refund-sync-owner", "用户取消定制")
+
+    class FakeWechatPayConfig:
+        ready = True
+        mch_id = "1746874094"
+        missing: list[str] = []
+
+    monkeypatch.setattr("app.order_service.WechatPayConfig", FakeWechatPayConfig)
+    monkeypatch.setattr(
+        service,
+        "query_wechat_refund",
+        lambda out_refund_no, config: {
+            "mchid": "1746874094",
+            "out_trade_no": paid["out_trade_no"],
+            "transaction_id": "wx-transaction-001",
+            "out_refund_no": out_refund_no,
+            "refund_id": "wx-refund-sync-001",
+            "status": "SUCCESS",
+            "success_time": "2026-06-26T12:00:00+08:00",
+            "amount": {
+                "total": requested["total_fee"],
+                "refund": requested["total_fee"],
+                "payer_refund": requested["total_fee"],
+            },
+        },
+    )
+
+    synced = service.sync_wechat_refund(order_id, operator="admin")
+
+    assert synced["status"] == "refunded"
+    assert synced["payment_status"] == "refunded"
+    assert synced["refund_status"] == "success"
+    assert synced["refund"]["wechat_status"] == "SUCCESS"
+    assert synced["refund"]["refund_id"] == "wx-refund-sync-001"
+
+
+def test_mock_payment_is_disabled_outside_test_mode(tmp_path, monkeypatch):
+    monkeypatch.delenv("WECHAT_PAY_TEST_MODE", raising=False)
+    service = OrderService(tmp_path / "mock-disabled.db")
+    service.get_user = lambda _user_id: None
+    result = service.create_order(
+        {
+            "user_id": "mock-disabled-user",
+            "receiver": {"name": "测试用户", "phone": "13800000000", "address": "测试地址"},
+            "design": {"summary": {"price": 18}},
+            "sequence": [{"name": "测试珠子", "price": 18}],
+            "bom": [],
+        }
+    )
+
+    try:
+        service.mark_paid_for_dev(result["order"]["order_id"], "mock-disabled-user")
+    except ValueError as exc:
+        assert "禁用模拟支付" in str(exc)
+    else:
+        raise AssertionError("production mode must reject mock payment")
+
+
+def test_diy_design_list_and_delete(tmp_path):
+    service = OrderService(tmp_path / "design-assets.db")
+    saved = service.save_design(
+        {
+            "user_id": "design-user",
+            "design": {"summary": {"price": 128}},
+            "sequence": [{"name": "南红玛瑙", "size": 8}],
+        }
+    )
+
+    designs = service.list_designs("design-user")
+    assert [item["design_id"] for item in designs] == [saved["design_id"]]
+    assert designs[0]["sequence"][0]["name"] == "南红玛瑙"
+
+    deleted = service.delete_design(saved["design_id"], "design-user")
+    assert deleted["deleted"] is True
+    assert service.list_designs("design-user") == []
+
+
+def test_cart_items_can_be_created_updated_and_cleared(tmp_path):
+    service = OrderService(tmp_path / "cart-assets.db")
+    item = service.save_cart_item(
+        {
+            "user_id": "cart-user",
+            "item_type": "plan",
+            "item_id": "plan-001",
+            "item": {"name": "温柔守护方案", "price": 299},
+            "quantity": 1,
+        }
+    )
+
+    assert item["quantity"] == 1
+    assert service.list_cart_items("cart-user")[0]["item"]["name"] == "温柔守护方案"
+
+    updated = service.update_cart_item(item["cart_item_id"], "cart-user", {"quantity": 2})
+    assert updated["quantity"] == 2
+
+    service.delete_cart_item(item["cart_item_id"], "cart-user")
+    assert service.list_cart_items("cart-user") == []
+
+
+def test_diy_design_rekeys_when_design_id_belongs_to_another_user(tmp_path):
+    service = OrderService(tmp_path / "design-id-conflict.db")
+    first = service.save_design(
+        {
+            "user_id": "design-user-a",
+            "design_id": "shared-local-design-id",
+            "design": {"summary": {"price": 88}},
+            "sequence": [{"name": "白水晶", "size": 8}],
+        }
+    )
+    second = service.save_design(
+        {
+            "user_id": "design-user-b",
+            "design_id": "shared-local-design-id",
+            "design": {"summary": {"price": 99}},
+            "sequence": [{"name": "彩幽灵", "size": 8}],
+        }
+    )
+
+    assert first["design_id"] == "shared-local-design-id"
+    assert second["design_id"] != "shared-local-design-id"
+    assert second["user_id"] == "design-user-b"
+    assert service.get_design("shared-local-design-id")["user_id"] == "design-user-a"
+
+
+def test_user_addresses_keep_single_default(tmp_path):
+    service = OrderService(tmp_path / "address-assets.db")
+    first = service.save_address(
+        {
+            "user_id": "address-user",
+            "name": "张三",
+            "phone": "13800000000",
+            "region": ["重庆市", "重庆市", "渝中区"],
+            "detail_address": "解放碑 1 号",
+        }
+    )
+    second = service.save_address(
+        {
+            "user_id": "address-user",
+            "name": "李四",
+            "phone": "13900000000",
+            "region": ["四川省", "成都市", "锦江区"],
+            "detail_address": "春熙路 2 号",
+            "is_default": True,
+        }
+    )
+
+    assert first["is_default"] is True
+    addresses = service.list_addresses("address-user")
+    assert addresses[0]["address_id"] == second["address_id"]
+    assert addresses[0]["is_default"] is True
+    assert addresses[1]["is_default"] is False
+
+    service.set_default_address(first["address_id"], "address-user")
+    addresses = service.list_addresses("address-user")
+    assert addresses[0]["address_id"] == first["address_id"]
+
+
+def test_available_coupons_filter_by_status_amount_and_expiry(tmp_path):
+    service = OrderService(tmp_path / "coupon-assets.db")
+    timestamp = now_iso()
+    with service.connect() as connection:
+        connection.execute(
+            """
+            INSERT INTO user_coupons
+            (coupon_id, user_id, title, coupon_type, value, min_amount, status, expires_at, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("coupon-ok", "coupon-user", "新客券", "amount", 20, 100, "unused", "2099-01-01T00:00:00+00:00", timestamp, timestamp),
+        )
+        connection.execute(
+            """
+            INSERT INTO user_coupons
+            (coupon_id, user_id, title, coupon_type, value, min_amount, status, expires_at, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("coupon-high", "coupon-user", "高门槛券", "amount", 50, 999, "unused", "2099-01-01T00:00:00+00:00", timestamp, timestamp),
+        )
+
+    assert [coupon["coupon_id"] for coupon in service.available_coupons("coupon-user", 199)] == ["coupon-ok"]
 
 
 def test_calculate_returns_ui_ready_result():
@@ -145,6 +1085,11 @@ def test_first_time_user_gets_starter_daily_energy_and_same_day_is_cached():
     assert first.json()["data"]["mode"] == "starter"
     assert first.json()["data"]["personalized"] is False
     assert first.json()["data"]["guide"]["route"] == "/pages/assessment/assessment"
+    assert first.json()["data"]["recommended_stone"]
+    assert len(first.json()["data"]["recommended_crystals"]) >= 2
+    assert first.json()["data"]["commerce_entry"]["source"] == "daily_energy"
+    assert first.json()["data"]["workbench_payload"]["source"] == "daily_energy"
+    assert first.json()["data"]["workbench_payload"]["bracelet_plan"]["layout"]
     assert second.json()["data"]["cache_hit"] is True
     assert second.json()["data"]["score"] == first.json()["data"]["score"]
 
@@ -163,6 +1108,8 @@ def test_assessed_user_gets_personalized_daily_energy():
     assert data["personalized"] is True
     assert data["assessment_id"]
     assert data["guide"] is None
+    assert data["workbench_payload"]["source_context"]["assessment_id"] == data["assessment_id"]
+    assert data["commerce_entry"]["button_text"] == "一键生成今日手串"
 
 
 def test_daily_checkin_is_saved_and_used_on_recalculation():

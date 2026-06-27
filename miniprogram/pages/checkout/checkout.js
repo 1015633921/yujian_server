@@ -1,6 +1,6 @@
 const auth = require('../../utils/auth');
 const env = require('../../config/env');
-const { createOrder, mockPayOrder } = require('../../utils/api');
+const { createOrder, mockPayOrder, getMaterials } = require('../../utils/api');
 
 const MATERIALS = {
   clearQuartz8: { name: '喜马拉雅白水晶 8mm', sku: 'SKU_CLEAR_8MM', price: 5 },
@@ -24,11 +24,58 @@ const MATERIALS = {
 
 const ADDRESS_KEY = 'checkoutReceiver';
 
+function firstImageUrl(entry = {}) {
+  const urls = (entry.image_urls || entry.image_pool || [])
+    .concat(entry.image_url || [])
+    .filter(Boolean);
+  return urls[0] || '';
+}
+
+function moneyValue(...values) {
+  for (const value of values) {
+    if (value === undefined || value === null || value === '') continue;
+    const amount = Number(value);
+    if (Number.isFinite(amount)) return amount;
+  }
+  return 0;
+}
+
+function normalizeSequenceItem(entry = {}, index = 0) {
+  const key = entry.id || entry.sku || entry.material_id || '';
+  const fallback = MATERIALS[key] || {};
+  const imageUrls = (entry.image_urls || entry.image_pool || [])
+    .concat(entry.image_url || [])
+    .filter(Boolean);
+  const size = entry.size || entry.diameter || '';
+  const name = entry.name || entry.series || entry.category || fallback.name || key || '定制珠材';
+  const category = entry.category || entry.series || '';
+  return {
+    ...entry,
+    index: Number(entry.index || index + 1),
+    id: entry.id || key,
+    sku: entry.sku || fallback.sku || key,
+    name,
+    category,
+    series: entry.series || '',
+    size,
+    sizeText: size ? `${size}mm` : '',
+    subText: [size ? `${size}mm` : '', category].filter(Boolean).join(' · '),
+    price: moneyValue(entry.price, entry.priceText, entry.amount, fallback.price),
+    weight: Number(entry.weight || 0),
+    image_url: entry.image_url || imageUrls[0] || '',
+    image_urls: imageUrls
+  };
+}
+
 Page({
   data: {
     design: null,
     sequence: [],
     bom: [],
+    designPreviewImage: '',
+    previewBeads: [],
+    amountText: '0.00',
+    couponDiscountText: '-¥0.00',
     receiver: {
       name: '',
       phone: '',
@@ -40,6 +87,7 @@ Page({
     fullAddress: '',
     hasAddress: false,
     addressError: '',
+    remark: '',
     submitting: false
   },
 
@@ -64,22 +112,181 @@ Page({
 
   loadDesign() {
     const design = wx.getStorageSync('currentDesign');
-    if (!design || !design.selected || !design.selected.length) return;
-    const sequence = design.selected.map((id, index) => ({
+    const hasSelected = Array.isArray(design && design.selected) && design.selected.length;
+    const hasSequence = Array.isArray(design && design.sequence) && design.sequence.length;
+    if (!design || (!hasSelected && !hasSequence)) return;
+    const rawSequence = hasSequence ? design.sequence : design.selected.map((id, index) => ({
       index: index + 1,
       id,
       name: MATERIALS[id] ? MATERIALS[id].name : id,
       sku: MATERIALS[id] ? MATERIALS[id].sku : id,
       price: MATERIALS[id] ? MATERIALS[id].price : 0
     }));
+    const sequence = rawSequence.map(normalizeSequenceItem);
+    this.applyDesignState(design, sequence);
+    this.refreshDesignPrices();
+  },
+
+  buildBom(sequence = []) {
     const bomMap = {};
     sequence.forEach(item => {
-      if (!bomMap[item.sku]) {
-        bomMap[item.sku] = { sku: item.sku, name: item.name, qty: 0 };
+      const key = item.sku || item.id || `${item.name}-${item.size}`;
+      if (!bomMap[key]) {
+        bomMap[key] = {
+          sku: key,
+          name: item.name,
+          qty: 0,
+          size: item.size || '',
+          sizeText: item.sizeText || '',
+          subText: item.subText || item.category || '',
+          category: item.category || '',
+          price: Number(item.price || 0),
+          image_url: item.image_url || ''
+        };
       }
-      bomMap[item.sku].qty += 1;
+      bomMap[key].qty += 1;
+      bomMap[key].total = Number((bomMap[key].qty * bomMap[key].price).toFixed(2));
+      bomMap[key].priceText = this.formatAmount(bomMap[key].price);
+      bomMap[key].totalText = this.formatAmount(bomMap[key].total);
     });
-    this.setData({ design, sequence, bom: Object.values(bomMap) });
+    return Object.values(bomMap);
+  },
+
+  applyDesignState(design, sequence) {
+    const bom = this.buildBom(sequence);
+    const fallbackAmount = sequence.reduce((sum, item) => sum + Number(item.price || 0), 0);
+    const summaryAmount = Number(design.summary && (design.summary.priceText || design.summary.price));
+    const amount = Number.isFinite(summaryAmount) && summaryAmount > 0 ? summaryAmount : fallbackAmount;
+    const summary = {
+      ...(design.summary || {}),
+      count: sequence.length,
+      price: amount,
+      priceText: this.formatAmount(amount)
+    };
+    const designForView = { ...design, summary };
+    this.setData({
+      design: designForView,
+      designPreviewImage: this.resolveDesignPreviewImage(designForView),
+      sequence,
+      bom,
+      previewBeads: this.buildPreviewBeads(sequence, design.placements || []),
+      amountText: this.formatAmount(amount)
+    });
+  },
+
+  resolveDesignPreviewImage(design = {}) {
+    return design.preview_image
+      || design.previewImage
+      || design.design_preview_url
+      || design.preview_url
+      || design.previewUrl
+      || design.image_url
+      || design.local_preview_image
+      || design.localPreviewImage
+      || '';
+  },
+
+  onPreviewImageError() {
+    this.setData({ designPreviewImage: '' });
+  },
+
+  async refreshDesignPrices() {
+    const design = this.data.design;
+    const sequence = this.data.sequence || [];
+    if (!design || !sequence.length) return;
+    try {
+      const payload = await getMaterials();
+      const materials = payload.materials || [];
+      if (!materials.length) return;
+      const byId = {};
+      const bySku = {};
+      materials.forEach(material => {
+        if (material.id) byId[String(material.id)] = material;
+        if (material.skuId) bySku[String(material.skuId)] = material;
+        if (material.sku) bySku[String(material.sku)] = material;
+      });
+
+      const changed = [];
+      const refreshed = sequence.map((item, index) => {
+        const material = byId[String(item.id || item.material_id || '')]
+          || bySku[String(item.sku || item.skuId || '')];
+        if (!material) return item;
+        const currentPrice = moneyValue(material.price, material.priceText, material.amount);
+        const oldPrice = moneyValue(item.price, item.priceText);
+        const hasReliableSnapshot = Boolean(item.snapshot_at);
+        if (hasReliableSnapshot && oldPrice !== currentPrice) {
+          changed.push(`${material.name || item.name || '珠材'} ¥${this.formatAmount(oldPrice)}→¥${this.formatAmount(currentPrice)}`);
+        }
+        return normalizeSequenceItem({
+          ...item,
+          id: material.id || item.id,
+          material_id: material.id || item.material_id,
+          sku: material.skuId || material.sku || item.sku,
+          skuId: material.skuId || item.skuId || item.sku,
+          name: material.name || item.name,
+          category: material.category || item.category,
+          series: material.series || item.series,
+          grade: material.grade || item.grade,
+          effect: material.effect || item.effect,
+          element: material.element || item.element,
+          size: material.size || item.size,
+          diameter: material.size || item.diameter,
+          price: currentPrice,
+          weight: material.weight || item.weight,
+          image_url: item.image_url || material.image_url || firstImageUrl(material),
+          image_urls: material.image_urls || material.image_pool || item.image_urls || [],
+          snapshot_at: item.snapshot_at || new Date().toISOString()
+        }, index);
+      });
+
+      const refreshedAmount = refreshed.reduce((sum, item) => sum + Number(item.price || 0), 0);
+      const nextDesign = {
+        ...design,
+        summary: {
+          ...(design.summary || {}),
+          count: refreshed.length,
+          price: refreshedAmount,
+          priceText: this.formatAmount(refreshedAmount)
+        },
+        sequence: refreshed,
+        selected: refreshed.map(item => item.id || item.sku).filter(Boolean)
+      };
+      this.applyDesignState(nextDesign, refreshed);
+      wx.setStorageSync('currentDesign', {
+        ...nextDesign,
+        summary: this.data.design.summary
+      });
+      if (changed.length) {
+        wx.showModal({
+          title: '珠材价格已同步',
+          content: `当前方案已按最新珠材价格刷新：${changed.slice(0, 3).join('；')}${changed.length > 3 ? '…' : ''}`,
+          showCancel: false,
+          confirmText: '知道了'
+        });
+      }
+    } catch (error) {
+      console.warn('refresh checkout material prices failed:', error);
+    }
+  },
+
+  buildPreviewBeads(sequence, placements = []) {
+    const beads = (sequence || []).slice(0, 18);
+    const count = Math.max(beads.length, 1);
+    return beads.map((item, index) => {
+      const placement = placements[index] || item.placement || {};
+      const angle = (360 / count) * index;
+      const size = 26;
+      return {
+        ...item,
+        image_url: placement.image_url || item.image_url || firstImageUrl(item),
+        style: `width:${size}rpx;height:${size}rpx;transform:rotate(${angle}deg) translateY(-58rpx) rotate(${-angle}deg);`
+      };
+    });
+  },
+
+  formatAmount(value) {
+    const amount = Number(value || 0);
+    return Number.isFinite(amount) ? amount.toFixed(2) : '0.00';
   },
 
   setReceiver(receiver) {
@@ -107,6 +314,10 @@ Page({
       regionText: region.join(' ')
     });
     if (this.data.addressError) this.setData({ addressError: '' });
+  },
+
+  onRemarkInput(e) {
+    this.setData({ remark: e.detail.value || '' });
   },
 
   chooseWechatAddress() {
@@ -177,7 +388,9 @@ Page({
     try {
       const result = await createOrder({
         user_id: user.user_id,
+        design_id: this.data.design.designId || this.data.design.design_id || '',
         receiver,
+        remark: (this.data.remark || '').trim(),
         design: this.data.design,
         sequence: this.data.sequence,
         bom: this.data.bom
@@ -189,7 +402,7 @@ Page({
       if (payment.available && payment.pay_params) {
         await this.requestWechatPayment(payment.pay_params);
         wx.showToast({ title: '支付完成', icon: 'success' });
-        wx.navigateTo({ url: '/pages/order-list/order-list?status=all' });
+        this.goSuccess(result.order.order_id);
         return;
       }
 
@@ -204,16 +417,37 @@ Page({
             await this.mockPay(result.order.order_id, user.user_id);
             return;
           }
-          wx.navigateTo({ url: '/pages/order-list/order-list?status=all' });
+          this.goOrderDetail(result.order.order_id);
         }
       });
     } catch (error) {
       wx.hideLoading();
       console.error('submit order failed:', error);
-      wx.showToast({ title: error.message || '下单失败', icon: 'none' });
+      this.handleSubmitError(error);
     } finally {
       this.setData({ submitting: false });
     }
+  },
+
+  handleSubmitError(error) {
+    const message = error && error.message ? error.message : '下单失败';
+    if (message.includes('珠材价格已更新') || message.includes('已下架或无库存')) {
+      wx.showModal({
+        title: '珠材信息已更新',
+        content: message,
+        confirmText: '返回工作台',
+        cancelText: '稍后',
+        success: (res) => {
+          if (res.confirm) {
+            wx.navigateBack({
+              fail: () => wx.redirectTo({ url: '/pages/workspace/workspace' })
+            });
+          }
+        }
+      });
+      return;
+    }
+    wx.showToast({ title: message, icon: 'none' });
   },
 
   async mockPay(orderId, userId) {
@@ -223,7 +457,7 @@ Page({
       this.cacheOrder(order);
       wx.hideLoading();
       wx.showToast({ title: '已进入待发货', icon: 'success' });
-      wx.navigateTo({ url: '/pages/order-list/order-list?status=ship' });
+      this.goSuccess(order.order_id || orderId);
     } catch (error) {
       wx.hideLoading();
       wx.showToast({ title: error.message || '模拟支付失败', icon: 'none' });
@@ -251,10 +485,19 @@ Page({
       statusKey: this.statusKey(order),
       status: order.status_text || this.statusText(order),
       totalAmount: order.total_amount,
+      remark: order.remark || '',
       logistics: order.logistics || {},
       statusHistory: order.status_history || []
     };
     wx.setStorageSync('orders', [localOrder, ...orders.filter(item => item.id !== localOrder.id)]);
+  },
+
+  goSuccess(orderId) {
+    wx.navigateTo({ url: `/pages/order-success/order-success?id=${encodeURIComponent(orderId || '')}` });
+  },
+
+  goOrderDetail(orderId) {
+    wx.redirectTo({ url: `/pages/order-detail/order-detail?id=${encodeURIComponent(orderId || '')}` });
   },
 
   statusKey(order) {

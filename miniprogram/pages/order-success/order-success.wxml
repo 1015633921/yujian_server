@@ -1,0 +1,45 @@
+<view class="success-page yu-page">
+  <view class="success-card yu-card yu-card-lg">
+    <view class="success-icon">
+      <view class="check-mark">✓</view>
+    </view>
+    <view class="success-title">订单提交成功</view>
+    <view class="success-desc">我们已收到你的定制需求，正在为你同步订单信息。</view>
+
+    <view class="info-card">
+      <view class="info-row">
+        <text>订单号</text>
+        <view>{{display.orderId}}</view>
+      </view>
+      <view class="info-row">
+        <text>下单时间</text>
+        <view>{{display.createdAt || '刚刚'}}</view>
+      </view>
+      <view class="info-row">
+        <text>预计发货</text>
+        <view>{{display.deliveryText}}</view>
+      </view>
+      <view wx:if="{{display.receiverName}}" class="info-row">
+        <text>收件人</text>
+        <view>{{display.receiverName}}</view>
+      </view>
+      <view class="info-row amount-row">
+        <text>订单金额</text>
+        <view>¥{{display.amount}}</view>
+      </view>
+    </view>
+
+    <button class="yu-button yu-button-primary primary-action" bindtap="viewDetail">查看订单详情</button>
+    <button class="yu-button yu-button-secondary secondary-action" bindtap="continueShopping">继续逛逛</button>
+  </view>
+
+  <view class="tips-card yu-card">
+    <view class="tips-title">后续你可以在订单详情中查看</view>
+    <view class="tips-list">
+      <view>制作状态与发货信息</view>
+      <view>收货地址与订单备注</view>
+      <view>方案材料和串珠顺序</view>
+    </view>
+    <view class="orders-link" bindtap="goOrders">查看全部订单 →</view>
+  </view>
+</view>

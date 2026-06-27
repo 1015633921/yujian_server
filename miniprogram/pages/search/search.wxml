@@ -1,38 +1,67 @@
 <view class="page search-page">
   <view class="search-box">
     <text class="search-icon">⌕</text>
-    <input class="search-input" placeholder="搜索水晶、功效、配饰" value="{{keyword}}" focus bindconfirm="submitSearch" bindinput="onKeywordInput" />
+    <input class="search-input" placeholder="搜索水晶、颜色、功效或灵感" value="{{keyword}}" focus bindconfirm="submitSearch" bindinput="onKeywordInput" />
     <button wx:if="{{keyword}}" class="clear-btn" bindtap="clearKeyword">×</button>
   </view>
 
-  <view wx:if="{{!hasSearched}}" class="section">
-    <view class="section-title">常搜关键词</view>
-    <view class="keyword-row">
-      <view wx:for="{{hotKeywords}}" wx:key="*this" class="keyword-chip" data-keyword="{{item}}" bindtap="tapKeyword">{{item}}</view>
+  <block wx:if="{{!hasSearched}}">
+    <view class="section keyword-section">
+      <view class="section-title">大家常搜</view>
+      <view class="keyword-row">
+        <view wx:for="{{hotKeywords}}" wx:key="*this" class="keyword-chip" data-keyword="{{item}}" bindtap="tapKeyword">{{item}}</view>
+      </view>
     </view>
-  </view>
 
-  <view class="section">
-    <view class="section-head">
-      <view class="section-title">{{hasSearched ? '搜索结果' : '推荐材料'}}</view>
-      <view class="section-link">{{results.length}} 件</view>
-    </view>
-    <view wx:if="{{loading}}" class="card state-card">正在搜索...</view>
-    <view wx:elif="{{!results.length}}" class="card state-card">没有找到相关材料，换个关键词试试。</view>
-    <view wx:else class="result-list">
-      <view wx:for="{{results}}" wx:key="id" class="result-card card">
-        <image wx:if="{{item.image_url}}" class="result-image" src="{{item.image_url}}" mode="aspectFit" data-id="{{item.id}}" binderror="onImageError"></image>
-        <view wx:else class="result-sphere" style="background: radial-gradient(circle at 32% 26%, {{item.shine}} 0 10%, {{item.color}} 12% 58%, rgba(0,0,0,.22) 100%);"></view>
-        <view class="result-copy">
-          <view class="result-name">{{item.name}}</view>
-          <view class="result-meta">{{item.category}} · {{item.effect}}</view>
-          <view class="result-price">¥{{item.price}} / {{item.size}}mm</view>
+    <view class="section">
+      <view class="section-head">
+        <view>
+          <view class="section-title">推荐灵感</view>
+          <view class="section-subtitle">先看看大家都在怎么搭配</view>
         </view>
-        <view class="result-actions">
-          <button data-id="{{item.id}}" bindtap="addToInspiration">收藏</button>
-          <button class="primary" data-id="{{item.id}}" bindtap="startDiy">DIY</button>
+      </view>
+      <view class="inspiration-grid">
+        <view wx:for="{{recommendedInspirations}}" wx:key="id" class="inspiration-card" data-id="{{item.id}}" data-type="{{item.type}}" bindtap="openInspiration">
+          <view class="inspiration-image {{item.tone}}"></view>
+          <view class="inspiration-copy">
+            <view class="inspiration-title">{{item.title}}</view>
+            <view class="inspiration-meta">{{item.meta}}</view>
+            <view class="inspiration-link">查看搭配思路 →</view>
+          </view>
         </view>
       </view>
     </view>
-  </view>
+  </block>
+
+  <block wx:else>
+    <view class="result-summary">
+      <view>
+        <text class="result-keyword">“{{keyword}}”</text>
+        <text class="result-label">的搜索结果</text>
+      </view>
+      <text>{{resultCount}} 条</text>
+    </view>
+
+    <view class="section result-section">
+      <view class="section-head">
+        <view>
+          <view class="section-title">相关方案与灵感</view>
+          <view class="section-subtitle">查看设计原因、搭配逻辑与适用场景</view>
+        </view>
+        <view class="section-link">{{inspirationResults.length}} 篇</view>
+      </view>
+      <view wx:if="{{!inspirationResults.length}}" class="state-card">暂时没有找到相关灵感。</view>
+      <view wx:else class="inspiration-result-list">
+        <view wx:for="{{inspirationResults}}" wx:key="id" class="inspiration-result-card" data-id="{{item.id}}" data-type="{{item.type}}" bindtap="openInspiration">
+          <view class="result-inspiration-image {{item.tone}}"></view>
+          <view class="result-inspiration-copy">
+            <view class="inspiration-type">{{item.type === 'plan' ? '推荐方案' : '社区作品'}}</view>
+            <view class="inspiration-title">{{item.title}}</view>
+            <view class="inspiration-desc">{{item.desc}}</view>
+            <view class="inspiration-link">查看详情 →</view>
+          </view>
+        </view>
+      </view>
+    </view>
+  </block>
 </view>

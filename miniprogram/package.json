@@ -1,0 +1,11 @@
+{
+  "name": "yujian-miniprogram",
+  "private": true,
+  "scripts": {
+    "env:test": "node ../scripts/select_miniprogram_env.js test",
+    "env:prod": "node ../scripts/select_miniprogram_env.js prod"
+  },
+  "dependencies": {
+    "matter-js": "0.20.0"
+  }
+}

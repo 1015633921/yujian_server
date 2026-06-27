@@ -1,54 +1,180 @@
 <view class="page order-detail-page" wx:if="{{order}}">
-  <view class="card status-card">
-    <view class="status-text">{{order.status}}</view>
-    <view class="order-id">{{order.id}}</view>
-    <view class="order-time">{{order.createdAt}}</view>
-  </view>
-
-  <view class="card detail-card">
-    <view class="card-title">收货信息</view>
-    <view class="info-row"><text>收货人</text><view>{{order.receiver.name}}</view></view>
-    <view class="info-row"><text>手机号</text><view>{{order.receiver.phone}}</view></view>
-    <view class="info-row"><text>地址</text><view>{{order.receiver.address}}</view></view>
-  </view>
-
-  <view class="card detail-card">
-    <view class="card-title">方案材料</view>
-    <view wx:for="{{order.sequence}}" wx:key="index" class="material-row">
-      <view>{{item.name || item.materialId || item.id}}</view>
-      <text>¥{{item.price || 0}}</text>
-    </view>
-    <view class="total-row">
-      <text>实付</text>
-      <view>¥{{order.totalAmount}}</view>
-    </view>
-  </view>
-
-  <view wx:if="{{logisticsDetail}}" class="card detail-card">
-    <view class="card-title">物流信息</view>
-    <view class="logistics-status">{{logisticsDetail.statusText}}</view>
-    <view class="logistics-meta">{{logisticsDetail.carrier}} {{logisticsDetail.trackingNo}}</view>
-    <view class="logistics-source">{{logisticsDetail.source}}</view>
-    <view wx:for="{{logisticsDetail.traces}}" wx:key="index" class="trace-row">
-      <view class="trace-dot"></view>
-      <view>
-        <view class="trace-desc">{{item.desc}}</view>
-        <view wx:if="{{item.location}}" class="trace-sub">{{item.location}}</view>
-        <view wx:if="{{item.time}}" class="trace-sub">{{item.time}}</view>
+  <view class="card hero-card {{order.statusTone}}">
+    <view class="hero-head">
+      <view class="hero-side">
+        <view class="hero-side-title">{{order.statusDisplayText}}</view>
+        <view class="hero-side-sub">{{order.etaText}}</view>
+        <view class="hero-icon">
+          <view class="hero-icon-core"></view>
+        </view>
       </view>
     </view>
+    <view class="order-id-row" bindtap="copyOrderId">
+      <text class="order-id-value" selectable="{{true}}">订单号：{{order.id}}</text>
+    </view>
+
+    <view class="status-steps">
+      <block wx:for="{{order.statusSteps}}" wx:key="key">
+        <view class="step-item {{item.active ? 'active' : ''}}">
+          <view class="step-line" wx:if="{{index > 0}}"></view>
+          <view class="step-dot">
+            <view class="step-dot-core"></view>
+          </view>
+          <view class="step-label">{{item.label}}</view>
+          <view class="step-time">{{item.time || ' '}}</view>
+        </view>
+      </block>
+    </view>
   </view>
 
-  <view class="action-bar">
-    <button wx:if="{{order.statusKey === 'pay'}}" data-action="pay" bindtap="handleAction">继续支付</button>
-    <button wx:if="{{order.statusKey === 'ship' && isLocalApi}}" data-action="mockShip" bindtap="handleAction">模拟发货</button>
-    <button wx:if="{{order.statusKey === 'receive' || order.statusKey === 'done'}}" data-action="logistics" bindtap="handleAction">查看物流</button>
-    <button wx:if="{{order.statusKey === 'receive'}}" data-action="receive" bindtap="handleAction">确认收货</button>
-    <button wx:if="{{order.statusKey === 'ship' || order.statusKey === 'receive'}}" data-action="refund" bindtap="handleAction">申请退款</button>
-    <button wx:if="{{order.statusKey === 'receive' || order.statusKey === 'done'}}" data-action="afterSale" bindtap="handleAction">售后</button>
+  <view class="card logistics-card compact-logistics-card" wx:if="{{logisticsDetail && logisticsDetail.show}}">
+    <view class="card-head logistics-head">
+      <view class="head-left">
+        <text class="card-title">物流信息</text>
+        <view class="carrier-badge">{{logisticsDetail.carrierShort}}</view>
+        <text class="carrier-text">{{logisticsDetail.carrier}}</text>
+        <text class="tracking-text" bindtap="copyTrackingNo">{{logisticsDetail.trackingNo}}</text>
+      </view>
+      <view class="head-action" data-action="logistics" bindtap="handleAction">查看物流 <text>›</text></view>
+    </view>
+
+    <view class="logistics-summary" data-action="logistics" bindtap="handleAction">
+      <view class="summary-dot"></view>
+      <view class="summary-copy">
+        <view class="summary-title">{{logisticsDetail.summaryTitle}}</view>
+        <view class="summary-desc">{{logisticsDetail.summaryDesc}}</view>
+        <view class="summary-meta">
+          <text wx:if="{{logisticsDetail.latestTrace.time}}">{{logisticsDetail.latestTrace.time}}</text>
+          <text wx:if="{{logisticsDetail.latestTrace.location}}">　{{logisticsDetail.latestTrace.location}}</text>
+        </view>
+      </view>
+      <view class="summary-arrow">›</view>
+    </view>
+  </view>
+
+  <view wx:if="{{showLogisticsModal}}" class="logistics-modal-mask" catchtap="closeLogisticsModal" catchtouchmove="noop">
+    <view class="logistics-modal" catchtap="noop">
+      <view class="modal-grip"></view>
+      <view class="modal-head">
+        <view>
+          <view class="modal-title">物流轨迹</view>
+          <view class="modal-sub">{{logisticsDetail.carrier}} {{logisticsDetail.trackingNo}}</view>
+        </view>
+        <button class="modal-close" bindtap="closeLogisticsModal">×</button>
+      </view>
+      <view class="modal-status-card">
+        <view class="modal-status">{{logisticsDetail.statusText}}</view>
+        <view class="modal-source">{{logisticsDetail.source}}</view>
+        <view wx:if="{{logisticsDetail.message}}" class="modal-message">{{logisticsDetail.message}}</view>
+      </view>
+      <scroll-view class="modal-trace-scroll" scroll-y enhanced show-scrollbar="{{false}}">
+        <view class="trace-list modal-trace-list">
+          <block wx:for="{{logisticsDetail.traces}}" wx:key="id">
+            <view class="trace-item {{item.active ? 'active' : ''}}">
+              <view class="trace-axis">
+                <view class="trace-dot"></view>
+                <view class="trace-line" wx:if="{{index < logisticsDetail.traces.length - 1}}"></view>
+              </view>
+              <view class="trace-content">
+                <view class="trace-title">{{item.desc}}</view>
+                <view class="trace-sub">
+                  <text wx:if="{{item.time}}">{{item.time}}</text>
+                  <text wx:if="{{item.location}}">　{{item.location}}</text>
+                </view>
+              </view>
+            </view>
+          </block>
+        </view>
+      </scroll-view>
+    </view>
+  </view>
+
+  <view class="card info-card">
+    <view class="card-head">
+      <view class="card-title">收货信息</view>
+      <view wx:if="{{order.canEditAddress}}" class="head-action subtle" bindtap="editAddress">⌕ 修改</view>
+    </view>
+    <view class="info-grid">
+      <text>收货人</text>
+      <view>{{order.receiver.name || '未填写'}}</view>
+      <text>手机号</text>
+      <view>{{order.receiver.phone || '未填写'}}</view>
+      <text>收货地址</text>
+      <view>{{order.receiver.address || '未填写'}}</view>
+    </view>
+  </view>
+
+  <view class="card remark-card" wx:if="{{order.remark}}">
+    <view class="card-title">订单备注</view>
+    <view class="remark-text">{{order.remark}}</view>
+  </view>
+
+  <view class="card material-card">
+    <view class="card-head">
+      <view class="card-title">方案材料</view>
+      <view class="count-pill">共 {{order.materialCount}} 件</view>
+    </view>
+    <view class="material-list">
+      <block wx:for="{{order.displayMaterials}}" wx:key="key">
+        <view class="material-row">
+          <view class="material-thumb-wrap">
+            <image wx:if="{{item.imageUrl}}" class="material-thumb" src="{{item.imageUrl}}" mode="aspectFill"></image>
+            <view wx:else class="material-thumb fallback" style="{{item.colorStyle}}"></view>
+          </view>
+          <view class="material-info">
+            <view class="material-title-line">
+              <view class="material-name">{{item.name}}</view>
+              <text class="material-position">{{item.positionLabel}}</text>
+            </view>
+            <view class="material-detail" wx:if="{{item.detail}}">{{item.detail}}</view>
+            <view class="material-tags" wx:if="{{item.tags.length}}">
+              <text wx:for="{{item.tags}}" wx:key="label">{{item.label}} {{item.value}}</text>
+            </view>
+            <view class="material-effect" wx:if="{{item.effect}}">{{item.effect}}</view>
+          </view>
+          <view class="material-price">
+            <view>¥{{item.priceText}}</view>
+            <text>{{item.qtyText}}</text>
+          </view>
+        </view>
+      </block>
+    </view>
+    <button wx:if="{{order.hasMoreMaterials}}" class="expand-btn" bindtap="toggleMaterials">
+      {{showAllMaterials ? '收起材料' : '查看全部材料'}} <text>{{showAllMaterials ? '⌃' : '⌄'}}</text>
+    </button>
+  </view>
+
+  <view class="card amount-card">
+    <view class="card-title">订单金额</view>
+    <view class="amount-list">
+      <view wx:for="{{order.amountRows}}" wx:key="label" class="amount-row">
+        <text>{{item.label}}</text>
+        <view class="{{item.danger ? 'danger' : ''}}">{{item.value}}</view>
+      </view>
+    </view>
+    <view class="paid-row">
+      <text>实付款</text>
+      <view>¥{{order.totalAmountText}}</view>
+    </view>
+  </view>
+
+  <view class="bottom-safe"></view>
+
+  <view class="action-bar {{order.actionBarClass}}" wx:if="{{order.hasFooterAction}}">
+    <button wx:if="{{order.canCancel}}" class="plain-action" data-action="cancel" bindtap="handleAction">取消订单</button>
+    <button wx:elif="{{order.canRefund}}" class="plain-action" data-action="refund" bindtap="handleAction">申请退款</button>
+    <button wx:elif="{{order.canAfterSale}}" class="plain-action" data-action="afterSale" bindtap="handleAction">申请售后</button>
+    <button class="plain-action" open-type="contact">联系客服</button>
+    <button wx:if="{{order.canPay}}" class="primary-action" data-action="pay" bindtap="handleAction">继续支付</button>
+    <button wx:elif="{{order.canMockShip}}" class="primary-action" data-action="mockShip" bindtap="handleAction">模拟发货</button>
+    <button wx:elif="{{order.canReceive}}" class="primary-action" data-action="receive" bindtap="handleAction">确认收货</button>
+    <button wx:elif="{{order.canViewLogistics}}" class="primary-action" data-action="logistics" bindtap="handleAction">查看物流</button>
   </view>
 </view>
 
-<view class="page" wx:else>
-  <view class="card empty-card">订单不存在或已刷新，请返回订单列表。</view>
+<view class="page order-empty" wx:else>
+  <view class="card empty-card">
+    <view class="empty-title">{{loading ? '正在加载订单...' : '订单不存在'}}</view>
+    <view class="empty-desc">请返回订单列表重新选择，或联系客服协助查询。</view>
+  </view>
 </view>

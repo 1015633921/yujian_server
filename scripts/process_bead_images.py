@@ -17,6 +17,8 @@ def main() -> None:
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT_DIR, help="缩略图输出目录")
     parser.add_argument("--size", type=int, default=640, help="输出缩略图尺寸")
     parser.add_argument("--transparent", action="store_true", help="将浅色拍摄背景处理为透明背景")
+    parser.add_argument("--white-background", action="store_true", help="使用纯白背景，只保留珠子主体")
+    parser.add_argument("--preserve-filename", action="store_true", help="保留源文件名，便于原位替换")
     parser.add_argument("--circle-mask", action="store_true", help="keep only the round bead body")
     parser.add_argument("--fixed-crop", action="store_true", help="use a fixed crop box for same-layout source images")
     parser.add_argument("--crop-left", type=float, default=0.12, help="fixed crop left ratio")
@@ -36,12 +38,14 @@ def main() -> None:
         raise SystemExit(f"No images found in {source_dir}")
 
     for path in files:
-        output_path = output_dir / f"{slug_from_name(path.stem)}.png"
+        output_name = f"{path.stem}.png" if args.preserve_filename else f"{slug_from_name(path.stem)}.png"
+        output_path = output_dir / output_name
         crop_bead_image(
             path,
             output_path,
             args.size,
             transparent=args.transparent,
+            white_background=args.white_background,
             circle_mask=args.circle_mask,
             fixed_crop=args.fixed_crop,
             crop_left=args.crop_left,
@@ -57,6 +61,7 @@ def crop_bead_image(
     output: Path,
     size: int,
     transparent: bool = False,
+    white_background: bool = False,
     circle_mask: bool = False,
     fixed_crop: bool = False,
     crop_left: float = 0.12,
@@ -94,7 +99,8 @@ def crop_bead_image(
     if circle_mask:
         cropped = apply_soft_circle_mask(cropped)
 
-    canvas = Image.new("RGBA", (size, size), (255, 255, 255, 0))
+    background = (255, 255, 255, 255) if white_background else (255, 255, 255, 0)
+    canvas = Image.new("RGBA", (size, size), background)
     cropped_rgba = cropped.convert("RGBA")
     x = (size - cropped_rgba.width) // 2
     y = (size - cropped_rgba.height) // 2

@@ -1,3 +1,7 @@
 {
-  "navigationBarTitleText": "灵感详情"
+  "navigationStyle": "custom",
+  "navigationBarTitleText": "灵感详情",
+  "navigationBarBackgroundColor": "#FBFAF7",
+  "backgroundColor": "#F8F6F1",
+  "navigationBarTextStyle": "black"
 }

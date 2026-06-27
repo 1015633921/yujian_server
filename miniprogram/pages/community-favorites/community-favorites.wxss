@@ -1,0 +1,261 @@
+.favorites-page {
+  min-height: 100vh;
+  box-sizing: border-box;
+  padding: 24rpx 28rpx 60rpx;
+  background:
+    radial-gradient(circle at 92% 2%, rgba(191, 145, 104, 0.16), transparent 27%),
+    linear-gradient(180deg, #f8f3ec, #f1ebe4);
+}
+
+.page-nav {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  min-height: 48rpx;
+}
+
+.remove-button::after,
+.same-button::after,
+.discover-button::after {
+  border: 0;
+}
+
+.page-count {
+  font-size: 22rpx;
+  color: #99877c;
+}
+
+.page-heading {
+  display: flex;
+  flex-direction: column;
+  margin: 26rpx 8rpx 32rpx;
+}
+
+.eyebrow {
+  font-size: 20rpx;
+  letter-spacing: 5rpx;
+  color: #a4826e;
+}
+
+.page-title {
+  margin-top: 12rpx;
+  font-size: 40rpx;
+  font-weight: 700;
+  color: #352820;
+}
+
+.page-desc {
+  margin-top: 12rpx;
+  font-size: 24rpx;
+  color: #928177;
+}
+
+.favorite-list {
+  display: flex;
+  flex-direction: column;
+  gap: 26rpx;
+}
+
+.favorite-card {
+  overflow: hidden;
+  border-radius: 34rpx;
+  background: rgba(255, 253, 249, 0.94);
+  box-shadow: 0 16rpx 38rpx rgba(73, 52, 40, 0.1);
+}
+
+.post-image {
+  position: relative;
+  height: 280rpx;
+  background: radial-gradient(circle at 35% 30%, #fff 0 10%, #b9d8df 11% 32%, #315f66 33% 100%);
+}
+
+.post-image.gold {
+  background: radial-gradient(circle at 35% 30%, #fff6c7 0 10%, #d7b65d 11% 36%, #8e6c21 37% 100%);
+}
+
+.post-image.pink {
+  background: radial-gradient(circle at 35% 30%, #fff 0 10%, #e6a7a4 11% 36%, #a65e62 37% 100%);
+}
+
+.post-image.clear {
+  background: radial-gradient(circle at 35% 30%, #fff 0 10%, #e9edf0 11% 36%, #9aa8ad 37% 100%);
+}
+
+.post-image.black {
+  background: radial-gradient(circle at 35% 30%, #e9edf0 0 10%, #41464b 11% 36%, #121416 37% 100%);
+}
+
+.image-mark {
+  position: absolute;
+  left: 28rpx;
+  bottom: 24rpx;
+  display: flex;
+  flex-direction: column;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.image-mark text:first-child {
+  font-family: serif;
+  font-size: 29rpx;
+  letter-spacing: 7rpx;
+}
+
+.image-mark text:last-child {
+  margin-top: 4rpx;
+  font-size: 13rpx;
+  letter-spacing: 4rpx;
+}
+
+.post-content {
+  padding: 28rpx;
+}
+
+.post-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20rpx;
+}
+
+.post-title {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  font-size: 32rpx;
+  font-weight: 700;
+  color: #352820;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.remove-button {
+  flex: none;
+  margin: 0;
+  padding: 0 18rpx;
+  border-radius: 999rpx;
+  font-size: 20rpx;
+  line-height: 48rpx;
+  color: #79533f;
+  background: #f2e9e1;
+}
+
+.post-meta,
+.post-desc {
+  display: block;
+}
+
+.post-meta {
+  margin-top: 9rpx;
+  font-size: 21rpx;
+  color: #a08f84;
+}
+
+.post-desc {
+  margin-top: 18rpx;
+  font-size: 25rpx;
+  line-height: 1.6;
+  color: #65584f;
+}
+
+.tag-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10rpx;
+  margin-top: 18rpx;
+}
+
+.tag {
+  padding: 8rpx 14rpx;
+  border-radius: 999rpx;
+  font-size: 19rpx;
+  color: #7a5b48;
+  background: #f3ece5;
+}
+
+.same-button,
+.discover-button {
+  margin: 24rpx 0 0;
+  border-radius: 999rpx;
+  font-size: 25rpx;
+  font-weight: 700;
+  line-height: 76rpx;
+  color: #fff;
+  background: linear-gradient(135deg, #687264, #815a44);
+}
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 180rpx 48rpx 80rpx;
+  text-align: center;
+}
+
+.empty-symbol {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 180rpx;
+  height: 180rpx;
+  border: 1rpx solid rgba(126, 91, 69, 0.24);
+  border-radius: 50%;
+  font-size: 70rpx;
+  color: #8b6751;
+  background: rgba(255, 255, 255, 0.56);
+}
+
+.empty-title {
+  margin-top: 42rpx;
+  font-size: 34rpx;
+  font-weight: 700;
+  color: #3b2d25;
+}
+
+.empty-desc {
+  margin-top: 16rpx;
+  font-size: 24rpx;
+  line-height: 1.7;
+  color: #97867c;
+}
+
+.discover-button {
+  width: 430rpx;
+  margin-top: 38rpx;
+}
+
+/* 星灵自然疗愈主题 */
+.favorites-page {
+  padding-right: 32rpx;
+  padding-left: 32rpx;
+  background:
+    radial-gradient(circle at 88% 2%, rgba(175,187,165,.14), transparent 25%),
+    linear-gradient(180deg, #fbfaf7, #f7f4ef);
+}
+.eyebrow { color: #939d8a; }
+.page-title,
+.post-title,
+.empty-title {
+  color: #303230;
+  font-family: "STKaiti", "KaiTi", serif;
+  font-weight: 600;
+}
+.favorite-card {
+  border: 1rpx solid rgba(140,145,133,.12);
+  border-radius: 28rpx;
+  background: rgba(255,255,255,.72);
+  box-shadow: 0 14rpx 34rpx rgba(76,73,65,.06);
+}
+.remove-button,
+.tag {
+  color: #66705f;
+  background: #eef0e9;
+}
+.same-button,
+.discover-button {
+  color: #fff;
+  background: linear-gradient(135deg, #a8b29d, #8f9b84);
+}
+.empty-symbol {
+  border-color: rgba(137,149,127,.28);
+  color: #7f8977;
+}

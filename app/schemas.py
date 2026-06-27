@@ -115,6 +115,7 @@ class ReceiverInfo(BaseModel):
 
 class OrderCreateRequest(BaseModel):
     user_id: NonEmptyString
+    design_id: str | None = Field(default=None, max_length=80)
     receiver: ReceiverInfo
     design: dict = Field(default_factory=dict)
     sequence: list[dict] = Field(default_factory=list, min_length=1)
@@ -122,9 +123,51 @@ class OrderCreateRequest(BaseModel):
     remark: str | None = Field(default=None, max_length=500)
 
 
+class DIYDesignSaveRequest(BaseModel):
+    user_id: NonEmptyString
+    design_id: str | None = Field(default=None, max_length=80)
+    design: dict = Field(default_factory=dict)
+    sequence: list[dict] = Field(default_factory=list)
+    status: str = Field(default="saved", max_length=30)
+
+
+class CartItemCreateRequest(BaseModel):
+    user_id: NonEmptyString
+    item_type: str = Field(default="plan", max_length=40)
+    item_id: str | None = Field(default=None, max_length=100)
+    item: dict = Field(default_factory=dict)
+    quantity: int = Field(default=1, ge=1, le=99)
+
+
+class CartItemUpdateRequest(BaseModel):
+    user_id: NonEmptyString
+    item: dict | None = None
+    quantity: int | None = Field(default=None, ge=1, le=99)
+
+
+class UserAddressRequest(BaseModel):
+    user_id: NonEmptyString
+    address_id: str | None = Field(default=None, max_length=80)
+    name: NonEmptyString
+    phone: NonEmptyString
+    region: list[str] = Field(default_factory=list)
+    detail_address: NonEmptyString
+    address: str | None = Field(default=None, max_length=800)
+    is_default: bool = False
+
+
+class UserAddressActionRequest(BaseModel):
+    user_id: NonEmptyString
+
+
 class OrderActionRequest(BaseModel):
     user_id: NonEmptyString
     reason: str | None = Field(default=None, max_length=500)
+
+
+class OrderReceiverUpdateRequest(BaseModel):
+    user_id: NonEmptyString
+    receiver: dict = Field(default_factory=dict)
 
 
 class OrderRefundRequest(BaseModel):

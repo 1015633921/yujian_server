@@ -1,74 +1,203 @@
-<view class="page" wx:if="{{report}}">
-  <view class="nav-row">
-    <view class="icon-btn" bindtap="goBack">‹</view>
-    <view class="nav-title">能量报告</view>
-    <view class="icon-btn" bindtap="shareReport">↗</view>
+<view class="result-page yu-page" wx:if="{{report}}">
+  <view class="result-nav">
+    <view class="nav-back yu-pressable" bindtap="goBack">‹</view>
+    <view class="nav-title">五行测算</view>
+    <view class="nav-share yu-pressable" bindtap="shareReport">↗</view>
   </view>
 
-  <view class="report-hero card">
-    <view class="avatar">{{avatarChar}}</view>
-    <view class="report-title">{{viewReport.title}}</view>
-    <view class="report-tags">
-      <text class="tag">{{viewReport.mbti}}</text>
-      <text class="tag">{{viewReport.wish}}</text>
-      <text class="tag">平衡指数 {{viewReport.balanceIndex}}</text>
+  <view class="result-stepper">
+    <view
+      wx:for="{{steps}}"
+      wx:key="key"
+      class="step-item {{item.activeClass}}"
+    >
+      <view class="step-dot">{{item.index}}</view>
+      <view class="step-label">{{item.label}}</view>
     </view>
-    <view class="summary">{{viewReport.summary}}</view>
-    <view class="solar-time">真太阳时校准：{{viewReport.trueSolarTime}}</view>
   </view>
 
-  <view class="section">
-    <view class="section-title">五行能量分布</view>
-    <view class="card chart-card">
-      <view wx:for="{{viewReport.elements}}" wx:key="key" class="element-row">
-        <view class="element-name">{{item.name}}</view>
-        <view class="element-track"><view class="element-fill" style="width: {{item.width}}; background: {{item.color}};"></view></view>
-        <view class="element-value">{{item.value}}</view>
+  <view class="result-head">
+    <view class="result-title">你的五行能量分布</view>
+    <view class="result-subtitle">根据出生信息与当前愿望计算</view>
+  </view>
+
+  <view class="energy-stage">
+    <view
+      wx:for="{{viewReport.elements}}"
+      wx:key="key"
+      class="element-orbit element-{{item.key}}"
+    >
+      <view class="element-name">{{item.name}}</view>
+      <view class="element-percent">{{item.percent}}%</view>
+    </view>
+
+    <view class="energy-ring-wrap">
+      <view class="energy-ring" style="background: {{viewReport.ringGradient}};">
+        <view class="energy-ring-inner">
+          <view class="energy-label">整体能量</view>
+          <view class="energy-score">{{viewReport.score}}</view>
+          <view class="energy-status">{{viewReport.statusText}}</view>
+        </view>
       </view>
-      <view class="chart-note">偏强：{{viewReport.strongest}} · 待补：{{viewReport.weakest}}</view>
     </view>
   </view>
 
-  <view class="section">
-    <view class="section-title">生成 DIY 推荐手串</view>
-    <view class="card recommend-card">
-      <view class="recommend-title">还差一步：输入手腕围度</view>
-      <view class="recommend-copy">系统会结合你的五行能量、核心愿望和实际手围，计算珠子种类、尺寸与数量，再生成可继续编辑的 DIY 推荐方案。</view>
+  <view class="summary-card yu-card yu-card-lg">
+    <view class="summary-head">
+      <view>
+        <view class="summary-title">能量解读</view>
+        <view class="summary-meta">偏强 {{viewReport.strongest}} · 待补 {{viewReport.weakest}}</view>
+      </view>
+      <view class="balance-badge">平衡 {{viewReport.score}}</view>
+    </view>
+    <view class="summary-copy">{{viewReport.summary}}</view>
+  </view>
+
+  <view class="keyword-card yu-card">
+    <view class="card-title">能量关键词</view>
+    <view class="keyword-desc">提炼属于你的禅意 / 国风气质标签</view>
+    <view class="keyword-list">
+      <view wx:for="{{viewReport.keywords}}" wx:key="label" class="keyword-tag">
+        <text>{{item.label}}</text>
+        <view>{{item.source}}</view>
+      </view>
     </view>
   </view>
 
-  <button class="primary-button" bindtap="openWristModal">输入手围并获取推荐</button>
+  <view class="season-card yu-card">
+    <view class="season-head">
+      <view>
+        <view class="card-title">近期能量运势提示</view>
+        <view class="season-meta">{{viewReport.seasonal.period}} · {{viewReport.seasonal.seasonal_element}}气当令</view>
+      </view>
+      <view class="season-mark">{{viewReport.seasonal.seasonal_element}}</view>
+    </view>
+    <view class="season-copy">{{viewReport.seasonal.seasonal_copy}}</view>
+    <view class="season-line">
+      <text>流失点</text>
+      <view>{{viewReport.seasonal.drain_point}}</view>
+    </view>
+    <view class="season-line">
+      <text>调和建议</text>
+      <view>{{viewReport.seasonal.suggestion}}</view>
+    </view>
+  </view>
+
+  <view class="element-card yu-card">
+    <view class="card-title">五行占比</view>
+    <view wx:for="{{viewReport.elements}}" wx:key="key" class="element-row">
+      <view class="element-pill" style="background: {{item.softColor}}; color: {{item.color}};">{{item.name}}</view>
+      <view class="element-track">
+        <view class="element-fill" style="width: {{item.width}}; background: {{item.color}};"></view>
+      </view>
+      <view class="element-value">{{item.percent}}%</view>
+    </view>
+  </view>
+
+  <view class="poster-entry yu-card yu-pressable" bindtap="shareReport">
+    <view>
+      <view class="poster-kicker">REPORT POSTER</view>
+      <view class="poster-title">生成专属报告海报</view>
+      <view class="poster-copy">把你的五行比例、关键词和调和建议做成宇涧专属海报，方便保存和分享。</view>
+    </view>
+    <view class="poster-icon">{{posterGenerating ? '…' : '海报'}}</view>
+  </view>
+
+  <view class="recommend-entry yu-card yu-pressable" bindtap="openWristModal">
+    <view>
+      <view class="recommend-title">下一步生成手串方案</view>
+      <view class="recommend-copy">输入手腕围度后，系统会结合五行比例、核心愿望和珠径偏好生成可继续编辑的 DIY 方案。</view>
+    </view>
+    <view class="recommend-icon">→</view>
+  </view>
+
+  <view class="result-bottom">
+    <button class="yu-button yu-button-primary result-submit" bindtap="openWristModal">查看推荐方案</button>
+  </view>
 </view>
 
-<view class="page empty-page" wx:else>
-  <view class="nav-title">还没有报告</view>
-  <button class="primary-button" bindtap="goBack">返回测算</button>
+<view class="empty-page yu-page" wx:else>
+  <view class="empty-card yu-card">
+    <view class="empty-title">还没有测算报告</view>
+    <view class="empty-desc">先完成基础信息填写，再查看五行能量分布。</view>
+    <button class="yu-button yu-button-primary empty-button" bindtap="goBack">返回测算</button>
+  </view>
+</view>
+
+<canvas
+  id="reportPosterCanvas"
+  class="report-poster-canvas"
+  type="2d"
+  canvas-id="reportPosterCanvas"
+></canvas>
+
+<view wx:if="{{showPosterModal}}" class="poster-mask" catchtap="closePosterModal">
+  <view class="poster-modal" catchtap="noop">
+    <view class="poster-modal-head">
+      <view>
+        <view class="poster-modal-title">专属报告海报</view>
+        <view class="poster-modal-sub">长按图片也可以转发或保存</view>
+      </view>
+      <view class="poster-close" bindtap="closePosterModal">×</view>
+    </view>
+    <image class="poster-preview" src="{{posterPath}}" mode="aspectFit" show-menu-by-longpress="{{true}}" bindtap="previewPoster"></image>
+    <view class="poster-actions">
+      <button class="poster-secondary" bindtap="closePosterModal">稍后</button>
+      <button class="poster-primary" bindtap="savePosterImage">保存海报</button>
+    </view>
+  </view>
 </view>
 
 <view wx:if="{{showWristModal}}" class="modal-mask" bindtap="closeWristModal">
   <view class="wrist-modal" catchtap="noop">
     <view class="modal-head">
       <view>
-        <view class="modal-title">输入手腕围度</view>
-        <view class="modal-sub">请贴合手腕测量，不需要自行预留松量</view>
+        <view class="modal-title">选择手腕大小</view>
+        <view class="modal-sub">左右滑动软尺，松手后自动吸附到 0.1cm</view>
       </view>
       <view class="modal-close" bindtap="closeWristModal">×</view>
     </view>
 
-    <view class="wrist-input-wrap">
-      <input class="wrist-input" type="digit" placeholder="例如 16" value="{{wristInput}}" bindinput="onWristInput" />
-      <text>cm</text>
+    <view class="wrist-ruler-value">
+      <text class="wrist-ruler-number">{{wristRulerValue}}</text>
+      <text class="wrist-ruler-unit">cm</text>
     </view>
-
-    <view class="wrist-options">
-      <view wx:for="{{wristOptions}}" wx:key="*this" class="wrist-option" data-value="{{item}}" bindtap="selectWristOption">{{item}}cm</view>
+    <view class="wrist-ruler-wrap">
+      <view class="wrist-ruler-pointer"></view>
+      <view class="wrist-ruler-fade left"></view>
+      <view class="wrist-ruler-fade right"></view>
+      <scroll-view
+        class="wrist-ruler-scroll"
+        scroll-x
+        enhanced
+        show-scrollbar="{{false}}"
+        bounces="{{true}}"
+        scroll-left="{{wristRulerScrollLeft}}"
+        bindscroll="onWristRulerScroll"
+        bindtouchstart="onWristRulerTouchStart"
+        bindtouchend="onWristRulerTouchEnd"
+        bindtouchcancel="onWristRulerTouchEnd"
+      >
+        <view class="wrist-ruler-track" style="padding-left:{{wristRulerSidePadding}}px;padding-right:{{wristRulerSidePadding}}px;">
+          <view
+            wx:for="{{wristRulerTicks}}"
+            wx:key="index"
+            class="wrist-ruler-tick {{item.className}}"
+            style="width:{{wristRulerTickWidth}}px;"
+          >
+            <view class="tick-line"></view>
+            <view class="tick-label">{{item.label}}</view>
+          </view>
+        </view>
+      </scroll-view>
     </view>
+    <view class="wrist-ruler-range">{{wristRulerRangeText}}</view>
 
     <view class="bead-size-label">偏好珠径</view>
     <view class="bead-size-options">
       <view wx:for="{{beadSizeOptions}}" wx:key="*this" class="bead-size-option {{beadSize === item ? 'active' : ''}}" data-value="{{item}}" bindtap="selectBeadSize">{{item}}mm</view>
     </view>
 
-    <button class="primary-button modal-button" loading="{{generating}}" disabled="{{generating}}" bindtap="confirmWristAndRecommend">生成推荐 DIY 手串</button>
+    <button class="yu-button yu-button-primary modal-button" loading="{{generating}}" disabled="{{generating}}" bindtap="confirmWristAndRecommend">生成推荐 DIY 手串</button>
   </view>
 </view>

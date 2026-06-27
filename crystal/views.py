@@ -1,17 +1,18 @@
 from __future__ import annotations
 
 import json
-import uuid
 from datetime import datetime
 from decimal import Decimal
 from typing import Any, Callable
 
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import F, Q
 from django.http import HttpRequest, JsonResponse
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
+
+from app.order_service import generate_numeric_order_no
 
 from .models import (
     Address,
@@ -313,14 +314,22 @@ def create_order(request: HttpRequest, user: MiniUser, body: dict[str, Any]) -> 
         if not plan:
             return fail("plan not found", status=404)
     total = Decimal(str(body.get("total_amount") or (plan.price_snapshot if plan else 0)))
-    item = Order.objects.create(
-        user=user,
-        order_no=body.get("order_no") or f"YJ{timezone.now().strftime('%Y%m%d%H%M%S')}{uuid.uuid4().hex[:6].upper()}",
-        diy_plan=plan,
-        total_amount=total,
-        items=body.get("items", plan.beads + plan.accessories if plan else []),
-        address=body.get("address", {}),
-    )
+    item = None
+    for _ in range(12):
+        try:
+            item = Order.objects.create(
+                user=user,
+                order_no=generate_numeric_order_no(),
+                diy_plan=plan,
+                total_amount=total,
+                items=body.get("items", plan.beads + plan.accessories if plan else []),
+                address=body.get("address", {}),
+            )
+            break
+        except IntegrityError:
+            continue
+    if item is None:
+        return fail("订单号生成冲突，请重试", status=503)
     if plan:
         plan.status = DIYPlan.STATUS_ORDERED
         plan.save(update_fields=["status", "updated_at"])

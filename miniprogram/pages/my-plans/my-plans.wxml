@@ -1,0 +1,71 @@
+<view class="my-plans-page yu-page">
+  <view class="plans-nav">
+    <view class="nav-back yu-pressable" bindtap="goBack">‹</view>
+    <view class="nav-title">我的方案</view>
+    <view class="nav-spacer"></view>
+  </view>
+
+  <scroll-view class="tabs-scroll" scroll-x enable-flex show-scrollbar="{{false}}">
+    <view
+      wx:for="{{tabs}}"
+      wx:key="key"
+      class="plan-tab {{activeTab === item.key ? 'active' : ''}}"
+      data-key="{{item.key}}"
+      bindtap="switchTab"
+    >
+      <text>{{item.label}}</text>
+      <text class="tab-count">{{item.count}}</text>
+    </view>
+  </scroll-view>
+
+  <view wx:if="{{visiblePlans.length}}" class="plan-list">
+    <view
+      wx:for="{{visiblePlans}}"
+      wx:key="key"
+      class="plan-card yu-card yu-card-pressable"
+      data-key="{{item.key}}"
+      bindtap="openPlan"
+    >
+      <view class="plan-preview {{item.statusClass}}">
+        <view class="preview-ring">
+          <image wx:for="{{item.previewBeads}}" wx:key="index" class="preview-bead" src="{{item.src}}" mode="aspectFill" style="{{item.style}}" />
+        </view>
+      </view>
+      <view class="plan-main">
+        <view class="plan-topline">
+          <view class="plan-name">{{item.name}}</view>
+          <view class="plan-arrow">›</view>
+        </view>
+        <view class="plan-meta">手围：{{item.wristSize}}</view>
+        <view class="plan-date">{{item.dateText}}</view>
+        <view class="plan-recipe">{{item.recipeText}}</view>
+        <view class="plan-footer">
+          <view class="status-pill {{item.statusClass}}">{{item.statusText}}</view>
+          <view class="plan-price">¥{{item.priceText}}</view>
+        </view>
+      </view>
+      <view wx:if="{{item.type === 'saved'}}" class="saved-actions">
+        <button class="action-button edit" data-key="{{item.key}}" catchtap="continueEdit">继续编辑</button>
+        <button class="action-button delete" data-key="{{item.key}}" catchtap="deletePlan">删除</button>
+      </view>
+    </view>
+  </view>
+
+  <view wx:else class="empty-card yu-card">
+    <view class="empty-ring">
+      <text>宇涧</text>
+      <text class="empty-en">YU JIAN</text>
+    </view>
+    <view class="empty-title">这里还没有方案</view>
+    <view class="empty-desc">从测算推荐或 DIY 工作台开始，保存后的手串方案会集中在这里。</view>
+    <button class="yu-button yu-button-primary empty-button" bindtap="createPlan">新建方案</button>
+  </view>
+
+  <view class="new-plan-card yu-card yu-card-pressable" bindtap="createPlan">
+    <view class="new-icon">＋</view>
+    <view>
+      <view class="new-title">新建方案</view>
+      <view class="new-desc">选择定制方式，开始一条新的专属手串</view>
+    </view>
+  </view>
+</view>

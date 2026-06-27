@@ -1,3 +1,5 @@
 {
-  "navigationBarTitleText": "灵感社区"
+  "navigationStyle": "custom",
+  "backgroundColor": "#F6F4EF",
+  "navigationBarTextStyle": "white"
 }

@@ -1,43 +1,79 @@
-<view class="page" wx:if="{{post}}">
-  <view class="hero card">
-    <view class="hero-image {{post.tone}}"></view>
-    <view class="hero-body">
-      <view class="post-title">{{post.title}}</view>
-      <view class="post-meta">{{post.author}} · {{post.likes}} 喜欢</view>
-      <view class="tag-row">
-        <text wx:for="{{post.tags}}" wx:key="*this" class="tag">{{item}}</text>
-      </view>
-      <view class="post-desc">{{post.desc}}</view>
+<view class="inspo-detail-page" wx:if="{{viewPost}}">
+  <view class="detail-nav">
+    <view class="nav-back yu-pressable" bindtap="goBack">‹</view>
+    <view class="nav-title">灵感详情</view>
+    <view class="nav-capsule">
+      <view class="nav-dot">•••</view>
+      <view class="nav-circle"></view>
     </view>
   </view>
 
-  <view class="section">
+  <view class="title-panel">
+    <view class="detail-meta">
+      <view class="tone-dot" style="background: {{viewPost.toneColor}};"></view>
+      <text>{{viewPost.toneLabel}}</text>
+      <view class="meta-line"></view>
+      <text>{{viewPost.dateText}}</text>
+    </view>
+    <view class="hero-title">{{viewPost.title}}</view>
+    <view class="hero-desc">{{viewPost.desc}}</view>
+  </view>
+
+  <view class="hero-media yu-card">
+    <image wx:if="{{viewPost.imageUrl}}" class="hero-image" src="{{viewPost.imageUrl}}" mode="aspectFill"></image>
+    <view wx:else class="bracelet-stage">
+      <image
+        wx:for="{{viewPost.visualBeads}}"
+        wx:for-item="bead"
+        wx:key="id"
+        class="preview-bead"
+        src="{{bead.src}}"
+        mode="aspectFill"
+        style="{{bead.style}}"
+      ></image>
+    </view>
+  </view>
+
+  <view class="section-card yu-card">
+    <view class="section-kicker">SCENE</view>
+    <view class="section-title">适用场景</view>
+    <view class="scene-chips">
+      <text wx:for="{{viewPost.sceneItems}}" wx:key="*this">{{item}}</text>
+    </view>
+    <view class="story-copy">{{viewPost.scene}}</view>
+  </view>
+
+  <view class="section-card yu-card recipe-card">
+    <view class="section-kicker">RECIPE</view>
+    <view class="section-title">配方展示</view>
+    <view class="material-item" wx:for="{{viewPost.materials}}" wx:key="index">
+      <view class="material-index" style="background: {{viewPost.toneColor}};">{{item.index}}</view>
+      <view class="material-image-wrap">
+        <image wx:if="{{item.image}}" class="material-image" src="{{item.image}}" mode="aspectFill"></image>
+        <view wx:else class="material-dot" style="background: {{item.color}};"></view>
+      </view>
+      <view class="material-copy">
+        <view class="material-name">{{item.role}}：{{item.name}}</view>
+        <view class="material-desc">{{item.desc}}</view>
+      </view>
+    </view>
+  </view>
+
+  <view class="section-card yu-card story-card">
+    <view class="section-kicker">STORY</view>
     <view class="section-title">设计灵感</view>
-    <view class="card content-card">{{post.story}}</view>
-  </view>
-
-  <view class="section">
-    <view class="section-title">适合场景</view>
-    <view class="card content-card">{{post.scene}}</view>
-  </view>
-
-  <view class="section">
-    <view class="section-title">材料清单</view>
-    <view class="card material-list">
-      <view wx:for="{{post.materials}}" wx:key="*this" class="material-row">
-        <view class="material-dot {{post.tone}}"></view>
-        <view>{{item}}</view>
-      </view>
-    </view>
-  </view>
-
-  <view class="section">
-    <view class="section-title">作者备注</view>
-    <view class="card content-card">{{post.authorNote}}</view>
+    <view class="story-copy">{{viewPost.story}}</view>
   </view>
 
   <view class="bottom-actions">
-    <button class="secondary-button favorite-button" bindtap="toggleFavorite">{{isFavorite ? '已收藏' : '收藏灵感'}}</button>
-    <button class="primary-button" bindtap="useSame">一键同款并修改</button>
+    <button class="secondary-button favorite-button" bindtap="toggleFavorite">{{favoriteText}}</button>
+    <button class="primary-button" bindtap="useSame">带入 DIY 调整</button>
+  </view>
+</view>
+
+<view class="empty-page" wx:else>
+  <view class="empty-card yu-card">
+    <view class="empty-title">正在打开灵感</view>
+    <view class="empty-desc">稍等一下，正在同步方案内容。</view>
   </view>
 </view>

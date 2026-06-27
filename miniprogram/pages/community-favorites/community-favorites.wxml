@@ -1,0 +1,57 @@
+<view class="favorites-page">
+  <view class="page-nav">
+    <text class="page-count">{{posts.length}} 篇收藏</text>
+  </view>
+
+  <block wx:if="{{posts.length}}">
+    <view class="page-heading">
+      <text class="eyebrow">宇涧 · 社区收藏</text>
+      <text class="page-title">留住打动你的搭配</text>
+      <text class="page-desc">这里只展示你真正收藏过的社区作品。</text>
+    </view>
+
+    <view class="favorite-list">
+      <view
+        wx:for="{{posts}}"
+        wx:key="id"
+        class="favorite-card"
+        data-id="{{item.id}}"
+        bindtap="openPost"
+      >
+        <view class="post-image {{item.tone}}">
+          <view class="image-mark">
+            <text>宇涧</text>
+            <text>INSPIRATION</text>
+          </view>
+        </view>
+        <view class="post-content">
+          <view class="post-heading">
+            <text class="post-title">{{item.title}}</text>
+            <button
+              class="remove-button"
+              data-id="{{item.id}}"
+              catchtap="removeFavorite"
+            >已收藏</button>
+          </view>
+          <text class="post-meta">{{item.author}} · {{item.likes}} 喜欢</text>
+          <text class="post-desc">{{item.desc}}</text>
+          <view class="tag-row">
+            <text wx:for="{{item.tags}}" wx:key="*this" class="tag">{{item}}</text>
+          </view>
+          <button
+            class="same-button"
+            data-id="{{item.id}}"
+            catchtap="useSame"
+          >用这个灵感做一条</button>
+        </view>
+      </view>
+    </view>
+  </block>
+
+  <view wx:else class="empty-state">
+    <view class="empty-symbol">◇</view>
+    <text class="empty-title">还没有社区收藏</text>
+    <text class="empty-desc">在社区作品详情中点击“收藏灵感”，喜欢的作品就会留在这里。</text>
+    <button class="discover-button" bindtap="goCommunity">去逛灵感社区</button>
+  </view>
+</view>

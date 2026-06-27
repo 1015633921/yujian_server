@@ -1,0 +1,205 @@
+page {
+  background: var(--yu-color-bg-page);
+}
+
+.custom-mode-page {
+  min-height: 100vh;
+  padding: calc(22rpx + env(safe-area-inset-top)) 32rpx calc(48rpx + env(safe-area-inset-bottom));
+  background:
+    radial-gradient(circle at 88% 0%, rgba(100, 124, 112, .12), rgba(100, 124, 112, 0) 28%),
+    linear-gradient(180deg, var(--yu-color-bg-page-warm) 0%, var(--yu-color-bg-page) 100%);
+}
+
+.mode-nav {
+  display: grid;
+  grid-template-columns: 72rpx 1fr 132rpx;
+  align-items: center;
+  min-height: 72rpx;
+}
+
+.nav-back {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 58rpx;
+  height: 58rpx;
+  border: var(--yu-line-hair);
+  border-radius: 50%;
+  color: var(--yu-color-anchor-dark);
+  background: rgba(255, 255, 255, .78);
+  box-shadow: var(--yu-shadow-press);
+  font-size: 44rpx;
+  line-height: 1;
+}
+
+.nav-title {
+  color: var(--yu-color-anchor-dark);
+  text-align: center;
+  font-size: 28rpx;
+  font-weight: 800;
+}
+
+.nav-capsule {
+  justify-self: end;
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+  height: 54rpx;
+  padding: 0 18rpx;
+  border: var(--yu-line-hair);
+  border-radius: 999rpx;
+  color: #171917;
+  background: rgba(255,255,255,.78);
+  box-shadow: var(--yu-shadow-press);
+  font-size: 25rpx;
+  font-weight: 900;
+}
+
+.capsule-dot {
+  padding-left: 14rpx;
+  border-left: var(--yu-line-hair);
+}
+
+.mode-heading {
+  margin-top: 34rpx;
+  text-align: center;
+}
+
+.mode-eyebrow {
+  color: var(--yu-color-text-secondary);
+  font-size: 18rpx;
+  font-weight: 800;
+  letter-spacing: 5rpx;
+}
+
+.mode-title {
+  margin: 18rpx auto 0;
+  max-width: 540rpx;
+  color: var(--yu-color-anchor-dark);
+  font-family: "Songti SC", "STSong", "STKaiti", "KaiTi", serif;
+  font-size: 36rpx;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.mode-desc {
+  margin: 16rpx auto 0;
+  max-width: 570rpx;
+  color: var(--yu-color-text-secondary);
+  font-size: 23rpx;
+  line-height: 1.55;
+}
+
+.mode-list {
+  display: grid;
+  gap: 22rpx;
+  margin-top: 42rpx;
+}
+
+.mode-card {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr 116rpx;
+  align-items: center;
+  min-height: 146rpx;
+  padding: 28rpx 22rpx 28rpx 30rpx;
+  border-radius: var(--yu-radius-card);
+  background: rgba(255,255,255,.92);
+}
+
+.mode-card-title {
+  color: var(--yu-color-anchor-dark);
+  font-size: 28rpx;
+  font-weight: 900;
+}
+
+.mode-card-desc {
+  margin-top: 10rpx;
+  color: var(--yu-color-text-secondary);
+  font-size: 22rpx;
+  line-height: 1.45;
+}
+
+.mode-badge {
+  justify-self: end;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 88rpx;
+  height: 88rpx;
+  clip-path: polygon(25% 6%, 75% 6%, 100% 50%, 75% 94%, 25% 94%, 0 50%);
+  color: #fff;
+  background: var(--yu-color-green);
+  box-shadow: 0 14rpx 28rpx rgba(20,20,20,.12);
+  font-size: 34rpx;
+  font-weight: 900;
+}
+
+.mode-card.green .mode-badge {
+  background: var(--yu-color-green);
+}
+
+.mode-card.purple .mode-badge {
+  background: var(--yu-color-purple);
+}
+
+.mode-card.blue .mode-badge {
+  background: var(--yu-color-blue);
+}
+
+.mode-card.gold .mode-badge {
+  background: #D5A64D;
+}
+
+.mode-card.dark .mode-badge {
+  background: var(--yu-color-anchor-dark);
+}
+
+.mode-note {
+  display: grid;
+  grid-template-columns: 18rpx 1fr;
+  gap: 18rpx;
+  margin-top: 34rpx;
+  padding: 24rpx;
+  border-radius: var(--yu-radius-card);
+  background: rgba(255,255,255,.74);
+}
+
+.note-dot {
+  width: 10rpx;
+  height: 10rpx;
+  margin-top: 11rpx;
+  border-radius: 50%;
+  background: var(--yu-color-green);
+}
+
+.note-title {
+  color: var(--yu-color-anchor-dark);
+  font-size: 24rpx;
+  font-weight: 900;
+}
+
+.note-desc {
+  margin-top: 8rpx;
+  color: var(--yu-color-text-secondary);
+  font-size: 21rpx;
+  line-height: 1.55;
+}
+
+@media (max-width: 360px) {
+  .custom-mode-page {
+    padding-left: 24rpx;
+    padding-right: 24rpx;
+  }
+
+  .mode-card {
+    grid-template-columns: 1fr 96rpx;
+    padding-left: 24rpx;
+  }
+
+  .mode-badge {
+    width: 76rpx;
+    height: 76rpx;
+    font-size: 30rpx;
+  }
+}
