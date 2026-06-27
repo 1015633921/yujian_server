@@ -169,7 +169,7 @@ Page({
       designPreviewImage: this.resolveDesignPreviewImage(designForView),
       sequence,
       bom,
-      previewBeads: this.buildPreviewBeads(sequence, design.placements || []),
+      previewBeads: this.buildPreviewBeads(sequence, design.placements || [], designForView),
       amountText: this.formatAmount(amount)
     });
   },
@@ -269,17 +269,20 @@ Page({
     }
   },
 
-  buildPreviewBeads(sequence, placements = []) {
+  buildPreviewBeads(sequence, placements = [], design = {}) {
     const beads = (sequence || []).slice(0, 18);
     const count = Math.max(beads.length, 1);
+    const wristSize = Number(design.wristSize || design.wrist_size || (design.summary && design.summary.wristSize) || 16);
+    const safeWrist = Number.isFinite(wristSize) ? Math.max(10, Math.min(25, wristSize)) : 16;
+    const radius = Math.round(116 + ((safeWrist - 10) / 15) * 44);
+    const size = count >= 17 ? 42 : count >= 15 ? 44 : count >= 12 ? 46 : 50;
     return beads.map((item, index) => {
       const placement = placements[index] || item.placement || {};
       const angle = (360 / count) * index;
-      const size = 48;
       return {
         ...item,
         image_url: placement.image_url || item.image_url || firstImageUrl(item),
-        style: `width:${size}rpx;height:${size}rpx;transform:rotate(${angle}deg) translateY(-138rpx) rotate(${-angle}deg);`
+        style: `width:${size}rpx;height:${size}rpx;margin-left:-${size / 2}rpx;margin-top:-${size / 2}rpx;transform:rotate(${angle}deg) translateY(-${radius}rpx) rotate(${-angle}deg);`
       };
     });
   },

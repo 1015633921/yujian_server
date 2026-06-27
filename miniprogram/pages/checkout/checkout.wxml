@@ -8,24 +8,26 @@
   <view wx:if="{{design}}" class="checkout-content">
     <view class="plan-card yu-card yu-card-lg">
       <view class="plan-preview">
-        <image
-          wx:if="{{designPreviewImage}}"
-          class="plan-preview-image"
-          src="{{designPreviewImage}}"
-          mode="aspectFill"
-          lazy-load="{{true}}"
-          binderror="onPreviewImageError"
-        ></image>
-        <view wx:else class="bracelet-mini">
-          <view class="bracelet-mini-ring"></view>
-          <view
-            wx:for="{{previewBeads}}"
-            wx:key="index"
-            class="preview-bead"
-            style="{{item.style}}"
-          >
-            <image wx:if="{{item.image_url}}" class="preview-bead-image" src="{{item.image_url}}" mode="aspectFill"></image>
-            <view wx:else class="preview-bead-dot"></view>
+        <view class="plan-preview-stage">
+          <image
+            wx:if="{{designPreviewImage}}"
+            class="plan-preview-image"
+            src="{{designPreviewImage}}"
+            mode="aspectFit"
+            lazy-load="{{true}}"
+            binderror="onPreviewImageError"
+          ></image>
+          <view wx:else class="bracelet-mini">
+            <view class="bracelet-mini-ring"></view>
+            <view
+              wx:for="{{previewBeads}}"
+              wx:key="index"
+              class="preview-bead"
+              style="{{item.style}}"
+            >
+              <image wx:if="{{item.image_url}}" class="preview-bead-image" src="{{item.image_url}}" mode="aspectFill"></image>
+              <view wx:else class="preview-bead-dot"></view>
+            </view>
           </view>
         </view>
       </view>
