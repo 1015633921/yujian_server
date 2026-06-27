@@ -108,6 +108,13 @@ MYSQL_SCHEMA = [
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     """,
     """
+    CREATE TABLE IF NOT EXISTS system_settings (
+      setting_key VARCHAR(120) PRIMARY KEY,
+      setting_json LONGTEXT NOT NULL,
+      updated_at VARCHAR(40) NOT NULL
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """,
+    """
     CREATE TABLE IF NOT EXISTS admin_users (
       admin_id VARCHAR(80) PRIMARY KEY, username VARCHAR(100) NOT NULL UNIQUE,
       password_hash VARCHAR(255) NOT NULL, salt VARCHAR(100) NOT NULL, role VARCHAR(40) NOT NULL,

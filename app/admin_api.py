@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter, File, Form, Header, HTTPException, Query, Request, UploadFile
 from pydantic import BaseModel, Field
 
@@ -154,6 +156,11 @@ class OrderRefundReviewPayload(BaseModel):
 
 class WechatOrderPathPayload(BaseModel):
     path: str = "/pages/order-detail/order-detail?id=${商品订单号}"
+
+
+class DailyEnergyRulesPayload(BaseModel):
+    rules: dict[str, Any] = Field(default_factory=dict)
+    reset_to_default: bool = False
 
 
 def success(data, message: str = "ok") -> dict:
@@ -364,6 +371,26 @@ def daily_energies(
 ):
     require_admin(authorization)
     return success(admin_service.list_daily_energies(keyword=keyword, limit=limit))
+
+
+@admin_router.get("/daily-energy-rules", summary="每日能量规则配置")
+def daily_energy_rules(authorization: str | None = Header(default=None)):
+    require_admin(authorization)
+    return success(admin_service.daily_energy_rules())
+
+
+@admin_router.put("/daily-energy-rules", summary="保存每日能量规则配置")
+def save_daily_energy_rules(
+    payload: DailyEnergyRulesPayload,
+    authorization: str | None = Header(default=None),
+):
+    actor = require_admin(authorization)
+    try:
+        return success(admin_service.save_daily_energy_rules(payload.model_dump(), actor), "每日能量规则已保存")
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @admin_router.get("/checkins", summary="每日签到记录")

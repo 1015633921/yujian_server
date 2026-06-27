@@ -91,6 +91,15 @@ class AssessmentRepository:
             connection.execute(
                 "CREATE INDEX IF NOT EXISTS idx_users_openid ON users(openid)"
             )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS system_settings (
+                    setting_key TEXT PRIMARY KEY,
+                    setting_json TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
 
     def find_by_fingerprint(self, fingerprint: str) -> dict[str, Any] | None:
         with self.connect() as connection:
@@ -246,6 +255,39 @@ class AssessmentRepository:
             {"date": row["checkin_date"], "mood": row["mood"], "sleep": row["sleep"], "stress": row["stress"]}
             for row in rows
         ]
+
+    def get_setting(self, setting_key: str) -> Any | None:
+        with self.connect() as connection:
+            row = connection.execute(
+                "SELECT setting_json FROM system_settings WHERE setting_key = ?",
+                (setting_key,),
+            ).fetchone()
+        if not row:
+            return None
+        try:
+            return json.loads(row["setting_json"])
+        except (TypeError, json.JSONDecodeError):
+            return None
+
+    def save_setting(self, setting_key: str, value: Any, updated_at: str) -> None:
+        if use_mysql() and not self._force_sqlite:
+            sql = """
+                INSERT INTO system_settings (setting_key, setting_json, updated_at)
+                VALUES (?, ?, ?)
+                ON DUPLICATE KEY UPDATE setting_json=VALUES(setting_json), updated_at=VALUES(updated_at)
+            """
+        else:
+            sql = """
+                INSERT INTO system_settings (setting_key, setting_json, updated_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(setting_key) DO UPDATE SET
+                    setting_json = excluded.setting_json, updated_at = excluded.updated_at
+            """
+        with self._lock, self.connect() as connection:
+            connection.execute(
+                sql,
+                (setting_key, json.dumps(value, ensure_ascii=False), updated_at),
+            )
 
     def upsert_user(self, user: dict[str, Any]) -> dict[str, Any]:
         if use_mysql() and not self._force_sqlite:

@@ -9,6 +9,13 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from .avatar_storage import AvatarStorage
+from .daily_rules import (
+    DAILY_RULES_SETTING_KEY,
+    default_daily_energy_rules,
+    daily_rules_version,
+    normalize_daily_energy_rules,
+    public_daily_rules_payload,
+)
 from .materials import (
     MATERIAL_CATALOG,
     clean_image_urls,
@@ -276,6 +283,15 @@ class AdminService:
                     status TEXT NOT NULL,
                     sort_order INTEGER NOT NULL DEFAULT 0,
                     created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS system_settings (
+                    setting_key TEXT PRIMARY KEY,
+                    setting_json TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 )
                 """
@@ -1507,6 +1523,62 @@ class AdminService:
                 params,
             ).fetchall()
         return [dict(row) for row in rows]
+
+    def get_setting(self, setting_key: str) -> Any | None:
+        with self.connect() as connection:
+            row = connection.execute(
+                "SELECT setting_json FROM system_settings WHERE setting_key = ?",
+                (setting_key,),
+            ).fetchone()
+        if not row:
+            return None
+        return json_value(row["setting_json"], None)
+
+    def save_setting(self, setting_key: str, value: Any, updated_at: str) -> None:
+        if use_mysql() and not self._force_sqlite:
+            sql = """
+                INSERT INTO system_settings (setting_key, setting_json, updated_at)
+                VALUES (?, ?, ?)
+                ON DUPLICATE KEY UPDATE setting_json=VALUES(setting_json), updated_at=VALUES(updated_at)
+            """
+        else:
+            sql = """
+                INSERT INTO system_settings (setting_key, setting_json, updated_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(setting_key) DO UPDATE SET
+                    setting_json = excluded.setting_json, updated_at = excluded.updated_at
+            """
+        with self.connect() as connection:
+            connection.execute(sql, (setting_key, json_text(value), updated_at))
+
+    def daily_energy_rules(self) -> dict[str, Any]:
+        raw = self.get_setting(DAILY_RULES_SETTING_KEY)
+        rules = normalize_daily_energy_rules(raw)
+        return {
+            "rules": rules,
+            "public_options": public_daily_rules_payload(rules),
+            "rules_version": daily_rules_version(rules),
+            "updated_at": "",
+        }
+
+    def save_daily_energy_rules(self, payload: dict[str, Any], actor: dict[str, Any]) -> dict[str, Any]:
+        if (actor or {}).get("role") == "viewer":
+            raise PermissionError("只读账号不能修改每日能量规则")
+        rules_payload = payload.get("rules") if isinstance(payload, dict) and "rules" in payload else payload
+        if not isinstance(rules_payload, dict):
+            raise ValueError("规则配置必须是 JSON 对象")
+        reset_to_default = bool(payload.get("reset_to_default")) if isinstance(payload, dict) else False
+        if reset_to_default:
+            rules_payload = default_daily_energy_rules()
+        rules = normalize_daily_energy_rules(rules_payload)
+        timestamp = now_iso()
+        self.save_setting(DAILY_RULES_SETTING_KEY, rules, timestamp)
+        return {
+            "rules": rules,
+            "public_options": public_daily_rules_payload(rules),
+            "rules_version": daily_rules_version(rules),
+            "updated_at": timestamp,
+        }
 
     def public_material(self, row: dict[str, Any]) -> dict[str, Any]:
         image_path = row.get("image_path") or ""

@@ -1,5 +1,5 @@
 const auth = require('../../utils/auth');
-const { checkInDailyEnergy, getTodayDailyEnergy } = require('../../utils/api');
+const { getDailyEnergyOptions, getTodayDailyEnergy } = require('../../utils/api');
 
 const DAILY_CACHE_KEY = 'todayDailyEnergy';
 const DAILY_REFRESH_DATE_KEY = 'todayDailyEnergyRefreshDate';
@@ -51,10 +51,10 @@ const CRYSTAL_COLORS = {
 };
 
 const MOOD_OPTIONS = [
-  { key: 'calm', label: '平稳', desc: '想稳住节奏', mood: 4, sleep: 4, stress: 2 },
-  { key: 'tired', label: '疲惫', desc: '需要轻一点', mood: 2, sleep: 2, stress: 3 },
-  { key: 'busy', label: '紧绷', desc: '事情比较满', mood: 3, sleep: 3, stress: 4 },
-  { key: 'clear', label: '清醒', desc: '适合表达', mood: 4, sleep: 3, stress: 2 }
+  { key: 'calm', label: '平静', emoji: '🫧', desc: '状态稳定，可以轻推进' },
+  { key: 'pressure', label: '压力山大', emoji: '🤯', desc: '脑子太满，需要降噪' },
+  { key: 'battery_low', label: '电量告急', emoji: '🔋', desc: '先省电，再推进' },
+  { key: 'money', label: '一心搞钱', emoji: '💰', desc: '目标明确，适合变现' }
 ];
 
 const SCENE_OPTIONS = [
@@ -65,10 +65,10 @@ const SCENE_OPTIONS = [
 ];
 
 const GOAL_OPTIONS = [
-  { key: 'communicate', label: '稳定表达', wish: '正缘桃花/人际和合' },
-  { key: 'focus', label: '减少内耗', wish: '健康护身/保持专注' },
-  { key: 'action', label: '推进任务', wish: '招财进宝/事业腾飞' },
-  { key: 'protect', label: '低压防护', wish: '辟邪防小人/消除焦虑' }
+  { key: 'stable_expression', label: '稳定表达', wish: '正缘桃花/人际和合' },
+  { key: 'less_overthinking', label: '减少内耗', wish: '健康护身/保持专注' },
+  { key: 'move_task', label: '推进任务', wish: '招财进宝/事业腾飞' },
+  { key: 'low_pressure_protect', label: '低压防护', wish: '辟邪防小人/消除焦虑' }
 ];
 
 function firstText(value, fallback = '') {
@@ -83,10 +83,29 @@ function decorateOptions(options, selectedKey) {
   }));
 }
 
+function decorateTagOptions(options, selectedKeys = []) {
+  return options.map(item => ({
+    ...item,
+    className: selectedKeys.includes(item.key) ? 'active' : ''
+  }));
+}
+
+function normalizeRuleOptions(payload = {}) {
+  const statusTags = Array.isArray(payload.status_tags) && payload.status_tags.length ? payload.status_tags : MOOD_OPTIONS;
+  const scenes = Array.isArray(payload.scenes) && payload.scenes.length ? payload.scenes : SCENE_OPTIONS;
+  const goals = Array.isArray(payload.goals) && payload.goals.length ? payload.goals : GOAL_OPTIONS;
+  return {
+    rulesVersion: payload.rules_version || '',
+    statusTags,
+    scenes,
+    goals
+  };
+}
+
 function isFreshDailyPayload(daily) {
   return !!(
     daily
-    && Number(daily.content_version) >= 2
+    && Number(daily.content_version) >= 3
     && daily.season_hint
     && daily.season_hint.summary
   );
@@ -105,21 +124,60 @@ Page({
     refreshing: false,
     daily: null,
     viewDaily: null,
-    moodOptions: decorateOptions(MOOD_OPTIONS, 'calm'),
+    rulesVersion: '',
+    rawStatusOptions: MOOD_OPTIONS,
+    rawSceneOptions: SCENE_OPTIONS,
+    rawGoalOptions: GOAL_OPTIONS,
+    moodOptions: decorateTagOptions(MOOD_OPTIONS, ['calm']),
     sceneOptions: decorateOptions(SCENE_OPTIONS, 'work'),
-    goalOptions: decorateOptions(GOAL_OPTIONS, 'communicate'),
-    selectedMood: 'calm',
+    goalOptions: decorateOptions(GOAL_OPTIONS, 'stable_expression'),
+    selectedStatusTags: ['calm'],
     selectedScene: 'work',
-    selectedGoal: 'communicate'
+    selectedGoal: 'stable_expression'
   },
 
   async onLoad() {
+    await this.loadRuleOptions();
     const cached = wx.getStorageSync(DAILY_CACHE_KEY);
-    if (cached) {
+    if (cached && cached.date === todayKey() && isFreshDailyPayload(cached) && (!this.data.rulesVersion || cached.rules_version === this.data.rulesVersion)) {
       this.applyDaily(cached);
       return;
     }
     await this.loadDaily({ force: false });
+  },
+
+  async loadRuleOptions() {
+    try {
+      const options = normalizeRuleOptions(await getDailyEnergyOptions());
+      const selectedStatusTags = this.data.selectedStatusTags.length
+        ? this.data.selectedStatusTags.filter(key => options.statusTags.some(item => item.key === key))
+        : [];
+      const nextStatusTags = selectedStatusTags.length ? selectedStatusTags : [options.statusTags[0]?.key].filter(Boolean);
+      const selectedScene = options.scenes.some(item => item.key === this.data.selectedScene)
+        ? this.data.selectedScene
+        : options.scenes[0]?.key || '';
+      const selectedGoal = options.goals.some(item => item.key === this.data.selectedGoal)
+        ? this.data.selectedGoal
+        : options.goals[0]?.key || '';
+      this.setData({
+        rulesVersion: options.rulesVersion,
+        rawStatusOptions: options.statusTags,
+        rawSceneOptions: options.scenes,
+        rawGoalOptions: options.goals,
+        selectedStatusTags: nextStatusTags,
+        selectedScene,
+        selectedGoal,
+        moodOptions: decorateTagOptions(options.statusTags, nextStatusTags),
+        sceneOptions: decorateOptions(options.scenes, selectedScene),
+        goalOptions: decorateOptions(options.goals, selectedGoal)
+      });
+    } catch (error) {
+      this.setData({
+        moodOptions: decorateTagOptions(MOOD_OPTIONS, this.data.selectedStatusTags),
+        sceneOptions: decorateOptions(SCENE_OPTIONS, this.data.selectedScene),
+        goalOptions: decorateOptions(GOAL_OPTIONS, this.data.selectedGoal)
+      });
+    }
   },
 
   async loadDaily(options = {}) {
@@ -129,6 +187,9 @@ Page({
       const goal = this.currentGoal();
       const daily = await getTodayDailyEnergy(user.user_id, {
         initialWish: goal && goal.wish,
+        statusTags: this.data.selectedStatusTags,
+        sceneKey: this.data.selectedScene,
+        goalKeys: this.data.selectedGoal ? [this.data.selectedGoal] : [],
         forceRecalculate: !!options.force
       });
       this.applyDaily(daily);
@@ -331,7 +392,7 @@ Page({
   },
 
   currentMood() {
-    return this.data.moodOptions.find(item => item.key === this.data.selectedMood) || this.data.moodOptions[0];
+    return this.data.moodOptions.filter(item => this.data.selectedStatusTags.includes(item.key));
   },
 
   currentScene() {
@@ -343,10 +404,17 @@ Page({
   },
 
   selectMood(e) {
-    const selectedMood = e.currentTarget.dataset.key;
+    const key = e.currentTarget.dataset.key;
+    let selectedStatusTags = [...this.data.selectedStatusTags];
+    if (selectedStatusTags.includes(key)) {
+      selectedStatusTags = selectedStatusTags.filter(item => item !== key);
+    } else {
+      selectedStatusTags.push(key);
+    }
+    selectedStatusTags = selectedStatusTags.slice(-3);
     this.setData({
-      selectedMood,
-      moodOptions: decorateOptions(MOOD_OPTIONS, selectedMood)
+      selectedStatusTags,
+      moodOptions: decorateTagOptions(this.data.rawStatusOptions || MOOD_OPTIONS, selectedStatusTags)
     });
   },
 
@@ -354,7 +422,7 @@ Page({
     const selectedScene = e.currentTarget.dataset.key;
     this.setData({
       selectedScene,
-      sceneOptions: decorateOptions(SCENE_OPTIONS, selectedScene)
+      sceneOptions: decorateOptions(this.data.rawSceneOptions || SCENE_OPTIONS, selectedScene)
     });
   },
 
@@ -362,7 +430,7 @@ Page({
     const selectedGoal = e.currentTarget.dataset.key;
     this.setData({
       selectedGoal,
-      goalOptions: decorateOptions(GOAL_OPTIONS, selectedGoal)
+      goalOptions: decorateOptions(this.data.rawGoalOptions || GOAL_OPTIONS, selectedGoal)
     });
   },
 
@@ -371,14 +439,7 @@ Page({
     this.setData({ refreshing: true });
     wx.showLoading({ title: '正在生成' });
     try {
-      const user = await auth.requireLogin('登录后才能更新今日建议。');
-      const mood = this.currentMood();
-      await checkInDailyEnergy({
-        user_id: user.user_id,
-        mood: mood.mood,
-        sleep: mood.sleep,
-        stress: mood.stress
-      });
+      await auth.requireLogin('登录后才能更新今日建议。');
       await this.loadDaily({ force: true });
       wx.showToast({ title: '今日建议已更新', icon: 'none' });
     } catch (error) {

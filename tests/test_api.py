@@ -1077,7 +1077,7 @@ def test_more_than_three_core_wishes_are_rejected():
 
 
 def test_first_time_user_gets_starter_daily_energy_and_same_day_is_cached():
-    user_id = "daily-starter-user"
+    user_id = "daily-starter-user-v3"
     first = client.get(f"/api/v1/daily-energy/today?user_id={user_id}&force_recalculate=true")
     second = client.get(f"/api/v1/daily-energy/today?user_id={user_id}")
 
@@ -1090,6 +1090,8 @@ def test_first_time_user_gets_starter_daily_energy_and_same_day_is_cached():
     assert first.json()["data"]["commerce_entry"]["source"] == "daily_energy"
     assert first.json()["data"]["workbench_payload"]["source"] == "daily_energy"
     assert first.json()["data"]["workbench_payload"]["bracelet_plan"]["layout"]
+    assert first.json()["data"]["rules_version"]
+    assert first.json()["data"]["state_context"]["source"] == "live_selection"
     assert second.json()["data"]["cache_hit"] is True
     assert second.json()["data"]["score"] == first.json()["data"]["score"]
 
@@ -1112,17 +1114,24 @@ def test_assessed_user_gets_personalized_daily_energy():
     assert data["commerce_entry"]["button_text"] == "一键生成今日手串"
 
 
-def test_daily_checkin_is_saved_and_used_on_recalculation():
+def test_daily_options_and_live_tags_are_used_on_recalculation():
     user_id = "daily-checkin-user"
+    options = client.get("/api/v1/daily-energy/options")
     checkin = client.post(
         "/api/v1/daily-energy/check-in?checkin_date=2026-06-04",
         json={"user_id": user_id, "mood": 5, "sleep": 5, "stress": 1},
     )
     response = client.get(
-        f"/api/v1/daily-energy/2026-06-04?user_id={user_id}&force_recalculate=true"
+        f"/api/v1/daily-energy/2026-06-04?user_id={user_id}"
+        "&status_tags=money&scene_key=deadline&goal_keys=wealth&force_recalculate=true"
     )
 
+    assert options.status_code == 200
+    assert options.json()["data"]["status_tags"]
+    assert options.json()["data"]["scenes"]
+    assert options.json()["data"]["goals"]
     assert checkin.status_code == 200
     assert response.status_code == 200
-    assert response.json()["data"]["state_context"]["source"] == "recent_checkins"
-    assert response.json()["data"]["state_context"]["adjustment"] > 0
+    assert response.json()["data"]["state_context"]["source"] == "live_selection"
+    assert response.json()["data"]["state_context"]["selected_status_tags"][0]["key"] == "money"
+    assert response.json()["data"]["state_context"]["selected_scene"]["key"] == "deadline"

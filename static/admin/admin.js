@@ -7,7 +7,7 @@ const state = {
   page: 'overview',
   insight: 'assessments',
   materialUi: { selected: new Set(), expanded: new Set(), sortBy: 'sort_order', sortOrder: 'asc' },
-  cache: { materials: [], blocks: [], homeBanners: [], orders: [], communityPosts: [], recommendationPlans: [], admins: [], loginLogs: [] }
+  cache: { materials: [], blocks: [], homeBanners: [], orders: [], communityPosts: [], recommendationPlans: [], admins: [], loginLogs: [], dailyRules: null }
 };
 const pageMeta = {
   overview:['BUSINESS OVERVIEW','经营概览'],orders:['ORDER FULFILLMENT','订单履约'],
@@ -15,6 +15,7 @@ const pageMeta = {
   bannerContent:['HOME BANNERS','Home Banner'],
   communityContent:['COMMUNITY CMS','社区灵感'],recommendContent:['RECOMMEND CMS','热门推荐'],
   users:['CUSTOMER CENTER','用户中心'],insights:['ENERGY INSIGHTS','能量数据'],
+  dailyRules:['DAILY ENERGY RULES','能量规则'],
   admins:['ADMIN SECURITY','管理员账号'],
   system:['SYSTEM READINESS','系统配置']
 };
@@ -134,7 +135,7 @@ function switchPage(page){
   state.page=page;document.querySelectorAll('.nav-item').forEach(x=>x.classList.toggle('active',x.dataset.page===page));
   document.querySelectorAll('.page-view').forEach(x=>x.classList.toggle('hide',x.id!==page));
   $('pageEyebrow').textContent=pageMeta[page][0];$('pageTitle').textContent=pageMeta[page][1];
-  ({overview:loadDashboard,orders:loadOrders,materials:loadMaterials,content:loadBlocks,bannerContent:loadHomeBanners,communityContent:loadCommunityPosts,recommendContent:loadRecommendationPlans,users:loadUsers,insights:loadInsights,admins:loadAdmins,system:loadSystemStatus}[page]||(()=>{}))();
+  ({overview:loadDashboard,orders:loadOrders,materials:loadMaterials,content:loadBlocks,bannerContent:loadHomeBanners,communityContent:loadCommunityPosts,recommendContent:loadRecommendationPlans,users:loadUsers,insights:loadInsights,dailyRules:loadDailyRules,admins:loadAdmins,system:loadSystemStatus}[page]||(()=>{}))();
 }
 function refreshCurrent(){switchPage(state.page);toast('数据已刷新')}
 function statusPill(status,text){const cls=['refund_requested','after_sale'].includes(status)?'danger':['pending_payment','pending_ship'].includes(status)?'warn':['closed','refunded'].includes(status)?'muted':'';return `<span class="status-pill ${cls}">${esc(text||status)}</span>`}
@@ -1045,6 +1046,52 @@ async function loadInsights(){
   }else{
     const rows=await api(`/api/v1/admin/checkins?keyword=${k}`);$('insightsTable').innerHTML=table(['日期','用户','心情','睡眠','压力','更新时间'],rows.map(x=>[x.checkin_date,`<small>${esc(x.user_id)}</small>`,scoreBar(x.mood),scoreBar(x.sleep),scoreBar(x.stress),fmtTime(x.updated_at)]))
   }
+}
+async function loadDailyRules(){
+  const data=await api('/api/v1/admin/daily-energy-rules');
+  state.cache.dailyRules=data;
+  const rules=data.rules||{};
+  if($('dailyRulesEditor'))$('dailyRulesEditor').value=JSON.stringify(rules,null,2);
+  renderDailyRulesSummary(data);
+}
+function renderDailyRulesSummary(data={}){
+  const rules=data.rules||{},options=data.public_options||{};
+  if(!$('dailyRulesSummary'))return;
+  $('dailyRulesSummary').innerHTML=`
+    <div><b>${esc(data.rules_version||options.rules_version||'-')}</b><span>规则版本</span></div>
+    <div><b>${(rules.status_tags||[]).length}</b><span>状态标签</span></div>
+    <div><b>${(rules.scenes||[]).length}</b><span>场景选项</span></div>
+    <div><b>${(rules.goals||[]).length}</b><span>目标选项</span></div>
+    <div><b>${rules.content_version||'-'}</b><span>内容版本</span></div>
+  `;
+}
+function parseDailyRulesEditor(){
+  try{return JSON.parse($('dailyRulesEditor')?.value||'{}')}
+  catch(e){toast(`JSON 格式错误：${e.message}`);throw e}
+}
+function formatDailyRules(){
+  const rules=parseDailyRulesEditor();
+  $('dailyRulesEditor').value=JSON.stringify(rules,null,2);
+}
+async function saveDailyRules(){
+  try{
+    const rules=parseDailyRulesEditor();
+    const data=await api('/api/v1/admin/daily-energy-rules',{method:'PUT',body:JSON.stringify({rules})});
+    state.cache.dailyRules=data;
+    $('dailyRulesEditor').value=JSON.stringify(data.rules||rules,null,2);
+    renderDailyRulesSummary(data);
+    toast('每日能量规则已保存');
+  }catch(e){if(e instanceof SyntaxError)return;toast(e.message||'保存规则失败')}
+}
+async function resetDailyRules(){
+  if(!confirm('确认恢复系统默认每日能量规则？当前自定义规则会被覆盖。'))return;
+  try{
+    const data=await api('/api/v1/admin/daily-energy-rules',{method:'PUT',body:JSON.stringify({reset_to_default:true,rules:{}})});
+    state.cache.dailyRules=data;
+    $('dailyRulesEditor').value=JSON.stringify(data.rules||{},null,2);
+    renderDailyRulesSummary(data);
+    toast('已恢复默认规则');
+  }catch(e){toast(e.message||'恢复默认失败')}
 }
 function formulaTags(formula={}){
   const tags=formula.tags||[];

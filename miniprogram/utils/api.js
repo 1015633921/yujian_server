@@ -225,8 +225,15 @@ function bindPhone(payload) {
 function getTodayDailyEnergy(userId, options = {}) {
   const query = [`user_id=${encodeURIComponent(userId)}`];
   if (options.initialWish) query.push(`initial_wish=${encodeURIComponent(options.initialWish)}`);
+  (options.statusTags || []).forEach(key => query.push(`status_tags=${encodeURIComponent(key)}`));
+  if (options.sceneKey) query.push(`scene_key=${encodeURIComponent(options.sceneKey)}`);
+  (options.goalKeys || []).forEach(key => query.push(`goal_keys=${encodeURIComponent(key)}`));
   if (options.forceRecalculate) query.push('force_recalculate=true');
   return request(`/api/v1/daily-energy/today?${query.join('&')}`);
+}
+
+function getDailyEnergyOptions() {
+  return request('/api/v1/daily-energy/options');
 }
 
 function checkInDailyEnergy(payload) {
@@ -366,6 +373,7 @@ module.exports = {
   uploadDesignPreview,
   bindPhone,
   getTodayDailyEnergy,
+  getDailyEnergyOptions,
   checkInDailyEnergy,
   getMaterials,
   getHomeBanners,

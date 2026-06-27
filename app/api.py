@@ -562,16 +562,37 @@ def assessment_detail(assessment_id: str):
     return success(result)
 
 
+def parse_key_list(values: list[str] | None) -> list[str]:
+    keys: list[str] = []
+    for value in values or []:
+        for chunk in str(value or "").replace("，", ",").split(","):
+            key = chunk.strip()
+            if key and key not in keys:
+                keys.append(key)
+    return keys
+
+
+@router.get("/daily-energy/options", summary="获取今日能量可选标签、场景和目标")
+def daily_energy_options():
+    return success(daily_service.options())
+
+
 @router.get("/daily-energy/today", summary="获取今日能量补给站内容")
 def today_daily_energy(
     user_id: str = Query(min_length=1, max_length=100),
     initial_wish: str | None = Query(default=None, max_length=100),
+    status_tags: list[str] | None = Query(default=None),
+    scene_key: str | None = Query(default=None, max_length=80),
+    goal_keys: list[str] | None = Query(default=None),
     force_recalculate: bool = Query(default=False),
 ):
     result, cache_hit = daily_service.get_or_calculate(
         user_id=user_id,
         target_date=date.today(),
         initial_wish=initial_wish,
+        status_tags=parse_key_list(status_tags),
+        scene_key=scene_key,
+        goal_keys=parse_key_list(goal_keys),
         force_recalculate=force_recalculate,
     )
     return success({**result, "cache_hit": cache_hit}, "读取今日能量" if cache_hit else "今日能量已生成")
@@ -589,11 +610,19 @@ def daily_energy_check_in(
 def dated_daily_energy(
     energy_date: date,
     user_id: str = Query(min_length=1, max_length=100),
+    initial_wish: str | None = Query(default=None, max_length=100),
+    status_tags: list[str] | None = Query(default=None),
+    scene_key: str | None = Query(default=None, max_length=80),
+    goal_keys: list[str] | None = Query(default=None),
     force_recalculate: bool = Query(default=False),
 ):
     result, cache_hit = daily_service.get_or_calculate(
         user_id=user_id,
         target_date=energy_date,
+        initial_wish=initial_wish,
+        status_tags=parse_key_list(status_tags),
+        scene_key=scene_key,
+        goal_keys=parse_key_list(goal_keys),
         force_recalculate=force_recalculate,
     )
     return success({**result, "cache_hit": cache_hit})

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>宇涧运营后台</title>
-  <link rel="stylesheet" href="static/admin/admin.css?v=20260626-material-gallery-1">
+  <link rel="stylesheet" href="static/admin/admin.css?v=20260627-daily-rules-1">
 </head>
 <body>
   <section id="authView" class="auth-screen">
@@ -45,6 +45,7 @@
         <button class="nav-item" data-page="recommendContent" onclick="switchPage('recommendContent')"><i>★</i>热门推荐</button>
         <button class="nav-item" data-page="users" onclick="switchPage('users')"><i>♙</i>用户中心</button>
         <button class="nav-item" data-page="insights" onclick="switchPage('insights')"><i>⌁</i>能量数据</button>
+        <button class="nav-item" data-page="dailyRules" onclick="switchPage('dailyRules')"><i>签</i>能量规则</button>
         <button class="nav-item" data-page="admins" onclick="switchPage('admins')"><i>盾</i>管理员账号</button>
         <button class="nav-item" data-page="system" onclick="switchPage('system')"><i>⚙</i>系统配置</button>
       </nav>
@@ -206,7 +207,6 @@
         <div class="subtabs">
           <button class="subtab active" data-insight="assessments" onclick="switchInsight('assessments')">测算记录</button>
           <button class="subtab" data-insight="daily" onclick="switchInsight('daily')">每日能量</button>
-          <button class="subtab" data-insight="checkins" onclick="switchInsight('checkins')">用户签到</button>
         </div>
         <div class="page-toolbar">
           <div class="filter-group">
@@ -222,6 +222,22 @@
           </div>
         </div>
         <article class="panel table-panel"><div id="insightsTable"></div></article>
+      </section>
+
+      <section id="dailyRules" class="page-view hide">
+        <div class="content-hint">这里控制小程序「今日能量建议」里的状态标签、场景、目标、五行权重和推荐晶石。保存后用户下次刷新今日建议会使用新规则。</div>
+        <article class="panel">
+          <div class="panel-head">
+            <div><h2>每日能量规则 JSON</h2><p>建议先复制备份再修改；格式错误会被前端拦截，后端也会做安全归一化。</p></div>
+            <div class="table-actions">
+              <button class="btn secondary compact" onclick="formatDailyRules()">格式化</button>
+              <button class="btn secondary compact danger-outline" onclick="resetDailyRules()">恢复默认</button>
+              <button class="btn primary compact" onclick="saveDailyRules()">保存规则</button>
+            </div>
+          </div>
+          <div id="dailyRulesSummary" class="rules-summary"></div>
+          <textarea id="dailyRulesEditor" class="rules-editor" spellcheck="false" placeholder="正在加载规则..."></textarea>
+        </article>
       </section>
 
       <section id="admins" class="page-view hide">
@@ -265,6 +281,6 @@
     <div id="drawerBody" class="drawer-body"></div>
   </aside>
   <div id="toast" class="toast hide"></div>
-  <script src="static/admin/admin.js?v=20260626-material-gallery-1"></script>
+  <script src="static/admin/admin.js?v=20260627-daily-rules-1"></script>
 </body>
 </html>

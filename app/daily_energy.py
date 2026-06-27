@@ -4,6 +4,7 @@ import hashlib
 from datetime import date
 from typing import Any
 
+from .daily_rules import daily_rules_version, normalize_daily_energy_rules
 from .energy import ELEMENTS, WISH_MAPPING, normalized_profile
 from .recommendation import CRYSTAL_CATALOG, SUPPORTING_BY_ELEMENT
 
@@ -22,7 +23,7 @@ WORKBENCH_CRYSTAL_CODES = {
     "hematite",
 }
 
-DAILY_ENERGY_CONTENT_VERSION = 2
+DAILY_ENERGY_CONTENT_VERSION = 3
 
 SEASON_ELEMENT = {
     1: "水", 2: "木", 3: "木", 4: "木",
@@ -30,12 +31,24 @@ SEASON_ELEMENT = {
     9: "金", 10: "金", 11: "水", 12: "水",
 }
 
+HEAVENLY_STEMS = ("甲", "乙", "丙", "丁", "戊", "己", "庚", "辛", "壬", "癸")
+STEM_ELEMENT = {
+    "甲": "木", "乙": "木", "丙": "火", "丁": "火", "戊": "土",
+    "己": "土", "庚": "金", "辛": "金", "壬": "水", "癸": "水",
+}
+EARTHLY_BRANCHES = ("子", "丑", "寅", "卯", "辰", "巳", "午", "未", "申", "酉", "戌", "亥")
+BRANCH_ELEMENT = {
+    "子": "水", "丑": "土", "寅": "木", "卯": "木", "辰": "土", "巳": "火",
+    "午": "火", "未": "土", "申": "金", "酉": "金", "戌": "土", "亥": "水",
+}
+GANZHI_REFERENCE = date(1984, 2, 2)  # 甲子日参考点，用于稳定生成日柱节律。
+
 ELEMENT_CONTENT = {
     "金": {
         "theme": "清晰整理的一天",
         "color": "月雾白",
         "best_time": "15:00-17:00",
-        "actions": ["整理一个长期搁置的清单", "为今天最重要的决定设置明确边界", "给桌面留出一块干净空间"],
+        "actions": ["整理一个长期搁置的清单", "为今天最重要的决定设置清晰边界", "给桌面留出一块干净空间"],
         "avoid": ["反复纠结已经做出的决定"],
     },
     "木": {
@@ -50,7 +63,7 @@ ELEMENT_CONTENT = {
         "color": "海盐蓝",
         "best_time": "21:00-23:00",
         "actions": ["给自己十分钟不被打扰的安静时间", "记录今天最真实的一种感受", "适度补水并放慢节奏"],
-        "avoid": ["在情绪波动时立即做重大决定"],
+        "avoid": ["在情绪波动时立刻做重大决定"],
     },
     "火": {
         "theme": "表达与推进的一天",
@@ -63,7 +76,7 @@ ELEMENT_CONTENT = {
         "theme": "稳定积蓄的一天",
         "color": "麦芽金",
         "best_time": "13:00-15:00",
-        "actions": ["整理一处经常使用的空间", "写下今天最重要的一件事", "按计划完成一顿规律饮食"],
+        "actions": ["整理一处经常使用的空间", "写下今天最重要的一件事", "按计划完成一项规律饮食"],
         "avoid": ["因为追求完美而迟迟不开始"],
     },
 }
@@ -119,58 +132,67 @@ class DailyEnergyCalculator:
         user_id: str,
         target_date: date,
         assessment: dict[str, Any] | None,
-        checkins: list[dict[str, Any]],
-        initial_wish: str | None = None,
+        interaction: dict[str, Any] | None = None,
+        rules: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        rules = rules if isinstance(rules, dict) and rules.get("schema_version") else normalize_daily_energy_rules(rules)
         date_profile = self.date_profile(target_date)
-        state = self.state_score(checkins)
+        date_basis = self.date_basis(target_date)
+        context = self.interaction_context(interaction or {}, rules)
         if assessment and assessment.get("final_energy_profile"):
-            return self.personalized(user_id, target_date, assessment, date_profile, state, checkins)
-        return self.starter(user_id, target_date, date_profile, state, initial_wish)
+            return self.personalized(user_id, target_date, assessment, date_profile, date_basis, context, rules)
+        return self.starter(user_id, target_date, date_profile, date_basis, context, rules)
 
     def starter(
         self,
         user_id: str,
         target_date: date,
         date_profile: dict[str, float],
-        state: dict[str, Any],
-        initial_wish: str | None,
+        date_basis: dict[str, Any],
+        context: dict[str, Any],
+        rules: dict[str, Any],
     ) -> dict[str, Any]:
-        stable = self.stable_user_profile(user_id, target_date)
-        wish = self.wish_profile(initial_wish)
-        combined = {
-            element: date_profile[element] * 0.7 + stable[element] * 0.2 + wish[element] * 0.1
-            for element in ELEMENTS
-        }
-        profile = normalized_profile(combined, 100)
-        focus = max(profile, key=profile.get)
+        weights = rules.get("scoring", {}).get("starter_weights") or {}
+        combined = self.weighted_profile({
+            "date": (date_profile, weights.get("date", 0.30)),
+            "status": (context["status_profile"], weights.get("status", 0.30)),
+            "scene": (context["scene_profile"], weights.get("scene", 0.15)),
+            "goal": (context["goal_profile"], weights.get("goal", 0.25)),
+        })
+        focus = max(combined, key=combined.get)
+        support = self.support_element(combined)
+        score = self.clamp(
+            round(float(rules.get("scoring", {}).get("starter_base", 66)) + self.date_score_delta(date_profile) + context["score_delta"]),
+            int(rules.get("scoring", {}).get("min_score", 42)),
+            min(90, int(rules.get("scoring", {}).get("max_score", 96))),
+        )
         content = ELEMENT_CONTENT[focus]
-        score = self.clamp(round(68 + self.stable_offset(user_id, target_date, 9) + state["adjustment"]), 55, 88)
         result = {
             "mode": "starter",
             "personalized": False,
             "assessment_id": None,
             "score": score,
             "level": self.score_level(score),
-            "theme": content["theme"],
-            "summary": f"今天的{focus}能量更容易被感知，适合先稳定节奏，再为下一步积蓄力量。",
-            "energy_profile": profile,
+            "theme": self.theme_for_context(context, content["theme"]),
+            "summary": self.summary_text(focus, support, context, personalized=False),
+            "energy_profile": combined,
             "dominant_element": focus,
-            "supporting_element": min(profile, key=profile.get),
+            "supporting_element": support,
             "best_time": content["best_time"],
-            "lucky_color": content["color"],
-            "lucky_crystal": self.crystal_for_element(focus),
-            "actions": content["actions"],
+            "lucky_color": ELEMENT_CONTENT[support]["color"],
+            "lucky_crystal": self.crystal_for_element(support, rules),
+            "actions": self.actions_for_context(content, support, context),
             "avoid": content["avoid"],
-            "state_context": state,
+            "state_context": context["public"],
+            "date_basis": date_basis,
             "guide": {
                 "title": "解锁你的专属每日能量",
-                "description": "完成五行能量测算后，每日建议将结合你的个人能量与近期状态生成。",
+                "description": "完成五行能量测算后，系统会结合你的个人画像、当天节律和实时选择生成建议。",
                 "button_text": "开始专属测算",
                 "route": "/pages/assessment/assessment",
             },
         }
-        result.update(self.commercial_payload(result, target_date, focus, result["supporting_element"]))
+        result.update(self.commercial_payload(result, target_date, focus, support, context, rules))
         return result
 
     def personalized(
@@ -179,62 +201,214 @@ class DailyEnergyCalculator:
         target_date: date,
         assessment: dict[str, Any],
         date_profile: dict[str, float],
-        state: dict[str, Any],
-        checkins: list[dict[str, Any]],
+        date_basis: dict[str, Any],
+        context: dict[str, Any],
+        rules: dict[str, Any],
     ) -> dict[str, Any]:
-        personal = assessment["final_energy_profile"]
-        weakest = min(personal, key=personal.get)
-        strongest = max(personal, key=personal.get)
-        synergy = date_profile[weakest] - date_profile[strongest]
-        score = self.clamp(round(72 + synergy * 0.65 + state["adjustment"]), 48, 96)
-        combined = normalized_profile(
-            {element: personal[element] * 0.4 + date_profile[element] * 0.35 for element in ELEMENTS},
-            100,
+        personal = {element: float((assessment.get("final_energy_profile") or {}).get(element, 0)) for element in ELEMENTS}
+        if not any(personal.values()):
+            personal = {element: 20.0 for element in ELEMENTS}
+        max_personal = max(personal.values()) or 20
+        personal_need = normalized_profile({element: max_personal - personal[element] + 8 for element in ELEMENTS}, 100)
+        weights = rules.get("scoring", {}).get("personalized_weights") or {}
+        combined = self.weighted_profile({
+            "personal_need": (personal_need, weights.get("personal_need", 0.35)),
+            "date": (date_profile, weights.get("date", 0.20)),
+            "status": (context["status_profile"], weights.get("status", 0.20)),
+            "scene": (context["scene_profile"], weights.get("scene", 0.10)),
+            "goal": (context["goal_profile"], weights.get("goal", 0.15)),
+        })
+        focus = max(combined, key=combined.get)
+        support = max(personal_need, key=personal_need.get)
+        date_fit = sum(date_profile[element] * personal_need[element] for element in ELEMENTS) / 100
+        score = self.clamp(
+            round(float(rules.get("scoring", {}).get("personalized_base", 68)) + (date_fit - 20) * 0.85 + context["score_delta"]),
+            int(rules.get("scoring", {}).get("min_score", 42)),
+            int(rules.get("scoring", {}).get("max_score", 96)),
         )
-        focus = max(date_profile, key=date_profile.get)
-        support = weakest if date_profile[weakest] >= 15 else min(date_profile, key=date_profile.get)
         content = ELEMENT_CONTENT[focus]
-        if date_profile[weakest] > date_profile[strongest]:
-            summary = f"今日{weakest}能量能够补足你个人画像中的弱项，适合温和推进与主动表达。"
-        else:
-            summary = f"今日{strongest}能量会进一步放大你的天然优势，也要为{weakest}留出恢复空间。"
         result = {
             "mode": "personalized",
             "personalized": True,
             "assessment_id": assessment["assessment_id"],
             "score": score,
             "level": self.score_level(score),
-            "theme": content["theme"],
-            "summary": summary,
+            "theme": self.theme_for_context(context, content["theme"]),
+            "summary": self.summary_text(focus, support, context, personalized=True),
             "energy_profile": combined,
+            "personal_need_profile": personal_need,
             "dominant_element": focus,
             "supporting_element": support,
             "best_time": content["best_time"],
             "lucky_color": ELEMENT_CONTENT[support]["color"],
-            "lucky_crystal": self.crystal_for_element(support),
-            "actions": [
-                content["actions"][0],
-                ELEMENT_CONTENT[support]["actions"][1],
-                f"佩戴{self.crystal_for_element(support)}约两小时，作为今日节奏提醒。",
-            ],
+            "lucky_crystal": self.crystal_for_element(support, rules),
+            "actions": self.actions_for_context(content, support, context),
             "avoid": content["avoid"],
-            "state_context": {**state, "checkin_days": len(checkins)},
+            "state_context": context["public"],
+            "date_basis": date_basis,
             "guide": None,
         }
-        result.update(self.commercial_payload(result, target_date, focus, support))
+        result.update(self.commercial_payload(result, target_date, focus, support, context, rules))
         return result
 
     @staticmethod
     def date_profile(target_date: date) -> dict[str, float]:
-        digest = hashlib.sha256(target_date.isoformat().encode()).digest()
-        raw = {element: float(digest[index] + 80) for index, element in enumerate(ELEMENTS)}
-        raw[SEASON_ELEMENT[target_date.month]] += 180
+        basis = DailyEnergyCalculator.date_basis(target_date)
+        raw = {element: 8.0 for element in ELEMENTS}
+        raw[basis["seasonal_element"]] += 42
+        raw[basis["stem_element"]] += 28
+        raw[basis["branch_element"]] += 22
+        if target_date.day in {1, 8, 15, 22, 29}:
+            raw["金"] += 6
+        if target_date.day in {3, 10, 17, 24, 31}:
+            raw["水"] += 6
         return normalized_profile(raw, 100)
 
     @staticmethod
-    def stable_user_profile(user_id: str, target_date: date) -> dict[str, float]:
-        digest = hashlib.sha256(f"{user_id}:{target_date.isoformat()}".encode()).digest()
-        return normalized_profile({element: digest[index] + 50 for index, element in enumerate(ELEMENTS)}, 100)
+    def date_basis(target_date: date) -> dict[str, Any]:
+        offset = (target_date - GANZHI_REFERENCE).days
+        stem = HEAVENLY_STEMS[offset % 10]
+        branch = EARTHLY_BRANCHES[offset % 12]
+        seasonal_element = SEASON_ELEMENT[target_date.month]
+        return {
+            "period": f"{target_date.month}月流月",
+            "seasonal_element": seasonal_element,
+            "day_stem": stem,
+            "day_branch": branch,
+            "day_ganzhi": f"{stem}{branch}",
+            "stem_element": STEM_ELEMENT[stem],
+            "branch_element": BRANCH_ELEMENT[branch],
+            "method": "month-season + day-stem-branch",
+        }
+
+    @staticmethod
+    def neutral_profile() -> dict[str, float]:
+        return {element: 20.0 for element in ELEMENTS}
+
+    def interaction_context(self, interaction: dict[str, Any], rules: dict[str, Any]) -> dict[str, Any]:
+        tag_keys = self.clean_keys(interaction.get("status_tags") or interaction.get("statusTags"))
+        scene_key = (interaction.get("scene_key") or interaction.get("sceneKey") or "").strip()
+        goal_keys = self.clean_keys(interaction.get("goal_keys") or interaction.get("goalKeys"))
+        initial_wish = interaction.get("initial_wish") or interaction.get("initialWish")
+
+        tags_by_key = {item["key"]: item for item in rules.get("status_tags", [])}
+        scenes_by_key = {item["key"]: item for item in rules.get("scenes", [])}
+        goals_by_key = {item["key"]: item for item in rules.get("goals", [])}
+        selected_tags = [tags_by_key[key] for key in tag_keys if key in tags_by_key]
+        selected_scene = scenes_by_key.get(scene_key) if scene_key else None
+        selected_goals = [goals_by_key[key] for key in goal_keys if key in goals_by_key]
+
+        status_raw = {element: 0.0 for element in ELEMENTS}
+        scene_raw = {element: 0.0 for element in ELEMENTS}
+        goal_raw = {element: 0.0 for element in ELEMENTS}
+        dimension_delta: dict[str, float] = {}
+        score_delta = 0.0
+        crystal_codes: list[str] = []
+        keywords: list[str] = []
+        wearing_scenes: list[str] = []
+
+        for item in selected_tags:
+            for element in item.get("support_elements", []):
+                if element in status_raw:
+                    status_raw[element] += 1
+            score_delta += float(item.get("score_delta") or 0)
+            self.merge_delta(dimension_delta, item.get("dimension_delta") or {})
+            crystal_codes.extend(item.get("crystal_codes") or [])
+            keywords.extend(item.get("keywords") or [])
+
+        if selected_scene:
+            for element, value in (selected_scene.get("element_bias") or {}).items():
+                if element in scene_raw:
+                    scene_raw[element] += float(value or 0)
+            score_delta += float(selected_scene.get("score_delta") or 0)
+            self.merge_delta(dimension_delta, selected_scene.get("dimension_delta") or {})
+            crystal_codes.extend(selected_scene.get("crystal_codes") or [])
+            wearing_scenes.extend(selected_scene.get("wearing_scenes") or [selected_scene.get("label")])
+
+        for item in selected_goals:
+            for element in item.get("target_elements", []):
+                if element in goal_raw:
+                    goal_raw[element] += 1
+            score_delta += float(item.get("score_delta") or 0)
+            self.merge_delta(dimension_delta, item.get("dimension_delta") or {})
+            crystal_codes.extend(item.get("crystal_codes") or [])
+            keywords.extend(item.get("keywords") or [])
+
+        if not selected_goals and initial_wish:
+            goal_raw = self.wish_profile(initial_wish)
+        else:
+            goal_raw = normalized_profile(goal_raw, 100) if any(goal_raw.values()) else self.neutral_profile()
+
+        status_profile = normalized_profile(status_raw, 100) if any(status_raw.values()) else self.neutral_profile()
+        scene_profile = normalized_profile(scene_raw, 100) if any(scene_raw.values()) else self.neutral_profile()
+
+        public = {
+            "source": "live_selection",
+            "selected_status_tags": [
+                {"key": item.get("key"), "label": item.get("label"), "emoji": item.get("emoji") or ""}
+                for item in selected_tags
+            ],
+            "selected_scene": (
+                {"key": selected_scene.get("key"), "label": selected_scene.get("label"), "icon": selected_scene.get("icon") or ""}
+                if selected_scene else None
+            ),
+            "selected_goals": [
+                {"key": item.get("key"), "label": item.get("label")}
+                for item in selected_goals
+            ],
+            "score_delta": round(score_delta, 1),
+        }
+        return {
+            "status_profile": status_profile,
+            "scene_profile": scene_profile,
+            "goal_profile": goal_raw,
+            "score_delta": max(-16, min(16, score_delta)),
+            "dimension_delta": dimension_delta,
+            "crystal_codes": self.unique([code for code in crystal_codes if code]),
+            "keywords": self.unique([word for word in keywords if word]),
+            "wearing_scenes": self.unique([scene for scene in wearing_scenes if scene]),
+            "public": public,
+        }
+
+    @staticmethod
+    def clean_keys(value: Any) -> list[str]:
+        if value is None:
+            return []
+        if isinstance(value, str):
+            chunks = value.replace("，", ",").split(",")
+        elif isinstance(value, (list, tuple)):
+            chunks = value
+        else:
+            chunks = [value]
+        result: list[str] = []
+        for chunk in chunks:
+            key = str(chunk or "").strip()
+            if key and key not in result:
+                result.append(key)
+        return result
+
+    @staticmethod
+    def merge_delta(target: dict[str, float], source: dict[str, Any]) -> None:
+        for key, value in (source or {}).items():
+            try:
+                target[key] = target.get(key, 0.0) + float(value)
+            except (TypeError, ValueError):
+                continue
+
+    @staticmethod
+    def weighted_profile(parts: dict[str, tuple[dict[str, float], float]]) -> dict[str, float]:
+        raw = {element: 0.0 for element in ELEMENTS}
+        total_weight = 0.0
+        for profile, weight in parts.values():
+            weight = float(weight or 0)
+            if weight <= 0:
+                continue
+            total_weight += weight
+            for element in ELEMENTS:
+                raw[element] += float(profile.get(element, 0)) * weight
+        if total_weight <= 0:
+            return DailyEnergyCalculator.neutral_profile()
+        return normalized_profile(raw, 100)
 
     @staticmethod
     def wish_profile(initial_wish: str | None) -> dict[str, float]:
@@ -245,20 +419,26 @@ class DailyEnergyCalculator:
         return normalized_profile(profile, 100)
 
     @staticmethod
-    def state_score(checkins: list[dict[str, Any]]) -> dict[str, Any]:
-        if not checkins:
-            return {"source": "neutral_default", "mood": 3.0, "sleep": 3.0, "stress": 3.0, "adjustment": 0}
-        count = len(checkins)
-        mood = sum(item["mood"] for item in checkins) / count
-        sleep = sum(item["sleep"] for item in checkins) / count
-        stress = sum(item["stress"] for item in checkins) / count
-        adjustment = round((mood - 3) * 2.5 + (sleep - 3) * 2.5 - (stress - 3) * 3)
-        return {"source": "recent_checkins", "mood": round(mood, 1), "sleep": round(sleep, 1), "stress": round(stress, 1), "adjustment": adjustment}
+    def support_element(profile: dict[str, float]) -> str:
+        return min(profile, key=profile.get)
 
     @staticmethod
-    def crystal_for_element(element: str) -> str:
-        code = SUPPORTING_BY_ELEMENT[element][0]
-        return CRYSTAL_CATALOG[code]["name"]
+    def date_score_delta(profile: dict[str, float]) -> float:
+        spread = max(profile.values()) - min(profile.values())
+        top = max(profile.values())
+        return min(8, max(-6, (top - 20) * 0.18 - spread * 0.03))
+
+    @staticmethod
+    def crystal_for_element(element: str, rules: dict[str, Any]) -> str:
+        code = DailyEnergyCalculator.first_crystal_code(element, rules)
+        return CRYSTAL_CATALOG.get(code, {}).get("name") or "白水晶"
+
+    @staticmethod
+    def first_crystal_code(element: str, rules: dict[str, Any]) -> str:
+        for code in (rules.get("element_crystal_pool", {}).get(element) or SUPPORTING_BY_ELEMENT.get(element) or []):
+            if code in CRYSTAL_CATALOG:
+                return code
+        return "clear_quartz"
 
     def commercial_payload(
         self,
@@ -266,24 +446,10 @@ class DailyEnergyCalculator:
         target_date: date,
         focus_element: str,
         support_element: str,
+        context: dict[str, Any],
+        rules: dict[str, Any],
     ) -> dict[str, Any]:
-        """Build the product-facing recommendation fields for the mini program.
-
-        The daily energy card is a lightweight commerce entry: explain why a stone
-        fits today, then let the user take the generated plan into the DIY bench.
-        """
-        codes = []
-        for element in (support_element, focus_element):
-            for code in SUPPORTING_BY_ELEMENT[element]:
-                if code not in WORKBENCH_CRYSTAL_CODES:
-                    continue
-                if code not in codes:
-                    codes.append(code)
-                    break
-        if "clear_quartz" not in codes:
-            codes.append("clear_quartz")
-        codes = codes[:3]
-
+        codes = self.pick_crystal_codes(focus_element, support_element, context, rules)
         recommended_crystals = []
         for index, code in enumerate(codes):
             item = CRYSTAL_CATALOG[code]
@@ -309,6 +475,7 @@ class DailyEnergyCalculator:
         primary = recommended_crystals[0]
         secondary = recommended_crystals[1] if len(recommended_crystals) > 1 else primary
         keyword = result.get("theme") or "今日能量"
+        rules_version = daily_rules_version(rules)
         source_context = {
             "source": "daily_energy",
             "source_label": "今日能量",
@@ -319,6 +486,8 @@ class DailyEnergyCalculator:
             "assessment_id": result.get("assessment_id"),
             "dominant_element": result.get("dominant_element"),
             "supporting_element": result.get("supporting_element"),
+            "rules_version": rules_version,
+            "state_context": result.get("state_context"),
         }
         layout = []
         for crystal in recommended_crystals:
@@ -334,21 +503,23 @@ class DailyEnergyCalculator:
 
         return {
             "content_version": DAILY_ENERGY_CONTENT_VERSION,
+            "rules_version": rules_version,
             "title": result.get("theme"),
             "daily_keyword": keyword,
-            "keywords": self.build_keywords(result, focus_element, support_element),
+            "keywords": self.build_keywords(result, focus_element, support_element, context),
             "today_status": self.today_status(result.get("score", 70)),
-            "season_hint": self.build_season_hint(target_date, focus_element, support_element),
-            "dimensions": self.build_dimensions(result.get("energy_profile") or {}, result.get("score", 70)),
-            "dimension_commentary": self.build_dimension_commentary(result.get("energy_profile") or {}, focus_element),
+            "season_hint": self.build_season_hint(target_date, result.get("date_basis") or {}, focus_element, support_element),
+            "dimensions": self.build_dimensions(result.get("energy_profile") or {}, result.get("score", 70), context),
+            "dimension_commentary": self.build_dimension_commentary(result.get("energy_profile") or {}, focus_element, context),
             "recommended_stone": primary["name"],
             "recommended_crystals": recommended_crystals,
             "crystal_combo": self.build_crystal_combo(recommended_crystals),
             "wearing_advice": f"今天建议以{primary['name']}为主石，搭配{secondary['name']}，做成适合日常佩戴的轻量手串。",
-            "wearing_guide": self.build_wearing_guide(primary, focus_element, support_element),
+            "wearing_guide": self.build_wearing_guide(primary, focus_element, support_element, context),
             "action_tip": (result.get("actions") or ["先完成一件小事"])[0],
             "action_advice": self.build_action_advice(result),
             "daily_plan": self.build_daily_plan(target_date, result, primary, secondary),
+            "calculation_note": "按当月五行节律、当日天干地支、用户能量画像与实时状态/场景/目标标签综合计算。",
             "commerce_entry": {
                 "source": "daily_energy",
                 "title": "生成今日能量手串",
@@ -366,7 +537,7 @@ class DailyEnergyCalculator:
                 "recommended_crystals": recommended_crystals,
                 "bracelet_plan": {
                     "title": f"{target_date.strftime('%m.%d')} 今日能量手串",
-                    "summary": f"{primary['name']} + {secondary['name']}，围绕{keyword}生成。",
+                    "summary": f"{primary['name']} + {secondary['name']}，围绕「{keyword}」生成。",
                     "bead_size_mm": 8,
                     "estimated_bead_count": len(layout),
                     "pattern": "今日主石 + 平衡辅石 + 净化点缀",
@@ -376,8 +547,37 @@ class DailyEnergyCalculator:
             },
         }
 
-    def build_keywords(self, result: dict[str, Any], focus_element: str, support_element: str) -> list[str]:
+    def pick_crystal_codes(
+        self,
+        focus_element: str,
+        support_element: str,
+        context: dict[str, Any],
+        rules: dict[str, Any],
+    ) -> list[str]:
+        candidates = list(context.get("crystal_codes") or [])
+        for element in (support_element, focus_element):
+            candidates.extend(rules.get("element_crystal_pool", {}).get(element) or SUPPORTING_BY_ELEMENT.get(element) or [])
+        candidates.append("clear_quartz")
+        codes: list[str] = []
+        for code in candidates:
+            if code not in CRYSTAL_CATALOG or code not in WORKBENCH_CRYSTAL_CODES:
+                continue
+            if code not in codes:
+                codes.append(code)
+            if len(codes) >= 3:
+                break
+        if not codes:
+            codes = ["clear_quartz"]
+        while len(codes) < 3:
+            for code in ("clear_quartz", "aquamarine", "smoky_quartz", "rose_quartz"):
+                if code not in codes:
+                    codes.append(code)
+                    break
+        return codes[:3]
+
+    def build_keywords(self, result: dict[str, Any], focus_element: str, support_element: str, context: dict[str, Any]) -> list[str]:
         candidates = [
+            *context.get("keywords", []),
             ELEMENT_KEYWORDS.get(support_element, ["稳定"])[0],
             ELEMENT_KEYWORDS.get(focus_element, ["清透"])[1],
             "轻盈" if result.get("score", 70) >= 72 else "慢修复",
@@ -403,25 +603,28 @@ class DailyEnergyCalculator:
         return "低速修复"
 
     @staticmethod
-    def build_season_hint(target_date: date, focus_element: str, support_element: str) -> dict[str, Any]:
-        seasonal_element = SEASON_ELEMENT[target_date.month]
+    def build_season_hint(target_date: date, basis: dict[str, Any], focus_element: str, support_element: str) -> dict[str, Any]:
+        seasonal_element = basis.get("seasonal_element") or SEASON_ELEMENT[target_date.month]
+        day_ganzhi = basis.get("day_ganzhi") or ""
         return {
             "period": f"{target_date.month}月流月",
             "seasonal_element": seasonal_element,
+            "day_ganzhi": day_ganzhi,
             "summary": (
-                f"当前流月以{seasonal_element}气为主，今日更容易感知到{focus_element}能量。"
-                f"建议用{support_element}向的晶石做轻柔调和，减少状态流失。"
+                f"当前流月以{seasonal_element}气为主，今日{day_ganzhi}日会放大{focus_element}能量。"
+                f"建议用{support_element}向晶石做轻柔调和，减少状态流失。"
             ),
-            "drain_point": f"{support_element}能量不足时，容易出现节奏断档或注意力分散。",
-            "suggestion": "先完成一件确定的小事，再推进需要沟通或创意的任务。",
+            "drain_point": f"{support_element}能量不足时，容易出现注意力分散、节奏断档或表达过度解释。",
+            "suggestion": "先完成一件确定的小事，再推进需要沟通、创意或临场判断的任务。",
         }
 
-    def build_dimensions(self, profile: dict[str, float], score: int | float) -> list[dict[str, Any]]:
+    def build_dimensions(self, profile: dict[str, float], score: int | float, context: dict[str, Any]) -> list[dict[str, Any]]:
+        delta = context.get("dimension_delta") or {}
         return [
             {
                 "key": key,
                 "name": name,
-                "value": self.dimension_score(profile, weights, score),
+                "value": self.clamp(self.dimension_score(profile, weights, score) + round(float(delta.get(key, 0))), 35, 98),
                 "description": description,
             }
             for key, name, weights, description in DIMENSION_CONFIG
@@ -436,14 +639,16 @@ class DailyEnergyCalculator:
         total_weight = sum(weights.values()) or 1
         weighted = sum(float(profile.get(element, 0)) * weight for element, weight in weights.items()) / total_weight
         value = round(48 + weighted * 1.35 + (float(score or 70) - 70) * 0.18)
-        return self.clamp(value, 45, 96)
+        return self.clamp(value, 35, 96)
 
-    def build_dimension_commentary(self, profile: dict[str, float], focus_element: str) -> str:
-        dimensions = self.build_dimensions(profile, 70)
+    def build_dimension_commentary(self, profile: dict[str, float], focus_element: str, context: dict[str, Any]) -> str:
+        dimensions = self.build_dimensions(profile, 70, context)
         strongest = max(dimensions, key=lambda item: item["value"])
         weakest = min(dimensions, key=lambda item: item["value"])
+        scene = (context.get("public", {}).get("selected_scene") or {}).get("label")
+        scene_copy = f"结合「{scene}」场景，" if scene else ""
         return (
-            f"今天的{strongest['name']}相对更好，适合把事情做稳。"
+            f"{scene_copy}今天的{strongest['name']}相对更好，适合把事情做稳。"
             f"{weakest['name']}略弱，不建议一次塞入太多临场创意或高压对抗。"
             f"{focus_element}能量当令时，保持清晰表达会比强行加速更有效。"
         )
@@ -480,14 +685,15 @@ class DailyEnergyCalculator:
         }
 
     @staticmethod
-    def build_wearing_guide(primary: dict[str, Any], focus_element: str, support_element: str) -> dict[str, Any]:
+    def build_wearing_guide(primary: dict[str, Any], focus_element: str, support_element: str, context: dict[str, Any]) -> dict[str, Any]:
         focus = ELEMENT_WEARING.get(focus_element, ELEMENT_WEARING["水"])
         support = ELEMENT_WEARING.get(support_element, focus)
+        scenes = list(dict.fromkeys([*context.get("wearing_scenes", []), *focus["scenes"], *support["scenes"]]))[:4]
         return {
-            "hand": "建议左手佩戴，用更安静的方式稳定状态；如今天需要高频表达，也可以短时间换到右手提醒自己清晰输出。",
+            "hand": "建议左手佩戴，用更安静的方式稳定状态；如果今天需要高频表达，也可以短时间换到右手提醒自己清晰输出。",
             "colors": list(dict.fromkeys([*support["colors"], *focus["colors"]]))[:4],
             "avoid": focus["avoid"],
-            "scenes": list(dict.fromkeys([*focus["scenes"], *support["scenes"]]))[:4],
+            "scenes": scenes,
             "not_recommended": "高压谈判、强对抗场合，或情绪很满时立刻做重大决定。",
             "primary_stone": primary.get("name", "今日主石"),
         }
@@ -512,11 +718,11 @@ class DailyEnergyCalculator:
             "style": "清透通勤款",
             "main_colors": [color, "透明", "奶白"],
             "bead_sizes": ["6mm", "8mm"],
-            "wrist_hint": "将按你在 DIY 工作台选择的手围自动排布。",
+            "wrist_hint": "将在 DIY 工作台选择手围后自动排布。",
             "budget_text": "第一版先按可用珠材自动生成，后续可加入预算区间。",
             "description": (
                 f"以{primary.get('name')}作为今日主石，搭配{secondary.get('name')}做平衡，"
-                f"围绕“{result.get('theme') or '今日能量'}”生成可继续编辑的方案。"
+                f"围绕「{result.get('theme') or '今日能量'}」生成可继续编辑的方案。"
             ),
         }
 
@@ -539,6 +745,38 @@ class DailyEnergyCalculator:
         return items
 
     @staticmethod
+    def theme_for_context(context: dict[str, Any], fallback: str) -> str:
+        goals = context.get("public", {}).get("selected_goals") or []
+        tags = context.get("public", {}).get("selected_status_tags") or []
+        if goals:
+            return f"{goals[0]['label']}的一天"
+        if tags:
+            return f"{tags[0]['label']}也能稳住的一天"
+        return fallback
+
+    @staticmethod
+    def summary_text(focus: str, support: str, context: dict[str, Any], personalized: bool) -> str:
+        scene = (context.get("public", {}).get("selected_scene") or {}).get("label")
+        tags = context.get("public", {}).get("selected_status_tags") or []
+        tag_text = "、".join(item["label"] for item in tags[:2])
+        prefix = f"结合你今天选择的「{tag_text}」，" if tag_text else ""
+        scene_text = f"在「{scene}」场景里，" if scene else ""
+        personal_text = "也会照顾你的个人五行短板。" if personalized else "先用轻量方案帮你找到今日节奏。"
+        return f"{prefix}{scene_text}今天适合用{support}能量托住状态，再顺着{focus}能量推进事情，{personal_text}"
+
+    @staticmethod
+    def actions_for_context(content: dict[str, Any], support: str, context: dict[str, Any]) -> list[str]:
+        goals = context.get("public", {}).get("selected_goals") or []
+        scene = (context.get("public", {}).get("selected_scene") or {}).get("label")
+        actions = list(content.get("actions") or [])
+        if goals:
+            actions.insert(0, f"围绕「{goals[0]['label']}」先做一个 15 分钟内能完成的小动作")
+        if scene:
+            actions.insert(1, f"在「{scene}」前，先用一句话写下今天最想达成的结果")
+        actions.append(f"佩戴{ELEMENT_CONTENT[support]['color']}向晶石约两小时，作为今日节奏提醒。")
+        return DailyEnergyCalculator.unique(actions)[:3]
+
+    @staticmethod
     def stable_offset(user_id: str, target_date: date, spread: int) -> int:
         digest = hashlib.sha256(f"score:{user_id}:{target_date.isoformat()}".encode()).hexdigest()
         return int(digest[:8], 16) % (spread * 2 + 1) - spread
@@ -554,5 +792,13 @@ class DailyEnergyCalculator:
         return "低速修复"
 
     @staticmethod
-    def clamp(value: int, minimum: int, maximum: int) -> int:
-        return max(minimum, min(maximum, value))
+    def clamp(value: int | float, minimum: int, maximum: int) -> int:
+        return max(minimum, min(maximum, int(value)))
+
+    @staticmethod
+    def unique(values: list[Any]) -> list[Any]:
+        result: list[Any] = []
+        for value in values:
+            if value and value not in result:
+                result.append(value)
+        return result
