@@ -3624,8 +3624,19 @@ page {
 
 .cart-btn,
 .finish-btn {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  box-sizing: border-box !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  margin: 0 !important;
+  padding: 0 18rpx !important;
   border-radius: 999rpx !important;
   font-weight: 850 !important;
+  line-height: 1 !important;
+  white-space: nowrap !important;
 }
 
 .cart-btn {

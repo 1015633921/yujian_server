@@ -576,6 +576,7 @@
 }
 
 .result-bottom {
+  box-sizing: border-box;
   position: fixed;
   right: 0;
   bottom: 0;
@@ -587,6 +588,7 @@
 }
 
 .result-submit {
+  box-sizing: border-box;
   width: 100%;
   min-height: 92rpx;
   font-size: 28rpx;
@@ -703,15 +705,20 @@
 
 .poster-secondary,
 .poster-primary {
+  box-sizing: border-box;
   display: flex;
   align-items: center;
   justify-content: center;
+  width: 100%;
+  min-width: 0;
   height: 84rpx;
   margin: 0;
+  padding: 0 22rpx;
   border-radius: var(--yu-radius-pill);
   font-size: 26rpx;
   font-weight: 800;
-  line-height: 84rpx;
+  line-height: 1;
+  white-space: nowrap;
 }
 
 .poster-secondary::after,

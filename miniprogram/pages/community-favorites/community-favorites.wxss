@@ -129,12 +129,18 @@
 }
 
 .remove-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
   flex: none;
   margin: 0;
   padding: 0 18rpx;
+  min-height: 48rpx;
   border-radius: 999rpx;
   font-size: 20rpx;
-  line-height: 48rpx;
+  line-height: 1;
+  white-space: nowrap;
   color: #79533f;
   background: #f2e9e1;
 }
@@ -174,11 +180,18 @@
 
 .same-button,
 .discover-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  min-height: 76rpx;
   margin: 24rpx 0 0;
+  padding: 0 24rpx;
   border-radius: 999rpx;
   font-size: 25rpx;
   font-weight: 700;
-  line-height: 76rpx;
+  line-height: 1;
+  white-space: nowrap;
   color: #fff;
   background: linear-gradient(135deg, #687264, #815a44);
 }

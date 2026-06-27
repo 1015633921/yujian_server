@@ -53,9 +53,19 @@ image {
 }
 
 button {
+  display: flex;
+  overflow: visible;
+  align-items: center;
+  justify-content: center;
+  max-width: 100%;
+  min-width: 0;
   margin-left: 0;
   margin-right: 0;
-  line-height: normal;
+  padding-left: 0;
+  padding-right: 0;
+  box-sizing: border-box;
+  text-align: center;
+  line-height: 1.1;
 }
 
 button::after {
@@ -581,11 +591,13 @@ page {
   align-items: center;
   justify-content: center;
   min-width: 0;
+  max-width: 100%;
   min-height: var(--yu-control-height-md);
   margin: 0;
   padding: 0 var(--yu-control-padding-x);
   border-radius: var(--yu-radius-pill);
   box-sizing: border-box;
+  overflow: visible;
   font-size: 26rpx;
   font-weight: 750;
   line-height: 1.15;

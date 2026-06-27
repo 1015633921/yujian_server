@@ -992,13 +992,20 @@ page {
 
 .sheet-secondary,
 .sheet-primary {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
   height: 76rpx;
   min-height: 76rpx;
   margin: 0;
-  padding: 0;
+  padding: 0 18rpx;
   border-radius: 999rpx;
   font-size: 24rpx;
-  line-height: 76rpx;
+  line-height: 1;
+  white-space: nowrap;
 }
 
 .sheet-secondary {

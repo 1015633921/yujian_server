@@ -490,6 +490,7 @@
 
 /* WeUI-like assessment bottom action. */
 .assessment-bottom {
+  box-sizing: border-box;
   border-top: 0;
   background: transparent;
   box-shadow: none;
@@ -497,6 +498,8 @@
 }
 
 .assessment-submit {
+  box-sizing: border-box;
+  width: 100%;
   min-height: 86rpx;
   border-radius: 999rpx;
   background: linear-gradient(135deg, #2f322f 0%, #141614 100%);
