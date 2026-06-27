@@ -451,16 +451,18 @@ class DailyEnergyCalculator:
     ) -> dict[str, Any]:
         codes = self.pick_crystal_codes(focus_element, support_element, context, rules)
         recommended_crystals = []
+        context_codes = set(context.get("crystal_codes") or [])
         for index, code in enumerate(codes):
             item = CRYSTAL_CATALOG[code]
             role = "今日主石" if index == 0 else ("平衡辅石" if index == 1 else "净化点缀")
-            reason = (
-                f"补足{support_element}能量，适合今天随身佩戴"
-                if index == 0
-                else f"呼应{focus_element}主题，让搭配更稳定"
-                if index == 1
-                else "用于放大与净化整体能量"
-            )
+            if index == 0 and code in context_codes:
+                reason = "匹配你今天选择的状态与目标，适合作为主石随身佩戴"
+            elif index == 0:
+                reason = f"补足{support_element}能量，适合今天随身佩戴"
+            elif index == 1:
+                reason = f"呼应{focus_element}主题，让搭配更稳定"
+            else:
+                reason = "用于放大与净化整体能量"
             recommended_crystals.append({
                 "crystal_code": code,
                 "code": code,
