@@ -1,6 +1,6 @@
 .daily-page {
   min-height: 100vh;
-  padding: calc(24rpx + env(safe-area-inset-top)) 28rpx calc(182rpx + env(safe-area-inset-bottom));
+  padding: calc(24rpx + env(safe-area-inset-top)) 28rpx calc(156rpx + env(safe-area-inset-bottom));
   color: var(--yu-color-text-primary);
   background:
     radial-gradient(circle at 90% 2%, rgba(75, 126, 196, .16), transparent 26%),
@@ -776,9 +776,8 @@
   right: 0;
   bottom: 0;
   z-index: 20;
-  display: grid;
-  grid-template-columns: 240rpx minmax(0, 1fr);
-  gap: 18rpx;
+  display: flex;
+  align-items: center;
   padding: 18rpx 28rpx calc(22rpx + env(safe-area-inset-bottom));
   border-top: 1rpx solid rgba(229,226,220,.74);
   background: rgba(251,250,247,.96);
@@ -786,17 +785,12 @@
   backdrop-filter: blur(20rpx);
 }
 
-.bottom-secondary,
 .bottom-primary {
+  width: 100%;
   min-height: 90rpx;
   border-radius: 999rpx;
   font-size: 27rpx;
   font-weight: 850;
-}
-
-.bottom-secondary {
-  border: 1rpx solid rgba(32,32,31,.10);
-  background: rgba(255,255,255,.92);
 }
 
 .bottom-primary {
@@ -821,7 +815,6 @@
   }
 
   .daily-bottom {
-    grid-template-columns: 218rpx minmax(0, 1fr);
     padding-left: 22rpx;
     padding-right: 22rpx;
   }

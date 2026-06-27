@@ -210,7 +210,6 @@
   </view>
 
   <view class="daily-bottom">
-    <button class="yu-button yu-button-secondary bottom-secondary" bindtap="refreshDaily" loading="{{refreshing}}" disabled="{{refreshing}}">更新今日建议</button>
     <button class="yu-button yu-button-primary bottom-primary" bindtap="generateDailyDiy">生成今日手串方案</button>
   </view>
 </view>
