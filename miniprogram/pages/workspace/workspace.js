@@ -2790,7 +2790,7 @@ Page({
       selected: [...this.data.selected, id],
       placements: [...this.data.placements, placement || this.createLoosePlacement(this.data.selected.length, id)],
       isLooseMode: true,
-      selectedBeadIndex: this.data.selected.length
+      selectedBeadIndex: -1
     });
     this.recalculate();
     wx.nextTick(() => {
