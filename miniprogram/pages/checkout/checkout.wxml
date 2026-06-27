@@ -12,7 +12,7 @@
           wx:if="{{designPreviewImage}}"
           class="plan-preview-image"
           src="{{designPreviewImage}}"
-          mode="aspectFit"
+          mode="aspectFill"
           lazy-load="{{true}}"
           binderror="onPreviewImageError"
         ></image>

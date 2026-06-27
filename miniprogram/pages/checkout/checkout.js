@@ -275,11 +275,11 @@ Page({
     return beads.map((item, index) => {
       const placement = placements[index] || item.placement || {};
       const angle = (360 / count) * index;
-      const size = 26;
+      const size = 48;
       return {
         ...item,
         image_url: placement.image_url || item.image_url || firstImageUrl(item),
-        style: `width:${size}rpx;height:${size}rpx;transform:rotate(${angle}deg) translateY(-58rpx) rotate(${-angle}deg);`
+        style: `width:${size}rpx;height:${size}rpx;transform:rotate(${angle}deg) translateY(-138rpx) rotate(${-angle}deg);`
       };
     });
   },
