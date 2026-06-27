@@ -13,6 +13,12 @@ pip install -r requirements.txt
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
+如果需要运行测试或素材处理脚本，请安装开发依赖：
+
+```powershell
+pip install -r requirements-dev.txt
+```
+
 启动后访问：
 
 - Swagger 接口文档：`http://127.0.0.1:8000/docs`
@@ -154,6 +160,7 @@ GET /api/v1/crystals/catalog
 ## 测试
 
 ```powershell
+pip install -r requirements-dev.txt
 pytest -q
 ```
 
