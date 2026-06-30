@@ -1,28 +1,53 @@
 <view class="assessment-page yu-page">
   <view class="assessment-nav">
     <view class="nav-back yu-pressable" bindtap="goBack">‹</view>
-    <view class="nav-title">{{modeCopy.navTitle}}</view>
-    <view class="nav-more">···</view>
+    <view class="nav-title">{{currentStepKey === 'review' ? '确认测算信息' : modeCopy.navTitle}}</view>
+    <view class="nav-more yu-pressable" bindtap="openGuide">?</view>
   </view>
 
-  <view class="assessment-stepper">
-    <view
-      wx:for="{{steps}}"
-      wx:key="key"
-      class="step-item {{item.activeClass}}"
-    >
-      <view class="step-dot">{{item.index}}</view>
-      <view class="step-label">{{item.label}}</view>
+  <scroll-view class="assessment-stepper" scroll-x show-scrollbar="{{false}}">
+    <view class="stepper-track">
+      <view
+        wx:for="{{steps}}"
+        wx:key="key"
+        class="step-item {{item.activeClass}}"
+        data-index="{{index}}"
+        bindtap="jumpToStep"
+      >
+        <view class="step-dot">{{item.index}}</view>
+        <view class="step-label">{{item.label}}</view>
+      </view>
     </view>
-  </view>
+  </scroll-view>
 
-  <view class="assessment-hero">
+  <view wx:if="{{currentStepKey !== 'review'}}" class="assessment-hero">
     <view class="hero-kicker">{{modeCopy.kicker}}</view>
     <view class="hero-title">{{modeCopy.title}}</view>
     <view class="hero-desc">{{modeCopy.desc}}</view>
+    <view class="hero-guide-link" bindtap="openGuide">30 秒了解测算依据</view>
   </view>
 
-  <view class="form-panel yu-card yu-card-lg">
+  <view wx:if="{{currentStepKey !== 'review'}}" class="flow-intro">
+    <view class="flow-count">{{progressText}}</view>
+    <view>
+      <view class="flow-title">{{currentStep.title}}</view>
+      <view class="flow-desc">{{currentStep.desc}}</view>
+    </view>
+    <view class="flow-badge">{{currentStep.badge}}</view>
+  </view>
+
+  <view wx:if="{{currentStepKey === 'review'}}" class="review-hero">
+    <view class="review-progress">
+      <text>{{progressText}}</text>
+      <view class="review-progress-track">
+        <view class="review-progress-inner"></view>
+      </view>
+    </view>
+    <view class="review-hero-title">确认测算信息</view>
+    <view class="review-hero-desc">确认无误后，将生成你的五行能量报告和专属手串推荐。</view>
+  </view>
+
+  <view wx:if="{{currentStepKey === 'basic'}}" class="form-panel yu-card yu-card-lg">
     <view class="panel-head">
       <view>
         <view class="panel-title">请填写你的出生信息</view>
@@ -88,7 +113,7 @@
     </picker>
   </view>
 
-  <view class="option-section">
+  <view wx:if="{{currentStepKey === 'mbti'}}" class="option-section">
     <view class="option-head">
       <view>
         <view class="option-title">MBTI 类型</view>
@@ -109,7 +134,7 @@
     </view>
   </view>
 
-  <view class="option-section">
+  <view wx:if="{{currentStepKey === 'wish'}}" class="option-section">
     <view class="option-head">
       <view>
         <view class="option-title">当前核心愿望</view>
@@ -130,6 +155,86 @@
     </view>
   </view>
 
+  <view wx:if="{{currentStepKey === 'state'}}" class="option-section">
+    <view class="option-head">
+      <view>
+        <view class="option-title">当下状态</view>
+        <view class="option-desc">选出最近最有共鸣的感受，用于七脉轮动态调节。</view>
+      </view>
+      <view class="option-action">最多 5 项</view>
+    </view>
+    <view class="state-grid">
+      <view
+        wx:for="{{chakraOptions}}"
+        wx:key="value"
+        class="state-card {{item.activeClass}}"
+        data-value="{{item.value}}"
+        bindtap="toggleChakraAnswer"
+      >
+        <view class="state-title">{{item.label}}</view>
+        <view class="state-desc">{{item.desc}}</view>
+      </view>
+    </view>
+  </view>
+
+  <view wx:if="{{currentStepKey === 'palette'}}" class="option-section">
+    <view class="option-head">
+      <view>
+        <view class="option-title">直觉色彩</view>
+        <view class="option-desc">凭第一眼选择最吸引你的一组色彩。</view>
+      </view>
+      <view class="option-action">{{form.moodPaletteId ? '已选择' : '可选'}}</view>
+    </view>
+    <view class="palette-grid">
+      <view
+        wx:for="{{moodPalettes}}"
+        wx:key="value"
+        class="palette-card {{item.activeClass}}"
+        data-value="{{item.value}}"
+        bindtap="selectMoodPalette"
+      >
+        <view class="palette-swatches">
+          <view
+            wx:for="{{item.colors}}"
+            wx:for-item="color"
+            wx:key="*this"
+            class="palette-swatch"
+            style="background: {{color}};"
+          ></view>
+        </view>
+        <view class="palette-title">{{item.label}}</view>
+        <view class="palette-desc">{{item.desc}}</view>
+      </view>
+    </view>
+  </view>
+
+  <view wx:if="{{currentStepKey === 'review'}}" class="review-panel yu-card yu-card-lg">
+    <view class="panel-head">
+      <view>
+        <view class="panel-title">测算档案</view>
+        <view class="panel-desc">点击任一项可以返回对应步骤修改。</view>
+      </view>
+      <view class="panel-badge">已完成</view>
+    </view>
+    <view
+      wx:for="{{reviewRows}}"
+      wx:key="label"
+      class="review-row"
+      data-index="{{item.stepIndex}}"
+      bindtap="jumpToStep"
+    >
+      <view>
+        <view class="review-label">{{item.label}}</view>
+        <view class="review-value">{{item.value}}</view>
+      </view>
+      <view class="review-edit">修改</view>
+    </view>
+  </view>
+
+  <view wx:if="{{currentStepKey === 'review'}}" class="review-notice">
+    出生时辰未知时，系统会按中午 12:00 估算；结果用于文化体验与个性化推荐参考。
+  </view>
+
   <view class="privacy-note">
     <view class="note-dot"></view>
     <view>信息仅用于本次能量测算与方案推荐，不会展示给其他用户。</view>
@@ -137,35 +242,26 @@
 
   <view class="assessment-bottom">
     <button
+      wx:if="{{showPrevious}}"
+      class="assessment-nav-button"
+      bindtap="previousStep"
+    >
+      上一步
+    </button>
+    <button
+      wx:if="{{showSkip}}"
+      class="assessment-nav-button ghost"
+      bindtap="skipStep"
+    >
+      跳过
+    </button>
+    <button
       class="yu-button yu-button-primary assessment-submit"
       loading="{{submitting}}"
-      disabled="{{submitting}}"
-      bindtap="startAssessment"
+      disabled="{{submitting || !canProceed}}"
+      bindtap="handlePrimaryAction"
     >
-      下一步
+      {{primaryButtonText}}
     </button>
-  </view>
-
-  <view class="lab-tabbar {{labTabbarClass}}">
-    <view class="lab-tab" bindtap="goToPage" data-url="/pages/home/home">
-      <view class="tab-icon">⌂</view>
-      <text>首页</text>
-    </view>
-    <view class="lab-tab active" bindtap="goToPage" data-url="/pages/assessment/assessment">
-      <view class="tab-icon">✧</view>
-      <text>测算</text>
-    </view>
-    <view class="lab-tab center" bindtap="goToPage" data-url="/pages/workspace/workspace">
-      <view class="tab-icon">＋</view>
-      <text>DIY</text>
-    </view>
-    <view class="lab-tab" bindtap="viewShoppingCart">
-      <view class="tab-icon">▤</view>
-      <text>购物车</text>
-    </view>
-    <view class="lab-tab" bindtap="goToPage" data-url="/pages/profile/profile">
-      <view class="tab-icon">♙</view>
-      <text>我的</text>
-    </view>
   </view>
 </view>

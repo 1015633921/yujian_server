@@ -1,5 +1,12 @@
 const { getRecommendations } = require('../../utils/recommendationData');
-const { getRecommendationPlan, getRecommendationPlans } = require('../../utils/api');
+const auth = require('../../utils/auth');
+const {
+  getRecommendationPlan,
+  getRecommendationPlans,
+  getCommunityFavorites,
+  saveCommunityFavorite,
+  deleteCommunityFavorite
+} = require('../../utils/api');
 const { assetUrl } = require('../../utils/assets');
 
 const ASSETS = {
@@ -79,7 +86,7 @@ Page({
     let currentPlan = localPlans.find(item => item.id === id) || localPlans[0];
 
     try {
-      const remotePlans = await getRecommendationPlans({ limit: 8 });
+      const remotePlans = await getRecommendationPlans({ limit: 8, silent: true, timeout: 8000 });
       const normalizedRemote = (Array.isArray(remotePlans) ? remotePlans : []).map(normalizePlan);
       if (normalizedRemote.length) {
         plans = normalizedRemote;
@@ -91,7 +98,7 @@ Page({
 
     if (id) {
       try {
-        currentPlan = normalizePlan(await getRecommendationPlan(id));
+        currentPlan = normalizePlan(await getRecommendationPlan(id, { silent: true, timeout: 8000 }));
         const exists = plans.some(item => item.id === currentPlan.id);
         plans = exists ? plans.map(item => (item.id === currentPlan.id ? currentPlan : item)) : [currentPlan, ...plans];
       } catch (error) {
@@ -143,12 +150,23 @@ Page({
     this.refreshSavedState(currentPlan);
   },
 
-  refreshSavedState(plan = this.data.currentPlan) {
+  async refreshSavedState(plan = this.data.currentPlan) {
     if (!plan) return;
     const cart = wx.getStorageSync('inspirationCart') || [];
     this.setData({
       isSaved: cart.some(item => item.id === plan.id || item.name === plan.name)
     });
+    const user = auth.getStoredUser();
+    if (!user || !user.user_id) return;
+    try {
+      const favorites = await getCommunityFavorites(user.user_id, { silent: true, timeout: 8000 });
+      const favoriteId = `recommendation:${plan.id}`;
+      this.setData({
+        isSaved: favorites.some(item => (item.post_id || item.id) === favoriteId)
+      });
+    } catch (error) {
+      console.warn('plan favorite state fallback:', error.message || error);
+    }
   },
 
   onImageError(e) {
@@ -163,26 +181,44 @@ Page({
     });
   },
 
-  toggleSave() {
+  async toggleSave() {
     const plan = this.data.currentPlan;
     if (!plan) return;
-    const cart = wx.getStorageSync('inspirationCart') || [];
-    const isSaved = cart.some(item => item.id === plan.id || item.name === plan.name);
-    const nextCart = isSaved
-      ? cart.filter(item => item.id !== plan.id && item.name !== plan.name)
-      : [{
-        id: plan.id,
-        name: plan.name,
-        desc: plan.subtitle,
-        price: plan.price,
-        tone: plan.tone,
-        recipe: plan.recipe,
-        image_url: plan.imageUrl,
-        addedAt: Date.now()
-      }, ...cart];
-    wx.setStorageSync('inspirationCart', nextCart);
-    this.setData({ isSaved: !isSaved });
-    wx.showToast({ title: isSaved ? '已取消收藏' : '已收藏灵感', icon: 'none' });
+    let user;
+    try {
+      user = await auth.requireLogin('登录后才能收藏灵感。');
+    } catch (error) {
+      return;
+    }
+    const favoriteId = `recommendation:${plan.id}`;
+    const isSaved = this.data.isSaved;
+    try {
+      if (isSaved) {
+        await deleteCommunityFavorite(user.user_id, favoriteId);
+      } else {
+        await saveCommunityFavorite({
+          user_id: user.user_id,
+          post_id: favoriteId,
+          item: {
+            id: favoriteId,
+            source_id: plan.id,
+            favorite_type: 'recommendation_plan',
+            title: plan.name,
+            desc: plan.subtitle,
+            price: plan.price,
+            tone: plan.tone,
+            recipe: plan.recipe,
+            image_url: plan.imageUrl,
+            addedAt: Date.now()
+          }
+        });
+      }
+      this.setData({ isSaved: !isSaved });
+      await this.refreshSavedState(plan);
+      wx.showToast({ title: isSaved ? '已取消收藏' : '已收藏', icon: 'none' });
+    } catch (error) {
+      wx.showToast({ title: error.message || '收藏失败，请重试', icon: 'none' });
+    }
   },
 
   startDiy() {

@@ -37,6 +37,8 @@ class AssessmentRequest(BaseModel):
     mbti: str | None = None
     core_wish: CoreWish | None = Field(default=None, description="兼容旧版的单个核心愿望")
     core_wishes: list[CoreWish] = Field(default_factory=list, min_length=1, max_length=3)
+    chakra_answers: list[str] = Field(default_factory=list, max_length=5, description="七脉轮状态答案 ID")
+    mood_palette_id: str | None = Field(default=None, max_length=40, description="色彩直觉色板 ID")
     wrist_size_cm: float = Field(default=15.5, ge=10, le=30)
     bead_size_mm: int = Field(default=8, ge=4, le=20)
     force_recalculate: bool = False
@@ -133,6 +135,7 @@ class DIYDesignSaveRequest(BaseModel):
 
 class CartItemCreateRequest(BaseModel):
     user_id: NonEmptyString
+    cart_item_id: str | None = Field(default=None, max_length=80)
     item_type: str = Field(default="plan", max_length=40)
     item_id: str | None = Field(default=None, max_length=100)
     item: dict = Field(default_factory=dict)
@@ -143,6 +146,12 @@ class CartItemUpdateRequest(BaseModel):
     user_id: NonEmptyString
     item: dict | None = None
     quantity: int | None = Field(default=None, ge=1, le=99)
+
+
+class CommunityFavoriteSaveRequest(BaseModel):
+    user_id: NonEmptyString
+    post_id: NonEmptyString
+    item: dict = Field(default_factory=dict)
 
 
 class UserAddressRequest(BaseModel):

@@ -1,5 +1,5 @@
 const auth = require('../../utils/auth');
-const { getMaterials, saveDIYDesign, uploadDesignPreview } = require('../../utils/api');
+const { getMaterials, saveDIYDesign, saveCartItem, uploadDesignPreview } = require('../../utils/api');
 const { assetUrl } = require('../../utils/assets');
 
 let Body;
@@ -11,6 +11,8 @@ let Events;
 const MATERIAL_PAGE_SIZE = 24;
 const MATERIAL_CACHE_TTL = 30 * 60 * 1000;
 const MATERIAL_CACHE_KEY = 'workspaceMaterialCatalogV5';
+const TRAY_THEME_STORAGE_KEY = 'workspaceTrayThemeV1';
+const WORKSPACE_GUIDE_STORAGE_KEY = 'workspaceFirstGuideDismissedV1';
 const MAX_WORKSPACE_BEADS = 40;
 const MAX_MATERIAL_FLIGHT_QUEUE = 6;
 const MATERIAL_TAP_GUARD_MS = 80;
@@ -170,6 +172,18 @@ const MATERIAL_ELEMENT_KEY = {
 const ELEMENT_CN_TO_EN = { '金': 'metal', '木': 'wood', '水': 'water', '火': 'fire', '土': 'earth' };
 
 
+const TRAY_THEMES = [
+  { value: 'white', label: 'white', dotClass: 'white', imageUrl: `${assetUrl('workspace/tray-yustream-white-transparent.webp')}?v=20260629-clean` },
+  { value: 'warm', label: 'warm', dotClass: 'warm', imageUrl: `${assetUrl('workspace/tray-yustream-transparent.webp')}?v=20260629-clean` },
+  { value: 'black', label: 'black', dotClass: 'black', imageUrl: `${assetUrl('workspace/tray-yustream-black-transparent.webp')}?v=20260629-clean` }
+];
+
+const WORKSPACE_GUIDE_ITEMS = [
+  { index: '01', title: '点击材料', desc: '珠子会投入圆盘，先从喜欢的材质开始。' },
+  { index: '02', title: '拖动调整', desc: '轻触珠子移动位置，长按材料看实拍。' },
+  { index: '03', title: '一键成串', desc: '用成串/打散按钮，在规整和自由编辑间切换。' }
+];
+
 Page({
   data: {
     visibleMaterials: [],
@@ -185,13 +199,18 @@ Page({
     activeCategory: '全部',
     activeSeries: '全部',
     showTip: true,
+    showWorkspaceGuide: false,
+    workspaceGuideItems: WORKSPACE_GUIDE_ITEMS,
     wristSize: 16,
     wearStyle: 'single',
     selected: [],
     placements: [],
     selectedItems: [],
     useCanvasRenderer: true,
-    trayImageUrl: assetUrl('workspace/tray-yustream.jpg'),
+    trayImageUrl: TRAY_THEMES[0].imageUrl,
+    trayTheme: 'warm',
+    trayThemeItems: [],
+    trayImageFailed: false,
     canvasFlightActive: false,
     stringStyle: '',
     scaleTicks: [],
@@ -200,7 +219,6 @@ Page({
     completionWatermarkClass: '',
     wearStyleText: '单圈',
     shuffleButtonClass: '',
-    releaseButtonClass: '',
     randomIconText: '串',
     randomTitle: '随机成串',
     randomSubtitle: '随机排列珠面',
@@ -226,6 +244,10 @@ Page({
     wristRulerTickWidth: 11,
     wristRulerSidePadding: 180,
     wristRulerRangeText: '10.0–25.0cm',
+    wearStyleOptions: [
+      { value: 'single', label: '单圈', desc: '经典单圈，轻盈日常佩戴', className: 'active' },
+      { value: 'double', label: '双圈', desc: '绕腕两圈，层次更丰富', className: '' }
+    ],
     energyChart: {
       hasProfile: false,
       matchScore: 0,
@@ -247,8 +269,6 @@ Page({
       length: '0.0',
       currentWrist: '0.0',
       beadSizeText: '--',
-      wristDisplayLabel: '已铺长度',
-      wristDisplayValue: '0.0cm',
       weight: '0.00',
       maxLength: '16.8',
       warning: '',
@@ -277,6 +297,8 @@ Page({
     this.historyStack = wx.getStorageSync('workspaceHistory') || [];
     this.redoStack = [];
     this.initDeviceLayout();
+    this.initTrayTheme();
+    this.initWorkspaceGuide();
     this.ensureAudioPlayers();
     this.loadProfileEnergy();
     this.categoriesByTop = {};
@@ -291,7 +313,7 @@ Page({
     } else {
       this.loadDraft();
     }
-    this.materialLoadTimer = setTimeout(() => this.loadMaterials(), 240);
+    this.loadMaterials();
     this.wristPromptTimer = setTimeout(() => this.promptInitialWristSize(), 420);
   },
 
@@ -359,34 +381,140 @@ Page({
     });
   },
 
+  initTrayTheme() {
+    const stored = wx.getStorageSync(TRAY_THEME_STORAGE_KEY);
+    const activeTheme = this.getTrayThemeConfig(stored) || TRAY_THEMES[0];
+    this.setData({
+      trayTheme: activeTheme.value,
+      trayImageUrl: activeTheme.imageUrl,
+      trayThemeItems: this.buildTrayThemeItems(activeTheme.value)
+    });
+  },
+
+  getTrayThemeConfig(theme) {
+    return TRAY_THEMES.find(item => item.value === theme);
+  },
+
+  buildTrayThemeItems(activeTheme = this.data.trayTheme || 'white') {
+    return TRAY_THEMES.map(item => ({
+      ...item,
+      activeClass: item.value === activeTheme ? 'active' : ''
+    }));
+  },
+
+  selectTrayTheme(e) {
+    const trayTheme = e.currentTarget.dataset.theme;
+    const activeTheme = this.getTrayThemeConfig(trayTheme);
+    if (!activeTheme) return;
+    if (trayTheme === this.data.trayTheme) return;
+    wx.setStorageSync(TRAY_THEME_STORAGE_KEY, trayTheme);
+    this.setData({
+      trayTheme,
+      trayImageUrl: activeTheme.imageUrl,
+      trayThemeItems: this.buildTrayThemeItems(trayTheme),
+      trayImageFailed: false
+    }, () => this.scheduleCanvasRender());
+  },
+
+  getTrayPalette(theme = this.data.trayTheme || 'warm') {
+    if (theme === 'black') {
+      return this.getSmoothTrayPalette({
+        plateStops: [
+          [0, '#2c2c2a'],
+          [0.18, '#282827'],
+          [0.32, '#242424'],
+          [0.46, '#202020'],
+          [0.60, '#1d1d1c'],
+          [0.72, '#1a1a19'],
+          [0.84, '#171716'],
+          [0.93, '#141413'],
+          [1, '#10100f']
+        ],
+        stroke: 'rgba(205,165,93,0.30)',
+        centerStroke: 'rgba(205,165,93,0.22)',
+        noiseAlpha: 0.018
+      });
+    }
+    if (theme === 'warm') {
+      return this.getSmoothTrayPalette({
+        plateStops: [
+          [0, '#ffffff'],
+          [0.18, '#fffefd'],
+          [0.32, '#fcfaf6'],
+          [0.46, '#f8f4ee'],
+          [0.60, '#f3eee5'],
+          [0.72, '#eee6db'],
+          [0.84, '#e7ded0'],
+          [0.93, '#ded3c4'],
+          [1, '#d4c8b9']
+        ],
+        stroke: 'rgba(104,101,91,0.16)',
+        centerStroke: 'rgba(86,84,76,0.18)',
+        noiseAlpha: 0.016
+      });
+    }
+    return this.getSmoothTrayPalette();
+  },
+
+  getSmoothTrayPalette(options = {}) {
+    const plateStops = options.plateStops || [
+      [0, '#ffffff'],
+      [0.20, '#ffffff'],
+      [0.34, '#ffffff'],
+      [0.48, '#fefefe'],
+      [0.60, '#fdfdfd'],
+      [0.70, '#fbfbfb'],
+      [0.80, '#f8f8f8'],
+      [0.88, '#f4f4f4'],
+      [0.95, '#eeeeee'],
+      [1, '#e9e9e9']
+    ];
+    return {
+      page: '#ffffff',
+      plateStops,
+      inner0: plateStops[0][1],
+      inner1: plateStops[Math.floor(plateStops.length / 2)][1],
+      outer: plateStops[plateStops.length - 1][1],
+      stroke: options.stroke || 'rgba(104,101,91,0.10)',
+      centerStroke: options.centerStroke || 'rgba(86,84,76,0.12)',
+      noiseAlpha: options.noiseAlpha || 0.014
+    };
+  },
+
   buildResponsiveWorkspaceLayout({ windowWidth, windowHeight, viewportRpx, bottomInsetRpx, aspectRatio }) {
+    const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
     const isNarrow = windowWidth <= 340;
-    const isCompact = windowHeight <= 780;
-    const isShort = windowHeight <= 720;
-    const isTall = aspectRatio >= 2.05 || windowWidth >= 414;
-    const drawerHeight = isShort ? 548 : (isCompact ? 568 : 592);
-    const toolHeight = isCompact || isNarrow ? 84 : 88;
-    const toolGap = isCompact ? 12 : 16;
-    const estimatedTopChrome = isShort ? 96 : (isCompact ? 104 : 112);
-    const availableBeforeTool = Math.max(
-      500,
-      viewportRpx - estimatedTopChrome - drawerHeight - bottomInsetRpx - toolGap - toolHeight
-    );
-    const maxStage = isNarrow ? 512 : (isTall ? 574 : 560);
-    const minStage = isNarrow ? 460 : (isCompact ? 482 : 500);
-    const preferredTop = isShort ? 70 : (isCompact ? 80 : (isTall ? 96 : 88));
-    const minGapToTool = isCompact ? 30 : 38;
-    const maxStageBottom = availableBeforeTool - minGapToTool;
+    const isShort = windowHeight <= 720 || viewportRpx <= 1420;
+    const isCompact = windowHeight <= 780 || viewportRpx <= 1500;
+    const isRoomy = viewportRpx >= 1600;
+    const topChrome = 122;
+    const drawerMin = isShort ? 600 : (isCompact ? 628 : 636);
+    const drawerMax = isRoomy ? 724 : 700;
+    const drawerHeight = Math.round(clamp(viewportRpx * 0.43, drawerMin, drawerMax));
+    const toolHeight = isShort || isNarrow ? 78 : 82;
+    const toolGap = Math.round(clamp(viewportRpx * 0.026, isShort ? 26 : 34, 44));
+    const stageToolGap = Math.round(clamp(viewportRpx * 0.022, isShort ? 22 : 30, 40));
+    const toolTop = viewportRpx - drawerHeight - toolGap - toolHeight;
+    const maxStageBottom = Math.max(360, toolTop - topChrome - stageToolGap);
+    const maxStage = isNarrow ? 540 : (isRoomy ? 626 : 608);
+    const minStage = isShort ? 420 : (isCompact ? 500 : 536);
+    const preferredTop = isShort ? 46 : (isCompact ? 56 : 70);
     let stageTop = preferredTop;
-    let stageSize = Math.round(Math.min(maxStage, Math.max(minStage, maxStageBottom - stageTop)));
+    let stageSize = Math.round(clamp(maxStageBottom - stageTop, minStage, maxStage));
     if (stageTop + stageSize > maxStageBottom) {
-      stageSize = Math.max(isNarrow ? 430 : 452, maxStageBottom - stageTop);
+      stageSize = Math.max(isShort ? 392 : 452, Math.round(maxStageBottom - stageTop));
+    }
+    if (stageTop + stageSize > maxStageBottom) {
+      stageTop = Math.max(42, Math.round(maxStageBottom - stageSize));
     }
     const remainingVerticalSpace = maxStageBottom - stageTop - stageSize;
-    if (remainingVerticalSpace > 36) {
-      stageTop += Math.round(Math.min(32, remainingVerticalSpace * 0.36));
+    if (remainingVerticalSpace > 24) {
+      stageTop += Math.round(Math.min(34, remainingVerticalSpace * 0.18));
     }
-    const canvasHeight = Math.round(Math.max(stageTop + stageSize + 26, availableBeforeTool + 18));
+    const canvasHeight = Math.round(Math.max(
+      stageTop + stageSize + stageToolGap + toolHeight + toolGap,
+      toolTop - topChrome + toolHeight + toolGap
+    ));
     const stageCenter = Math.round(stageSize / 2);
     const stageRadius = Math.round(stageSize * 0.39);
     return {
@@ -398,11 +526,15 @@ Page({
       },
       style: [
         `--workspace-canvas-height:${canvasHeight}rpx`,
+        `--workspace-top-chrome:${topChrome}rpx`,
         `--workspace-stage-top:${stageTop}rpx`,
         `--workspace-stage-size:${stageSize}rpx`,
         `--workspace-drawer-height:${drawerHeight}rpx`,
         `--workspace-tool-bottom:${drawerHeight + toolGap}rpx`,
-        `--workspace-tool-height:${toolHeight}rpx`
+        `--workspace-tool-height:${toolHeight}rpx`,
+        `--workspace-tool-gap:${toolGap}rpx`,
+        `--workspace-stage-tool-gap:${stageToolGap}rpx`,
+        `--workspace-safe-bottom:${bottomInsetRpx}rpx`
       ].join(';')
     };
   },
@@ -430,7 +562,7 @@ Page({
       }
     }
     try {
-      const data = await getMaterials();
+      const data = await getMaterials({ silent: true, timeout: 8000 });
       const optimized = this.optimizeMaterialPayload(data);
       const serverVersion = optimized.version || optimized.updated_at || '';
       const cachedVersion = cachedPayload && (cachedPayload.version || cachedPayload.updated_at || '');
@@ -457,16 +589,65 @@ Page({
   optimizeMaterialPayload(data) {
     return {
       ...data,
-      materials: (data.materials || []).map(item => ({
-        ...item,
-        image_url: this.optimizeImageUrl(item.image_url),
-        image_urls: (item.image_urls || item.image_pool || [])
+      materials: (data.materials || []).map(item => {
+        const material = this.normalizeMaterialContract(item);
+        const imageUrls = (material.image_urls || material.image_pool || [])
           .map(url => this.optimizeImageUrl(url))
-          .filter(Boolean),
-        image_pool: (item.image_pool || item.image_urls || [])
-          .map(url => this.optimizeImageUrl(url))
-          .filter(Boolean)
-      }))
+          .filter(Boolean);
+        return {
+          ...material,
+          image_url: this.optimizeImageUrl(material.image_url),
+          image_urls: imageUrls,
+          image_pool: imageUrls
+        };
+      })
+    };
+  },
+
+  normalizeMaterialContract(item = {}) {
+    const sku = item.sku || {};
+    const energy = item.energy || {};
+    const visual = item.visual || {};
+    const rules = item.rules || {};
+    const asset = visual.asset || item.asset || {};
+    const imageUrls = visual.image_urls || item.image_urls || item.image_pool || [];
+    const effects = energy.effects || item.effects || [];
+    const primaryElement = energy.primary_element || item.primary_element || item.element || '';
+    return {
+      ...item,
+      sku,
+      energy,
+      visual,
+      rules,
+      id: sku.id || item.id,
+      skuId: sku.sku_id || item.skuId || item.sku_id,
+      material_code: sku.material_code || item.material_code,
+      top: sku.top || item.top,
+      category: sku.category || item.category,
+      series: sku.series || item.series,
+      grade: sku.grade || item.grade,
+      name: sku.name || item.name,
+      price: Number(sku.price_per_bead ?? item.price ?? 0),
+      size: Number(sku.size_mm ?? item.size ?? 8),
+      weight: Number(sku.weight_g ?? item.weight ?? 1),
+      stock: Number(sku.stock ?? item.stock ?? 0),
+      enabled: sku.enabled ?? item.enabled,
+      sort_order: Number(sku.sort_order ?? item.sort_order ?? item.sortOrder ?? 0),
+      element: primaryElement,
+      primary_element: primaryElement,
+      secondary_elements: energy.secondary_elements || item.secondary_elements || [],
+      effects,
+      effect: effects.join(' / '),
+      chakras: energy.chakras || item.chakras || [],
+      wish_pools: energy.wish_pools || item.wish_pools || [],
+      color: visual.color_hex || item.color,
+      shine: visual.shine_hex || item.shine,
+      image_url: visual.thumbnail_url || asset.thumbnail_url || item.thumbnail_url || item.image_url,
+      image_urls: imageUrls,
+      image_pool: imageUrls,
+      allowed_roles: rules.allowed_roles || item.allowed_roles || [],
+      conflict_codes: rules.conflict_codes || item.conflict_codes || [],
+      material_params: visual.material_params || item.material_params || {}
     };
   },
 
@@ -575,21 +756,24 @@ Page({
   materialSearchText(material = {}) {
     return [
       material.id,
-      material.skuId,
+      material.material_code,
       material.name,
       material.category,
       material.series,
       material.grade,
-      material.effect,
-      material.element
+      ...(material.effects || []),
+      material.primary_element,
+      ...(material.secondary_elements || []),
+      ...(material.chakras || []),
+      ...(material.wish_pools || [])
     ].filter(Boolean).join(' ').toLowerCase();
   },
 
   materialElementKey(material = {}) {
+    const elementKey = ELEMENT_CN_TO_EN[material.primary_element || material.element];
+    if (elementKey) return elementKey;
     const skuKey = MATERIAL_ELEMENT_KEY[material.skuId];
     if (skuKey) return skuKey;
-    const elementKey = ELEMENT_CN_TO_EN[material.element];
-    if (elementKey) return elementKey;
     const text = this.materialSearchText(material);
     if (/金|银|白|钛|发晶|铁|曜|耀/.test(text)) return 'metal';
     if (/绿|木|松|幽灵|东陵/.test(text)) return 'wood';
@@ -704,6 +888,7 @@ Page({
     clearTimeout(this.wristPromptTimer);
     clearTimeout(this.persistDraftTimer);
     clearTimeout(this.flightTimer);
+    clearTimeout(this.flightSafetyTimer);
     clearTimeout(this.shuffleTimer);
     clearTimeout(this.canvasResizeTimer);
     clearTimeout(this.audioPrewarmTimer);
@@ -732,17 +917,32 @@ Page({
 
   loadDraft() {
     const draft = wx.getStorageSync('currentDesign');
+    this.resetWorkspaceRuntime();
     if (draft && draft.selected && draft.selected.length) {
       this.setData({
         selected: draft.selected.map(id => LEGACY_ID_MAP[id] || id),
         placements: this.normalizePlacements(draft.selected, draft.placements),
         isLooseMode: draft.isLooseMode === true,
         wristSize: draft.wristSize || 16,
-        wearStyle: draft.wearStyle || 'single'
+        wearStyle: draft.wearStyle || 'single',
+        canvasFlightActive: false,
+        flightBead: null,
+        launchingMaterialId: '',
+        isShuffling: false,
+        isStringingFinishing: false,
+        selectedBeadIndex: -1,
+        draggingBeadIndex: -1,
+        dragDeleteArmed: false
       });
       this.recalculate();
     } else {
-      this.recalculate();
+      this.resetInteractionData({
+        selected: [],
+        placements: [],
+        selectedItems: [],
+        selectedBeadIndex: -1,
+        isLooseMode: true
+      }, () => this.recalculate());
     }
   },
 
@@ -783,7 +983,7 @@ Page({
       return false;
     }
     this.pendingRecommendedRecipe = false;
-    this.stopPhysics();
+    this.resetWorkspaceRuntime();
     this.pushHistory();
     wx.setStorageSync('recommendedWristSize', wristSize);
     wx.setStorageSync('workspaceWristConfirmed', true);
@@ -792,7 +992,14 @@ Page({
       selected,
       placements: this.normalizePlacements(selected),
       isLooseMode: false,
-      selectedBeadIndex: -1
+      selectedBeadIndex: -1,
+      canvasFlightActive: false,
+      flightBead: null,
+      launchingMaterialId: '',
+      isShuffling: false,
+      isStringingFinishing: false,
+      draggingBeadIndex: -1,
+      dragDeleteArmed: false
     });
     this.recalculate();
     return true;
@@ -825,7 +1032,7 @@ Page({
     this.sourceContext = sourceContext;
     const wristSize = Number(payload.wrist_size_cm) || Number(wx.getStorageSync('recommendedWristSize')) || this.data.wristSize || 16;
     this.pendingBackendRecommendation = false;
-    this.stopPhysics();
+    this.resetWorkspaceRuntime();
     this.pushHistory();
     wx.setStorageSync('recommendedWristSize', wristSize);
     wx.setStorageSync('workspaceWristConfirmed', true);
@@ -836,6 +1043,13 @@ Page({
       isLooseMode: false,
       selectedBeadIndex: -1,
       showTip: false,
+      canvasFlightActive: false,
+      flightBead: null,
+      launchingMaterialId: '',
+      isShuffling: false,
+      isStringingFinishing: false,
+      draggingBeadIndex: -1,
+      dragDeleteArmed: false,
       sourceContext
     });
     this.recalculate();
@@ -1166,7 +1380,12 @@ Page({
       const braceletInfo = res && res[0];
       const flightInfo = res && res[1];
       const circleRect = res && res[2];
-      this.braceletCanvasState = this.setupCanvasNode(braceletInfo, circleRect);
+      const braceletCanvasState = this.setupCanvasNode(braceletInfo, circleRect);
+      if (!braceletCanvasState || !braceletCanvasState.ctx) {
+        this.switchToDomRendererFallback('bracelet canvas unavailable');
+        return;
+      }
+      this.braceletCanvasState = braceletCanvasState;
       this.flightCanvasState = this.setupCanvasNode(flightInfo, {
         left: 0,
         top: 0,
@@ -1174,9 +1393,27 @@ Page({
         height: (this.data.deviceInfo && this.data.deviceInfo.windowHeight) || 667
       });
       this.canvasImageCache = this.canvasImageCache || {};
+      this.materialImagePreloadSet = this.materialImagePreloadSet || {};
       this.scheduleCanvasRender();
+      this.preloadMaterialImages(this.data.visibleMaterials);
       this.preloadVisibleCanvasImages(this.data.visibleMaterials);
     });
+  },
+
+  switchToDomRendererFallback(reason = '') {
+    if (!this.data.useCanvasRenderer) return;
+    console.warn('workspace canvas fallback:', reason);
+    this.stopCanvasRenderLoop();
+    this.braceletCanvasState = null;
+    this.flightCanvasState = null;
+    this.canvasImageCache = {};
+    this.canvasTextureCache = {};
+    this.materialImagePreloadSet = {};
+    this.canvasFlight = null;
+    this.setData({
+      useCanvasRenderer: false,
+      canvasFlightActive: false
+    }, () => this.recalculate({ persist: false }));
   },
 
   setupCanvasNode(info, rect = {}) {
@@ -1190,6 +1427,7 @@ Page({
     canvas.width = Math.round(width * dpr);
     canvas.height = Math.round(height * dpr);
     const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
     if (ctx.setTransform) ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     else ctx.scale(dpr, dpr);
     return {
@@ -1267,8 +1505,13 @@ Page({
     if (!flight) return;
     const elapsed = Date.now() - flight.startedAt;
     const raw = Math.max(0, Math.min(1, elapsed / flight.duration));
-    const progress = this.easeOutCubic(raw);
-    const point = this.quadraticBezier(flight.start, flight.control, flight.end, progress);
+    const progress = flight.easing === 'linear' ? raw : this.easeOutCubic(raw);
+    const point = flight.path === 'line'
+      ? {
+        x: flight.start.x + (flight.end.x - flight.start.x) * progress,
+        y: flight.start.y + (flight.end.y - flight.start.y) * progress
+      }
+      : this.quadraticBezier(flight.start, flight.control, flight.end, progress);
     const size = flight.sourceSize + (flight.targetSize - flight.sourceSize) * progress;
     const rotation = flight.rotation + flight.rotationDelta * progress;
     this.drawCanvasBead(ctx, {
@@ -1367,6 +1610,24 @@ Page({
       });
   },
 
+  preloadMaterialImages(materials = []) {
+    if (!wx.getImageInfo) return;
+    this.materialImagePreloadSet = this.materialImagePreloadSet || {};
+    const preloadCount = this.isLowPerformanceDevice ? 4 : 10;
+    (materials || [])
+      .slice(0, preloadCount)
+      .forEach(item => {
+        const url = item && item.image_url;
+        if (!url || this.materialImagePreloadSet[url]) return;
+        this.materialImagePreloadSet[url] = true;
+        wx.getImageInfo({
+          src: url,
+          success: () => {},
+          fail: () => {}
+        });
+      });
+  },
+
   getCanvasBeadTexture(item = {}, size = 64) {
     const dpr = (this.braceletCanvasState && this.braceletCanvasState.dpr) || 1;
     const baseSize = Math.round(Number(size) || 64);
@@ -1386,35 +1647,36 @@ Page({
       ctx.beginPath();
       ctx.arc(radius, radius, radius, 0, Math.PI * 2);
       ctx.clip();
+      const gradient = ctx.createRadialGradient(bucket * 0.36, bucket * 0.32, bucket * 0.06, radius, radius, radius);
+      gradient.addColorStop(0, item.shine || '#ffffff');
+      gradient.addColorStop(0.18, item.color || '#d8d2c8');
+      gradient.addColorStop(0.72, item.color || '#d8d2c8');
+      gradient.addColorStop(1, 'rgba(32,24,18,0.28)');
+      ctx.fillStyle = gradient;
+      ctx.fillRect(0, 0, bucket, bucket);
       if (sourceImage) {
-        ctx.drawImage(sourceImage, 0, 0, bucket, bucket);
+        const imageInset = -bucket * 0.025;
+        ctx.globalAlpha = 0.98;
+        ctx.drawImage(sourceImage, imageInset, imageInset, bucket - imageInset * 2, bucket - imageInset * 2);
+        ctx.globalAlpha = 1;
       } else {
-        const gradient = ctx.createRadialGradient(bucket * 0.36, bucket * 0.32, bucket * 0.06, radius, radius, radius);
-        gradient.addColorStop(0, item.shine || '#ffffff');
-        gradient.addColorStop(0.18, item.color || '#d8d2c8');
-        gradient.addColorStop(0.72, item.color || '#d8d2c8');
-        gradient.addColorStop(1, 'rgba(32,24,18,0.34)');
-        ctx.fillStyle = gradient;
-        ctx.fillRect(0, 0, bucket, bucket);
         ctx.fillStyle = 'rgba(255,255,255,0.52)';
         ctx.beginPath();
         ctx.arc(bucket * 0.38, bucket * 0.34, bucket * 0.11, 0, Math.PI * 2);
         ctx.fill();
-        const shade = ctx.createRadialGradient(bucket * 0.36, bucket * 0.32, bucket * 0.08, radius, radius, radius);
-        shade.addColorStop(0, 'rgba(255,255,255,0.04)');
-        shade.addColorStop(0.64, 'rgba(255,255,255,0)');
-        shade.addColorStop(1, 'rgba(0,0,0,0.20)');
-        ctx.fillStyle = shade;
-        ctx.fillRect(0, 0, bucket, bucket);
       }
+      const shade = ctx.createRadialGradient(bucket * 0.36, bucket * 0.32, bucket * 0.08, radius, radius, radius);
+      shade.addColorStop(0, 'rgba(255,255,255,0.03)');
+      shade.addColorStop(0.62, 'rgba(255,255,255,0)');
+      shade.addColorStop(1, sourceImage ? 'rgba(0,0,0,0.12)' : 'rgba(0,0,0,0.20)');
+      ctx.fillStyle = shade;
+      ctx.fillRect(0, 0, bucket, bucket);
       ctx.restore();
-      if (!sourceImage) {
-        ctx.beginPath();
-        ctx.arc(radius, radius, radius - 0.7, 0, Math.PI * 2);
-        ctx.strokeStyle = 'rgba(255,255,255,0.16)';
-        ctx.lineWidth = 0.8;
-        ctx.stroke();
-      }
+      ctx.beginPath();
+      ctx.arc(radius, radius, radius - 0.8, 0, Math.PI * 2);
+      ctx.strokeStyle = sourceImage ? 'rgba(32,32,31,0.18)' : 'rgba(255,255,255,0.16)';
+      ctx.lineWidth = sourceImage ? 1.2 : 0.8;
+      ctx.stroke();
       this.canvasTextureCache[key] = { ready: true, canvas };
       return canvas;
     } catch (error) {
@@ -1431,6 +1693,15 @@ Page({
     ctx.globalAlpha = sprite.deleteReady ? 0.58 : 1;
     ctx.translate(sprite.x, sprite.y);
     ctx.rotate((Number(sprite.rotation) || 0) * Math.PI / 180);
+    ctx.save();
+    ctx.shadowColor = 'rgba(42, 31, 22, 0.20)';
+    ctx.shadowBlur = sprite.screenSpace ? 6 : 8;
+    ctx.shadowOffsetY = sprite.screenSpace ? 2 : 3;
+    ctx.fillStyle = 'rgba(0,0,0,0.02)';
+    ctx.beginPath();
+    ctx.arc(0, 0, radius - 0.6, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
     if (sprite.active || sprite.deleteReady) {
       ctx.save();
       ctx.beginPath();
@@ -1473,16 +1744,11 @@ Page({
       ctx.fillRect(-radius, -radius, size, size);
     }
     ctx.restore();
-    if (!hasImage) {
-      ctx.shadowColor = 'rgba(45, 31, 22, 0.14)';
-      ctx.shadowBlur = 8;
-      ctx.shadowOffsetY = 3;
-      ctx.beginPath();
-      ctx.arc(0, 0, radius - 1, 0, Math.PI * 2);
-      ctx.strokeStyle = 'rgba(255,255,255,0.16)';
-      ctx.lineWidth = 0.8;
-      ctx.stroke();
-    }
+    ctx.beginPath();
+    ctx.arc(0, 0, radius - 1, 0, Math.PI * 2);
+    ctx.strokeStyle = hasImage ? 'rgba(32,32,31,0.20)' : 'rgba(255,255,255,0.16)';
+    ctx.lineWidth = hasImage ? 1.1 : 0.8;
+    ctx.stroke();
     ctx.restore();
   },
 
@@ -1717,44 +1983,48 @@ Page({
     this.physicsStillFrames = 0;
     if (this.data.useCanvasRenderer) this.scheduleCanvasRender(true);
     this.physicsTimer = setInterval(() => {
-      const now = Date.now();
-      this.physicsLastTime = now;
-      if (this.physicsTargets) this.applyStringingForces();
-      Engine.update(this.physicsEngine, this.physicsStepMs || 1000 / 30);
-      if (!this.physicsTargets) this.applyBilliardDamping();
-      this.resolveBeadOverlaps();
-      this.clampBodiesInsideTray();
-      if (this.pendingFrozenImpact && now - (this.pendingFrozenImpactAt || now) > 760) {
-        const launcher = (this.physicsBodies || []).find(body => body && body.plugin && body.plugin.isLauncher);
-        this.releaseFrozenBodiesFromImpact(launcher, null);
-      }
-      if (this.physicsTargets && this.isStringingSettled()) {
-        this.physicsStillFrames += 1;
-        if (this.physicsStillFrames > 6) {
+      try {
+        const now = Date.now();
+        this.physicsLastTime = now;
+        if (this.physicsTargets) this.applyStringingForces();
+        Engine.update(this.physicsEngine, this.physicsStepMs || 1000 / 30);
+        if (!this.physicsTargets) this.applyBilliardDamping();
+        this.resolveBeadOverlaps();
+        this.clampBodiesInsideTray();
+        if (this.pendingFrozenImpact && now - (this.pendingFrozenImpactAt || now) > 760) {
+          const launcher = (this.physicsBodies || []).find(body => body && body.plugin && body.plugin.isLauncher);
+          this.releaseFrozenBodiesFromImpact(launcher, null);
+        }
+        if (this.physicsTargets && this.isStringingSettled()) {
+          this.physicsStillFrames += 1;
+          if (this.physicsStillFrames > 6) {
+            if (this.data.isShuffling) this.finishStringing();
+            else this.finishImpactTargeting();
+            return;
+          }
+        } else if (this.physicsTargets) {
+          this.physicsStillFrames = 0;
+        }
+        if (this.physicsTargets && now - this.stringingStartedAt > 1700) {
           if (this.data.isShuffling) this.finishStringing();
           else this.finishImpactTargeting();
           return;
         }
-      } else if (this.physicsTargets) {
-        this.physicsStillFrames = 0;
-      }
-      if (this.physicsTargets && now - this.stringingStartedAt > 1700) {
-        if (this.data.isShuffling) this.finishStringing();
-        else this.finishImpactTargeting();
-        return;
-      }
-      const allSleeping = this.physicsBodies.length > 0
-        && this.physicsBodies.every(body => body.isSleeping);
-      if (!this.physicsTargets) {
-        this.physicsStillFrames = allSleeping ? this.physicsStillFrames + 1 : 0;
-      }
-      if (now - this.physicsLastRender >= (this.physicsRenderInterval || 50)) {
-        this.physicsLastRender = now;
-        this.syncPhysicsFrame();
-      }
-      if (!this.physicsTargets && this.physicsStillFrames > 12) {
-        this.syncPhysicsFrame();
-        this.pausePhysics();
+        const allSleeping = this.physicsBodies.length > 0
+          && this.physicsBodies.every(body => body.isSleeping);
+        if (!this.physicsTargets) {
+          this.physicsStillFrames = allSleeping ? this.physicsStillFrames + 1 : 0;
+        }
+        if (now - this.physicsLastRender >= (this.physicsRenderInterval || 50)) {
+          this.physicsLastRender = now;
+          this.syncPhysicsFrame();
+        }
+        if (!this.physicsTargets && this.physicsStillFrames > 12) {
+          this.syncPhysicsFrame();
+          this.pausePhysics();
+        }
+      } catch (error) {
+        this.recoverPhysicsRuntime();
       }
     }, this.physicsTimerInterval || 33);
   },
@@ -2000,34 +2270,38 @@ Page({
     this.setData({ isStringingFinishing: true });
     clearInterval(this.stringingFinishTimer);
     this.stringingFinishTimer = setInterval(() => {
-      frame += 1;
-      const progress = Math.min(1, frame / totalFrames);
-      const c1 = 1.18;
-      const c3 = c1 + 1;
-      const shifted = progress - 1;
-      const eased = 1 + c3 * shifted ** 3 + c1 * shifted ** 2;
-      this.physicsBodies.forEach((body, index) => {
-        const target = targets[index];
-        const start = starts[index];
-        if (!target || !start) return;
-        Body.setPosition(body, {
-          x: start.x + (target.x - start.x) * eased,
-          y: start.y + (target.y - start.y) * eased
+      try {
+        frame += 1;
+        const progress = Math.min(1, frame / totalFrames);
+        const c1 = 1.18;
+        const c3 = c1 + 1;
+        const shifted = progress - 1;
+        const eased = 1 + c3 * shifted ** 3 + c1 * shifted ** 2;
+        this.physicsBodies.forEach((body, index) => {
+          const target = targets[index];
+          const start = starts[index];
+          if (!target || !start) return;
+          Body.setPosition(body, {
+            x: start.x + (target.x - start.x) * eased,
+            y: start.y + (target.y - start.y) * eased
+          });
+          const targetAngle = targetAngles[index] || 0;
+          Body.setAngle(body, start.angle + (targetAngle - start.angle) * progress);
+          Body.setVelocity(body, { x: 0, y: 0 });
+          Body.setAngularVelocity(body, 0);
         });
-        const targetAngle = targetAngles[index] || 0;
-        Body.setAngle(body, start.angle + (targetAngle - start.angle) * progress);
-        Body.setVelocity(body, { x: 0, y: 0 });
-        Body.setAngularVelocity(body, 0);
-      });
-      this.syncPhysicsFrame();
-      if (progress >= 1) {
-        clearInterval(this.stringingFinishTimer);
-        this.stringingFinishTimer = null;
-        clearTimeout(this.stringingCompleteTimer);
-        this.stringingCompleteTimer = setTimeout(() => {
-          this.stringingCompleteTimer = null;
-          this.completeStringing();
-        }, 45);
+        this.syncPhysicsFrame();
+        if (progress >= 1) {
+          clearInterval(this.stringingFinishTimer);
+          this.stringingFinishTimer = null;
+          clearTimeout(this.stringingCompleteTimer);
+          this.stringingCompleteTimer = setTimeout(() => {
+            this.stringingCompleteTimer = null;
+            this.completeStringing();
+          }, 45);
+        }
+      } catch (error) {
+        this.recoverStringingRuntime();
       }
     }, this.isLowPerformanceDevice ? 28 : (this.isRealDevice ? 20 : 18));
   },
@@ -2085,6 +2359,102 @@ Page({
     this.livePlacements = null;
   },
 
+  clearFlightRuntime() {
+    clearTimeout(this.flightTimer);
+    this.flightTimer = null;
+    clearTimeout(this.flightSafetyTimer);
+    this.flightSafetyTimer = null;
+    this.flightQueue = [];
+    this.flightActive = false;
+    this.canvasFlightReadyRetries = 0;
+    this.canvasFlight = null;
+    this.clearWorkspaceFlightCanvas();
+  },
+
+  resetWorkspaceRuntime() {
+    this.clearFlightRuntime();
+    this.livePlacements = null;
+    this.stopPhysics();
+    this.dragState = null;
+    this.ringDragState = null;
+    this.suppressBeadTapUntil = 0;
+  },
+
+  resetInteractionData(extra = {}, callback) {
+    this.setData({
+      canvasFlightActive: false,
+      flightBead: null,
+      launchingMaterialId: '',
+      isShuffling: false,
+      isStringingFinishing: false,
+      draggingBeadIndex: -1,
+      dragDeleteArmed: false,
+      ...extra
+    }, callback);
+  },
+
+  hasBusyWorkspaceRuntime() {
+    return !!(
+      this.data.isShuffling
+      || this.data.isStringingFinishing
+      || this.data.canvasFlightActive
+      || this.flightActive
+      || (this.flightQueue && this.flightQueue.length)
+      || this.canvasFlight
+      || this.physicsTimer
+      || this.stringingFinishTimer
+      || this.stringingCompleteTimer
+      || this.stringingGuardTimer
+    );
+  },
+
+  recoverFlightRuntime() {
+    this.clearFlightRuntime();
+    this.resetInteractionData({}, () => {
+      this.scheduleCanvasRender();
+    });
+  },
+
+  armFlightSafetyTimer(duration = 1800) {
+    clearTimeout(this.flightSafetyTimer);
+    this.flightSafetyTimer = setTimeout(() => {
+      if (!this.flightActive && !this.canvasFlight && !this.data.canvasFlightActive) return;
+      this.recoverFlightRuntime();
+    }, duration);
+  },
+
+  recoverStringingRuntime() {
+    const selected = this.data.selected || [];
+    const placements = this.normalizePlacements(selected, this.data.placements);
+    this.stopPhysics();
+    this.resetInteractionData({
+      placements,
+      isLooseMode: selected.length ? false : true,
+      selectedBeadIndex: -1
+    }, () => {
+      this.recalculate();
+      this.scheduleCanvasRender();
+    });
+  },
+
+  recoverPhysicsRuntime() {
+    if (this.data.isShuffling || this.data.isStringingFinishing || this.physicsTargets) {
+      this.recoverStringingRuntime();
+      return;
+    }
+    const selected = this.data.selected || [];
+    const placements = this.normalizePlacements(selected, this.data.placements);
+    this.stopPhysics();
+    this.resetInteractionData({
+      placements,
+      isLooseMode: true,
+      selectedBeadIndex: -1
+    }, () => {
+      this.recalculate();
+      this.scheduleCanvasRender();
+    });
+  },
+
   pushHistory() {
     const history = this.historyStack || [];
     history.push({
@@ -2112,6 +2482,7 @@ Page({
 
   restoreDesignSnapshot(snapshot) {
     if (!snapshot) return;
+    this.resetWorkspaceRuntime();
     this.setData({
       selected: snapshot.selected || [],
       placements: snapshot.placements || [],
@@ -2119,6 +2490,11 @@ Page({
       wearStyle: snapshot.wearStyle || 'single',
       isLooseMode: snapshot.isLooseMode === true,
       selectedBeadIndex: -1,
+      canvasFlightActive: false,
+      flightBead: null,
+      launchingMaterialId: '',
+      isShuffling: false,
+      isStringingFinishing: false,
       draggingBeadIndex: -1,
       dragDeleteArmed: false,
       canUndo: (this.historyStack || []).length > 0,
@@ -2188,7 +2564,10 @@ Page({
       visibleMaterials,
       hasMoreMaterials: visibleMaterials.length < filteredMaterials.length,
       filterSummary
-    }, () => this.preloadVisibleCanvasImages(visibleMaterials));
+    }, () => {
+      this.preloadMaterialImages(visibleMaterials);
+      this.preloadVisibleCanvasImages(visibleMaterials);
+    });
   },
 
   loadMoreMaterials() {
@@ -2202,6 +2581,9 @@ Page({
     this.setData({
       visibleMaterials,
       hasMoreMaterials: visibleMaterials.length < filteredMaterials.length
+    }, () => {
+      this.preloadMaterialImages(visibleMaterials);
+      this.preloadVisibleCanvasImages(visibleMaterials);
     });
   },
 
@@ -2223,7 +2605,11 @@ Page({
     return (materials || []).map((item, index) => ({
       ...item,
       cardClass: `material-card-${index}${this.data.launchingMaterialId === item.id ? ' launching' : ''}`,
-      effectText: `${item.series && item.series !== item.name ? item.series + ' · ' : ''}${item.grade ? item.grade + ' · ' : ''}${item.effect || ''}`
+      effectText: [
+        item.series && item.series !== item.name ? item.series : '',
+        item.grade || '',
+        (item.effects || []).slice(0, 2).join(' / ')
+      ].filter(Boolean).join(' · ')
     }));
   },
 
@@ -2254,8 +2640,26 @@ Page({
     this.recalculate();
   },
 
+  onTrayImageError() {
+    this.setData({ trayImageFailed: true });
+    console.warn('workspace tray image failed, fallback background is active:', this.data.trayImageUrl);
+  },
+
   closeTip() {
     this.setData({ showTip: false });
+  },
+
+  initWorkspaceGuide() {
+    if (wx.getStorageSync(WORKSPACE_GUIDE_STORAGE_KEY)) return;
+    this.setData({ showWorkspaceGuide: true });
+  },
+
+  dismissWorkspaceGuide(e) {
+    const dataset = (e && e.currentTarget && e.currentTarget.dataset) || {};
+    if (dataset.forever) {
+      wx.setStorageSync(WORKSPACE_GUIDE_STORAGE_KEY, true);
+    }
+    this.setData({ showWorkspaceGuide: false });
   },
 
   openWristSetting() {
@@ -2430,6 +2834,14 @@ Page({
     wx.nextTick(() => this.startPhysicsFromCurrentDesign());
   },
 
+  toggleStringMode() {
+    if (this.data.isLooseMode) {
+      this.shuffleDesign();
+      return;
+    }
+    this.releaseString();
+  },
+
   buildCurrentSequence() {
     const timestamp = new Date().toISOString();
     return (this.data.selected || []).map((id, index) => {
@@ -2499,6 +2911,54 @@ Page({
       wx.showToast({ title: '预览图生成失败，请重试', icon: 'none' });
       return;
     }
+    const localId = `diy-${Date.now()}`;
+    const cartPayload = {
+      id: localId,
+      createdAt: Date.now(),
+      name: 'DIY 手串方案',
+      userId: user.user_id,
+      selected: [...this.data.selected],
+      materialIds: sequence.map(item => item.id || item.sku).filter(Boolean),
+      placements: this.data.placements.map(item => ({ ...item })),
+      wristSize: this.data.wristSize,
+      wearStyle: this.data.wearStyle,
+      isLooseMode: this.data.isLooseMode,
+      sourceContext: this.data.sourceContext || this.sourceContext || null,
+      preview_image: previewImage,
+      previewImage,
+      image_url: previewImage,
+      local_preview_image: previewResult.localPreviewImage || '',
+      summary,
+      sequence
+    };
+    try {
+      const saved = await saveCartItem({
+        user_id: user.user_id,
+        cart_item_id: localId,
+        item_type: 'diy_design',
+        item_id: localId,
+        item: cartPayload,
+        quantity: 1
+      });
+      const cart = wx.getStorageSync('diyDesignCart') || [];
+      const storedItem = {
+        ...cartPayload,
+        ...(saved.item || {}),
+        id: saved.cart_item_id || localId,
+        key: saved.cart_item_id || localId,
+        cart_item_id: saved.cart_item_id || localId,
+        quantity: saved.quantity || 1,
+        qty: saved.quantity || 1
+      };
+      wx.setStorage({
+        key: 'diyDesignCart',
+        data: [storedItem, ...cart.filter(item => (item.cart_item_id || item.id) !== storedItem.cart_item_id)].slice(0, 20),
+        success: () => wx.showToast({ title: '已加入购物车', icon: 'success' })
+      });
+    } catch (error) {
+      wx.showToast({ title: error.message || '购物车保存失败，请重试', icon: 'none' });
+    }
+    return;
     const cart = wx.getStorageSync('diyDesignCart') || [];
     cart.push({
       id: `diy-${Date.now()}`,
@@ -2553,8 +3013,20 @@ Page({
   },
 
   toggleWearStyle() {
+    this.openWristSetting();
+  },
+
+  selectWearStyle(e) {
+    const style = e.currentTarget && e.currentTarget.dataset && e.currentTarget.dataset.style;
+    if (style !== 'single' && style !== 'double') return;
+    if (style === this.data.wearStyle) {
+      return;
+    }
     this.pushHistory();
-    this.setData({ wearStyle: this.data.wearStyle === 'single' ? 'double' : 'single' });
+    this.setData({
+      wearStyle: style,
+      wearStyleOptions: this.buildWearStyleOptions(style)
+    });
     this.recalculate();
   },
 
@@ -2563,6 +3035,48 @@ Page({
     if (now - (this.lastQueueToastAt || 0) < MATERIAL_QUEUE_TOAST_GUARD_MS) return;
     this.lastQueueToastAt = now;
     wx.showToast({ title, icon: 'none' });
+  },
+
+  getTapPoint(e = {}) {
+    const detail = e.detail || {};
+    if (Number.isFinite(Number(detail.x)) && Number.isFinite(Number(detail.y))) {
+      return { x: Number(detail.x), y: Number(detail.y) };
+    }
+    const touch = (e.changedTouches && e.changedTouches[0]) || (e.touches && e.touches[0]);
+    if (touch && Number.isFinite(Number(touch.clientX)) && Number.isFinite(Number(touch.clientY))) {
+      return { x: Number(touch.clientX), y: Number(touch.clientY) };
+    }
+    return null;
+  },
+
+  isValidRect(rect) {
+    return !!rect
+      && Number(rect.width) > 1
+      && Number(rect.height) > 1
+      && Number.isFinite(Number(rect.left))
+      && Number.isFinite(Number(rect.top));
+  },
+
+  resolveFlightStartRect(cardRect, tapPoint, drawerRect, material = {}) {
+    if (this.isValidRect(cardRect)) return cardRect;
+    const size = Math.max(38, Math.min(72, Number(material.size || 8) * 5.4));
+    if (tapPoint && Number.isFinite(tapPoint.x) && Number.isFinite(tapPoint.y)) {
+      return {
+        left: tapPoint.x - size / 2,
+        top: tapPoint.y - size / 2,
+        width: size,
+        height: size
+      };
+    }
+    if (this.isValidRect(drawerRect)) {
+      return {
+        left: drawerRect.left + drawerRect.width * 0.68 - size / 2,
+        top: drawerRect.top + Math.min(drawerRect.height * 0.42, 220) - size / 2,
+        width: size,
+        height: size
+      };
+    }
+    return null;
   },
 
   addMaterial(e) {
@@ -2597,7 +3111,13 @@ Page({
       id,
       [...this.data.placements, ...queuedPlacements]
     );
-    this.flightQueue.push({ id, cardIndex, placement, image_url: placement.image_url || '' });
+    this.flightQueue.push({
+      id,
+      cardIndex,
+      placement,
+      image_url: placement.image_url || '',
+      tapPoint: this.getTapPoint(e)
+    });
     this.processFlightQueue();
   },
 
@@ -2614,6 +3134,7 @@ Page({
       return;
     }
     this.flightActive = true;
+    this.armFlightSafetyTimer();
     const query = wx.createSelectorQuery();
     query.select(`.material-card-${task.cardIndex} .material-sphere`).boundingClientRect();
     query.select('.bracelet-circle').boundingClientRect();
@@ -2699,72 +3220,124 @@ Page({
 
   processCanvasFlightQueue() {
     if (this.flightActive || !this.flightQueue.length) return;
+    if (!this.braceletCanvasState || !this.flightCanvasState) {
+      this.canvasFlightReadyRetries = (this.canvasFlightReadyRetries || 0) + 1;
+      if (this.canvasFlightReadyRetries <= 5) {
+        this.initWorkspaceCanvases();
+        setTimeout(() => this.processCanvasFlightQueue(), 70);
+        return;
+      }
+      this.canvasFlightReadyRetries = 0;
+    }
     const task = this.flightQueue.shift();
     const material = this.findMaterialById(task.id);
     if (!material) {
       this.processCanvasFlightQueue();
       return;
     }
+    this.canvasFlightReadyRetries = 0;
     this.flightActive = true;
+    this.armFlightSafetyTimer();
     const query = wx.createSelectorQuery().in(this);
+    query.select(`.material-card-${task.cardIndex} .material-sphere`).boundingClientRect();
     query.select('.bracelet-circle').boundingClientRect();
+    query.select('.material-drawer').boundingClientRect();
     query.exec(rects => {
-      const circleRect = rects && rects[0];
-      if (!circleRect) {
+      const cardRect = rects && rects[0];
+      const circleRect = rects && rects[1];
+      const drawerRect = rects && rects[2];
+      const startRect = this.resolveFlightStartRect(cardRect, task.tapPoint, drawerRect, material);
+      if (!startRect || !circleRect) {
         this.commitMaterial(task.id, task.placement, {}, () => this.finishCanvasFlight());
         return;
       }
       const layout = this.getStageLayout();
+      const logicalSize = layout.center * 2;
+      const scale = circleRect.width / logicalSize;
       const beadSize = Math.max(42, Math.min(78, material.size * 5.4));
       const launchIndex = this.data.selected.length + this.flightQueue.length;
       const launchSeed = (task.placement.rotation + launchIndex * 47) % 101;
-      const laneBias = ((launchIndex % 6) - 2.5) / 2.5;
-      const entryAngle = Math.PI / 2 + laneBias * 0.72 + ((launchSeed / 100) - 0.5) * 0.24;
+      const startX = startRect.left + startRect.width / 2;
+      const startY = startRect.top + startRect.height / 2;
+      const startLogicalX = (startX - circleRect.left) / scale;
+      const startLogicalY = (startY - circleRect.top) / scale;
+      const shotDx = layout.center - startLogicalX;
+      const shotDy = layout.center - startLogicalY;
+      const shotLength = Math.max(1, Math.sqrt(shotDx ** 2 + shotDy ** 2));
+      const shotX = shotDx / shotLength;
+      const shotY = shotDy / shotLength;
       const entryRadius = layout.center - beadSize / 2 - 14;
-      const entryLogicalX = layout.center + Math.cos(entryAngle) * entryRadius;
-      const entryLogicalY = layout.center + Math.sin(entryAngle) * entryRadius;
-      const aimAngle = entryAngle + Math.PI + laneBias * 0.22 + (Math.random() - 0.5) * 0.18;
-      const aimRadius = layout.center - beadSize / 2 - 20;
-      const aimX = layout.center + Math.cos(aimAngle) * aimRadius;
-      const aimY = layout.center + Math.sin(aimAngle) * aimRadius;
-      const aimDx = aimX - entryLogicalX;
-      const aimDy = aimY - entryLogicalY;
-      const aimLength = Math.max(1, Math.sqrt(aimDx ** 2 + aimDy ** 2));
-      const tangentX = -aimDy / aimLength;
-      const tangentY = aimDx / aimLength;
-      const baseLaunchSpeed = this.isLowPerformanceDevice ? 34 : (this.isRealDevice ? 44 : 48);
+      const entryLogicalX = layout.center - shotX * entryRadius;
+      const entryLogicalY = layout.center - shotY * entryRadius;
+      const tangentX = -shotY;
+      const tangentY = shotX;
+      const baseLaunchSpeed = this.isLowPerformanceDevice ? 38 : (this.isRealDevice ? 48 : 52);
       const powerRoll = Math.random();
       const powerFactor = powerRoll < 0.12
-        ? 0.78 + Math.random() * 0.12
-        : (powerRoll > 0.84 ? 1.28 + Math.random() * 0.24 : 1.02 + Math.random() * 0.28);
+        ? 0.92 + Math.random() * 0.08
+        : (powerRoll > 0.84 ? 1.12 + Math.random() * 0.12 : 1.0 + Math.random() * 0.12);
       const launchSpeed = baseLaunchSpeed * powerFactor + (launchSeed % 7) * 0.35;
-      const scatterStrength = (1.2 + Math.random() * 1.7) + Math.abs(laneBias) * (0.6 + Math.random() * 0.7);
+      const scatterStrength = (Math.random() - 0.5) * 0.9;
       const launchPlacement = {
         ...task.placement,
         looseX: entryLogicalX,
         looseY: entryLogicalY
       };
+      const endX = circleRect.left + entryLogicalX * scale;
+      const endY = circleRect.top + entryLogicalY * scale;
+      const controlX = (startX + endX) / 2;
+      const controlY = (startY + endY) / 2;
+      const sourceSize = Math.max(36, Math.min(76, Math.min(startRect.width, startRect.height)));
+      const targetSize = beadSize * scale;
+      const flightDuration = this.isLowPerformanceDevice ? 300 : (this.isRealDevice ? 270 : 240);
+      const flightStartDelay = this.isRealDevice ? 48 : 24;
+      const flightMaterial = {
+        ...material,
+        image_url: task.image_url || material.image_url || ''
+      };
       this.physicsTargets = null;
       this.pendingImpactTargets = null;
       this.pendingFrozenImpact = false;
+      if (flightMaterial.image_url) this.getCanvasImage(flightMaterial.image_url);
+      this.canvasFlight = {
+        material: flightMaterial,
+        start: { x: startX, y: startY },
+        control: { x: controlX, y: controlY },
+        end: { x: endX, y: endY },
+        path: 'line',
+        easing: 'linear',
+        sourceSize,
+        targetSize,
+        rotation: Number(task.placement.rotation || 0),
+        rotationDelta: 8 + (launchSeed % 5),
+        startedAt: Date.now() + flightStartDelay,
+        duration: flightDuration
+      };
       this.setData({ launchingMaterialId: task.id }, () => {
-        this.commitMaterial(task.id, launchPlacement, {
-          x: entryLogicalX,
-          y: entryLogicalY,
-          billiardDamping: this.isLowPerformanceDevice ? 0.88 : 0.92,
-          frictionAir: 0.002,
-          restitution: 0.9,
-          velocity: {
-            x: aimDx / aimLength * launchSpeed + tangentX * scatterStrength,
-            y: aimDy / aimLength * launchSpeed + tangentY * scatterStrength
-          },
-          angularVelocity: ((task.placement.rotation % 9) - 4) * 0.018
-        }, () => this.finishCanvasFlight());
+        this.setData({ canvasFlightActive: true }, () => this.scheduleCanvasRender(true));
+        this.flightTimer = setTimeout(() => {
+          this.commitMaterial(task.id, launchPlacement, {
+            x: entryLogicalX,
+            y: entryLogicalY,
+            billiardDamping: this.isLowPerformanceDevice ? 0.88 : 0.92,
+            frictionAir: 0.002,
+            restitution: 0.9,
+            velocity: {
+              x: shotX * launchSpeed + tangentX * scatterStrength,
+              y: shotY * launchSpeed + tangentY * scatterStrength
+            },
+            angularVelocity: ((task.placement.rotation % 9) - 4) * 0.018
+          }, () => this.finishCanvasFlight());
+        }, flightStartDelay + flightDuration + 18);
       });
     });
   },
 
   finishCanvasFlight() {
+    clearTimeout(this.flightTimer);
+    this.flightTimer = null;
+    clearTimeout(this.flightSafetyTimer);
+    this.flightSafetyTimer = null;
     this.canvasFlight = null;
     this.clearWorkspaceFlightCanvas();
     this.setData({ canvasFlightActive: false, launchingMaterialId: '' }, () => {
@@ -2843,6 +3416,10 @@ Page({
   },
 
   finishFlight() {
+    clearTimeout(this.flightTimer);
+    this.flightTimer = null;
+    clearTimeout(this.flightSafetyTimer);
+    this.flightSafetyTimer = null;
     this.setData({ flightBead: null, launchingMaterialId: '' });
     this.flightActive = false;
     this.processFlightQueue();
@@ -2887,45 +3464,57 @@ Page({
   },
 
   startStringingPhysics() {
-    this.stopPhysics();
-    this.createPhysicsEngine();
-    this.playSoundEffect('shuffle', 0);
-    this.physicsEngine.enableSleeping = false;
-    this.physicsEngine.gravity.scale = 0;
-    const placements = this.normalizePlacements(this.data.selected, this.data.placements);
-    this.data.selected.forEach((id, index) => {
-      const body = this.createPhysicsBody(id, placements[index], index);
-      body.collisionFilter.group = 0;
-      body.collisionFilter.mask = 0xFFFFFFFF;
-    });
-    const items = this.data.selected.map(id => this.findMaterialById(id)).filter(Boolean);
-    const geometry = this.calculateBraceletGeometry(items);
-    this.physicsTargets = geometry.angles.map(angle => ({
-      x: geometry.center + Math.cos(angle) * geometry.radius,
-      y: geometry.center + Math.sin(angle) * geometry.radius
-    }));
-    this.physicsBodies.forEach((body, index) => {
-      const target = this.physicsTargets[index];
-      const tangentX = -(target.y - geometry.center);
-      const tangentY = target.x - geometry.center;
-      const tangentLength = Math.max(1, Math.sqrt(tangentX ** 2 + tangentY ** 2));
-      const pullX = target.x - body.position.x;
-      const pullY = target.y - body.position.y;
-      const pullLength = Math.max(1, Math.sqrt(pullX ** 2 + pullY ** 2));
-      const swirlSpeed = this.isLowPerformanceDevice ? 2.1 : (this.isRealDevice ? 3.0 : 3.2);
-      const pullSpeed = Math.min(7.2, Math.max(2.3, pullLength * 0.026));
-      Body.setVelocity(body, {
-        x: tangentX / tangentLength * swirlSpeed + pullX / pullLength * pullSpeed,
-        y: tangentY / tangentLength * swirlSpeed + pullY / pullLength * pullSpeed
+    try {
+      this.stopPhysics();
+      if (!this.data.selected.length) {
+        this.recoverStringingRuntime();
+        return;
+      }
+      this.createPhysicsEngine();
+      this.playSoundEffect('shuffle', 0);
+      this.physicsEngine.enableSleeping = false;
+      this.physicsEngine.gravity.scale = 0;
+      const placements = this.normalizePlacements(this.data.selected, this.data.placements);
+      this.data.selected.forEach((id, index) => {
+        const body = this.createPhysicsBody(id, placements[index], index);
+        body.collisionFilter.group = 0;
+        body.collisionFilter.mask = 0xFFFFFFFF;
       });
-      Body.setAngularVelocity(body, (index % 2 ? 1 : -1) * 0.038);
-    });
-    this.stringingStartedAt = Date.now();
-    clearTimeout(this.stringingGuardTimer);
-    this.stringingGuardTimer = setTimeout(() => {
-      if (this.data.isShuffling) this.finishStringing();
-    }, 1600);
-    this.runPhysics();
+      const items = this.data.selected.map(id => this.findMaterialById(id)).filter(Boolean);
+      const geometry = this.calculateBraceletGeometry(items);
+      this.physicsTargets = geometry.angles.map(angle => ({
+        x: geometry.center + Math.cos(angle) * geometry.radius,
+        y: geometry.center + Math.sin(angle) * geometry.radius
+      }));
+      if (!this.physicsBodies.length || this.physicsTargets.length !== this.physicsBodies.length) {
+        this.completeStringing();
+        return;
+      }
+      this.physicsBodies.forEach((body, index) => {
+        const target = this.physicsTargets[index];
+        const tangentX = -(target.y - geometry.center);
+        const tangentY = target.x - geometry.center;
+        const tangentLength = Math.max(1, Math.sqrt(tangentX ** 2 + tangentY ** 2));
+        const pullX = target.x - body.position.x;
+        const pullY = target.y - body.position.y;
+        const pullLength = Math.max(1, Math.sqrt(pullX ** 2 + pullY ** 2));
+        const swirlSpeed = this.isLowPerformanceDevice ? 2.1 : (this.isRealDevice ? 3.0 : 3.2);
+        const pullSpeed = Math.min(7.2, Math.max(2.3, pullLength * 0.026));
+        Body.setVelocity(body, {
+          x: tangentX / tangentLength * swirlSpeed + pullX / pullLength * pullSpeed,
+          y: tangentY / tangentLength * swirlSpeed + pullY / pullLength * pullSpeed
+        });
+        Body.setAngularVelocity(body, (index % 2 ? 1 : -1) * 0.038);
+      });
+      this.stringingStartedAt = Date.now();
+      clearTimeout(this.stringingGuardTimer);
+      this.stringingGuardTimer = setTimeout(() => {
+        if (this.data.isShuffling) this.finishStringing();
+      }, 1600);
+      this.runPhysics();
+    } catch (error) {
+      this.recoverStringingRuntime();
+    }
   },
 
   removeItem(e) {
@@ -2953,14 +3542,28 @@ Page({
 
   clearDesign() {
     if (this.data.selected.length) this.pushHistory();
-    this.stopPhysics();
-    this.setData({ selected: [], placements: [], selectedBeadIndex: -1, isLooseMode: true });
-    this.recalculate();
+    this.resetWorkspaceRuntime();
+    this.resetInteractionData({
+      selected: [],
+      placements: [],
+      selectedItems: [],
+      selectedBeadIndex: -1,
+      isLooseMode: true
+    }, () => {
+      this.recalculate();
+      this.scheduleCanvasRender();
+    });
   },
 
   confirmClearDesign() {
-    if (!this.data.selected.length) {
+    const busy = this.hasBusyWorkspaceRuntime();
+    if (!this.data.selected.length && !busy) {
       wx.showToast({ title: '盘面已经是空的', icon: 'none' });
+      return;
+    }
+    if (!this.data.selected.length && busy) {
+      this.clearDesign();
+      wx.showToast({ title: '已重置盘面', icon: 'none' });
       return;
     }
     wx.showModal({
@@ -3296,13 +3899,10 @@ Page({
     const currentWrist = items.length
       ? Math.max(0, this.data.wearStyle === 'double' ? (length - 1.2) / 2 : length - 0.8)
       : 0;
-    const isWristEstimateReady = items.length > 2 && length >= targetLength * 0.72;
     const sizes = items.map(item => Number(item.size || 0)).filter(Boolean);
     const minSize = sizes.length ? Math.min(...sizes) : 0;
     const maxSize = sizes.length ? Math.max(...sizes) : 0;
     const beadSizeText = !sizes.length ? '--' : minSize === maxSize ? maxSize + 'mm' : minSize + '-' + maxSize + 'mm';
-    const wristDisplayLabel = isWristEstimateReady ? '预计可戴手腕' : '当前已铺长度';
-    const wristDisplayValue = (isWristEstimateReady ? currentWrist : length).toFixed(1) + 'cm';
     const summary = {
       count: items.length,
       price: price,
@@ -3311,8 +3911,6 @@ Page({
       weight: weight.toFixed(2),
       currentWrist: currentWrist.toFixed(1),
       beadSizeText: beadSizeText,
-      wristDisplayLabel: wristDisplayLabel,
-      wristDisplayValue: wristDisplayValue,
       maxLength: targetLength.toFixed(1),
       warning: warning,
       energy: energy
@@ -3331,6 +3929,7 @@ Page({
       completionWatermarkClass: items.length ? 'has-beads' : '',
       wearStyleText: this.data.wearStyle === 'single' ? '单圈' : '双圈',
       wristOptionItems: this.buildWristOptionItems(),
+      wearStyleOptions: this.buildWearStyleOptions(),
       ...actionState,
       energyChartSvgUrl
     };
@@ -3387,6 +3986,7 @@ Page({
         : (Math.round(Number(placement.rotation || 0) / 180) * 180);
       const background = this.buildBeadBackground(item);
       const classes = [];
+      if (item.image_url) classes.push('has-image');
       if (index === this.data.selectedBeadIndex) classes.push('active');
       if (index === this.data.draggingBeadIndex) classes.push('dragging');
       if (index === this.data.draggingBeadIndex && this.data.dragDeleteArmed) classes.push('delete-ready');
@@ -3404,7 +4004,6 @@ Page({
   },
 
   buildBeadBackground(item = {}) {
-    if (item.image_url) return 'transparent';
     return `radial-gradient(circle at 32% 28%, ${item.shine || '#fff'} 0 10%, ${item.color || '#d8d2c8'} 12% 58%, rgba(0,0,0,.22) 100%)`;
   },
 
@@ -3493,7 +4092,6 @@ Page({
   buildActionState() {
     return {
       shuffleButtonClass: this.data.isShuffling ? 'working' : '',
-      releaseButtonClass: this.data.isShuffling ? 'working' : '',
       randomIconText: this.data.isShuffling ? '...' : '串',
       randomTitle: this.data.isShuffling
         ? '正在成串'
@@ -3509,6 +4107,24 @@ Page({
       label: `${size}cm`,
       className: Number(size) === current ? 'active' : ''
     }));
+  },
+
+  buildWearStyleOptions(nextStyle) {
+    const current = nextStyle || this.data.wearStyle || 'single';
+    return [
+      {
+        value: 'single',
+        label: '单圈',
+        desc: '经典单圈，轻盈日常佩戴',
+        className: current === 'single' ? 'active' : ''
+      },
+      {
+        value: 'double',
+        label: '双圈',
+        desc: '绕腕两圈，层次更丰富',
+        className: current === 'double' ? 'active' : ''
+      }
+    ];
   },
 
   getStageLayout() {
@@ -3538,8 +4154,9 @@ Page({
     const centerX = width / 2;
     const centerY = height / 2;
     const radius = Math.min(width, height) * 0.42;
+    const palette = this.getTrayPalette();
     ctx.clearRect(0, 0, width, height);
-    ctx.fillStyle = '#f7f4ef';
+    ctx.fillStyle = palette.page;
     ctx.fillRect(0, 0, width, height);
 
     const plate = ctx.createRadialGradient(
@@ -3550,25 +4167,64 @@ Page({
       centerY,
       radius * 1.15
     );
-    plate.addColorStop(0, '#ffffff');
-    plate.addColorStop(0.42, '#f1ede5');
-    plate.addColorStop(1, '#ded6c9');
+    (palette.plateStops || [
+      [0, palette.inner0],
+      [0.42, palette.inner1],
+      [1, palette.outer]
+    ]).forEach(stop => {
+      plate.addColorStop(stop[0], stop[1]);
+    });
     ctx.fillStyle = plate;
     ctx.beginPath();
     ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
     ctx.fill();
 
-    ctx.strokeStyle = 'rgba(104, 101, 91, 0.16)';
+    this.drawCanvasDitherNoise(ctx, width, height, {
+      x: centerX,
+      y: centerY,
+      radius,
+      alpha: palette.noiseAlpha
+    });
+
+    ctx.strokeStyle = palette.stroke;
     ctx.lineWidth = 1.2;
     ctx.beginPath();
     ctx.arc(centerX, centerY, radius * 0.92, 0, Math.PI * 2);
     ctx.stroke();
 
-    ctx.strokeStyle = 'rgba(86, 84, 76, 0.18)';
+    ctx.strokeStyle = palette.centerStroke;
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.arc(centerX, centerY, radius * 0.54, 0, Math.PI * 2);
     ctx.stroke();
+  },
+
+  drawCanvasDitherNoise(ctx, width, height, options = {}) {
+    const alpha = Number(options.alpha || 0);
+    if (!ctx || alpha <= 0) return;
+    const centerX = Number(options.x || width / 2);
+    const centerY = Number(options.y || height / 2);
+    const radius = Number(options.radius || Math.min(width, height) / 2);
+    const density = Math.max(360, Math.round(width * height / 520));
+    let seed = 123456789;
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+    ctx.clip();
+
+    for (let i = 0; i < density; i += 1) {
+      seed = (seed * 1664525 + 1013904223) >>> 0;
+      const x = seed % width;
+      seed = (seed * 1664525 + 1013904223) >>> 0;
+      const y = seed % height;
+      seed = (seed * 1664525 + 1013904223) >>> 0;
+      const tone = (seed & 1) ? 255 : 0;
+      ctx.fillStyle = `rgba(${tone},${tone},${tone},${alpha})`;
+      ctx.fillRect(x, y, 1, 1);
+    }
+
+    ctx.restore();
   },
 
   renderBraceletPreviewForExport() {

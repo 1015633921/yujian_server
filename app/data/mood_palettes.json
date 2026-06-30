@@ -1,0 +1,64 @@
+{
+  "palettes": {
+    "sea_salt_blue": {
+      "name": "海盐蓝白",
+      "subtitle": "表达、清澈、松弛",
+      "colors": ["#DCEFF2", "#F8F7F2", "#6D8FA3"],
+      "color_families": ["blue", "white", "clear"],
+      "mood_tags": ["表达", "清澈", "松弛", "沟通"],
+      "visual_tags": ["冰感", "通透", "浅色"],
+      "chakra": "throat",
+      "element_weights": {"水": 1.8, "金": 1.1}
+    },
+    "rose_garden": {
+      "name": "粉绿花园",
+      "subtitle": "接纳、关系、柔软",
+      "colors": ["#F0B7C3", "#DDEAD7", "#7EA27E"],
+      "color_families": ["pink", "green"],
+      "mood_tags": ["接纳", "关系", "柔软", "修复"],
+      "visual_tags": ["花园感", "柔和", "温柔"],
+      "chakra": "heart",
+      "element_weights": {"木": 1.7, "火": 1.0}
+    },
+    "sunlit_gold": {
+      "name": "金橙日光",
+      "subtitle": "自信、行动、财富感",
+      "colors": ["#F1C75B", "#E9924E", "#FFF1C8"],
+      "color_families": ["yellow", "gold", "orange"],
+      "mood_tags": ["自信", "行动", "目标感", "财富感"],
+      "visual_tags": ["明亮", "金色", "暖光"],
+      "chakra": "solar_plexus",
+      "element_weights": {"火": 1.5, "土": 1.2, "金": 0.7}
+    },
+    "moon_violet": {
+      "name": "紫白月光",
+      "subtitle": "灵感、直觉、安静",
+      "colors": ["#DDD7EF", "#F7F5F0", "#8177B4"],
+      "color_families": ["purple", "white", "clear"],
+      "mood_tags": ["灵感", "直觉", "安静", "净化"],
+      "visual_tags": ["月光感", "通透", "微光"],
+      "chakra": "third_eye",
+      "element_weights": {"水": 1.3, "金": 1.0, "木": 0.8}
+    },
+    "earth_red": {
+      "name": "红棕大地",
+      "subtitle": "稳定、安全、落地",
+      "colors": ["#8E3F35", "#B9835A", "#E8D8C7"],
+      "color_families": ["red", "brown"],
+      "mood_tags": ["稳定", "安全感", "落地", "保护"],
+      "visual_tags": ["大地感", "暖色", "深色"],
+      "chakra": "root",
+      "element_weights": {"土": 1.8, "火": 1.1}
+    },
+    "black_gold": {
+      "name": "黑金镜面",
+      "subtitle": "边界、保护、专注",
+      "colors": ["#1F2225", "#C8A95B", "#F5F2EA"],
+      "color_families": ["black", "gold", "white"],
+      "mood_tags": ["边界", "保护", "专注", "决断"],
+      "visual_tags": ["镜面感", "深色", "金色"],
+      "chakra": "root",
+      "element_weights": {"金": 1.8, "水": 1.0}
+    }
+  }
+}

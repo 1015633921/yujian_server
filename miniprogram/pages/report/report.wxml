@@ -53,6 +53,46 @@
     <view class="summary-copy">{{viewReport.summary}}</view>
   </view>
 
+  <view class="bazi-card yu-card">
+    <view class="card-title">命盘底色</view>
+    <view class="bazi-pillars">{{viewReport.bazi.pillarsText || '已按真太阳时排盘'}}</view>
+    <view class="bazi-grid">
+      <view>
+        <text>日主</text>
+        <view>{{viewReport.bazi.dayMaster || '已生成'}}</view>
+      </view>
+      <view>
+        <text>强弱</text>
+        <view>{{viewReport.bazi.strength || '中和'}}</view>
+      </view>
+      <view>
+        <text>喜用</text>
+        <view>{{viewReport.bazi.usefulText || '调和'}}</view>
+      </view>
+    </view>
+    <view class="bazi-strategy">{{viewReport.bazi.strategy || viewReport.recommendationStrategy}}</view>
+  </view>
+
+  <view class="live-card yu-card">
+    <view class="card-title">当下能量</view>
+    <view class="live-block">
+      <view class="live-label">七脉轮</view>
+      <view class="live-title">{{viewReport.chakra.name}}</view>
+      <view class="live-copy">{{viewReport.chakra.summary}}</view>
+      <view class="live-colors" wx:if="{{viewReport.chakra.colors.length}}">
+        <view wx:for="{{viewReport.chakra.colors}}" wx:key="*this" class="live-color" style="background: {{item}};"></view>
+      </view>
+    </view>
+    <view class="live-block">
+      <view class="live-label">直觉色彩</view>
+      <view class="live-title">{{viewReport.mood.name}}</view>
+      <view class="live-copy">{{viewReport.mood.summary}}</view>
+      <view class="live-colors" wx:if="{{viewReport.mood.colors.length}}">
+        <view wx:for="{{viewReport.mood.colors}}" wx:key="*this" class="live-color" style="background: {{item}};"></view>
+      </view>
+    </view>
+  </view>
+
   <view class="keyword-card yu-card">
     <view class="card-title">能量关键词</view>
     <view class="keyword-desc">提炼属于你的禅意 / 国风气质标签</view>
@@ -94,6 +134,21 @@
     </view>
   </view>
 
+  <view class="why-recommend-card yu-card">
+    <view class="card-title">为什么推荐这些水晶</view>
+    <view class="why-recommend-desc">系统会把命盘底色、愿望场景和当下状态一起折算到材料库，而不是只看单一标签。</view>
+    <view class="why-recommend-list">
+      <view wx:for="{{viewReport.recommendationReasons}}" wx:key="index" class="why-recommend-row">
+        <view class="why-recommend-index">{{item.index}}</view>
+        <view class="why-recommend-copy">
+          <view class="why-recommend-title">{{item.title}}</view>
+          <view class="why-recommend-text">{{item.desc}}</view>
+          <view class="why-recommend-meta">{{item.meta}}</view>
+        </view>
+      </view>
+    </view>
+  </view>
+
   <view class="poster-entry yu-card yu-pressable" bindtap="shareReport">
     <view>
       <view class="poster-kicker">REPORT POSTER</view>
@@ -112,7 +167,10 @@
   </view>
 
   <view class="result-bottom">
-    <button class="yu-button yu-button-primary result-submit" bindtap="openWristModal">查看推荐方案</button>
+    <view class="result-actions">
+      <button class="result-secondary" bindtap="restartAssessment">重新测算</button>
+      <button class="yu-button yu-button-primary result-submit" bindtap="openWristModal">查看推荐方案</button>
+    </view>
   </view>
 </view>
 
@@ -143,7 +201,7 @@
     <image class="poster-preview" src="{{posterPath}}" mode="aspectFit" show-menu-by-longpress="{{true}}" bindtap="previewPoster"></image>
     <view class="poster-actions">
       <button class="poster-secondary" bindtap="closePosterModal">稍后</button>
-      <button class="poster-primary" bindtap="savePosterImage">保存海报</button>
+      <button class="poster-primary" loading="{{posterSaving}}" disabled="{{posterSaving}}" bindtap="savePosterImage">保存海报</button>
     </view>
   </view>
 </view>

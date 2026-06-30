@@ -66,6 +66,17 @@
       <view class="menu-right">{{draftCount}} 个 ></view>
     </view>
     <view class="menu-divider"></view>
+    <view class="menu-row" bindtap="viewCommunityFavorites">
+      <view class="menu-left">
+        <view class="menu-icon favorite">藏</view>
+        <view>
+          <view class="menu-title">我的收藏</view>
+          <view class="menu-desc">收藏过的灵感搭配与推荐方案</view>
+        </view>
+      </view>
+      <view class="menu-right">{{communityFavoriteCount}} 个 ></view>
+    </view>
+    <view class="menu-divider"></view>
     <view class="menu-row" bindtap="viewShoppingCart">
       <view class="menu-left">
         <view class="menu-icon cart">车</view>

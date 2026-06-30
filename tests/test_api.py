@@ -20,10 +20,17 @@ PAYLOAD = {
 }
 
 
+def ensure_material_taxonomy(service, category: str, series: str, top: str = "bead") -> None:
+    saved_category = service.save_material_category({"top": top, "name": category})
+    service.save_material_series({"category_id": saved_category["id"], "name": series})
+
+
 def test_options_support_form_rendering():
     response = client.get("/api/v1/assessment/options")
     assert response.status_code == 200
     assert len(response.json()["data"]["mbti_options"]) == 16
+    assert response.json()["data"]["chakra_questions"]
+    assert response.json()["data"]["mood_palettes"]
 
 
 def test_compact_material_search_omits_catalog_metadata_and_honors_limit():
@@ -34,12 +41,360 @@ def test_compact_material_search_omits_catalog_metadata_and_honors_limit():
     assert set(data) == {"materials"}
     assert len(data["materials"]) <= 2
     assert all(isinstance(item.get("image_urls"), list) for item in data["materials"])
+    if data["materials"]:
+        item = data["materials"][0]
+        assert {"sku", "energy", "visual", "rules"}.issubset(item)
+        assert item["sku"]["size_mm"]
+        assert item["energy"]["primary_element"]
+        assert isinstance(item["visual"]["image_urls"], list)
+        assert isinstance(item["rules"]["allowed_roles"], list)
+
+
+def test_admin_material_options_expose_field_governance_specs(tmp_path):
+    from app.admin_service import AdminService
+
+    service = AdminService(tmp_path / "material-options.db")
+    payload = service.material_options_payload()
+
+    specs = payload["field_specs"]
+    option_specs = {item["key"]: item for item in specs["option_types"]}
+    form_specs = {item["key"]: item for item in specs["material_fields"]}
+
+    assert payload["option_types"][0]["control"]
+    assert option_specs["wish_pools"]["control"] == "multi_select"
+    assert option_specs["match_rules"]["value_kind"] == "rule_key"
+    assert option_specs["bead_shapes"]["cardinality"] == "one"
+    assert form_specs["primary_element"]["value_kind"] == "enum_key"
+    assert form_specs["purchase_note"]["value_kind"] == "free_text"
+    assert form_specs["thumbnail_url"]["control"] == "upload"
+    assert specs["governance"]["enum_first"] is True
+
+
+def test_admin_material_requires_option_values_to_exist_in_dictionary(tmp_path):
+    from app.admin_service import AdminService
+
+    service = AdminService(tmp_path / "material-option-validation.db")
+    custom_effect = service.save_material_option_item(
+        {"option_type": "effects", "label": "成长守护", "sort_order": 8}
+    )
+    ensure_material_taxonomy(service, "quartz", "Growth Guard Quartz")
+    ensure_material_taxonomy(service, "quartz", "Bad Effect Quartz")
+
+    saved = service.save_material(
+        {
+            "material_code": "growth_guard_quartz",
+            "top": "bead",
+            "category": "quartz",
+            "series": "Growth Guard Quartz",
+            "name": "Growth Guard Quartz",
+            "primary_element": "wood",
+            "effects": ["成长守护"],
+            "price_per_bead": 3.8,
+            "size_mm": 8,
+            "weight_g": 1.1,
+            "stock": 5,
+            "thumbnail_url": "https://cdn-test.yustream.cn/materials/beads/growth.png",
+        }
+    )
+
+    assert saved["energy"]["effects"] == [custom_effect["key"]]
+
+    with pytest.raises(ValueError, match="未维护选项"):
+        service.save_material(
+            {
+                "material_code": "bad_effect_quartz",
+                "top": "bead",
+                "category": "quartz",
+                "series": "Bad Effect Quartz",
+                "name": "Bad Effect Quartz",
+                "primary_element": "wood",
+                "effects": ["随手乱填标签"],
+                "price_per_bead": 3.8,
+                "size_mm": 8,
+                "weight_g": 1.1,
+                "stock": 5,
+                "thumbnail_url": "https://cdn-test.yustream.cn/materials/beads/bad.png",
+            }
+        )
+
+
+def test_admin_material_requires_taxonomy_before_sku_save(tmp_path):
+    from app.admin_service import AdminService
+
+    service = AdminService(tmp_path / "material-taxonomy-validation.db")
+    payload = {
+        "material_code": "taxonomy_guard_quartz",
+        "top": "bead",
+        "category": "unlisted-category",
+        "series": "Unlisted Series",
+        "name": "Unlisted Series",
+        "primary_element": "water",
+        "effects": ["focus"],
+        "price_per_bead": 2.6,
+        "size_mm": 8,
+        "weight_g": 1,
+        "stock": 5,
+        "thumbnail_url": "https://cdn-test.yustream.cn/materials/beads/taxonomy.png",
+    }
+
+    with pytest.raises(ValueError, match="分类未维护"):
+        service.save_material(payload)
+
+    category = service.save_material_category({"top": "bead", "name": "unlisted-category"})
+    with pytest.raises(ValueError, match="品种未维护"):
+        service.save_material(payload)
+
+    service.save_material_series({"category_id": category["id"], "name": "Unlisted Series"})
+    saved = service.save_material(payload)
+
+    assert saved["sku"]["category"] == "unlisted-category"
+    assert saved["sku"]["series"] == "Unlisted Series"
+
+
+def test_admin_material_spu_reports_size_coverage_and_missing_specs(tmp_path):
+    from app.admin_service import AdminService
+
+    service = AdminService(tmp_path / "material-spec-coverage.db")
+    ensure_material_taxonomy(service, "quartz", "Coverage Quartz")
+    ensure_material_taxonomy(service, "quartz", "Partial Quartz")
+
+    def save_size(series: str, code: str, size: int) -> None:
+        service.save_material(
+            {
+                "id": f"{code}_{size}",
+                "skuId": f"{code}_{size}",
+                "material_code": code,
+                "top": "bead",
+                "category": "quartz",
+                "series": series,
+                "name": series,
+                "primary_element": "water",
+                "effects": ["focus"],
+                "price_per_bead": 1,
+                "size_mm": size,
+                "weight_g": 1,
+                "stock": 3,
+                "thumbnail_url": f"https://cdn-test.yustream.cn/materials/beads/{code}-{size}.png",
+            }
+        )
+
+    for size in range(8, 16):
+        save_size("Coverage Quartz", "coverage_quartz", size)
+    for size in (8, 10):
+        save_size("Partial Quartz", "partial_quartz", size)
+
+    complete = service.list_material_spus(keyword="Coverage Quartz")[0]
+    partial = service.list_material_spus(keyword="Partial Quartz")[0]
+
+    assert complete["specStatus"] == "complete"
+    assert complete["missingSizes"] == []
+    assert complete["specCoverage"] == 1
+    assert partial["specStatus"] == "partial"
+    assert partial["missingSizes"] == [9, 11, 12, 13, 14, 15]
+    assert partial["specCoverage"] == pytest.approx(0.25)
+    assert [group["key"] for group in service.list_material_spus(keyword="Coverage Quartz", spec_state="complete")] == [
+        "coverage_quartz"
+    ]
+    assert [group["key"] for group in service.list_material_spus(keyword="Partial Quartz", spec_state="incomplete")] == [
+        "partial_quartz"
+    ]
+
+
+def test_admin_material_saves_structured_knowledge_without_legacy_required_fields(tmp_path):
+    from app.admin_service import AdminService
+
+    service = AdminService(tmp_path / "knowledge-materials.db")
+    ensure_material_taxonomy(service, "test", "Moss Agate")
+    saved = service.save_material(
+        {
+            "material_code": "test_moss_agate",
+            "top": "bead",
+            "category": "test",
+            "series": "Moss Agate",
+            "name": "Moss Agate",
+            "primary_element": "wood",
+            "secondary_elements": ["water"],
+            "effects": ["career", "focus"],
+            "chakras": ["heart"],
+            "wish_pools": ["career"],
+            "allowed_roles": ["primary", "support"],
+            "price_per_bead": 3.5,
+            "size_mm": 8,
+            "weight_g": 1.1,
+            "stock": 8,
+            "thumbnail_url": "https://cdn-test.yustream.cn/materials/beads/moss.png",
+            "color_hex": "#6fa56b",
+            "shine_hex": "#d7eadc",
+            "enabled": True,
+        }
+    )
+
+    assert saved["sku"]["material_code"] == "test_moss_agate"
+    assert saved["sku"]["price_per_bead"] == 3.5
+    assert saved["energy"]["primary_element"] == "wood"
+    assert saved["energy"]["effects"] == ["career", "focus"]
+    assert saved["visual"]["thumbnail_url"].endswith("/moss.png")
+    assert saved["rules"]["allowed_roles"] == ["primary", "support"]
+
+
+def test_admin_material_keeps_ops_fields_internal_to_admin(tmp_path):
+    from app.admin_service import AdminService
+    from app.materials import normalize_db_material
+
+    service = AdminService(tmp_path / "ops-materials.db")
+    ensure_material_taxonomy(service, "quartz", "Rose Quartz")
+    saved = service.save_material(
+        {
+            "material_code": "ops_rose_quartz",
+            "top": "bead",
+            "category": "quartz",
+            "series": "Rose Quartz",
+            "name": "Rose Quartz",
+            "primary_element": "water",
+            "secondary_elements": ["wood"],
+            "effects": ["calm"],
+            "material_params": {
+                "bead_shape": "round",
+                "surface_finish": "glossy",
+                "transparency_level": "semi_transparent",
+                "texture_features": ["cloud", "rutile"],
+                "batch_variation": "medium",
+                "hole_diameter_mm": "1.1",
+                "size_tolerance_mm": 0.2,
+                "origin_hint": "Brazil",
+            },
+            "price_per_bead": 2.8,
+            "cost_price": 1.2,
+            "safety_stock": 10,
+            "supplier_name": "Studio A",
+            "purchase_note": "Batch color is slightly pale.",
+            "size_mm": 8,
+            "weight_g": 1.0,
+            "stock": 6,
+            "enabled": True,
+        }
+    )
+
+    assert saved["sku"]["cost_price"] == 1.2
+    assert saved["sku"]["margin_amount"] == 1.6
+    assert saved["sku"]["margin_rate"] == pytest.approx(0.5714)
+    assert saved["sku"]["margin_status"] == "normal"
+    assert saved["sku"]["inventory_cost_value"] == 7.2
+    assert saved["sku"]["inventory_retail_value"] == 16.8
+    assert saved["sku"]["inventory_margin_value"] == 9.6
+    assert saved["sku"]["safety_stock"] == 10
+    assert saved["sku"]["supplier_name"] == "Studio A"
+    assert saved["sku"]["stock_status"] == "low"
+    assert saved["ops"]["purchase_note"] == "Batch color is slightly pale."
+    assert saved["visual"]["material_params"]["bead_shape"] == "round"
+    assert saved["visual"]["material_params"]["surface_finish"] == "glossy"
+    assert saved["visual"]["material_params"]["transparency_level"] == "semi_transparent"
+    assert saved["visual"]["material_params"]["texture_features"] == ["cloud", "rutile"]
+    assert saved["visual"]["material_params"]["batch_variation"] == "medium"
+    assert saved["visual"]["material_params"]["hole_diameter_mm"] == 1.1
+    assert saved["visual"]["material_params"]["size_tolerance_mm"] == 0.2
+    assert saved["visual"]["material_params"]["origin_hint"] == "Brazil"
+    assert saved["quality"]["ready_for_sale"] is False
+    assert saved["quality"]["level"] == "risk"
+    assert any(issue["key"] == "image_missing" for issue in saved["quality"]["issues"])
+
+    groups = service.list_material_spus(keyword="Rose Quartz")
+    assert groups[0]["qualityRiskCount"] == 1
+    assert groups[0]["qualityIssueCount"] >= 1
+    assert groups[0]["minMarginRate"] == pytest.approx(0.5714)
+    assert groups[0]["marginRiskCount"] == 0
+    assert groups[0]["inventoryCostValue"] == 7.2
+    assert groups[0]["inventoryRetailValue"] == 16.8
+    assert groups[0]["inventoryMarginValue"] == 9.6
+    risk_items = service.list_materials(keyword="Rose Quartz", quality="risk")
+    ready_items = service.list_materials(keyword="Rose Quartz", quality="ready")
+    low_stock_items = service.list_materials(keyword="Rose Quartz", stock_state="low")
+    normal_margin_items = service.list_materials(keyword="Rose Quartz", margin="normal")
+    assert [item["sku"]["id"] for item in risk_items] == [saved["sku"]["id"]]
+    assert ready_items == []
+    assert [item["sku"]["id"] for item in low_stock_items] == [saved["sku"]["id"]]
+    assert [item["sku"]["id"] for item in normal_margin_items] == [saved["sku"]["id"]]
+
+    service.batch_update_materials([saved["sku"]["id"]], "safety_stock", 3)
+    updated = service.get_material(saved["sku"]["id"])
+    assert updated["sku"]["safety_stock"] == 3
+    assert updated["sku"]["stock_status"] == "normal"
+    assert [item["sku"]["id"] for item in service.list_materials(keyword="Rose Quartz", stock_state="normal")] == [
+        saved["sku"]["id"]
+    ]
+
+    public = normalize_db_material(
+        {
+            "id": "ops_rose_quartz_8",
+            "skuId": "ops_rose_quartz_8",
+            "top": "bead",
+            "category": "quartz",
+            "name": "Rose Quartz",
+            "price": 2.8,
+            "size": 8,
+            "weight": 1,
+            "stock": 6,
+            "cost_price": 1.2,
+            "safety_stock": 10,
+            "supplier_name": "Studio A",
+            "purchase_note": "Batch color is slightly pale.",
+        }
+    )
+    assert "cost_price" not in public
+    assert "safety_stock" not in public
+    assert "supplier_name" not in public
+    assert "purchase_note" not in public
+
+
+def test_admin_material_flags_loss_margin_as_pricing_risk(tmp_path):
+    from app.admin_service import AdminService
+
+    service = AdminService(tmp_path / "loss-margin-materials.db")
+    ensure_material_taxonomy(service, "quartz", "Loss Margin Quartz")
+    saved = service.save_material(
+        {
+            "material_code": "loss_margin_test",
+            "top": "bead",
+            "category": "quartz",
+            "series": "Loss Margin Quartz",
+            "name": "Loss Margin Quartz",
+            "primary_element": "water",
+            "effects": ["calm"],
+            "price_per_bead": 2,
+            "cost_price": 3,
+            "size_mm": 8,
+            "weight_g": 1,
+            "stock": 5,
+            "safety_stock": 1,
+            "thumbnail_url": "https://cdn-test.yustream.cn/materials/beads/loss.png",
+            "enabled": True,
+        }
+    )
+
+    assert saved["sku"]["margin_amount"] == -1
+    assert saved["sku"]["margin_rate"] == pytest.approx(-0.5)
+    assert saved["sku"]["margin_status"] == "loss"
+    assert saved["sku"]["inventory_cost_value"] == 15
+    assert saved["sku"]["inventory_retail_value"] == 10
+    assert saved["sku"]["inventory_margin_value"] == -5
+    assert any(issue["key"] == "margin_loss" for issue in saved["quality"]["issues"])
+    groups = service.list_material_spus(keyword="Loss Margin Quartz")
+    assert groups[0]["marginLossCount"] == 1
+    assert groups[0]["marginRiskCount"] == 1
+    assert groups[0]["inventoryCostValue"] == 15
+    assert groups[0]["inventoryRetailValue"] == 10
+    assert groups[0]["inventoryMarginValue"] == -5
+    loss_items = service.list_materials(keyword="Loss Margin Quartz", margin="loss")
+    margin_risk_items = service.list_materials(keyword="Loss Margin Quartz", margin="risk")
+    assert [item["sku"]["id"] for item in loss_items] == [saved["sku"]["id"]]
+    assert [item["sku"]["id"] for item in margin_risk_items] == [saved["sku"]["id"]]
 
 
 def test_admin_material_accepts_multiple_image_urls(tmp_path):
     from app.admin_service import AdminService
 
     service = AdminService(tmp_path / "multi-image-materials.db")
+    ensure_material_taxonomy(service, "测试晶石", "多图测试珠")
     saved = service.save_material(
         {
             "id": "multiImageBead8",
@@ -102,6 +457,7 @@ def test_admin_material_autogenerates_id_sku_and_disables_zero_stock(tmp_path):
     from app.admin_service import AdminService
 
     service = AdminService(tmp_path / "auto-materials.db")
+    ensure_material_taxonomy(service, "test", "Auto Bead")
     saved = service.save_material(
         {
             "top": "bead",
@@ -132,10 +488,45 @@ def test_admin_material_autogenerates_id_sku_and_disables_zero_stock(tmp_path):
     )
 
     assert saved["id"].startswith("mat_")
-    assert saved["skuId"].startswith("bead-auto-bead-8mm")
+    assert saved["skuId"].isdigit()
+    assert saved["skuId"].startswith("10")
     assert saved["enabled"] is False
     assert duplicate["skuId"] != saved["skuId"]
+    assert duplicate["skuId"].isdigit()
     assert duplicate["enabled"] is True
+
+
+def test_material_code_infers_crystal_family_from_chinese_series():
+    from app.material_knowledge import material_code_from_payload, normalize_knowledge_payload
+
+    payload = {"top": "bead", "category": "粉红晶石", "series": "莫桑比亚粉水晶", "name": "莫桑比亚粉水晶"}
+    assert material_code_from_payload(payload) == "rose_quartz"
+
+    knowledge = normalize_knowledge_payload(payload, payload)
+    assert knowledge["code"] == "rose_quartz"
+    assert knowledge["primary_element"] == "wood"
+    assert "heart" in knowledge["chakras"]
+    assert "love" in knowledge["wish_pools"]
+    assert knowledge["material_params"]["transparency_level"] == "translucent"
+
+
+def test_agate_variants_keep_separate_material_codes_and_category():
+    from app.material_knowledge import material_code_from_payload
+    from scripts.regenerate_material_skus_and_knowledge import canonical_category, canonical_material_code
+
+    cases = {
+        "南红玛瑙": "south_red_agate",
+        "红玛瑙": "red_agate",
+        "盐源玛瑙": "salt_source_agate",
+        "阿拉善玛瑙": "alashan_agate",
+        "条纹玛瑙": "banded_agate",
+        "樱花玛瑙": "flower_agate",
+    }
+    for series, expected in cases.items():
+        payload = {"top": "bead", "category": "红色晶石", "series": series, "name": series}
+        assert material_code_from_payload(payload) == expected
+        assert canonical_material_code({**payload, "material_code": "red_agate"}) == expected
+        assert canonical_category(payload, expected) == "玛瑙"
 
 
 def test_material_catalog_exposes_cache_version():
@@ -152,6 +543,7 @@ def test_order_rejects_stale_material_price(tmp_path):
 
     db_path = tmp_path / "stale-material-price.db"
     admin = AdminService(db_path)
+    ensure_material_taxonomy(admin, "test", "Price Check Bead")
     saved = admin.save_material(
         {
             "id": "priceCheckBead8",
@@ -193,6 +585,7 @@ def test_order_repairs_legacy_zero_price_without_snapshot(tmp_path, monkeypatch)
     monkeypatch.setenv("WECHAT_PAY_TEST_MODE", "false")
     db_path = tmp_path / "legacy-zero-price.db"
     admin = AdminService(db_path)
+    ensure_material_taxonomy(admin, "test", "Legacy Zero Bead")
     saved = admin.save_material(
         {
             "id": "legacyZeroBead8",
@@ -237,6 +630,7 @@ def test_order_uses_current_material_price_snapshot(tmp_path, monkeypatch):
     monkeypatch.setenv("WECHAT_PAY_TEST_MODE", "false")
     db_path = tmp_path / "current-material-price.db"
     admin = AdminService(db_path)
+    ensure_material_taxonomy(admin, "test", "Current Price Bead")
     saved = admin.save_material(
         {
             "id": "currentPriceBead8",
@@ -279,6 +673,8 @@ def test_order_material_snapshot_survives_material_update_and_delete(tmp_path, m
     monkeypatch.setenv("WECHAT_PAY_TEST_MODE", "false")
     db_path = tmp_path / "order-material-snapshot.db"
     admin = AdminService(db_path)
+    ensure_material_taxonomy(admin, "original-category", "Original Series")
+    ensure_material_taxonomy(admin, "changed-category", "Changed Series")
     saved = admin.save_material(
         {
             "id": "snapshotBead8",
@@ -325,6 +721,7 @@ def test_order_material_snapshot_survives_material_update_and_delete(tmp_path, m
             "category": "changed-category",
             "series": "Changed Series",
             "effect": "changed effect",
+            "effects": ["vitality"],
             "element": "fire",
             "price": 99,
             "image_url": "https://cdn-test.yustream.cn/materials/beads/changed.png",
@@ -914,6 +1311,26 @@ def test_cart_items_can_be_created_updated_and_cleared(tmp_path):
     assert service.list_cart_items("cart-user") == []
 
 
+def test_community_favorites_are_user_scoped_and_mutable(tmp_path):
+    service = OrderService(tmp_path / "community-favorites.db")
+    saved = service.save_community_favorite(
+        {
+            "user_id": "favorite-user",
+            "post_id": "post-001",
+            "item": {"title": "Morning crystal inspiration", "recipe": ["clearQuartz"]},
+        }
+    )
+
+    assert saved["id"] == "post-001"
+    assert saved["title"] == "Morning crystal inspiration"
+    assert service.list_community_favorites("other-user") == []
+    assert service.list_community_favorites("favorite-user")[0]["post_id"] == "post-001"
+
+    deleted = service.delete_community_favorite("favorite-user", "post-001")
+    assert deleted["deleted"] is True
+    assert service.list_community_favorites("favorite-user") == []
+
+
 def test_diy_design_rekeys_when_design_id_belongs_to_another_user(tmp_path):
     service = OrderService(tmp_path / "design-id-conflict.db")
     first = service.save_design(
@@ -1049,6 +1466,8 @@ def test_optional_mbti_and_three_core_wishes_are_accepted():
                 "正缘桃花/人际和合",
                 "健康护身/保持专注",
             ],
+            "chakra_answers": ["state_expression", "need_clarity"],
+            "mood_palette_id": "sea_salt_blue",
             "force_recalculate": True,
         },
     )
@@ -1056,6 +1475,8 @@ def test_optional_mbti_and_three_core_wishes_are_accepted():
     assert response.status_code == 200
     assert response.json()["data"]["input_summary"]["mbti"] is None
     assert len(response.json()["data"]["input_summary"]["core_wishes"]) == 3
+    assert response.json()["data"]["chakra_analysis"]["primary_chakra"] == "throat"
+    assert response.json()["data"]["mood_analysis"]["palette_id"] == "sea_salt_blue"
 
 
 def test_more_than_three_core_wishes_are_rejected():

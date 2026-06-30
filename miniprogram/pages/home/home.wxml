@@ -38,10 +38,22 @@
     </swiper-item>
   </swiper>
 
+  <view class="new-user-guide yu-card yu-card-pressable" bindtap="goToPage" data-url="/pages/assessment-guide/assessment-guide">
+    <view class="guide-copy">
+      <view class="guide-kicker">NEW HERE</view>
+      <view class="guide-title">30 秒了解专属定制</view>
+      <view class="guide-desc">看懂五行、MBTI、七脉轮和直觉色彩怎么参与推荐，再开始测算或 DIY。</view>
+    </view>
+    <view class="guide-action">
+      <text>了解定制</text>
+      <view>→</view>
+    </view>
+  </view>
+
   <view class="workshop-section yu-section">
     <view class="section-row">
       <view class="section-title">定制工坊</view>
-      <view class="section-dots"><text></text><text></text><text class="active"></text></view>
+      <view class="section-link" bindtap="goToPage" data-url="/pages/assessment-guide/assessment-guide">了解测算 →</view>
     </view>
 
     <scroll-view class="workshop-flow-scroll" scroll-x enable-flex show-scrollbar="{{false}}">

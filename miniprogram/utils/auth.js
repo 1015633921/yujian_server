@@ -48,6 +48,9 @@ function logout() {
   wx.removeStorageSync(USER_KEY);
   wx.removeStorageSync(USER_ID_KEY);
   wx.removeStorageSync('orders');
+  wx.removeStorageSync('communityFavorites');
+  wx.removeStorageSync('diyDesignCart');
+  wx.removeStorageSync('inspirationCart');
   try {
     const app = getApp();
     if (app && app.globalData) app.globalData.userInfo = null;
@@ -83,7 +86,7 @@ async function silentLogin() {
     wx.removeStorageSync(USER_ID_KEY);
   }
   const code = await wxLoginCode();
-  const user = await api.wechatLogin({ code });
+  const user = await api.wechatLogin({ code }, { silent: true, timeout: 8000 });
   return saveUser(user);
 }
 
@@ -143,7 +146,7 @@ async function requireLogin(message = '请先登录后继续') {
   try {
     return await silentLogin();
   } catch (error) {
-    console.error('refresh wechat login failed:', error);
+    console.warn('refresh wechat login failed:', error.message || error);
   }
   const confirmed = await new Promise((resolve) => {
     wx.showModal({

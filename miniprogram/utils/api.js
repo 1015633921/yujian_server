@@ -8,6 +8,40 @@ function getBaseUrl() {
   return env.fallbackBaseUrl;
 }
 
+function getErrorMessage(error, fallback = '接口连接失败') {
+  return (error && (error.errMsg || error.message)) || fallback;
+}
+
+function isTimeoutMessage(message = '') {
+  return String(message).toLowerCase().indexOf('timeout') > -1;
+}
+
+function buildRequestError(path, method, message) {
+  const friendly = isTimeoutMessage(message)
+    ? `${method} ${path} 请求超时，请稍后重试`
+    : `${method} ${path} ${message}`;
+  const error = new Error(friendly);
+  error.requestPath = path;
+  error.requestMethod = method;
+  error.rawMessage = message;
+  return error;
+}
+
+function logRequestFailure(label, payload, options = {}) {
+  const data = {
+    path: payload.path,
+    url: payload.url,
+    method: payload.method,
+    statusCode: payload.statusCode,
+    message: payload.message
+  };
+  if (options.silent) {
+    console.warn(label, data);
+    return;
+  }
+  console.error(label, data);
+}
+
 function request(path, options = {}) {
   if (env.useAnyService && wx.cloud && wx.cloud.callContainer) {
     return requestByAnyService(path, options);
@@ -17,9 +51,10 @@ function request(path, options = {}) {
 }
 
 function requestByAnyService(path, options = {}) {
+  const method = options.method || 'GET';
   return wx.cloud.callContainer({
     path,
-    method: options.method || 'GET',
+    method,
     data: options.data || {},
     header: {
       ...(options.header || {}),
@@ -27,17 +62,19 @@ function requestByAnyService(path, options = {}) {
       'X-WX-SERVICE': 'tcbanyservice',
       'X-AnyService-Name': env.anyServiceName
     },
-    timeout: 10000
+    timeout: options.timeout || 10000
   }).then((res) => unwrapResponse(res.statusCode, res.data)).catch((error) => {
     const accountInfo = wx.getAccountInfoSync ? wx.getAccountInfoSync() : {};
-    console.error('AnyService request failed:', {
+    const message = getErrorMessage(error);
+    logRequestFailure('AnyService request failed:', {
       path,
+      method,
       environment: env.cloudEnvId,
       service: env.anyServiceName,
       appId: accountInfo.miniProgram && accountInfo.miniProgram.appId,
-      error
-    });
-    throw error;
+      message
+    }, options);
+    throw buildRequestError(path, method, message);
   });
 }
 
@@ -50,24 +87,38 @@ function requestByUrl(path, options = {}) {
       method,
       data: options.data || {},
       header: { 'content-type': 'application/json', ...(options.header || {}) },
-      timeout: 10000,
+      timeout: options.timeout || 10000,
       success(res) {
         try {
           resolve(unwrapResponse(res.statusCode, res.data));
         } catch (error) {
-          console.error('api response failed:', { url, statusCode: res.statusCode, data: res.data, error });
+          logRequestFailure('api response failed:', {
+            path,
+            url,
+            method,
+            statusCode: res.statusCode,
+            message: error.message || 'response_unwrap_failed'
+          }, options);
           reject(error);
         }
       },
       fail(error) {
         const errMsg = error.errMsg || '无法连接接口服务';
-        console.error('wx.request failed:', { url, method, error });
-        wx.showModal({
+        const requestError = buildRequestError(path, method, errMsg);
+        logRequestFailure('wx.request failed:', {
+          path,
+          url,
+          method,
+          message: errMsg
+        }, options);
+        if (!options.silent && options.showModal !== false) {
+          wx.showModal({
           title: '接口连接失败',
           content: `${url}\n${errMsg}`,
           showCancel: false
-        });
-        reject(new Error(errMsg));
+          });
+        }
+        reject(requestError);
       }
     });
   });
@@ -81,28 +132,32 @@ function unwrapResponse(statusCode, body) {
   throw new Error((body && (body.message || body.detail)) || `请求失败 (${statusCode})`);
 }
 
-function calculateEnergy(payload) {
-  return request('/api/v1/assessment/energy', { method: 'POST', data: payload });
+function calculateEnergy(payload, options = {}) {
+  return request('/api/v1/assessment/energy', { ...options, method: 'POST', data: payload });
+}
+
+function getAssessmentOptions(options = {}) {
+  return request('/api/v1/assessment/options', options);
 }
 
 function checkAnyService() {
   return request('/health');
 }
 
-function createDIYRecommendation(assessmentId, payload) {
-  return request(`/api/v1/assessment/${assessmentId}/diy-recommendation`, { method: 'POST', data: payload });
+function createDIYRecommendation(assessmentId, payload, options = {}) {
+  return request(`/api/v1/assessment/${assessmentId}/diy-recommendation`, { ...options, method: 'POST', data: payload });
 }
 
-function wechatLogin(payload) {
-  return request('/api/v1/auth/wechat-login', { method: 'POST', data: payload });
+function wechatLogin(payload, options = {}) {
+  return request('/api/v1/auth/wechat-login', { ...options, method: 'POST', data: payload });
 }
 
-function getUserProfile(userId) {
-  return request(`/api/v1/auth/profile?user_id=${encodeURIComponent(userId)}`);
+function getUserProfile(userId, options = {}) {
+  return request(`/api/v1/auth/profile?user_id=${encodeURIComponent(userId)}`, options);
 }
 
-function saveUserProfile(payload) {
-  return request('/api/v1/auth/profile', { method: 'POST', data: payload });
+function saveUserProfile(payload, options = {}) {
+  return request('/api/v1/auth/profile', { ...options, method: 'POST', data: payload });
 }
 
 function isDomainListError(errMsg = '') {
@@ -174,7 +229,13 @@ function uploadAvatar(filePath, userId) {
           const body = typeof res.data === 'string' ? JSON.parse(res.data) : res.data;
           resolve(unwrapResponse(res.statusCode, body));
         } catch (error) {
-          console.error('avatar upload response failed:', { url, statusCode: res.statusCode, data: res.data, error });
+          logRequestFailure('avatar upload response failed:', {
+            path: '/api/v1/auth/avatar',
+            url,
+            method: 'UPLOAD',
+            statusCode: res.statusCode,
+            message: error.message || 'upload_response_unwrap_failed'
+          });
           reject(error);
         }
       },
@@ -184,8 +245,13 @@ function uploadAvatar(filePath, userId) {
           uploadAvatarByBase64(filePath, userId).then(resolve).catch(reject);
           return;
         }
-        console.error('wx.uploadFile failed:', { url, error });
-        reject(new Error(errMsg));
+        logRequestFailure('wx.uploadFile failed:', {
+          path: '/api/v1/auth/avatar',
+          url,
+          method: 'UPLOAD',
+          message: errMsg
+        });
+        reject(buildRequestError('/api/v1/auth/avatar', 'UPLOAD', errMsg));
       }
     });
   });
@@ -206,12 +272,24 @@ function uploadDesignPreview(filePath, userId) {
           const body = typeof res.data === 'string' ? JSON.parse(res.data) : res.data;
           resolve(unwrapResponse(res.statusCode, body));
         } catch (error) {
-          console.error('design preview upload response failed:', { url, statusCode: res.statusCode, data: res.data, error });
+          logRequestFailure('design preview upload response failed:', {
+            path: '/api/v1/diy-designs/preview',
+            url,
+            method: 'UPLOAD',
+            statusCode: res.statusCode,
+            message: error.message || 'upload_response_unwrap_failed'
+          });
           reject(error);
         }
       },
       fail(error) {
-        console.error('wx.uploadFile design preview failed:', { url, error });
+        const errMsg = getErrorMessage(error, '方案预览图上传失败');
+        logRequestFailure('wx.uploadFile design preview failed:', {
+          path: '/api/v1/diy-designs/preview',
+          url,
+          method: 'UPLOAD',
+          message: errMsg
+        });
         reject(new Error(error.errMsg || '方案预览图上传失败'));
       }
     });
@@ -229,7 +307,10 @@ function getTodayDailyEnergy(userId, options = {}) {
   if (options.sceneKey) query.push(`scene_key=${encodeURIComponent(options.sceneKey)}`);
   (options.goalKeys || []).forEach(key => query.push(`goal_keys=${encodeURIComponent(key)}`));
   if (options.forceRecalculate) query.push('force_recalculate=true');
-  return request(`/api/v1/daily-energy/today?${query.join('&')}`);
+  return request(`/api/v1/daily-energy/today?${query.join('&')}`, {
+    silent: !!options.silent,
+    timeout: options.timeout
+  });
 }
 
 function getDailyEnergyOptions() {
@@ -246,34 +327,68 @@ function getMaterials(options = {}) {
   if (options.keyword) query.push(`keyword=${encodeURIComponent(options.keyword)}`);
   if (options.compact) query.push('compact=true');
   if (options.limit) query.push(`limit=${encodeURIComponent(options.limit)}`);
-  return request(`/api/v1/materials${query.length ? `?${query.join('&')}` : ''}`);
+  return request(`/api/v1/materials${query.length ? `?${query.join('&')}` : ''}`, {
+    silent: !!options.silent,
+    timeout: options.timeout
+  });
 }
 
 function getCommunityPosts(options = {}) {
   const query = [];
   if (options.limit) query.push(`limit=${encodeURIComponent(options.limit)}`);
-  return request(`/api/v1/community-posts${query.length ? `?${query.join('&')}` : ''}`);
+  return request(`/api/v1/community-posts${query.length ? `?${query.join('&')}` : ''}`, {
+    silent: !!options.silent,
+    timeout: options.timeout
+  });
 }
 
 function getHomeBanners(options = {}) {
   const query = [];
   if (options.limit) query.push(`limit=${encodeURIComponent(options.limit)}`);
-  return request(`/api/v1/home-banners${query.length ? `?${query.join('&')}` : ''}`);
+  return request(`/api/v1/home-banners${query.length ? `?${query.join('&')}` : ''}`, {
+    silent: !!options.silent,
+    timeout: options.timeout
+  });
 }
 
-function getCommunityPost(postId) {
-  return request(`/api/v1/community-posts/${encodeURIComponent(postId)}`);
+function getCommunityPost(postId, options = {}) {
+  return request(`/api/v1/community-posts/${encodeURIComponent(postId)}`, options);
+}
+
+function getCommunityFavorites(userId, options = {}) {
+  return request(`/api/v1/community-favorites?user_id=${encodeURIComponent(userId)}`, {
+    silent: !!options.silent,
+    timeout: options.timeout
+  });
+}
+
+function saveCommunityFavorite(payload, options = {}) {
+  return request('/api/v1/community-favorites', {
+    ...options,
+    method: 'POST',
+    data: payload
+  });
+}
+
+function deleteCommunityFavorite(userId, postId, options = {}) {
+  return request(
+    `/api/v1/community-favorites/${encodeURIComponent(postId)}?user_id=${encodeURIComponent(userId)}`,
+    { ...options, method: 'DELETE' }
+  );
 }
 
 function getRecommendationPlans(options = {}) {
   const query = [];
   if (options.homeHot !== undefined) query.push(`home_hot=${options.homeHot ? 'true' : 'false'}`);
   if (options.limit) query.push(`limit=${encodeURIComponent(options.limit)}`);
-  return request(`/api/v1/recommendation-plans${query.length ? `?${query.join('&')}` : ''}`);
+  return request(`/api/v1/recommendation-plans${query.length ? `?${query.join('&')}` : ''}`, {
+    silent: !!options.silent,
+    timeout: options.timeout
+  });
 }
 
-function getRecommendationPlan(planId) {
-  return request(`/api/v1/recommendation-plans/${encodeURIComponent(planId)}`);
+function getRecommendationPlan(planId, options = {}) {
+  return request(`/api/v1/recommendation-plans/${encodeURIComponent(planId)}`, options);
 }
 
 function createOrder(payload) {
@@ -282,6 +397,43 @@ function createOrder(payload) {
 
 function saveDIYDesign(payload) {
   return request('/api/v1/diy-designs', { method: 'POST', data: payload });
+}
+
+function getCartItems(userId, options = {}) {
+  return request(`/api/v1/cart?user_id=${encodeURIComponent(userId)}`, {
+    silent: !!options.silent,
+    timeout: options.timeout
+  });
+}
+
+function saveCartItem(payload, options = {}) {
+  return request('/api/v1/cart/items', {
+    ...options,
+    method: 'POST',
+    data: payload
+  });
+}
+
+function updateCartItem(cartItemId, payload, options = {}) {
+  return request(`/api/v1/cart/items/${encodeURIComponent(cartItemId)}`, {
+    ...options,
+    method: 'PATCH',
+    data: payload
+  });
+}
+
+function deleteCartItem(cartItemId, userId, options = {}) {
+  return request(
+    `/api/v1/cart/items/${encodeURIComponent(cartItemId)}?user_id=${encodeURIComponent(userId)}`,
+    { ...options, method: 'DELETE' }
+  );
+}
+
+function clearCart(userId, options = {}) {
+  return request(`/api/v1/cart?user_id=${encodeURIComponent(userId)}`, {
+    ...options,
+    method: 'DELETE'
+  });
 }
 
 function getOrders(userId) {
@@ -365,6 +517,7 @@ module.exports = {
   request,
   checkAnyService,
   calculateEnergy,
+  getAssessmentOptions,
   createDIYRecommendation,
   wechatLogin,
   getUserProfile,
@@ -379,9 +532,17 @@ module.exports = {
   getHomeBanners,
   getCommunityPosts,
   getCommunityPost,
+  getCommunityFavorites,
+  saveCommunityFavorite,
+  deleteCommunityFavorite,
   getRecommendationPlans,
   getRecommendationPlan,
   saveDIYDesign,
+  getCartItems,
+  saveCartItem,
+  updateCartItem,
+  deleteCartItem,
+  clearCart,
   createOrder,
   getOrders,
   getOrder,

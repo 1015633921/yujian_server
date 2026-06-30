@@ -1,5 +1,6 @@
 const { getCommunityPost: getLocalCommunityPost } = require('../../utils/communityData');
-const { getCommunityPost } = require('../../utils/api');
+const auth = require('../../utils/auth');
+const { getCommunityPost, getCommunityFavorites, saveCommunityFavorite, deleteCommunityFavorite } = require('../../utils/api');
 const { assetUrl } = require('../../utils/assets');
 
 const ASSETS = {
@@ -248,35 +249,75 @@ Page({
   async loadPost(id) {
     let post = getLocalCommunityPost(id);
     try {
-      post = await getCommunityPost(id);
+      post = await getCommunityPost(id, { silent: true, timeout: 8000 });
     } catch (error) {
       console.warn('community detail fallback:', error.message || error);
     }
 
     const viewPost = normalizePost(post || {});
-    const favorites = wx.getStorageSync('communityFavorites') || [];
     this.setData({
       post: viewPost.raw,
       viewPost,
-      isFavorite: favorites.some(item => item.id === viewPost.id),
-      favoriteText: favorites.some(item => item.id === viewPost.id) ? '已收藏' : '收藏灵感'
+      isFavorite: false,
+      favoriteText: '收藏灵感'
     });
+    this.refreshFavoriteState(viewPost);
   },
 
-  toggleFavorite() {
+  async refreshFavoriteState(viewPost = this.data.viewPost) {
+    if (!viewPost || !viewPost.id) return;
+    let user = auth.getStoredUser();
+    try {
+      user = user && user.user_id ? user : await auth.silentLogin();
+      const favorites = await getCommunityFavorites(user.user_id, { silent: true, timeout: 8000 });
+      wx.setStorageSync('communityFavorites', favorites);
+      const isFavorite = favorites.some(item => (item.post_id || item.id) === viewPost.id);
+      this.setData({
+        isFavorite,
+        favoriteText: isFavorite ? '已收藏' : '收藏灵感'
+      });
+    } catch (error) {
+      const favorites = wx.getStorageSync('communityFavorites') || [];
+      const isFavorite = favorites.some(item => (item.post_id || item.id) === viewPost.id);
+      this.setData({
+        isFavorite,
+        favoriteText: isFavorite ? '已收藏' : '收藏灵感'
+      });
+    }
+  },
+
+  async toggleFavorite() {
     const post = this.data.viewPost;
     if (!post) return;
-    const favorites = wx.getStorageSync('communityFavorites') || [];
-    const isFavorite = favorites.some(item => item.id === post.id);
-    const nextFavorites = isFavorite
-      ? favorites.filter(item => item.id !== post.id)
-      : [{ id: post.id, title: post.title, tone: post.tone, recipe: post.recipe, addedAt: Date.now() }, ...favorites];
-    wx.setStorageSync('communityFavorites', nextFavorites);
-    this.setData({
-      isFavorite: !isFavorite,
-      favoriteText: isFavorite ? '收藏灵感' : '已收藏'
-    });
-    wx.showToast({ title: isFavorite ? '已取消收藏' : '已收藏', icon: 'none' });
+    let user;
+    try {
+      user = await auth.requireLogin('登录后才能收藏灵感。');
+    } catch (error) {
+      return;
+    }
+    const isFavorite = this.data.isFavorite;
+    try {
+      if (isFavorite) {
+        await deleteCommunityFavorite(user.user_id, post.id);
+      } else {
+        await saveCommunityFavorite({
+          user_id: user.user_id,
+          post_id: post.id,
+          item: {
+            id: post.id,
+            title: post.title,
+            tone: post.tone,
+            recipe: post.recipe,
+            image_url: post.imageUrl,
+            addedAt: Date.now()
+          }
+        });
+      }
+      await this.refreshFavoriteState(post);
+      wx.showToast({ title: isFavorite ? '已取消收藏' : '已收藏', icon: 'none' });
+    } catch (error) {
+      wx.showToast({ title: error.message || '收藏失败，请重试', icon: 'none' });
+    }
   },
 
   useSame() {

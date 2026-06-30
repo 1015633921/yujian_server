@@ -13,6 +13,7 @@ RUN pip install -i https://mirrors.cloud.tencent.com/pypi/simple --upgrade pip \
 COPY app ./app
 COPY static ./static
 COPY scripts/migrate_sqlite_to_mysql.py ./scripts/migrate_sqlite_to_mysql.py
+COPY scripts/regenerate_material_skus_and_knowledge.py ./scripts/regenerate_material_skus_and_knowledge.py
 
 RUN mkdir -p /app/data
 

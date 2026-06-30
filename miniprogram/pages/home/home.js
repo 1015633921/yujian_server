@@ -1,7 +1,14 @@
 const auth = require('../../utils/auth');
 const { getCommunityPosts: getLocalCommunityPosts } = require('../../utils/communityData');
 const { getRecommendations: getLocalRecommendations } = require('../../utils/recommendationData');
-const { getTodayDailyEnergy, getCommunityPosts, getRecommendationPlans, getHomeBanners } = require('../../utils/api');
+const {
+  getTodayDailyEnergy,
+  getCommunityPosts,
+  getRecommendationPlans,
+  getHomeBanners,
+  getCartItems,
+  saveCommunityFavorite
+} = require('../../utils/api');
 const { assetUrl } = require('../../utils/assets');
 
 const TAB_BAR_PAGES = ['/pages/home/home', '/pages/assessment/assessment', '/pages/workspace/workspace', '/pages/profile/profile'];
@@ -236,6 +243,7 @@ Page({
     });
     this.hydrateDailyEnergyFromStorage();
     this.refreshDailyEnergyOnEntry();
+    this.refreshShoppingCartOnEntry();
     this.loadCmsContent();
   },
 
@@ -286,9 +294,9 @@ Page({
   async loadCmsContent() {
     try {
       const [banners, recommendations, posts] = await Promise.all([
-        getHomeBanners({ limit: 8 }),
-        getRecommendationPlans({ homeHot: true, limit: 8 }),
-        getCommunityPosts({ limit: 8 })
+        getHomeBanners({ limit: 8, silent: true, timeout: 8000 }),
+        getRecommendationPlans({ homeHot: true, limit: 8, silent: true, timeout: 8000 }),
+        getCommunityPosts({ limit: 8, silent: true, timeout: 8000 })
       ]);
       this.setData({
         homeBanners: decorateHomeBanners(banners),
@@ -313,11 +321,33 @@ Page({
     this.dailyAutoRefreshing = true;
     try {
       const user = await auth.silentLogin();
-      await this.loadDailyEnergy(user.user_id, { force: true });
+      await this.loadDailyEnergy(user.user_id, { force: true, silent: true });
     } catch (error) {
       console.warn('daily energy entry refresh skipped:', error.message || error);
     } finally {
       this.dailyAutoRefreshing = false;
+    }
+  },
+
+  async refreshShoppingCartOnEntry() {
+    let user = auth.getStoredUser();
+    if (!user || !user.user_id) return;
+    try {
+      const rows = await getCartItems(user.user_id, { silent: true, timeout: 8000 });
+      const shoppingCart = rows
+        .filter(row => (row.item_type || 'diy_design') === 'diy_design')
+        .map(row => ({
+          ...(row.item || {}),
+          id: row.cart_item_id,
+          key: row.cart_item_id,
+          cart_item_id: row.cart_item_id,
+          quantity: row.quantity,
+          qty: row.quantity
+        }));
+      wx.setStorageSync('diyDesignCart', shoppingCart);
+      this.setData({ shoppingCart });
+    } catch (error) {
+      console.warn('home cart refresh skipped:', error.message || error);
     }
   },
 
@@ -353,7 +383,11 @@ Page({
 
   async loadDailyEnergy(userId, options = {}) {
     try {
-      const daily = await getTodayDailyEnergy(userId, { forceRecalculate: !!options.force });
+      const daily = await getTodayDailyEnergy(userId, {
+        forceRecalculate: !!options.force,
+        silent: !!options.silent,
+        timeout: options.silent ? 8000 : undefined
+      });
       wx.setStorageSync(DAILY_CACHE_KEY, daily);
       if (options.force) wx.setStorageSync(DAILY_REFRESH_DATE_KEY, todayKey());
       this.applyDailyEnergy(daily);
@@ -483,9 +517,40 @@ Page({
     wx.showToast({ title: exists ? '已在收藏中' : '已收藏灵感', icon: 'none' });
   },
 
-  addDailyStoneToCart() {
+  async addDailyStoneToCart() {
     const detail = this.data.dailyStoneDetail;
     if (!detail) return;
+    let user;
+    try {
+      user = await auth.requireLogin('登录后才能收藏灵感。');
+    } catch (error) {
+      return;
+    }
+    const favoriteId = `daily:${todayKey()}:${detail.name || 'stone'}`;
+    try {
+      await saveCommunityFavorite({
+        user_id: user.user_id,
+        post_id: favoriteId,
+        item: {
+          id: favoriteId,
+          favorite_type: 'daily_energy',
+          title: `${detail.name}今日能量`,
+          name: `${detail.name}今日能量`,
+          desc: detail.desc,
+          tone: detail.tone,
+          recipe: detail.recipe,
+          source: 'daily_energy',
+          sourceContext: (detail.workbenchPayload && detail.workbenchPayload.source_context) || null,
+          crystals: detail.crystals || [],
+          addedAt: Date.now()
+        }
+      });
+      this.setData({ showStoneSheet: false });
+      wx.showToast({ title: '已收藏', icon: 'none' });
+    } catch (error) {
+      wx.showToast({ title: error.message || '收藏失败，请重试', icon: 'none' });
+    }
+    return;
     const cart = wx.getStorageSync('inspirationCart') || [];
     const item = {
       name: `${detail.name}今日能量`,

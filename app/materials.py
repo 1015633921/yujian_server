@@ -6,6 +6,7 @@ import time
 from urllib.parse import quote, urlsplit, urlunsplit
 
 from .database import connect_database, use_mysql
+from .material_knowledge import enrich_materials_with_knowledge, material_code_from_payload
 
 
 def material_cdn_base_url() -> str:
@@ -24,6 +25,17 @@ CDN_BASE_URL = material_cdn_base_url()
 MATERIAL_CACHE_TTL_SECONDS = 60
 _MATERIAL_PAYLOAD_CACHE: dict[tuple, dict] = {}
 MATERIAL_SORT_POLICY_VERSION = "featured-v1"
+
+INTERNAL_MATERIAL_FIELDS = {
+    "cost_price",
+    "cost",
+    "safety_stock",
+    "stock_warning",
+    "supplier_name",
+    "supplier",
+    "purchase_note",
+    "purchase_remark",
+}
 
 
 FEATURED_MATERIAL_PRIORITY_KEYWORDS: tuple[tuple[int, tuple[str, ...]], ...] = (
@@ -304,7 +316,7 @@ def filter_static_materials(top: str | None = None, keyword: str | None = None) 
         if search_terms and not any(term in haystack for term in search_terms):
             continue
         materials.append(with_cdn_url(item))
-    return sort_materials_for_customer(materials)
+    return enrich_materials_with_knowledge(sort_materials_for_customer(materials))
 
 
 def build_material_payload(materials: list[dict], version: dict | None = None) -> dict:
@@ -390,13 +402,16 @@ def list_db_materials(
             rows = connection.execute(sql, params).fetchall()
     except Exception:
         return None
-    materials = sort_materials_for_customer([normalize_db_material(dict(row)) for row in rows])
+    materials = enrich_materials_with_knowledge(
+        sort_materials_for_customer([normalize_db_material(dict(row)) for row in rows])
+    )
     if limit:
         materials = materials[:limit]
     return materials
 
 
 def normalize_db_material(row: dict) -> dict:
+    public_row = {key: value for key, value in row.items() if key not in INTERNAL_MATERIAL_FIELDS}
     image_url = normalize_material_image_url(row.get("image_url") or "")
     image_path = row.get("image_path") or ""
     if image_path:
@@ -412,7 +427,8 @@ def normalize_db_material(row: dict) -> dict:
     if not image_url and image_urls:
         image_url = image_urls[0]
     return {
-        **row,
+        **public_row,
+        "material_code": row.get("material_code") or material_code_from_payload(row),
         "enabled": bool(row.get("enabled", 1)),
         "series": row.get("series") or row.get("name") or "",
         "grade": row.get("grade") or "",

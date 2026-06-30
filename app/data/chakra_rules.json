@@ -1,0 +1,91 @@
+{
+  "chakras": {
+    "root": {
+      "name": "海底轮",
+      "keywords": ["稳定", "安全感", "落地"],
+      "colors": ["#8E2635", "#766052", "#23252A"],
+      "color_families": ["red", "brown", "black"],
+      "mood_tags": ["稳定", "安全感", "落地", "保护"],
+      "visual_tags": ["深色", "大地感", "保护感"],
+      "element_weights": {"土": 2.0, "火": 1.0}
+    },
+    "sacral": {
+      "name": "脐轮",
+      "keywords": ["流动", "创造力", "亲密感"],
+      "colors": ["#E78B3C", "#F1B36A", "#F4C7A1"],
+      "color_families": ["orange", "pink", "clear"],
+      "mood_tags": ["流动", "创造力", "亲密感", "柔软"],
+      "visual_tags": ["暖色", "柔润", "半透"],
+      "element_weights": {"水": 1.4, "火": 1.2, "木": 0.8}
+    },
+    "solar_plexus": {
+      "name": "太阳神经丛",
+      "keywords": ["自信", "行动力", "目标感"],
+      "colors": ["#E4B83F", "#C99A2E", "#FFF1C8"],
+      "color_families": ["yellow", "gold", "orange"],
+      "mood_tags": ["自信", "行动", "目标感", "财富感"],
+      "visual_tags": ["明亮", "金色", "暖光"],
+      "element_weights": {"火": 1.7, "土": 1.4, "金": 0.7}
+    },
+    "heart": {
+      "name": "心轮",
+      "keywords": ["接纳", "关系", "柔软"],
+      "colors": ["#ECA8B7", "#548B62", "#DDEAD7"],
+      "color_families": ["pink", "green"],
+      "mood_tags": ["接纳", "关系", "柔软", "修复"],
+      "visual_tags": ["柔和", "花园感", "温柔"],
+      "element_weights": {"木": 1.7, "火": 1.0, "水": 0.6}
+    },
+    "throat": {
+      "name": "喉轮",
+      "keywords": ["表达", "沟通", "清澈"],
+      "colors": ["#75B8D1", "#4F789B", "#DCEFF2"],
+      "color_families": ["blue", "white", "clear"],
+      "mood_tags": ["表达", "沟通", "清澈", "松弛"],
+      "visual_tags": ["冰感", "通透", "浅色"],
+      "element_weights": {"水": 1.8, "金": 1.1}
+    },
+    "third_eye": {
+      "name": "眉心轮",
+      "keywords": ["洞察", "直觉", "灵感"],
+      "colors": ["#5966A8", "#7C6CB0", "#DDD7EF"],
+      "color_families": ["blue", "purple", "indigo"],
+      "mood_tags": ["洞察", "直觉", "灵感", "专注"],
+      "visual_tags": ["冷色", "星空感", "微光"],
+      "element_weights": {"水": 1.4, "木": 1.0, "金": 0.7}
+    },
+    "crown": {
+      "name": "顶轮",
+      "keywords": ["连接", "安静", "净化"],
+      "colors": ["#F4F1EA", "#B9A7D8", "#E8EDF0"],
+      "color_families": ["white", "purple", "clear"],
+      "mood_tags": ["连接", "安静", "净化", "修复"],
+      "visual_tags": ["白色", "通透", "月光感"],
+      "element_weights": {"金": 1.5, "水": 1.0, "土": 0.6}
+    }
+  },
+  "questions": [
+    {
+      "id": "recent_state",
+      "title": "最近更明显的状态",
+      "options": [
+        {"id": "state_expression", "label": "想表达但有点卡住", "chakra": "throat"},
+        {"id": "state_soft_heart", "label": "关系里容易心软消耗", "chakra": "heart"},
+        {"id": "state_low_confidence", "label": "做决定时不够有底气", "chakra": "solar_plexus"},
+        {"id": "state_unsettled", "label": "缺少安全感，心容易飘", "chakra": "root"},
+        {"id": "state_low_inspiration", "label": "灵感变少，直觉变钝", "chakra": "third_eye"}
+      ]
+    },
+    {
+      "id": "current_need",
+      "title": "当下最想增强",
+      "options": [
+        {"id": "need_grounding", "label": "稳定和落地", "chakra": "root"},
+        {"id": "need_flow", "label": "流动和创造力", "chakra": "sacral"},
+        {"id": "need_action", "label": "自信和行动力", "chakra": "solar_plexus"},
+        {"id": "need_acceptance", "label": "接纳和关系修复", "chakra": "heart"},
+        {"id": "need_clarity", "label": "表达和清晰沟通", "chakra": "throat"}
+      ]
+    }
+  ]
+}

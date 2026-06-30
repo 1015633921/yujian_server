@@ -64,7 +64,18 @@ CRYSTAL_MATERIAL_ALIASES = {
     "hematite": ["赤铁矿", "银发晶", "白水晶", "黑曜石"],
 }
 
-ELEMENT_TO_MATERIAL_KEY = {"金": "metal", "木": "wood", "水": "water", "火": "fire", "土": "earth"}
+ELEMENT_TO_MATERIAL_KEY = {
+    "金": "metal",
+    "木": "wood",
+    "水": "water",
+    "火": "fire",
+    "土": "earth",
+    "metal": "metal",
+    "wood": "wood",
+    "water": "water",
+    "fire": "fire",
+    "earth": "earth",
+}
 
 SEASON_ELEMENT = {
     1: "水", 2: "木", 3: "木", 4: "木",
@@ -490,9 +501,10 @@ class DailyEnergyCalculator:
 
     @staticmethod
     def material_element_key(material: dict[str, Any]) -> str:
-        element = str(material.get("element") or "")
-        if element in ELEMENT_TO_MATERIAL_KEY:
-            return ELEMENT_TO_MATERIAL_KEY[element]
+        element = str(material.get("element") or "").strip()
+        normalized_element = ELEMENT_TO_MATERIAL_KEY.get(element) or ELEMENT_TO_MATERIAL_KEY.get(element.lower())
+        if normalized_element:
+            return normalized_element
         text = DailyEnergyCalculator.material_search_text(material)
         if any(word in text for word in ("金", "银", "白", "钛", "发晶", "铁", "曜", "耀")):
             return "metal"
@@ -605,7 +617,8 @@ class DailyEnergyCalculator:
         if alias_match:
             return alias_match
 
-        target_element = ELEMENT_TO_MATERIAL_KEY.get(str(crystal.get("element") or ""))
+        crystal_element = str(crystal.get("element") or "").strip()
+        target_element = ELEMENT_TO_MATERIAL_KEY.get(crystal_element) or ELEMENT_TO_MATERIAL_KEY.get(crystal_element.lower())
         element_matches = [
             item for item in source
             if target_element and DailyEnergyCalculator.material_element_key(item) == target_element

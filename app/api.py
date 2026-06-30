@@ -15,11 +15,12 @@ from .daily_service import DailyEnergyService
 from .admin_service import AdminService
 from .materials import list_materials
 from .order_service import OrderService
-from .recommendation import CRYSTAL_CATALOG
+from .recommendation import RecommendationEngine
 from .schemas import (
     AssessmentRequest,
     CartItemCreateRequest,
     CartItemUpdateRequest,
+    CommunityFavoriteSaveRequest,
     DailyCheckInRequest,
     DIYDesignSaveRequest,
     DIYRecommendationRequest,
@@ -64,10 +65,11 @@ def assessment_options():
 
 @router.get("/crystals/catalog", summary="获取推荐水晶图鉴")
 def crystal_catalog():
+    catalog = RecommendationEngine.catalog()
     return success(
         [
             {"code": code, **item}
-            for code, item in CRYSTAL_CATALOG.items()
+            for code, item in catalog.items()
         ]
     )
 
@@ -110,6 +112,24 @@ def public_community_post(post_id: str):
         return success(post)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get("/community-favorites", summary="获取我的灵感收藏")
+def list_community_favorites(user_id: str = Query(min_length=1, max_length=100)):
+    return success(order_service.list_community_favorites(user_id))
+
+
+@router.post("/community-favorites", summary="收藏灵感")
+def save_community_favorite(payload: CommunityFavoriteSaveRequest):
+    try:
+        return success(order_service.save_community_favorite(payload.model_dump(mode="json")), "灵感已收藏")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.delete("/community-favorites/{post_id}", summary="取消灵感收藏")
+def delete_community_favorite(post_id: str, user_id: str = Query(min_length=1, max_length=100)):
+    return success(order_service.delete_community_favorite(user_id, post_id), "已取消收藏")
 
 
 @router.get("/recommendation-plans", summary="获取已发布热门推荐方案")

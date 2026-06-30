@@ -31,7 +31,7 @@ Step "Packing backend + admin static files for $Env"
 if (Test-Path $PackagePath) {
   Remove-Item -LiteralPath $PackagePath -Force
 }
-tar -czf $PackagePath app static scripts/migrate_sqlite_to_mysql.py requirements.txt Dockerfile compose.yaml
+tar -czf $PackagePath app static scripts/migrate_sqlite_to_mysql.py scripts/regenerate_material_skus_and_knowledge.py requirements.txt Dockerfile compose.yaml
 
 Step "Uploading package to $Server"
 scp -i $KeyPath $PackagePath "${Server}:$RemotePackage"

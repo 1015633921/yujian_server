@@ -1,0 +1,151 @@
+<view class="guide-page yu-page">
+  <view class="guide-nav">
+    <view class="guide-back yu-pressable" bindtap="goBack">‹</view>
+    <view class="guide-nav-title">测算说明</view>
+    <view class="guide-nav-mark">LAB</view>
+  </view>
+
+  <view class="guide-hero guide-reveal reveal-hero">
+    <view class="hero-copy">
+      <view class="guide-kicker">YUSTREAM KNOWLEDGE ENGINE</view>
+      <view class="guide-title">我们怎么把感觉，变成一条有依据的手串建议</view>
+      <view class="guide-desc">
+        宇涧的测算不是把几个概念堆在一起，也不是随机抽一颗水晶。我们会把文化框架、性格偏好、近期状态、色彩直觉和真实材料库放在同一个规则系统里，再生成一条用户能听懂的推荐理由。
+      </view>
+      <view class="hero-tags">
+        <text>看起来温柔</text>
+        <text>底层有逻辑</text>
+        <text>结果可解释</text>
+      </view>
+    </view>
+    <view class="hero-visual">
+      <view class="orb-ring">
+        <image
+          wx:for="{{crystals}}"
+          wx:key="index"
+          class="hero-crystal"
+          src="{{item.src}}"
+          mode="aspectFit"
+          style="{{item.style}}"
+        ></image>
+        <view class="orb-core">
+          <text>3</text>
+          <view>LAYERS</view>
+        </view>
+      </view>
+    </view>
+  </view>
+
+  <view class="boundary-card yu-card guide-reveal reveal-boundary">
+    <view class="boundary-title">先把边界说清楚</view>
+    <view class="boundary-desc">
+      我们会尊重传统文化，也尊重现代科学边界。测算结果用于文化体验、审美定制和水晶材料推荐，不替代医学、心理咨询或现实决策。
+    </view>
+    <view class="boundary-grid">
+      <view wx:for="{{boundaries}}" wx:key="title" class="boundary-item">
+        <view class="boundary-item-title">{{item.title}}</view>
+        <view class="boundary-item-desc">{{item.desc}}</view>
+      </view>
+    </view>
+  </view>
+
+  <view class="guide-section guide-reveal reveal-layers">
+    <view class="section-head">
+      <view>
+        <view class="section-kicker">OUR MOAT</view>
+        <view class="section-title">真正的壁垒不是名词多</view>
+      </view>
+    </view>
+
+    <view class="layer-list">
+      <view wx:for="{{knowledgeLayers}}" wx:key="index" class="layer-card yu-card">
+        <view class="layer-index" style="background: {{item.accent}};">{{item.index}}</view>
+        <view class="layer-main">
+          <view class="layer-title">{{item.title}}</view>
+          <view class="layer-subtitle" style="color: {{item.accent}};">{{item.subtitle}}</view>
+          <view class="layer-desc">{{item.desc}}</view>
+          <view class="layer-points">
+            <text wx:for="{{item.points}}" wx:key="*this">{{item}}</text>
+          </view>
+        </view>
+      </view>
+    </view>
+  </view>
+
+  <view class="guide-section guide-reveal reveal-signals">
+    <view class="section-head">
+      <view>
+        <view class="section-kicker">SIGNALS</view>
+        <view class="section-title">每个维度只负责一类线索</view>
+      </view>
+    </view>
+
+    <view class="signal-list">
+      <view wx:for="{{signals}}" wx:key="key" class="signal-card yu-card">
+        <view class="signal-head">
+          <view class="signal-index" style="border-color: {{item.accent}}; color: {{item.accent}};">{{item.index}}</view>
+          <view>
+            <view class="signal-title">{{item.title}}</view>
+            <view class="signal-use">{{item.use}}</view>
+          </view>
+        </view>
+        <view class="signal-desc">{{item.desc}}</view>
+        <view class="signal-tags">
+          <text wx:for="{{item.tags}}" wx:key="*this">{{item}}</text>
+        </view>
+      </view>
+    </view>
+  </view>
+
+  <view class="guide-section guide-reveal reveal-material">
+    <view class="section-head">
+      <view>
+        <view class="section-kicker">MATERIAL LIBRARY</view>
+        <view class="section-title">推荐最终必须落到真实珠子</view>
+      </view>
+    </view>
+
+    <view class="material-card yu-card">
+      <view class="material-title">每种水晶都要有自己的知识档案</view>
+      <view class="material-desc">
+        如果材料库很薄，测算再复杂也会变成套话。我们要让每颗珠子都有可追溯标签，这样系统才能知道它适合谁、适合什么场景、成串后会呈现什么质感。
+      </view>
+      <view class="material-grid">
+        <text wx:for="{{materialFields}}" wx:key="*this">{{item}}</text>
+      </view>
+    </view>
+  </view>
+
+  <view class="guide-section guide-reveal reveal-flow">
+    <view class="section-head">
+      <view>
+        <view class="section-kicker">HOW IT WORKS</view>
+        <view class="section-title">从填写到推荐的三步</view>
+      </view>
+    </view>
+
+    <view class="flow-card yu-card">
+      <view wx:for="{{flowSteps}}" wx:key="title" class="flow-step">
+        <view class="flow-dot">{{index + 1}}</view>
+        <view>
+          <view class="flow-title">{{item.title}}</view>
+          <view class="flow-desc">{{item.desc}}</view>
+        </view>
+      </view>
+    </view>
+  </view>
+
+  <view class="source-card yu-card guide-reveal reveal-source">
+    <view class="source-title">我们希望用户读完后明白什么</view>
+    <view class="source-desc">
+      这不是一个“算命结果”，而是一套帮助用户表达自己、理解当下、选择真实水晶材料的定制系统。它可以温柔，但不能含糊；可以有文化感，但必须有边界。
+    </view>
+  </view>
+
+  <view class="guide-bottom-space"></view>
+
+  <view class="guide-bottom">
+    <button class="guide-secondary" bindtap="openWorkspace">先去 DIY</button>
+    <button class="guide-primary" bindtap="startAssessment">开始测算</button>
+  </view>
+</view>

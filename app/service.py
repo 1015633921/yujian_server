@@ -7,8 +7,10 @@ import uuid
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from .energy import ELEMENTS, EnergyCalculator, MBTI_MAPPING, PLACE_COORDINATES, WISH_MAPPING
-from .recommendation import CRYSTAL_CATALOG, PRIMARY_POOLS, RecommendationEngine, interpretation
+from .energy import ELEMENTS, ENERGY_WEIGHTS, EnergyCalculator, MBTI_MAPPING, PLACE_COORDINATES, WISH_MAPPING
+from .fortune.chakra import public_chakra_options
+from .fortune.mood_palette import public_mood_palettes
+from .recommendation import RecommendationEngine, interpretation
 from .repository import AssessmentRepository
 from .schemas import AssessmentRequest, DIYRecommendationRequest
 
@@ -75,19 +77,14 @@ class AssessmentService:
         result = {
             "assessment_id": uuid.uuid4().hex,
             "created_at": created_at,
-            "input_summary": {
-                "user_id": request.user_id,
-                "name": request.name,
-                "birthday": request.birthday.isoformat(),
-                "birth_time": request.birth_time.strftime("%H:%M"),
-                "birth_place": request.birth_place,
-                "mbti": request.mbti,
-                "core_wish": request.primary_core_wish,
-                "core_wishes": request.core_wishes,
-                "wrist_size_cm": request.wrist_size_cm,
-                "bead_size_mm": request.bead_size_mm,
-            },
+            "input_summary": self.input_summary(request, include_wrist=True),
             "solar_time": energy["solar_time"],
+            "bazi_basis": energy["bazi_basis"],
+            "name_analysis": energy["name_analysis"],
+            "chakra_analysis": energy["chakra_analysis"],
+            "mood_analysis": energy["mood_analysis"],
+            "useful_elements": energy["useful_elements"],
+            "recommendation_strategy": energy["recommendation_strategy"],
             "final_energy_profile": energy["final"],
             "energy_breakdown": energy["breakdown"],
             "chart": {
@@ -143,6 +140,12 @@ class AssessmentService:
             "status": "energy_ready",
             "input_summary": self.input_summary(request, include_wrist=False),
             "solar_time": energy["solar_time"],
+            "bazi_basis": energy["bazi_basis"],
+            "name_analysis": energy["name_analysis"],
+            "chakra_analysis": energy["chakra_analysis"],
+            "mood_analysis": energy["mood_analysis"],
+            "useful_elements": energy["useful_elements"],
+            "recommendation_strategy": energy["recommendation_strategy"],
             "final_energy_profile": energy["final"],
             "energy_breakdown": energy["breakdown"],
             "chart": self.chart(energy),
@@ -186,6 +189,11 @@ class AssessmentService:
             "final": assessment["final_energy_profile"],
             "breakdown": assessment["energy_breakdown"],
             "solar_time": assessment["solar_time"],
+            "bazi_basis": assessment.get("bazi_basis") or {},
+            "chakra_analysis": assessment.get("chakra_analysis") or {},
+            "mood_analysis": assessment.get("mood_analysis") or {},
+            "useful_elements": assessment.get("useful_elements") or [],
+            "recommendation_strategy": assessment.get("recommendation_strategy") or "",
             "strongest": assessment["strongest_element"],
             "weakest": assessment["weakest_element"],
         }
@@ -226,18 +234,35 @@ class AssessmentService:
 
     @staticmethod
     def fingerprint(request: AssessmentRequest) -> str:
-        payload = request.model_dump(mode="json", exclude={"force_recalculate"})
-        raw = json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
+        return AssessmentService.product_fingerprint(request)
+
+    @staticmethod
+    def natal_fingerprint(request: AssessmentRequest) -> str:
+        payload = request.model_dump(
+            mode="json",
+            include={"name", "birthday", "birth_time", "birth_place", "lng", "lat"},
+        )
+        raw = f"natal:{json.dumps(payload, ensure_ascii=False, sort_keys=True)}".encode("utf-8")
         return hashlib.sha256(raw).hexdigest()
 
     @staticmethod
-    def energy_fingerprint(request: AssessmentRequest) -> str:
+    def assessment_fingerprint(request: AssessmentRequest) -> str:
         payload = request.model_dump(
             mode="json",
             exclude={"force_recalculate", "wrist_size_cm", "bead_size_mm"},
         )
-        raw = f"energy:{json.dumps(payload, ensure_ascii=False, sort_keys=True)}".encode("utf-8")
+        raw = f"assessment:{json.dumps(payload, ensure_ascii=False, sort_keys=True)}".encode("utf-8")
         return hashlib.sha256(raw).hexdigest()
+
+    @staticmethod
+    def product_fingerprint(request: AssessmentRequest) -> str:
+        payload = request.model_dump(mode="json", exclude={"force_recalculate"})
+        raw = f"product:{json.dumps(payload, ensure_ascii=False, sort_keys=True)}".encode("utf-8")
+        return hashlib.sha256(raw).hexdigest()
+
+    @staticmethod
+    def energy_fingerprint(request: AssessmentRequest) -> str:
+        return AssessmentService.assessment_fingerprint(request)
 
     @staticmethod
     def input_summary(request: AssessmentRequest, include_wrist: bool = True) -> dict:
@@ -252,6 +277,8 @@ class AssessmentService:
             "mbti": request.mbti,
             "core_wish": request.primary_core_wish,
             "core_wishes": request.core_wishes,
+            "chakra_answers": request.chakra_answers,
+            "mood_palette_id": request.mood_palette_id,
         }
         if include_wrist:
             summary.update({"wrist_size_cm": request.wrist_size_cm, "bead_size_mm": request.bead_size_mm})
@@ -382,6 +409,8 @@ class AssessmentService:
 
     @staticmethod
     def options() -> dict:
+        catalog = RecommendationEngine.catalog()
+        primary_pools = RecommendationEngine.primary_pools(catalog)
         return {
             "mbti_options": sorted(MBTI_MAPPING),
             "mbti_optional": True,
@@ -390,16 +419,18 @@ class AssessmentService:
                     "value": wish,
                     "label": wish,
                     "target_elements": list(elements),
-                    "primary_crystals": [CRYSTAL_CATALOG[code]["name"] for code in PRIMARY_POOLS[wish]],
+                    "primary_crystals": [catalog[code]["name"] for code in primary_pools[wish] if code in catalog],
                 }
                 for wish, elements in WISH_MAPPING.items()
             ],
             "core_wish_selection": {"min": 1, "max": 3, "primary_rule": "第一个愿望用于锁定主石"},
+            "chakra_questions": public_chakra_options(),
+            "mood_palettes": public_mood_palettes(),
             "birth_place_presets": [
                 {"label": place, "lng": coordinates[0], "lat": coordinates[1]}
                 for place, coordinates in PLACE_COORDINATES.items()
             ],
             "wrist_size": {"min": 10, "max": 30, "default": 15.5, "step": 0.5},
             "bead_size_options": [6, 8, 10, 12],
-            "calculation_weights": {"bazi": 55, "mbti": 15, "name": 10, "wish": 20},
+            "calculation_weights": ENERGY_WEIGHTS,
         }

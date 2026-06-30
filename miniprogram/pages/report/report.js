@@ -10,8 +10,9 @@ const ELEMENT_META = {
 const ELEMENT_ORDER = ['木', '火', '土', '金', '水'];
 const STEPS = [
   { key: 'basic', index: 1, label: '基础信息', activeClass: 'done' },
-  { key: 'analysis', index: 2, label: '能量分析', activeClass: 'active' },
-  { key: 'recommend', index: 3, label: '推荐方案', activeClass: '' }
+  { key: 'wish', index: 2, label: '核心愿望', activeClass: 'done' },
+  { key: 'state', index: 3, label: '当下状态', activeClass: 'done' },
+  { key: 'analysis', index: 4, label: '能量分析', activeClass: 'active' }
 ];
 const POSTER_WIDTH = 750;
 const POSTER_HEIGHT = 1200;
@@ -19,6 +20,8 @@ const WRIST_RULER_MIN = 10;
 const WRIST_RULER_MAX = 25;
 const WRIST_RULER_STEP = 0.1;
 const WRIST_RULER_TICK_RPX = 22;
+const ASSESSMENT_RECALCULATE_KEY = 'assessmentRecalculateMode';
+const ASSESSMENT_SUPPRESS_AUTO_REPORT_ONCE_KEY = 'assessmentSuppressAutoReportOnce';
 
 function safeText(value, fallback = '') {
   if (value === null || value === undefined) return fallback;
@@ -153,6 +156,7 @@ Page({
     generating: false,
     posterGenerating: false,
     posterPath: '',
+    posterSaving: false,
     showPosterModal: false
   },
 
@@ -165,6 +169,15 @@ Page({
         viewReport: this.buildViewReport(report),
         avatarChar: safeText(inputSummary.name, '宇').slice(0, 1)
       });
+    }
+  },
+
+  onUnload() {
+    if (this.skipSuppressAssessmentAutoReport) return;
+    const pages = getCurrentPages();
+    const previousPage = pages && pages.length > 1 ? pages[pages.length - 2] : null;
+    if (previousPage && previousPage.route === 'pages/assessment/assessment') {
+      wx.setStorageSync(ASSESSMENT_SUPPRESS_AUTO_REPORT_ONCE_KEY, true);
     }
   },
 
@@ -199,6 +212,11 @@ Page({
       trueSolarTime: report.solar_time && report.solar_time.true_solar_time ? report.solar_time.true_solar_time : '已按出生地校准',
       keywords: this.buildKeywordTags(report.energy_keywords),
       seasonal: this.buildSeasonalEnergy(report.seasonal_energy, report),
+      bazi: this.buildBaziView(report.bazi_basis || {}),
+      chakra: this.buildChakraView(report.chakra_analysis || {}),
+      mood: this.buildMoodView(report.mood_analysis || {}),
+      recommendationStrategy: report.recommendation_strategy || '',
+      recommendationReasons: this.buildRecommendationReasons(report, elements),
       elements,
       ringGradient: this.buildRingGradient(elements)
     };
@@ -255,6 +273,89 @@ Page({
       suggestion: '保持规律作息，把注意力放回最重要的一件事。',
       summary: `你的${strongest}能量较明显，${weakest}能量适合慢慢补足。保持规律作息，把注意力放回最重要的一件事。`
     };
+  },
+
+  buildBaziView(bazi) {
+    const pillars = bazi.pillars || {};
+    const useful = Array.isArray(bazi.useful_elements) ? bazi.useful_elements.join(' / ') : '';
+    return {
+      pillarsText: [pillars.year, pillars.month, pillars.day, pillars.time].filter(Boolean).join(' · '),
+      dayMaster: bazi.day_master ? `${bazi.day_master}日主` : '',
+      strength: bazi.day_master_strength || '',
+      usefulText: useful,
+      strategy: bazi.strategy || ''
+    };
+  },
+
+  buildChakraView(chakra) {
+    const keywords = Array.isArray(chakra.keywords) ? chakra.keywords.join(' / ') : '';
+    return {
+      name: chakra.primary_chakra_name || '未选择',
+      keywords,
+      summary: chakra.summary || '未选择当下状态，系统按中性状态参与计算。',
+      colors: Array.isArray(chakra.colors) ? chakra.colors : []
+    };
+  },
+
+  buildMoodView(mood) {
+    return {
+      name: mood.name || '未选择',
+      subtitle: mood.subtitle || '未选择直觉色彩',
+      summary: mood.summary || '未选择色彩时，系统不额外偏向某一组情绪色。',
+      colors: Array.isArray(mood.colors) ? mood.colors : []
+    };
+  },
+
+  buildRecommendationReasons(report, elements) {
+    const inputSummary = report.input_summary || {};
+    const wishes = inputSummary.core_wishes || (inputSummary.core_wish ? [inputSummary.core_wish] : []);
+    const bazi = report.bazi_basis || {};
+    const usefulElements = Array.isArray(bazi.useful_elements) ? bazi.useful_elements.filter(Boolean) : [];
+    const strategy = safeText(bazi.strategy || report.recommendation_strategy);
+    const strongest = safeText(report.strongest_element, '优势');
+    const weakest = safeText(report.weakest_element, '待补');
+    const chakra = report.chakra_analysis || {};
+    const mood = report.mood_analysis || {};
+    const topElements = (elements || [])
+      .slice()
+      .sort((a, b) => (Number(b.percent) || 0) - (Number(a.percent) || 0))
+      .slice(0, 2)
+      .map(item => item.name)
+      .filter(Boolean);
+    const usefulText = usefulElements.length ? usefulElements.join(' / ') : weakest;
+    const baseDesc = strategy
+      || `当前${strongest}能量较明显，${usefulText}适合温柔调和，推荐会优先选择能让整体比例更平衡的材料。`;
+    const wishDesc = wishes.length
+      ? `你选择了「${wishes.slice(0, 2).join('、')}」，材料筛选会更偏向这个佩戴目标和场景。`
+      : '未填写愿望时，系统会先以五行平衡和佩戴舒适度作为主要推荐依据。';
+    const stateParts = [
+      chakra.primary_chakra_name ? `七脉轮偏向「${chakra.primary_chakra_name}」` : '',
+      mood.name ? `直觉色彩选择「${mood.name}」` : ''
+    ].filter(Boolean);
+    const stateDesc = stateParts.length
+      ? `${stateParts.join('，')}，会影响辅助珠的颜色、功效标签和排序权重。`
+      : '未选择当下状态时，推荐会保持中性，不额外放大某一类颜色或情绪标签。';
+
+    return [
+      {
+        index: '01',
+        title: '命盘与五行',
+        desc: baseDesc,
+        meta: topElements.length ? `主要参考：${topElements.join(' / ')}` : '主要参考：五行比例'
+      },
+      {
+        index: '02',
+        title: '愿望与场景',
+        desc: wishDesc,
+        meta: wishes.length ? `愿望：${wishes.slice(0, 3).join(' / ')}` : '愿望：未填写'
+      },
+      {
+        index: '03',
+        title: '当下状态',
+        desc: stateDesc,
+        meta: '七脉轮 / 直觉色彩'
+      }
+    ];
   },
 
   buildRingGradient(elements) {
@@ -424,6 +525,7 @@ Page({
       wx.setStorageSync('diyWorkbenchPayload', result.workbench_payload);
       wx.setStorageSync('workspacePreset', 'backend-recommended');
       this.setData({ showWristModal: false });
+      this.skipSuppressAssessmentAutoReport = true;
       wx.switchTab({ url: '/pages/workspace/workspace' });
     } catch (error) {
       wx.showToast({ title: error.message || '生成失败，请稍后重试', icon: 'none' });
@@ -464,28 +566,167 @@ Page({
   },
 
   savePosterImage() {
-    if (!this.data.posterPath) return;
+    if (!this.data.posterPath || this.data.posterSaving || this.photoAlbumPermissionPending) return;
+    this.photoAlbumPermissionPending = true;
+    this.ensurePhotoAlbumPermission()
+      .then(() => {
+        this.photoAlbumPermissionPending = false;
+        this.savePosterToAlbum();
+      })
+      .catch(error => {
+        this.photoAlbumPermissionPending = false;
+        if (error && error.handled) return;
+        const message = error && error.message ? error.message : '请稍后重试，或长按海报图片保存。';
+        wx.showToast({ title: message, icon: 'none' });
+      });
+  },
+
+  ensurePhotoAlbumPermission() {
+    return new Promise((resolve, reject) => {
+      if (!wx.getSetting) {
+        resolve();
+        return;
+      }
+      wx.getSetting({
+        success: setting => {
+          const authSetting = setting.authSetting || {};
+          const albumScope = authSetting['scope.writePhotosAlbum'];
+          if (albumScope === true) {
+            resolve();
+            return;
+          }
+          if (albumScope === false) {
+            this.openPhotoAlbumSetting(resolve, reject);
+            return;
+          }
+          if (!wx.authorize) {
+            resolve();
+            return;
+          }
+          this.requestPhotoAlbumAuthorize(resolve, reject);
+        },
+        fail: () => resolve()
+      });
+    });
+  },
+
+  requestPhotoAlbumAuthorize(resolve, reject) {
+    wx.showModal({
+      title: '保存海报到相册',
+      content: '需要获得“保存到相册”权限，授权后我会自动把这张报告海报保存到你的手机相册。',
+      confirmText: '允许保存',
+      cancelText: '先不了',
+      success: res => {
+        if (!res.confirm) {
+          reject({ handled: true });
+          return;
+        }
+        wx.authorize({
+          scope: 'scope.writePhotosAlbum',
+          success: resolve,
+          fail: error => {
+            console.warn('authorize photo album failed:', error);
+            this.openPhotoAlbumSetting(resolve, reject);
+          }
+        });
+      },
+      fail: () => reject({ handled: true })
+    });
+  },
+
+  openPhotoAlbumSetting(resolve = () => {}, reject = () => {}) {
+    wx.showModal({
+      title: '开启保存权限',
+      content: '刚才没有获得相册写入权限。请在下一页打开“保存到相册”开关，返回后我会继续保存海报。',
+      confirmText: '去开启',
+      cancelText: '先不了',
+      success: res => {
+        if (!res.confirm) {
+          reject({ handled: true });
+          return;
+        }
+        if (!wx.openSetting) {
+          reject({ message: '当前微信版本不支持打开设置页' });
+          return;
+        }
+        wx.openSetting({
+          success: setting => {
+            const authSetting = setting.authSetting || {};
+            if (authSetting['scope.writePhotosAlbum']) {
+              resolve();
+              return;
+            }
+            wx.showModal({
+              title: '还没有开启权限',
+              content: '需要打开“保存到相册”开关后才能保存海报。你也可以长按海报图片，用系统菜单手动保存。',
+              showCancel: false
+            });
+            reject({ handled: true });
+          },
+          fail: () => reject({ message: '无法打开设置页，请长按海报图片保存。' })
+        });
+      },
+      fail: () => reject({ handled: true })
+    });
+  },
+
+  savePosterToAlbum() {
+    if (!wx.saveImageToPhotosAlbum) {
+      wx.showModal({
+        title: '当前微信版本不支持',
+        content: '请长按海报图片，使用系统菜单保存到相册。',
+        showCancel: false
+      });
+      return;
+    }
+    this.setData({ posterSaving: true });
+    wx.showLoading({ title: '正在保存' });
     wx.saveImageToPhotosAlbum({
       filePath: this.data.posterPath,
       success: () => {
         wx.showToast({ title: '已保存到相册', icon: 'success' });
       },
       fail: error => {
+        console.warn('save poster image failed:', error);
         const message = error.errMsg || '';
-        if (message.includes('auth deny') || message.includes('authorize')) {
-          wx.showModal({
-            title: '需要相册权限',
-            content: '请允许保存图片到相册，才能保存你的专属报告海报。',
-            confirmText: '去设置',
-            success: res => {
-              if (res.confirm) wx.openSetting({});
+        if (this.isPhotoAlbumAuthError(message)) {
+          wx.hideLoading();
+          this.setData({ posterSaving: false });
+          this.openPhotoAlbumSetting(
+            () => this.savePosterToAlbum(),
+            retryError => {
+              if (retryError && retryError.handled) return;
+              wx.showToast({ title: retryError.message || '请长按海报图片保存', icon: 'none' });
             }
-          });
+          );
           return;
         }
-        wx.showToast({ title: '保存失败，请重试', icon: 'none' });
+        wx.showModal({
+          title: '保存失败',
+          content: '请长按海报图片保存，或稍后重试。',
+          showCancel: false
+        });
+      },
+      complete: () => {
+        wx.hideLoading();
+        this.setData({ posterSaving: false });
       }
     });
+  },
+
+  isPhotoAlbumAuthError(message = '') {
+    const text = String(message).toLowerCase();
+    return text.includes('auth deny')
+      || text.includes('auth denied')
+      || text.includes('authorize')
+      || text.includes('permission')
+      || text.includes('scope.writephotosalbum')
+      || text.includes('deny');
+  },
+
+  restartAssessment() {
+    wx.setStorageSync(ASSESSMENT_RECALCULATE_KEY, true);
+    wx.switchTab({ url: '/pages/assessment/assessment' });
   },
 
   ensurePosterCanvas() {
@@ -619,6 +860,7 @@ Page({
   },
 
   goBack() {
+    wx.setStorageSync(ASSESSMENT_SUPPRESS_AUTO_REPORT_ONCE_KEY, true);
     const pages = getCurrentPages();
     if (pages.length > 1) {
       wx.navigateBack();

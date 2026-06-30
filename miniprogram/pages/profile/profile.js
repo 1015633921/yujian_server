@@ -9,7 +9,9 @@ const {
   confirmReceipt,
   requestAfterSale,
   refundOrder,
-  getOrderLogistics
+  getOrderLogistics,
+  getCartItems,
+  getCommunityFavorites
 } = require('../../utils/api');
 
 const ORDER_TABS = [
@@ -142,6 +144,39 @@ Page({
       orders: localOrders
     });
     this.refreshOrderView();
+    this.refreshUserAssetCounts();
+  },
+
+  async refreshUserAssetCounts() {
+    const user = auth.getStoredUser();
+    if (!user || !user.user_id) return;
+    try {
+      const [cartRows, favoriteRows] = await Promise.all([
+        getCartItems(user.user_id, { silent: true, timeout: 8000 }),
+        getCommunityFavorites(user.user_id, { silent: true, timeout: 8000 })
+      ]);
+      const shoppingCart = cartRows
+        .filter(row => (row.item_type || 'diy_design') === 'diy_design')
+        .map(row => ({
+          ...(row.item || {}),
+          id: row.cart_item_id,
+          key: row.cart_item_id,
+          cart_item_id: row.cart_item_id,
+          quantity: row.quantity,
+          qty: row.quantity
+        }));
+      wx.setStorageSync('diyDesignCart', shoppingCart);
+      wx.setStorageSync('communityFavorites', favoriteRows);
+      this.setData({
+        shoppingCartCount: shoppingCart.length,
+        communityFavoriteCount: favoriteRows.length,
+        profileStats: this.data.profileStats.map(item => (
+          item.key === 'cart' ? { ...item, value: shoppingCart.length } : item
+        ))
+      });
+    } catch (error) {
+      console.warn('refresh user assets fallback:', error.message || error);
+    }
   },
 
   async refreshOrdersFromServer() {

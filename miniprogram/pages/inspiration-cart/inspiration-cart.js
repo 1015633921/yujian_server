@@ -1,4 +1,6 @@
 const { assetUrl } = require('../../utils/assets');
+const auth = require('../../utils/auth');
+const { getCartItems, updateCartItem, deleteCartItem } = require('../../utils/api');
 
 const CART_KEY = 'diyDesignCart';
 
@@ -204,7 +206,7 @@ function resolvePreviewImage(item = {}) {
 function normalizeCartItem(item = {}, index = 0) {
   const sequence = buildSequence(item);
   const summary = item.summary || {};
-  const key = item.key || item.id || `cart-${item.createdAt || Date.now()}-${index}`;
+  const key = item.key || item.cart_item_id || item.id || `cart-${item.createdAt || Date.now()}-${index}`;
   const count = Number(summary.count || item.count || sequence.length || (item.selected || []).length || 0);
   const price = Number(summary.priceText || summary.price || item.price || item.amount || 0);
   const qty = clampQty(item.qty || item.quantity || 1);
@@ -252,8 +254,25 @@ Page({
     this.loadCart();
   },
 
-  loadCart() {
-    const cart = wx.getStorageSync(CART_KEY) || [];
+  async loadCart() {
+    let cart = wx.getStorageSync(CART_KEY) || [];
+    try {
+      const user = await auth.requireLogin('登录后才能查看购物车。');
+      const rows = await getCartItems(user.user_id, { silent: true, timeout: 8000 });
+      cart = rows
+        .filter(row => (row.item_type || 'diy_design') === 'diy_design')
+        .map(row => ({
+          ...(row.item || {}),
+          id: row.cart_item_id,
+          key: row.cart_item_id,
+          cart_item_id: row.cart_item_id,
+          quantity: row.quantity,
+          qty: row.quantity
+        }));
+      wx.setStorageSync(CART_KEY, cart);
+    } catch (error) {
+      console.warn('load cart fallback:', error.message || error);
+    }
     const items = cart.map(normalizeCartItem);
     const validKeys = new Set(items.map(item => item.key));
     let selectedKeys = (this.data.selectedKeys || []).filter(key => validKeys.has(key));
@@ -326,18 +345,38 @@ Page({
     this.applySelection(this.data.items, selectedKeys);
   },
 
-  changeQty(e) {
+  async changeQty(e) {
     const key = e.currentTarget.dataset.key;
     const delta = Number(e.currentTarget.dataset.delta || 0);
     const items = this.data.items.map(item => (
       item.key === key ? { ...item, qty: clampQty(item.qty + delta) } : item
     ));
+    const changed = items.find(item => item.key === key);
+    if (changed && changed.cart_item_id) {
+      try {
+        const user = await auth.requireLogin('登录后才能更新购物车。');
+        await updateCartItem(changed.cart_item_id, { user_id: user.user_id, quantity: changed.qty });
+      } catch (error) {
+        wx.showToast({ title: error.message || '更新购物车失败', icon: 'none' });
+        return;
+      }
+    }
     this.persistItems(items);
     this.applySelection(items, this.data.selectedKeys);
   },
 
-  removeItem(e) {
+  async removeItem(e) {
     const key = e.currentTarget.dataset.key;
+    const current = this.data.items.find(item => item.key === key);
+    if (current && current.cart_item_id) {
+      try {
+        const user = await auth.requireLogin('登录后才能更新购物车。');
+        await deleteCartItem(current.cart_item_id, user.user_id);
+      } catch (error) {
+        wx.showToast({ title: error.message || '移出购物车失败', icon: 'none' });
+        return;
+      }
+    }
     const items = this.data.items.filter(item => item.key !== key);
     const selectedKeys = this.data.selectedKeys.filter(itemKey => itemKey !== key);
     this.persistItems(items);
@@ -357,12 +396,26 @@ Page({
       confirmColor: '#C83B3D',
       success: res => {
         if (!res.confirm) return;
-        const selectedSet = new Set(this.data.selectedKeys);
-        const items = this.data.items.filter(item => !selectedSet.has(item.key));
-        this.persistItems(items);
-        this.applySelection(items, []);
+        this.removeSelectedItems();
       }
     });
+  },
+
+  async removeSelectedItems() {
+    const selectedSet = new Set(this.data.selectedKeys);
+    const selectedItems = this.data.items.filter(item => selectedSet.has(item.key));
+    try {
+      const user = await auth.requireLogin('登录后才能更新购物车。');
+      await Promise.all(selectedItems
+        .filter(item => item.cart_item_id)
+        .map(item => deleteCartItem(item.cart_item_id, user.user_id)));
+    } catch (error) {
+      wx.showToast({ title: error.message || '删除购物车失败', icon: 'none' });
+      return;
+    }
+    const items = this.data.items.filter(item => !selectedSet.has(item.key));
+    this.persistItems(items);
+    this.applySelection(items, []);
   },
 
   buildDesignPayload(item = {}) {
