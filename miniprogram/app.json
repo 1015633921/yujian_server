@@ -13,6 +13,7 @@
     "pages/profile/profile",
     "pages/daily-energy/daily-energy",
     "pages/assessment/assessment",
+    "pages/assessment-guide/assessment-guide",
     "pages/report/report",
     "pages/checkout/checkout",
     "pages/order-success/order-success",
@@ -51,6 +52,11 @@
     ]
   },
   "style": "v2",
+  "permission": {
+    "scope.writePhotosAlbum": {
+      "desc": "用于保存五行测算报告海报到你的相册"
+    }
+  },
   "__usePrivacyCheck__": true,
   "requiredPrivateInfos": [
     "chooseAddress"

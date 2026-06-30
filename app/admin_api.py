@@ -38,16 +38,49 @@ class AdminAccountUpdatePayload(BaseModel):
 class MaterialPayload(BaseModel):
     id: str | None = None
     skuId: str | None = ""
+    material_code: str | None = ""
     top: str
     category: str
     series: str | None = ""
     grade: str | None = ""
     name: str
-    effect: str
-    element: str
+    effect: str = ""
+    element: str = ""
+    primary_element: str | None = ""
+    secondary_elements: list[str] = Field(default_factory=list)
+    chakras: list[str] = Field(default_factory=list)
+    chakra_weights: dict = Field(default_factory=dict)
+    effects: list[str] = Field(default_factory=list)
+    wish_pools: list[str] = Field(default_factory=list)
+    color_family: str | None = ""
+    mood_tags: list[str] = Field(default_factory=list)
+    visual_tags: list[str] = Field(default_factory=list)
+    story: str | None = ""
+    allowed_roles: list[str] = Field(default_factory=list)
+    conflict_codes: list[str] = Field(default_factory=list)
+    match_rules: list[str] = Field(default_factory=list)
+    care_tags: list[str] = Field(default_factory=list)
+    material_params: dict = Field(default_factory=dict)
+    bead_shape: str | None = ""
+    surface_finish: str | None = ""
+    transparency_level: str | None = ""
+    texture_features: list[str] = Field(default_factory=list)
+    batch_variation: str | None = ""
+    hole_diameter_mm: float | None = None
+    size_tolerance_mm: float | None = None
+    asset: dict = Field(default_factory=dict)
+    thumbnail_url: str | None = ""
+    diffuse_map_url: str | None = ""
+    normal_map_url: str | None = ""
+    glb_model_url: str | None = ""
+    preview_render_url: str | None = ""
     price: float = 0
     size: float = 8
     weight: float = 1
+    cost_price: float = 0
+    safety_stock: int = 0
+    supplier_name: str | None = ""
+    purchase_note: str | None = ""
     color: str = "#dfe3e5"
     shine: str = "#ffffff"
     image_path: str | None = ""
@@ -62,6 +95,31 @@ class MaterialBatchPayload(BaseModel):
     ids: list[str]
     action: str
     value: float | int | str | None = None
+
+
+class MaterialCategoryPayload(BaseModel):
+    id: str | None = None
+    top: str = "bead"
+    name: str
+    sort_order: int = 0
+    enabled: bool = True
+
+
+class MaterialSeriesPayload(BaseModel):
+    id: str | None = None
+    category_id: str
+    name: str
+    sort_order: int = 0
+    enabled: bool = True
+
+
+class MaterialOptionPayload(BaseModel):
+    id: str | None = None
+    option_type: str
+    key: str | None = ""
+    label: str
+    sort_order: int = 0
+    enabled: bool = True
 
 
 class ContentBlockPayload(BaseModel):
@@ -161,6 +219,84 @@ class WechatOrderPathPayload(BaseModel):
 class DailyEnergyRulesPayload(BaseModel):
     rules: dict[str, Any] = Field(default_factory=dict)
     reset_to_default: bool = False
+
+
+class WarehouseItemPayload(BaseModel):
+    item_id: str | None = ""
+    item_code: str | None = ""
+    item_type: str = "bead"
+    category: str | None = ""
+    material_name: str
+    size_mm: float = 0
+    grade: str | None = ""
+    color_label: str | None = ""
+    quality_label: str | None = ""
+    origin_place: str | None = ""
+    unit: str = "颗"
+    image_urls: list[str] = Field(default_factory=list)
+    image_urls_text: str | None = ""
+    remark: str | None = ""
+    enabled: bool = True
+
+
+class WarehouseInboundPayload(BaseModel):
+    item_id: str
+    supplier_id: str | None = ""
+    location_id: str | None = ""
+    quantity: int = Field(gt=0)
+    unit_cost: float = 0
+    purchase_date: str | None = ""
+    inbound_at: str | None = ""
+    quality_note: str | None = ""
+    image_urls: list[str] = Field(default_factory=list)
+    image_urls_text: str | None = ""
+    certificate_urls: list[str] = Field(default_factory=list)
+    certificate_urls_text: str | None = ""
+    remark: str | None = ""
+
+
+class WarehouseOutboundPayload(BaseModel):
+    item_id: str
+    batch_id: str | None = ""
+    movement_type: str = "sale_out"
+    channel_id: str | None = ""
+    quantity: int = Field(gt=0)
+    external_order_no: str | None = ""
+    external_platform: str | None = ""
+    reason: str | None = ""
+    remark: str | None = ""
+    occurred_at: str | None = ""
+
+
+class WarehouseSupplierPayload(BaseModel):
+    supplier_id: str | None = ""
+    supplier_code: str | None = ""
+    name: str
+    contact_name: str | None = ""
+    phone: str | None = ""
+    address: str | None = ""
+    remark: str | None = ""
+    enabled: bool = True
+
+
+class WarehouseLocationPayload(BaseModel):
+    location_id: str | None = ""
+    location_code: str | None = ""
+    name: str
+    area: str | None = ""
+    shelf: str | None = ""
+    box_no: str | None = ""
+    remark: str | None = ""
+    enabled: bool = True
+
+
+class WarehouseChannelPayload(BaseModel):
+    channel_id: str | None = ""
+    channel_code: str | None = ""
+    name: str
+    channel_type: str = "manual"
+    remark: str | None = ""
+    enabled: bool = True
 
 
 def success(data, message: str = "ok") -> dict:
@@ -550,12 +686,159 @@ def refresh_all_order_logistics(authorization: str | None = Header(default=None)
     return success(order_service.refresh_active_shipments(), "运输中订单物流已同步")
 
 
+@admin_router.get("/warehouse/overview", summary="仓库库存概览")
+def warehouse_overview(authorization: str | None = Header(default=None)):
+    require_admin(authorization)
+    return success(admin_service.warehouse_overview())
+
+
+@admin_router.get("/warehouse/options", summary="仓库基础选项")
+def warehouse_options(authorization: str | None = Header(default=None)):
+    require_admin(authorization)
+    return success(admin_service.warehouse_options())
+
+
+@admin_router.get("/warehouse/items", summary="仓库库存品列表")
+def warehouse_items(
+    keyword: str = Query(default="", max_length=120),
+    category: str = Query(default="", max_length=120),
+    item_type: str = Query(default="", max_length=40),
+    enabled: str = Query(default="", max_length=10),
+    limit: int = Query(default=300, ge=1, le=500),
+    authorization: str | None = Header(default=None),
+):
+    require_admin(authorization)
+    return success(
+        admin_service.list_warehouse_items(
+            keyword=keyword,
+            category=category,
+            item_type=item_type,
+            enabled=enabled,
+            limit=limit,
+        )
+    )
+
+
+@admin_router.post("/warehouse/items", summary="新增仓库库存品")
+def create_warehouse_item(payload: WarehouseItemPayload, authorization: str | None = Header(default=None)):
+    actor = require_admin(authorization)
+    try:
+        return success(admin_service.save_warehouse_item(payload.model_dump(), actor=actor), "库存品已保存")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@admin_router.put("/warehouse/items/{item_id}", summary="更新仓库库存品")
+def update_warehouse_item(item_id: str, payload: WarehouseItemPayload, authorization: str | None = Header(default=None)):
+    actor = require_admin(authorization)
+    try:
+        return success(admin_service.save_warehouse_item(payload.model_dump(), item_id=item_id, actor=actor), "库存品已更新")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@admin_router.delete("/warehouse/items/{item_id}", summary="停用仓库库存品")
+def delete_warehouse_item(item_id: str, authorization: str | None = Header(default=None)):
+    actor = require_admin(authorization)
+    try:
+        return success(admin_service.delete_warehouse_item(item_id, actor=actor), "库存品已停用")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@admin_router.get("/warehouse/batches", summary="仓库批次列表")
+def warehouse_batches(
+    keyword: str = Query(default="", max_length=120),
+    item_id: str = Query(default="", max_length=80),
+    status: str = Query(default="", max_length=40),
+    limit: int = Query(default=300, ge=1, le=500),
+    authorization: str | None = Header(default=None),
+):
+    require_admin(authorization)
+    return success(admin_service.list_warehouse_batches(keyword=keyword, item_id=item_id, status=status, limit=limit))
+
+
+@admin_router.post("/warehouse/inbound", summary="仓库入库")
+def create_warehouse_inbound(payload: WarehouseInboundPayload, authorization: str | None = Header(default=None)):
+    actor = require_admin(authorization)
+    try:
+        return success(admin_service.create_warehouse_inbound(payload.model_dump(), actor=actor), "入库已记录")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@admin_router.post("/warehouse/outbound", summary="仓库出库")
+def create_warehouse_outbound(payload: WarehouseOutboundPayload, authorization: str | None = Header(default=None)):
+    actor = require_admin(authorization)
+    try:
+        return success(admin_service.create_warehouse_outbound(payload.model_dump(), actor=actor), "出库已记录")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@admin_router.get("/warehouse/movements", summary="仓库库存流水")
+def warehouse_movements(
+    keyword: str = Query(default="", max_length=120),
+    item_id: str = Query(default="", max_length=80),
+    movement_type: str = Query(default="", max_length=40),
+    channel_id: str = Query(default="", max_length=80),
+    start_date: str = Query(default="", max_length=20),
+    end_date: str = Query(default="", max_length=20),
+    limit: int = Query(default=300, ge=1, le=500),
+    authorization: str | None = Header(default=None),
+):
+    require_admin(authorization)
+    return success(
+        admin_service.list_warehouse_movements(
+            keyword=keyword,
+            item_id=item_id,
+            movement_type=movement_type,
+            channel_id=channel_id,
+            start_date=start_date,
+            end_date=end_date,
+            limit=limit,
+        )
+    )
+
+
+@admin_router.post("/warehouse/suppliers", summary="新增或更新仓库供应商")
+def save_warehouse_supplier(payload: WarehouseSupplierPayload, authorization: str | None = Header(default=None)):
+    actor = require_admin(authorization)
+    try:
+        return success(admin_service.save_warehouse_supplier(payload.model_dump(), actor=actor), "供应商已保存")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@admin_router.post("/warehouse/locations", summary="新增或更新仓位")
+def save_warehouse_location(payload: WarehouseLocationPayload, authorization: str | None = Header(default=None)):
+    actor = require_admin(authorization)
+    try:
+        return success(admin_service.save_warehouse_location(payload.model_dump(), actor=actor), "仓位已保存")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@admin_router.post("/warehouse/channels", summary="新增或更新出库渠道")
+def save_warehouse_channel(payload: WarehouseChannelPayload, authorization: str | None = Header(default=None)):
+    actor = require_admin(authorization)
+    try:
+        return success(admin_service.save_warehouse_channel(payload.model_dump(), actor=actor), "渠道已保存")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @admin_router.get("/materials", summary="后台材料列表")
 def materials(
     keyword: str = Query(default="", max_length=80),
     top: str = Query(default="", max_length=40),
+    category: str = Query(default="", max_length=100),
     element: str = Query(default="", max_length=20),
     status: str = Query(default="", max_length=20),
+    quality: str = Query(default="", max_length=30),
+    stock_state: str = Query(default="", max_length=20),
+    margin: str = Query(default="", max_length=20),
+    spec_state: str = Query(default="", max_length=20),
     sort_by: str = Query(default="sort_order", max_length=40),
     sort_order: str = Query(default="asc", max_length=10),
     authorization: str | None = Header(default=None),
@@ -565,46 +848,164 @@ def materials(
         admin_service.list_materials(
             keyword=keyword,
             top=top,
+            category=category,
             element=element,
             status=status,
+            quality=quality,
+            stock_state=stock_state,
+            margin=margin,
+            spec_state=spec_state,
             sort_by=sort_by,
             sort_order=sort_order,
         )
     )
 
 
+@admin_router.get("/material-spus", summary="后台材料 SPU/SKU 列表")
+def material_spus(
+    keyword: str = Query(default="", max_length=80),
+    top: str = Query(default="", max_length=40),
+    category: str = Query(default="", max_length=100),
+    element: str = Query(default="", max_length=20),
+    status: str = Query(default="", max_length=20),
+    quality: str = Query(default="", max_length=30),
+    stock_state: str = Query(default="", max_length=20),
+    margin: str = Query(default="", max_length=20),
+    sort_by: str = Query(default="sort_order", max_length=40),
+    sort_order: str = Query(default="asc", max_length=10),
+    authorization: str | None = Header(default=None),
+):
+    require_admin(authorization)
+    return success(
+        admin_service.list_material_spus(
+            keyword=keyword,
+            top=top,
+            category=category,
+            element=element,
+            status=status,
+            quality=quality,
+            stock_state=stock_state,
+            margin=margin,
+            sort_by=sort_by,
+            sort_order=sort_order,
+        )
+    )
+
+
+@admin_router.get("/material-options", summary="后台材料规范选项")
+def material_options(authorization: str | None = Header(default=None)):
+    require_admin(authorization)
+    return success(admin_service.material_options_payload())
+
+
+@admin_router.get("/material-taxonomy", summary="后台材料分类与品种")
+def material_taxonomy(
+    top: str = Query(default="", max_length=40),
+    include_disabled: bool = Query(default=True),
+    authorization: str | None = Header(default=None),
+):
+    require_admin(authorization)
+    return success(admin_service.list_material_taxonomy(top=top, include_disabled=include_disabled))
+
+
+@admin_router.post("/material-taxonomy/categories", summary="新增或更新材料分类")
+def save_material_category(payload: MaterialCategoryPayload, authorization: str | None = Header(default=None)):
+    actor = require_admin(authorization)
+    try:
+        return success(admin_service.save_material_category(payload.model_dump(), actor=actor), "分类已保存")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@admin_router.post("/material-taxonomy/series", summary="新增或更新材料品种")
+def save_material_series(payload: MaterialSeriesPayload, authorization: str | None = Header(default=None)):
+    actor = require_admin(authorization)
+    try:
+        return success(admin_service.save_material_series(payload.model_dump(), actor=actor), "品种已保存")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@admin_router.delete("/material-taxonomy/{item_id}", summary="停用材料分类或品种")
+def disable_material_taxonomy(item_id: str, authorization: str | None = Header(default=None)):
+    actor = require_admin(authorization)
+    try:
+        return success(admin_service.disable_material_taxonomy_item(item_id, actor=actor), "分类或品种已停用")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@admin_router.get("/material-option-items", summary="后台材料字段字典")
+def material_option_items(
+    option_type: str = Query(default="", max_length=40),
+    include_disabled: bool = Query(default=True),
+    authorization: str | None = Header(default=None),
+):
+    require_admin(authorization)
+    return success(admin_service.list_material_option_items(option_type=option_type, include_disabled=include_disabled))
+
+
+@admin_router.post("/material-option-items", summary="新增或更新材料字段字典")
+def save_material_option_item(payload: MaterialOptionPayload, authorization: str | None = Header(default=None)):
+    actor = require_admin(authorization)
+    try:
+        return success(admin_service.save_material_option_item(payload.model_dump(), actor=actor), "字段选项已保存")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@admin_router.delete("/material-option-items/{item_id}", summary="停用材料字段字典")
+def disable_material_option_item(item_id: str, authorization: str | None = Header(default=None)):
+    actor = require_admin(authorization)
+    try:
+        return success(admin_service.disable_material_option_item(item_id, actor=actor), "字段选项已停用")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @admin_router.post("/materials", summary="新增材料")
 def create_material(payload: MaterialPayload, authorization: str | None = Header(default=None)):
-    require_admin(authorization)
+    actor = require_admin(authorization)
     try:
-        return success(admin_service.save_material(payload.model_dump()), "材料已保存")
+        return success(admin_service.save_material(payload.model_dump(), actor=actor), "材料已保存")
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @admin_router.put("/materials/{material_id}", summary="更新材料")
 def update_material(material_id: str, payload: MaterialPayload, authorization: str | None = Header(default=None)):
-    require_admin(authorization)
+    actor = require_admin(authorization)
     try:
-        return success(admin_service.save_material(payload.model_dump(), material_id=material_id), "材料已更新")
+        return success(admin_service.save_material(payload.model_dump(), material_id=material_id, actor=actor), "材料已更新")
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @admin_router.delete("/materials/{material_id}", summary="删除材料")
 def delete_material(material_id: str, authorization: str | None = Header(default=None)):
-    require_admin(authorization)
-    admin_service.delete_material(material_id)
+    actor = require_admin(authorization)
+    admin_service.delete_material(material_id, actor=actor)
     return success({"deleted": material_id}, "材料已删除")
 
 
 @admin_router.post("/materials/batch", summary="批量操作珠材")
 def batch_materials(payload: MaterialBatchPayload, authorization: str | None = Header(default=None)):
-    require_admin(authorization)
+    actor = require_admin(authorization)
     try:
-        return success(admin_service.batch_update_materials(payload.ids, payload.action, payload.value), "批量操作已完成")
+        return success(admin_service.batch_update_materials(payload.ids, payload.action, payload.value, actor=actor), "批量操作已完成")
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@admin_router.get("/materials/audit-logs", summary="材料资料变更记录")
+def material_audit_logs(
+    material_id: str = Query(default="", max_length=120),
+    target_type: str = Query(default="", max_length=40),
+    limit: int = Query(default=100, ge=1, le=300),
+    authorization: str | None = Header(default=None),
+):
+    require_admin(authorization)
+    return success(admin_service.list_material_audit_logs(material_id=material_id, target_type=target_type, limit=limit))
 
 
 @admin_router.get("/home-banners", summary="home banners")

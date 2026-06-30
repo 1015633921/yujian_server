@@ -6,6 +6,7 @@ cryptography>=42.0,<47.0
 cos-python-sdk-v5>=1.9,<2.0
 PyMySQL>=1.1,<2.0
 python-multipart>=0.0.9,<1.0
+lunar_python>=1.4,<2.0
 
 # Legacy Django service remains available during migration.
 Django>=5.0,<6.0

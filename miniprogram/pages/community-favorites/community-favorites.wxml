@@ -1,57 +1,77 @@
-<view class="favorites-page">
-  <view class="page-nav">
-    <text class="page-count">{{posts.length}} 篇收藏</text>
+<view class="favorites-page yu-page">
+  <view class="section-head">
+    <view>
+      <view class="section-title">我的收藏</view>
+      <view class="section-subtitle">收藏过的灵感搭配、推荐方案和每日能量</view>
+    </view>
+    <view class="result-count">{{posts.length}} 款</view>
   </view>
 
-  <block wx:if="{{posts.length}}">
-    <view class="page-heading">
-      <text class="eyebrow">宇涧 · 社区收藏</text>
-      <text class="page-title">留住打动你的搭配</text>
-      <text class="page-desc">这里只展示你真正收藏过的社区作品。</text>
-    </view>
+  <view wx:if="{{loading}}" class="yu-loading">
+    <view class="yu-spinner"></view>
+    <view>正在同步收藏内容</view>
+  </view>
 
-    <view class="favorite-list">
-      <view
-        wx:for="{{posts}}"
-        wx:key="id"
-        class="favorite-card"
-        data-id="{{item.id}}"
-        bindtap="openPost"
-      >
-        <view class="post-image {{item.tone}}">
-          <view class="image-mark">
-            <text>宇涧</text>
-            <text>INSPIRATION</text>
-          </view>
+  <view wx:elif="{{!posts.length}}" class="empty-card yu-card">
+    <view class="empty-title">还没有收藏灵感</view>
+    <view class="empty-desc">在灵感详情、每日能量或材料页收藏后，会统一留在这里。</view>
+    <button class="empty-button yu-button yu-button-primary" bindtap="goCommunity">去逛灵感库</button>
+  </view>
+
+  <view wx:else class="post-list">
+    <view
+      wx:for="{{posts}}"
+      wx:key="id"
+      class="post-card yu-card yu-card-pressable type-{{item.favoriteType}}"
+      data-id="{{item.id}}"
+      bindtap="openPost"
+    >
+      <view class="post-media tone-{{item.tone}}">
+        <image
+          wx:if="{{item.imageUrl}}"
+          class="post-cover"
+          src="{{item.imageUrl}}"
+          mode="aspectFill"
+          lazy-load="{{true}}"
+          data-id="{{item.id}}"
+          binderror="onImageError"
+        />
+        <view wx:else class="bracelet-preview">
+          <image
+            wx:for="{{item.visualBeads}}"
+            wx:for-item="bead"
+            wx:key="id"
+            class="preview-bead"
+            src="{{bead.src}}"
+            mode="aspectFill"
+            lazy-load="{{true}}"
+            style="{{bead.style}}"
+          />
         </view>
-        <view class="post-content">
-          <view class="post-heading">
-            <text class="post-title">{{item.title}}</text>
-            <button
-              class="remove-button"
-              data-id="{{item.id}}"
-              catchtap="removeFavorite"
-            >已收藏</button>
-          </view>
-          <text class="post-meta">{{item.author}} · {{item.likes}} 喜欢</text>
-          <text class="post-desc">{{item.desc}}</text>
-          <view class="tag-row">
-            <text wx:for="{{item.tags}}" wx:key="*this" class="tag">{{item}}</text>
-          </view>
-          <button
-            class="same-button"
-            data-id="{{item.id}}"
-            catchtap="useSame"
-          >用这个灵感做一条</button>
+        <view class="media-shade"></view>
+        <view class="type-pill">{{item.typeLabel}}</view>
+        <button class="remove-fab" data-id="{{item.id}}" catchtap="removeFavorite">已收藏</button>
+        <view class="post-copy">
+          <view class="post-title">{{item.title}}</view>
+          <view class="post-desc">{{item.desc}}</view>
+        </view>
+      </view>
+
+      <view class="post-body">
+        <view class="post-meta">
+          <view class="author-dot"></view>
+          <view class="meta-text">{{item.author}}</view>
+          <view class="meta-divider"></view>
+          <view class="meta-text">{{item.sceneText}}</view>
+        </view>
+        <view class="tag-row">
+          <text wx:for="{{item.displayTags}}" wx:key="*this" class="yu-tag">{{item}}</text>
+        </view>
+        <view class="post-actions">
+          <view class="detail-link">{{item.actionText}}</view>
+          <button class="use-button" data-id="{{item.id}}" catchtap="useSame">带入 DIY</button>
         </view>
       </view>
     </view>
-  </block>
-
-  <view wx:else class="empty-state">
-    <view class="empty-symbol">◇</view>
-    <text class="empty-title">还没有社区收藏</text>
-    <text class="empty-desc">在社区作品详情中点击“收藏灵感”，喜欢的作品就会留在这里。</text>
-    <button class="discover-button" bindtap="goCommunity">去逛灵感社区</button>
   </view>
 </view>

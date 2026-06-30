@@ -1,12 +1,23 @@
 from __future__ import annotations
 
-import hashlib
 import math
-from datetime import date, datetime, time, timedelta
+from datetime import datetime, timedelta
 
+from .fortune.bazi import calculate_bazi
+from .fortune.chakra import calculate_chakra_profile
+from .fortune.common import ELEMENTS, empty_profile, normalized_profile
+from .fortune.mood_palette import calculate_mood_profile
+from .fortune.name_elements import analyze_name
 from .schemas import AssessmentRequest
 
-ELEMENTS = ("金", "木", "水", "火", "土")
+ENERGY_WEIGHTS = {
+    "bazi": 50,
+    "wish": 18,
+    "name": 8,
+    "mbti": 8,
+    "chakra": 8,
+    "mood": 8,
+}
 
 # Explicit 16-type mapping. Every profile totals 15 points.
 MBTI_MAPPING: dict[str, dict[str, float]] = {
@@ -53,37 +64,18 @@ PLACE_COORDINATES = {
     "甘肃省兰州市": (103.8343, 36.0611),
 }
 
-NAME_ELEMENT_CHARS = {
-    "金": set("金鑫锋铭钰锦锐银钟铠鉴辛白"),
-    "木": set("木林森楠松柏柳桐梓荣芳花竹禾"),
-    "水": set("水海洋江河湖雨雪冰清涵泽涛淼"),
-    "火": set("火炎焱烨煜炜灿晴明昕晖光"),
-    "土": set("土坤垚城山岩峰岳宇安辰田"),
-}
-
-
-def empty_profile() -> dict[str, float]:
-    return {element: 0.0 for element in ELEMENTS}
-
-
-def normalized_profile(raw: dict[str, float], total: float) -> dict[str, float]:
-    raw_total = sum(raw.values()) or 1
-    result = {element: round(raw.get(element, 0) / raw_total * total, 2) for element in ELEMENTS}
-    drift = round(total - sum(result.values()), 2)
-    result[max(result, key=result.get)] = round(result[max(result, key=result.get)] + drift, 2)
-    return result
-
-
 class EnergyCalculator:
-    """Combines mock Bazi, MBTI, name and wish energy into a 100-point profile."""
+    """Combines real Bazi, wish, name, MBTI and live-state inputs into 100 points."""
 
     def calculate(self, request: AssessmentRequest) -> dict:
         solar_time = self.calculate_true_solar_time(request)
-        bazi = self.calculate_bazi_mock(request.birthday, solar_time["true_solar_datetime"])
-        mbti = dict(MBTI_MAPPING[request.mbti]) if request.mbti else dict(NEUTRAL_MBTI_PROFILE)
-        name = self.calculate_name_energy(request.name)
+        bazi_result = calculate_bazi(solar_time["true_solar_datetime"], ENERGY_WEIGHTS["bazi"])
+        mbti = self.calculate_mbti_energy(request.mbti)
+        name, name_analysis = self.calculate_name_energy(request.name)
         wish = self.calculate_wish_energy(request.core_wishes)
-        breakdown = {"bazi": bazi, "mbti": mbti, "name": name, "wish": wish}
+        chakra, chakra_analysis = calculate_chakra_profile(request.chakra_answers, ENERGY_WEIGHTS["chakra"])
+        mood, mood_analysis = calculate_mood_profile(request.mood_palette_id, ENERGY_WEIGHTS["mood"])
+        breakdown = {"bazi": bazi_result.profile, "wish": wish, "name": name, "mbti": mbti, "chakra": chakra, "mood": mood}
         final = {
             element: round(sum(profile[element] for profile in breakdown.values()), 2)
             for element in ELEMENTS
@@ -91,6 +83,12 @@ class EnergyCalculator:
         return {
             "solar_time": {key: value for key, value in solar_time.items() if key != "true_solar_datetime"},
             "breakdown": breakdown,
+            "bazi_basis": bazi_result.basis,
+            "name_analysis": name_analysis,
+            "chakra_analysis": chakra_analysis,
+            "mood_analysis": mood_analysis,
+            "useful_elements": bazi_result.basis["useful_elements"],
+            "recommendation_strategy": bazi_result.basis["strategy"],
             "final": final,
             "strongest": max(final, key=final.get),
             "weakest": min(final, key=final.get),
@@ -127,37 +125,13 @@ class EnergyCalculator:
         return 120.0, None, "default_china_standard_meridian"
 
     @staticmethod
-    def calculate_bazi_mock(birthday: date, true_solar_datetime: datetime) -> dict[str, float]:
-        seed = f"{birthday.isoformat()}|{true_solar_datetime.strftime('%H:%M')}".encode("utf-8")
-        digest = hashlib.sha256(seed).digest()
-        raw = {element: float(digest[index] + 35) for index, element in enumerate(ELEMENTS)}
-        # Time branch influence: night favors water, noon favors fire.
-        hour = true_solar_datetime.hour
-        if 21 <= hour or hour < 5:
-            raw["水"] += 80
-        elif 9 <= hour < 15:
-            raw["火"] += 80
-        elif 5 <= hour < 9:
-            raw["木"] += 60
-        elif 15 <= hour < 19:
-            raw["金"] += 60
-        else:
-            raw["土"] += 60
-        return normalized_profile(raw, 55)
+    def calculate_mbti_energy(mbti: str | None) -> dict[str, float]:
+        raw = MBTI_MAPPING[mbti] if mbti else NEUTRAL_MBTI_PROFILE
+        return normalized_profile(raw, ENERGY_WEIGHTS["mbti"])
 
     @staticmethod
-    def calculate_name_energy(name: str) -> dict[str, float]:
-        raw = empty_profile()
-        for char in name:
-            matched = False
-            for element, chars in NAME_ELEMENT_CHARS.items():
-                if char in chars:
-                    raw[element] += 1
-                    matched = True
-                    break
-            if not matched:
-                raw[ELEMENTS[ord(char) % len(ELEMENTS)]] += 1
-        return normalized_profile(raw, 10)
+    def calculate_name_energy(name: str) -> tuple[dict[str, float], dict]:
+        return analyze_name(name, ENERGY_WEIGHTS["name"])
 
     @staticmethod
     def calculate_wish_energy(core_wishes: list[str]) -> dict[str, float]:
@@ -167,10 +141,10 @@ class EnergyCalculator:
             for wish in core_wishes
             for element in WISH_MAPPING[wish]
         }
-        points = 20 / len(target_elements)
+        points = ENERGY_WEIGHTS["wish"] / len(target_elements)
         for element in target_elements:
             profile[element] += points
-        drift = round(20 - sum(profile.values()), 2)
+        drift = round(ENERGY_WEIGHTS["wish"] - sum(profile.values()), 2)
         first = next(iter(target_elements))
         profile[first] = round(profile[first] + drift, 2)
         return profile

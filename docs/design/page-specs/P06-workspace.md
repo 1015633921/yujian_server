@@ -7,7 +7,6 @@
 ## 上下文
 
 - 页面实现：`miniprogram/pages/workspace/workspace.*`
-- WXS：`miniprogram/pages/workspace/workspace.wxs`
 - 参考图：`docs/design/references/P06-workspace.png`
 
 ## 必须保留的功能
@@ -35,4 +34,3 @@
 - 珠子不大面积重叠。
 - 窄屏机型按钮不重叠。
 - 编译无 WXML unexpected end。
-

@@ -311,6 +311,7 @@ page {
 }
 
 .menu-icon.plans { color: var(--yu-color-blue); background: rgba(54, 92, 156, .1); }
+.menu-icon.favorite { color: #8b5a3c; background: rgba(184, 143, 103, .14); }
 .menu-icon.cart { color: var(--yu-color-green); background: rgba(100, 124, 112, .12); }
 .menu-icon.address { color: #9a6d10; background: rgba(242, 181, 29, .16); }
 .menu-icon.coupon { color: var(--yu-color-red); background: rgba(200, 59, 61, .08); }

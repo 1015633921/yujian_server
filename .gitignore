@@ -16,6 +16,8 @@ generated/
 .tmp_*/
 .idea/
 data/
+!app/data/
+!app/data/*.json
 tools/
 outputs/
 miniprogram/assets/

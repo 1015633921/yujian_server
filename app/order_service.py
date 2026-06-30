@@ -246,6 +246,18 @@ class OrderService:
             )
             connection.execute(
                 """
+                CREATE TABLE IF NOT EXISTS community_favorites (
+                    user_id TEXT NOT NULL,
+                    post_id TEXT NOT NULL,
+                    item_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY (user_id, post_id)
+                )
+                """
+            )
+            connection.execute(
+                """
                 CREATE TABLE IF NOT EXISTS user_addresses (
                     address_id TEXT PRIMARY KEY,
                     user_id TEXT NOT NULL,
@@ -281,6 +293,7 @@ class OrderService:
             connection.execute("CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status, payment_status)")
             connection.execute("CREATE INDEX IF NOT EXISTS idx_diy_designs_user_updated ON diy_designs(user_id, updated_at DESC)")
             connection.execute("CREATE INDEX IF NOT EXISTS idx_cart_items_user_updated ON cart_items(user_id, updated_at DESC)")
+            connection.execute("CREATE INDEX IF NOT EXISTS idx_community_favorites_user_updated ON community_favorites(user_id, updated_at DESC)")
             connection.execute("CREATE INDEX IF NOT EXISTS idx_user_addresses_user_updated ON user_addresses(user_id, updated_at DESC)")
             connection.execute("CREATE INDEX IF NOT EXISTS idx_user_coupons_user_status ON user_coupons(user_id, status, expires_at)")
             self.backfill_order_designs(connection)
@@ -511,6 +524,68 @@ class OrderService:
         with self.connect() as connection:
             connection.execute("DELETE FROM cart_items WHERE user_id = ?", (user_id,))
         return {"user_id": user_id, "cleared": True}
+
+    def list_community_favorites(self, user_id: str) -> list[dict[str, Any]]:
+        with self.connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM community_favorites WHERE user_id = ? ORDER BY updated_at DESC",
+                (user_id,),
+            ).fetchall()
+        return [self.public_community_favorite(dict(row)) for row in rows]
+
+    def save_community_favorite(self, payload: dict[str, Any]) -> dict[str, Any]:
+        user_id = str(payload.get("user_id") or "").strip()
+        post_id = str(payload.get("post_id") or payload.get("id") or "").strip()
+        if not user_id:
+            raise ValueError("user_id cannot be empty")
+        if not post_id:
+            raise ValueError("post_id cannot be empty")
+        item = payload.get("item") or {}
+        if not isinstance(item, dict):
+            item = {}
+        item = {**item, "id": item.get("id") or post_id, "post_id": post_id}
+        timestamp = now_iso()
+        with self.connect() as connection:
+            existing = connection.execute(
+                "SELECT user_id FROM community_favorites WHERE user_id = ? AND post_id = ?",
+                (user_id, post_id),
+            ).fetchone()
+            if existing:
+                connection.execute(
+                    """
+                    UPDATE community_favorites SET item_json = ?, updated_at = ?
+                    WHERE user_id = ? AND post_id = ?
+                    """,
+                    (json.dumps(item, ensure_ascii=False), timestamp, user_id, post_id),
+                )
+            else:
+                connection.execute(
+                    """
+                    INSERT INTO community_favorites
+                    (user_id, post_id, item_json, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (user_id, post_id, json.dumps(item, ensure_ascii=False), timestamp, timestamp),
+                )
+        return self.get_community_favorite(user_id, post_id)
+
+    def get_community_favorite(self, user_id: str, post_id: str) -> dict[str, Any]:
+        with self.connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM community_favorites WHERE user_id = ? AND post_id = ?",
+                (user_id, post_id),
+            ).fetchone()
+        if not row:
+            raise ValueError("community favorite does not exist")
+        return self.public_community_favorite(dict(row))
+
+    def delete_community_favorite(self, user_id: str, post_id: str) -> dict[str, Any]:
+        with self.connect() as connection:
+            connection.execute(
+                "DELETE FROM community_favorites WHERE user_id = ? AND post_id = ?",
+                (user_id, post_id),
+            )
+        return {"user_id": user_id, "post_id": post_id, "deleted": True}
 
     def list_addresses(self, user_id: str) -> list[dict[str, Any]]:
         with self.connect() as connection:
@@ -1292,6 +1367,18 @@ class OrderService:
             "quantity": int(row.get("quantity") or 1),
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
+        }
+
+    def public_community_favorite(self, row: dict[str, Any]) -> dict[str, Any]:
+        item = self.loads(row.get("item_json") or "", {})
+        return {
+            "user_id": row["user_id"],
+            "post_id": row["post_id"],
+            "item": item,
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+            **item,
+            "id": item.get("id") or row["post_id"],
         }
 
     def public_address(self, row: dict[str, Any]) -> dict[str, Any]:

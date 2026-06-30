@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>宇涧运营后台</title>
-  <link rel="stylesheet" href="static/admin/admin.css?v=20260627-daily-rules-1">
+  <link rel="stylesheet" href="static/admin/admin.css?v=20260629-warehouse-1">
 </head>
 <body>
   <section id="authView" class="auth-screen">
@@ -39,6 +39,7 @@
         <button class="nav-item active" data-page="overview" onclick="switchPage('overview')"><i>⌂</i>经营概览</button>
         <button class="nav-item" data-page="orders" onclick="switchPage('orders')"><i>▤</i>订单履约<span id="orderBadge" class="nav-badge hide">0</span></button>
         <button class="nav-item" data-page="materials" onclick="switchPage('materials')"><i>◇</i>珠材商品</button>
+        <button class="nav-item" data-page="warehouse" onclick="switchPage('warehouse')"><i>▦</i>仓库库存</button>
         <button class="nav-item" data-page="content" onclick="switchPage('content')"><i>✦</i>运营内容</button>
         <button class="nav-item" data-page="bannerContent" onclick="switchPage('bannerContent')"><i>B</i>Home Banner</button>
         <button class="nav-item" data-page="communityContent" onclick="switchPage('communityContent')"><i>◎</i>社区灵感</button>
@@ -105,15 +106,47 @@
         <div class="page-toolbar">
           <div class="filter-group">
             <div class="search-control">⌕<input id="materialKeyword" placeholder="搜索名称、分类、品种或功效" oninput="debouncedLoadMaterials()"></div>
-            <select id="materialTop" onchange="loadMaterials()">
+            <select id="materialTop" onchange="handleMaterialTopChange()">
               <option value="">全部类型</option><option value="bead">珠珠</option><option value="accessory">配饰</option>
               <option value="incense">合香珠</option><option value="pendant">花托</option>
             </select>
+            <select id="materialCategory" class="material-category-filter" onchange="loadMaterials()">
+              <option value="">全部珠珠分类</option>
+            </select>
             <select id="materialElement" onchange="loadMaterials()">
-              <option value="">全部五行</option><option value="金">金</option><option value="木">木</option><option value="水">水</option><option value="火">火</option><option value="土">土</option>
+              <option value="">全部五行</option><option value="metal">金</option><option value="wood">木</option><option value="water">水</option><option value="fire">火</option><option value="earth">土</option>
             </select>
             <select id="materialStatus" onchange="loadMaterials()">
               <option value="">全部状态</option><option value="enabled">已启用</option><option value="disabled">已禁用</option>
+            </select>
+            <select id="materialStockState" onchange="loadMaterials()">
+              <option value="">全部库存</option>
+              <option value="out">缺货</option>
+              <option value="low">低库存</option>
+              <option value="normal">库存正常</option>
+              <option value="alert">库存预警</option>
+            </select>
+            <select id="materialMargin" onchange="loadMaterials()">
+              <option value="">全部定价</option>
+              <option value="loss">成本倒挂</option>
+              <option value="low">低毛利</option>
+              <option value="risk">定价风险</option>
+              <option value="unknown">未设成本</option>
+              <option value="normal">毛利正常</option>
+            </select>
+            <select id="materialQuality" onchange="loadMaterials()">
+              <option value="">全部资料质量</option>
+              <option value="risk">上架风险</option>
+              <option value="incomplete">有待完善</option>
+              <option value="ready">可上架</option>
+              <option value="excellent">资料优秀</option>
+            </select>
+            <select id="materialSpecState" onchange="loadMaterials()">
+              <option value="">全部规格</option>
+              <option value="complete">8-15mm 齐全</option>
+              <option value="incomplete">缺规格</option>
+              <option value="empty">无规格</option>
+              <option value="not_applicable">非珠珠</option>
             </select>
           </div>
           <div class="table-actions material-bulk-actions">
@@ -122,12 +155,100 @@
             <button class="btn secondary compact bulk-btn" disabled onclick="batchMaterials('disable')">批量禁用</button>
             <button class="btn secondary compact bulk-btn" disabled onclick="batchMaterials('price')">批量改价</button>
             <button class="btn secondary compact bulk-btn" disabled onclick="batchMaterials('stock')">批量库存</button>
+            <button class="btn secondary compact bulk-btn" disabled onclick="batchMaterials('safety_stock')">安全库存</button>
             <button class="btn secondary compact danger-outline bulk-btn" disabled onclick="batchMaterials('delete')">批量删除</button>
             <span class="bulk-divider"></span>
+            <button class="btn secondary compact" onclick="openMaterialTaxonomy()">分类/品种维护</button>
+            <button class="btn secondary compact" onclick="openMaterialOptionDictionary()">字段字典维护</button>
+            <button class="btn secondary compact" onclick="openMaterialAuditLogs()">变更记录</button>
             <button class="btn primary compact" onclick="newMaterial()">＋ 新增珠材</button>
           </div>
         </div>
         <article class="panel table-panel"><div id="materialsTable"></div></article>
+      </section>
+
+      <section id="warehouse" class="page-view hide">
+        <div class="subtabs warehouse-tabs">
+          <button class="subtab active" data-warehouse-tab="overview" onclick="switchWarehouseTab('overview')">库存概览</button>
+          <button class="subtab" data-warehouse-tab="items" onclick="switchWarehouseTab('items')">库存品</button>
+          <button class="subtab" data-warehouse-tab="inbound" onclick="switchWarehouseTab('inbound')">入库</button>
+          <button class="subtab" data-warehouse-tab="outbound" onclick="switchWarehouseTab('outbound')">出库</button>
+          <button class="subtab" data-warehouse-tab="movements" onclick="switchWarehouseTab('movements')">库存流水</button>
+          <button class="subtab" data-warehouse-tab="settings" onclick="switchWarehouseTab('settings')">基础资料</button>
+        </div>
+        <div class="content-hint">仓库库存是独立台账，只记录散珠、配件、线材、包装等实物仓储，不自动联动小程序商品库存或外部平台订单。</div>
+
+        <div id="warehouseOverviewView" class="warehouse-view">
+          <div id="warehouseStats" class="stats-grid"></div>
+          <div class="overview-grid">
+            <article class="panel span-2">
+              <div class="panel-head"><div><h2>低库存 / 零库存</h2><p>优先补拍、补货或下架的仓库实物</p></div></div>
+              <div id="warehouseLowStock"></div>
+            </article>
+            <article class="panel span-2">
+              <div class="panel-head"><div><h2>最近库存流水</h2><p>最近入库、销售出库、损耗和人工调整</p></div></div>
+              <div id="warehouseRecentMovements"></div>
+            </article>
+          </div>
+        </div>
+
+        <div id="warehouseItemsView" class="warehouse-view hide">
+          <div class="page-toolbar">
+            <div class="filter-group">
+              <div class="search-control wide">⌕<input id="warehouseKeyword" placeholder="搜索品名、编码、分类、颜色" oninput="debouncedLoadWarehouseItems()"></div>
+              <select id="warehouseItemType" onchange="loadWarehouseItems()"></select>
+              <input id="warehouseCategory" placeholder="分类筛选" oninput="debouncedLoadWarehouseItems()">
+              <select id="warehouseEnabled" onchange="loadWarehouseItems()"><option value="">全部状态</option><option value="1">启用</option><option value="0">停用</option></select>
+            </div>
+            <button class="btn primary compact" onclick="newWarehouseItem()">＋ 新增库存品</button>
+          </div>
+          <article class="panel table-panel"><div id="warehouseItemsTable"></div></article>
+        </div>
+
+        <div id="warehouseInboundView" class="warehouse-view hide">
+          <article class="panel">
+            <div class="panel-head"><div><h2>采购 / 拍摄入库</h2><p>生成批次号，记录供应商、仓位、数量和成本</p></div></div>
+            <div id="warehouseInboundForm" class="warehouse-form"></div>
+          </article>
+          <article class="panel table-panel"><div id="warehouseBatchesTable"></div></article>
+        </div>
+
+        <div id="warehouseOutboundView" class="warehouse-view hide">
+          <article class="panel">
+            <div class="panel-head"><div><h2>销售 / 损耗出库</h2><p>可指定批次，也可按先进先出自动扣减</p></div></div>
+            <div id="warehouseOutboundForm" class="warehouse-form"></div>
+          </article>
+        </div>
+
+        <div id="warehouseMovementsView" class="warehouse-view hide">
+          <div class="page-toolbar">
+            <div class="filter-group">
+              <div class="search-control wide">⌕<input id="warehouseMovementKeyword" placeholder="搜索流水号、外部订单号、库存品" oninput="debouncedLoadWarehouseMovements()"></div>
+              <select id="warehouseMovementType" onchange="loadWarehouseMovements()"></select>
+              <select id="warehouseMovementChannel" onchange="loadWarehouseMovements()"></select>
+              <input id="warehouseMovementStart" type="date" onchange="loadWarehouseMovements()">
+              <input id="warehouseMovementEnd" type="date" onchange="loadWarehouseMovements()">
+            </div>
+          </div>
+          <article class="panel table-panel"><div id="warehouseMovementsTable"></div></article>
+        </div>
+
+        <div id="warehouseSettingsView" class="warehouse-view hide">
+          <div class="warehouse-settings-grid">
+            <article class="panel">
+              <div class="panel-head"><div><h2>供应商</h2><p>记录采购来源，便于后续追溯批次</p></div><button class="btn secondary compact" onclick="newWarehouseSupplier()">新增</button></div>
+              <div id="warehouseSuppliersTable"></div>
+            </article>
+            <article class="panel">
+              <div class="panel-head"><div><h2>仓位</h2><p>主仓、抽屉、盒号、拍摄样品区</p></div><button class="btn secondary compact" onclick="newWarehouseLocation()">新增</button></div>
+              <div id="warehouseLocationsTable"></div>
+            </article>
+            <article class="panel">
+              <div class="panel-head"><div><h2>出库渠道</h2><p>抖音、小程序、微信私域、线下等</p></div><button class="btn secondary compact" onclick="newWarehouseChannel()">新增</button></div>
+              <div id="warehouseChannelsTable"></div>
+            </article>
+          </div>
+        </div>
       </section>
 
       <section id="content" class="page-view hide">
@@ -281,6 +402,6 @@
     <div id="drawerBody" class="drawer-body"></div>
   </aside>
   <div id="toast" class="toast hide"></div>
-  <script src="static/admin/admin.js?v=20260627-daily-rules-1"></script>
+  <script src="static/admin/admin.js?v=20260629-warehouse-1"></script>
 </body>
 </html>

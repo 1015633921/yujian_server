@@ -154,7 +154,7 @@ Page({
 
   async loadPosts() {
     try {
-      const posts = await getCommunityPosts({ limit: 50 });
+      const posts = await getCommunityPosts({ limit: 50, silent: true, timeout: 8000 });
       if (posts && posts.length) {
         this.applyPosts(decoratePosts(posts), false);
         return;

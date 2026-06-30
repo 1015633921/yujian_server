@@ -82,6 +82,11 @@ def main() -> None:
     parser.add_argument("--secret-id", default=os.getenv("TENCENT_COS_SECRET_ID"))
     parser.add_argument("--secret-key", default=os.getenv("TENCENT_COS_SECRET_KEY"))
     parser.add_argument("--cdn-base-url", default=os.getenv("TENCENT_COS_CDN_BASE_URL", ""))
+    parser.add_argument(
+        "--url-version",
+        default=datetime.now().strftime("%Y%m%d%H%M%S"),
+        help="Append a cache-busting version query to material image URLs.",
+    )
     parser.add_argument("--app-env", default=None, help="Override APP_ENV after loading local env files.")
     parser.add_argument("--mysql-database", default=None, help="Override MYSQL_DATABASE after loading local env files.")
     parser.add_argument("--dry-run", action="store_true")
@@ -288,8 +293,14 @@ def estimate_price(base_price: int, size: int) -> int:
 
 def public_url(args: argparse.Namespace, key: str) -> str:
     if args.cdn_base_url:
-        return f"{args.cdn_base_url.rstrip('/')}/{quote(key)}"
-    return f"https://{args.bucket}.cos.{args.region}.myqcloud.com/{quote(key)}"
+        url = f"{args.cdn_base_url.rstrip('/')}/{quote(key)}"
+    else:
+        url = f"https://{args.bucket}.cos.{args.region}.myqcloud.com/{quote(key)}"
+    version = str(args.url_version or "").strip()
+    if version:
+        separator = "&" if "?" in url else "?"
+        url = f"{url}{separator}v={quote(version)}"
+    return url
 
 
 def material_image_path(key: str) -> str:

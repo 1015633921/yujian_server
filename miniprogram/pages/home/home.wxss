@@ -265,6 +265,68 @@ page {
   font-size: 22rpx;
 }
 
+.new-user-guide {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24rpx;
+  margin: 30rpx 40rpx 0;
+  padding: 28rpx 30rpx;
+  border: 1rpx solid rgba(32, 32, 31, .08);
+  background:
+    linear-gradient(135deg, rgba(255,255,255,.94), rgba(250,248,242,.86));
+  box-shadow: 0 18rpx 44rpx rgba(47, 42, 32, .08);
+}
+
+.guide-copy {
+  min-width: 0;
+}
+
+.guide-kicker {
+  color: #9d7a3f;
+  font-size: 17rpx;
+  font-weight: 850;
+  letter-spacing: 2.4rpx;
+}
+
+.guide-title {
+  margin-top: 8rpx;
+  color: var(--yu-color-anchor-dark);
+  font-size: 30rpx;
+  font-weight: 900;
+  line-height: 1.22;
+}
+
+.guide-desc {
+  margin-top: 8rpx;
+  color: var(--yu-color-text-secondary);
+  font-size: 22rpx;
+  line-height: 1.48;
+}
+
+.guide-action {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 10rpx;
+  color: var(--yu-color-anchor-dark);
+  font-size: 23rpx;
+  font-weight: 760;
+  white-space: nowrap;
+}
+
+.guide-action view {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 42rpx;
+  height: 42rpx;
+  border-radius: 50%;
+  color: #fff;
+  background: #20201f;
+  font-size: 24rpx;
+}
+
 .section-dots {
   display: flex;
   align-items: center;
@@ -1031,6 +1093,7 @@ page {
 
   .workshop-section,
   .recommend-section,
+  .new-user-guide,
   .daily-lab-card,
   .inspiration-tray {
     margin-left: 28rpx;

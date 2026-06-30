@@ -1,27 +1,46 @@
 <view class="studio-page {{deviceClass}}" style="{{workspaceLayoutStyle}}">
   <view class="studio-top">
-    <view class="studio-title-overlay">
-      <view class="title title-premium"></view>
-      <view class="title-en">CRYSTAL STUDIO</view>
-    </view>
     <view class="title-row">
-      <view class="back-btn" bindtap="goBack"></view>
-      <view class="title">手串定制</view>
-      <button class="save-nav" bindtap="saveDraft">保存</button>
+      <view class="back-btn" catchtap="goBack" hover-class="back-btn-press" aria-role="button" aria-label="返回"></view>
     </view>
   </view>
 
   <view class="canvas-area">
     <view class="studio-count-pill {{countOverClass}}" bindtap="openWristSetting">
       <view class="count-gem"></view>
-      <text class="count-prefix"></text>
-      <view class="count-main">{{summary.count}}/18</view>
-      <text class="count-wrist">{{wristSize}}cm</text>
+      <view class="count-copy">
+        <view class="count-row">
+          <text class="count-prefix">已选</text>
+          <view class="count-main">{{summary.count}}/18</view>
+          <text class="count-unit">颗</text>
+        </view>
+        <view class="count-wrist">当前腕围 {{wristSize}}cm</view>
+        <view class="count-current-length">当前串长 {{summary.length}}cm</view>
+      </view>
+    </view>
+
+    <view class="tray-theme-switch">
+      <view class="tray-theme-dots">
+        <view
+          wx:for="{{trayThemeItems}}"
+          wx:key="value"
+          class="tray-theme-option {{item.activeClass}}"
+          data-theme="{{item.value}}"
+          bindtap="selectTrayTheme"
+        >
+          <view class="tray-theme-dot {{item.dotClass}}"></view>
+        </view>
+      </view>
     </view>
 
     <view class="bracelet-stage">
-      <view class="bracelet-circle {{isShuffling ? 'shuffling' : ''}}">
-        <image class="bracelet-tray-image" src="{{trayImageUrl}}" mode="aspectFill"></image>
+      <view class="bracelet-circle tray-theme-{{trayTheme}} {{trayImageFailed ? 'tray-image-failed' : ''}} {{isShuffling ? 'shuffling' : ''}}">
+        <image
+          class="bracelet-tray-image"
+          src="{{trayImageUrl}}"
+          mode="aspectFill"
+          binderror="onTrayImageError"
+        ></image>
         <view class="bracelet-string {{braceletStringClass}}" style="{{stringStyle}}"></view>
         <canvas
           wx:if="{{useCanvasRenderer}}"
@@ -75,13 +94,9 @@
         <view class="tool-icon tool-wrist"></view>
         <view class="tool-label">手围</view>
       </view>
-      <view class="tool-item {{shuffleButtonClass}}" bindtap="shuffleDesign">
-        <view class="tool-icon tool-string"></view>
-        <view class="tool-label">{{isLooseMode ? '成串' : '重串'}}</view>
-      </view>
-      <view wx:if="{{!isLooseMode}}" class="tool-item {{releaseButtonClass}}" bindtap="releaseString">
-        <view class="tool-icon tool-release"></view>
-        <view class="tool-label">解串</view>
+      <view class="tool-item {{shuffleButtonClass}}" bindtap="toggleStringMode">
+        <view class="tool-icon {{isLooseMode ? 'tool-string' : 'tool-release'}}"></view>
+        <view class="tool-label">{{isLooseMode ? '成串' : '打散'}}</view>
       </view>
       <view class="tool-item {{showEnergyPanel ? 'active' : ''}}" bindtap="toggleEnergyPanel">
         <view class="tool-icon tool-energy"></view>
@@ -151,7 +166,29 @@
 
       <view class="material-content">
         <view class="filter-summary">{{filterSummary}}</view>
-        <scroll-view wx:if="{{seriesOptions.length > 1}}" class="series-scroll" scroll-x enable-flex>
+        <view wx:if="{{showWorkspaceGuide}}" class="workspace-guide-card">
+          <view class="workspace-guide-head">
+            <view>
+              <view class="workspace-guide-kicker">FIRST DIY</view>
+              <view class="workspace-guide-title">三步开始排一串</view>
+            </view>
+            <view class="workspace-guide-close" catchtap="dismissWorkspaceGuide" data-forever="true">×</view>
+          </view>
+          <view class="workspace-guide-list">
+            <view wx:for="{{workspaceGuideItems}}" wx:key="index" class="workspace-guide-item">
+              <view class="workspace-guide-index">{{item.index}}</view>
+              <view>
+                <view class="workspace-guide-item-title">{{item.title}}</view>
+                <view class="workspace-guide-desc">{{item.desc}}</view>
+              </view>
+            </view>
+          </view>
+          <view class="workspace-guide-actions">
+            <button class="workspace-guide-primary" catchtap="dismissWorkspaceGuide" data-forever="true">开始试试</button>
+            <view class="workspace-guide-secondary" catchtap="dismissWorkspaceGuide" data-forever="true">不再提示</view>
+          </view>
+        </view>
+        <scroll-view wx:if="{{seriesOptions.length > 1}}" class="series-scroll" scroll-x enhanced="{{true}}" bounces="{{true}}" show-scrollbar="{{false}}">
           <view class="series-tabs">
             <view wx:for="{{seriesOptions}}" wx:key="value" class="series-tab {{item.className}}" data-series="{{item.value}}" bindtap="selectSeries">{{item.label}}</view>
           </view>
@@ -164,7 +201,7 @@
         <view wx:if="{{materialsLoading}}" class="material-load-state">正在同步最新珠材，图片加载时会先显示柔光占位</view>
         <view wx:if="{{materialsErrorText}}" class="material-load-state material-load-warning">{{materialsErrorText}}</view>
 
-        <scroll-view class="material-scroll" scroll-y bindscrolltolower="loadMoreMaterials">
+        <scroll-view class="material-scroll" scroll-y enhanced="{{true}}" bounces="{{true}}" show-scrollbar="{{false}}" bindscrolltolower="loadMoreMaterials">
           <view wx:if="{{visibleMaterials.length}}" class="material-grid">
             <view
               wx:for="{{visibleMaterials}}"
@@ -210,17 +247,9 @@
         <text>当前方案</text>
         <view class="checkout-price">¥{{summary.priceText}}</view>
         <view class="checkout-metrics">
-          <view class="checkout-metric">
-            <text>长度</text>
-            <view>{{summary.length}}/{{wristSize}}cm</view>
-          </view>
-          <view class="checkout-metric" bindtap="toggleWearStyle">
+          <view class="checkout-metric checkout-metric-action" bindtap="openWristSetting">
             <text>戴法</text>
             <view>{{wearStyleText}}</view>
-          </view>
-          <view class="checkout-metric">
-            <text>重量</text>
-            <view>{{summary.weight}}g</view>
           </view>
         </view>
       </view>
@@ -236,7 +265,7 @@
       <view class="wrist-picker-head">
         <view>
           <view class="wrist-picker-title">选择手围</view>
-          <view class="wrist-picker-subtitle">切换后会同步更新圆盘刻度和当前方案适配参考。</view>
+          <view class="wrist-picker-subtitle">设置腕围与戴法，系统会同步更新当前方案适配参考。</view>
         </view>
         <view class="wrist-picker-close" bindtap="closeWristSetting">×</view>
       </view>
@@ -275,6 +304,24 @@
         </scroll-view>
       </view>
       <view class="wrist-ruler-range">{{wristRulerRangeText}}</view>
+      <view class="wear-style-section">
+        <view class="wear-style-section-title">戴法</view>
+        <view class="wear-style-options">
+          <view
+            wx:for="{{wearStyleOptions}}"
+            wx:key="value"
+            class="wear-style-option {{item.className}}"
+            data-style="{{item.value}}"
+            bindtap="selectWearStyle"
+          >
+            <view class="wear-style-option-main">
+              <view class="wear-style-option-title">{{item.label}}</view>
+              <view class="wear-style-option-desc">{{item.desc}}</view>
+            </view>
+            <view class="wear-style-check"></view>
+          </view>
+        </view>
+      </view>
       <button class="wrist-ruler-confirm" bindtap="confirmWristRuler">确认手围</button>
     </view>
   </view>

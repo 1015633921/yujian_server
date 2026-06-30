@@ -7,11 +7,13 @@ const state = {
   page: 'overview',
   insight: 'assessments',
   materialUi: { selected: new Set(), expanded: new Set(), sortBy: 'sort_order', sortOrder: 'asc' },
-  cache: { materials: [], blocks: [], homeBanners: [], orders: [], communityPosts: [], recommendationPlans: [], admins: [], loginLogs: [], dailyRules: null }
+  warehouseTab: 'overview',
+  cache: { materials: [], materialSpus: [], materialOptions: null, materialTaxonomy: [], blocks: [], homeBanners: [], orders: [], communityPosts: [], recommendationPlans: [], admins: [], loginLogs: [], dailyRules: null, warehouse: { items: [], options: null, batches: [], movements: [], overview: null } }
 };
 const pageMeta = {
   overview:['BUSINESS OVERVIEW','经营概览'],orders:['ORDER FULFILLMENT','订单履约'],
   materials:['PRODUCT CATALOG','珠材商品'],content:['CONTENT OPERATIONS','运营内容'],
+  warehouse:['WAREHOUSE INVENTORY','仓库库存'],
   bannerContent:['HOME BANNERS','Home Banner'],
   communityContent:['COMMUNITY CMS','社区灵感'],recommendContent:['RECOMMEND CMS','热门推荐'],
   users:['CUSTOMER CENTER','用户中心'],insights:['ENERGY INSIGHTS','能量数据'],
@@ -19,6 +21,93 @@ const pageMeta = {
   admins:['ADMIN SECURITY','管理员账号'],
   system:['SYSTEM READINESS','系统配置']
 };
+const DEFAULT_MATERIAL_OPTIONS = {
+  elements: [
+    {key:'metal',label:'金'}, {key:'wood',label:'木'}, {key:'water',label:'水'}, {key:'fire',label:'火'}, {key:'earth',label:'土'}
+  ],
+  wish_pools: [
+    {key:'wealth',label:'招财'}, {key:'career',label:'事业'}, {key:'love',label:'桃花'}, {key:'relationship',label:'人缘'},
+    {key:'protection',label:'守护'}, {key:'calm',label:'安定'}, {key:'health',label:'健康'}, {key:'focus',label:'专注'},
+    {key:'communication',label:'表达沟通'}, {key:'study',label:'学习考试'}, {key:'sleep',label:'睡眠修复'},
+    {key:'emotion',label:'情绪柔和'}, {key:'inspiration',label:'灵感创作'}
+  ],
+  chakras: [
+    {key:'root',label:'海底轮'}, {key:'sacral',label:'脐轮'}, {key:'solar_plexus',label:'太阳轮'}, {key:'heart',label:'心轮'},
+    {key:'throat',label:'喉轮'}, {key:'third_eye',label:'眉心轮'}, {key:'crown',label:'顶轮'}
+  ],
+  color_families: [
+    {key:'clear',label:'清透'}, {key:'white',label:'白色'}, {key:'pink',label:'粉色'}, {key:'blue',label:'蓝色'}, {key:'green',label:'绿色'},
+    {key:'purple',label:'紫色'}, {key:'gold',label:'金色'}, {key:'red',label:'红色'}, {key:'brown',label:'棕色'}, {key:'black',label:'黑色'}
+  ],
+  grades: [
+    {key:'entry',label:'入门级'}, {key:'A',label:'A'}, {key:'AA',label:'AA'}, {key:'AAA',label:'AAA'},
+    {key:'AAAA',label:'AAAA'}, {key:'premium',label:'精选级'}, {key:'collector',label:'收藏级'}
+  ],
+  effects: [
+    {key:'wealth',label:'招财'}, {key:'career',label:'事业推进'}, {key:'love',label:'桃花人缘'}, {key:'protection',label:'守护避煞'},
+    {key:'calm',label:'稳定安定'}, {key:'focus',label:'专注清晰'}, {key:'communication',label:'表达沟通'},
+    {key:'emotion',label:'情绪柔和'}, {key:'sleep',label:'睡眠修复'}, {key:'inspiration',label:'灵感创作'}, {key:'vitality',label:'活力自信'}
+  ],
+  mood_tags: [
+    {key:'calming',label:'舒缓'}, {key:'confidence',label:'自信'}, {key:'clarity',label:'清晰'}, {key:'focus',label:'专注'},
+    {key:'vitality',label:'活力'}, {key:'softness',label:'柔和'}, {key:'boundary',label:'边界'}, {key:'companionship',label:'陪伴'}
+  ],
+  visual_tags: [
+    {key:'transparent',label:'透明感'}, {key:'milky',label:'奶白感'}, {key:'icy',label:'冰透'}, {key:'sparkling',label:'闪光'},
+    {key:'soft_color',label:'低饱和'}, {key:'texture',label:'纹理感'}, {key:'dark',label:'深色'}, {key:'warm',label:'暖调'}
+  ],
+  roles: [
+    {key:'primary',label:'主石'}, {key:'support',label:'辅石'}, {key:'accent',label:'点缀'}, {key:'spacer',label:'隔珠/隔片'}, {key:'pendant',label:'吊坠/花托'}
+  ],
+  match_rules: [
+    {key:'no_limit',label:'不限搭配'}, {key:'best_as_primary',label:'适合作主石'}, {key:'best_as_support',label:'适合作辅石'},
+    {key:'accent_only',label:'建议少量点缀'}, {key:'spacer_only',label:'仅作隔珠/隔片'}, {key:'pair_symmetry',label:'建议成对对称'},
+    {key:'avoid_dense',label:'避免高密度使用'}, {key:'needs_color_balance',label:'需搭配平衡色'}
+  ],
+  care_tags: [
+    {key:'avoid_water',label:'避免长期泡水'}, {key:'avoid_sun',label:'避免暴晒'}, {key:'avoid_sweat',label:'避免汗液久沾'},
+    {key:'fragile',label:'易磕碰'}, {key:'metal_sensitive',label:'金属敏感提醒'}, {key:'clean_regularly',label:'建议定期清洁'},
+    {key:'storage_separate',label:'建议分开收纳'}
+  ],
+  bead_shapes: [
+    {key:'round',label:'圆珠'}, {key:'faceted_round',label:'切面圆珠'}, {key:'rondelle',label:'算盘珠'},
+    {key:'barrel',label:'桶珠'}, {key:'disc',label:'隔片'}, {key:'special',label:'异形'}
+  ],
+  surface_finishes: [
+    {key:'glossy',label:'亮面抛光'}, {key:'matte',label:'哑光'}, {key:'frosted',label:'磨砂'},
+    {key:'faceted',label:'切面'}, {key:'carved',label:'雕刻'}
+  ],
+  transparency_levels: [
+    {key:'transparent',label:'通透'}, {key:'semi_transparent',label:'半透'}, {key:'translucent',label:'微透'}, {key:'opaque',label:'不透'}
+  ],
+  texture_features: [
+    {key:'clean',label:'净体'}, {key:'cloud',label:'棉絮'}, {key:'crack',label:'冰裂'}, {key:'rutile',label:'发丝'},
+    {key:'phantom',label:'幽灵'}, {key:'cat_eye',label:'猫眼'}, {key:'color_band',label:'色带'}, {key:'mineral_inclusion',label:'矿物内含'}
+  ],
+  batch_variation_levels: [
+    {key:'low',label:'批次差异小'}, {key:'medium',label:'批次差异中'}, {key:'high',label:'批次差异大'}
+  ],
+  taxonomy: [],
+  field_specs: { option_types: [], material_fields: [], governance: {} }
+};
+const MATERIAL_OPTION_TYPE_LABELS = {
+  wish_pools: '适用愿景池',
+  chakras: '对应脉轮',
+  color_families: '色彩倾向',
+  grades: '品质等级',
+  effects: '核心功效标签',
+  mood_tags: '情绪标签',
+  visual_tags: '视觉标签',
+  roles: '材料角色',
+  match_rules: '搭配规则',
+  care_tags: '佩戴养护',
+  bead_shapes: '珠体形制',
+  surface_finishes: '表面工艺',
+  transparency_levels: '通透度',
+  texture_features: '纹理/内含特征',
+  batch_variation_levels: '批次差异'
+};
+const MATERIAL_OPTION_TYPE_ORDER = ['wish_pools','effects','grades','chakras','color_families','mood_tags','visual_tags','roles','match_rules','care_tags','bead_shapes','surface_finishes','transparency_levels','texture_features','batch_variation_levels'];
 const EXPRESS_OPTIONS = [
   ['顺丰速运', 'shunfeng'],
   ['京东物流', 'jd'],
@@ -41,6 +130,8 @@ const debouncedLoadCommunityPosts=()=>debounce('communityPosts',loadCommunityPos
 const debouncedLoadRecommendationPlans=()=>debounce('recommendationPlans',loadRecommendationPlans);
 const debouncedLoadUsers=()=>debounce('users',loadUsers);
 const debouncedLoadInsights=()=>debounce('insights',loadInsights);
+const debouncedLoadWarehouseItems=()=>debounce('warehouseItems',loadWarehouseItems);
+const debouncedLoadWarehouseMovements=()=>debounce('warehouseMovements',loadWarehouseMovements);
 function formValue(id){return ($(id)?.value||'').trim()}
 function selectedExpress(){
   const raw=formValue('ship_express');
@@ -89,7 +180,7 @@ async function copyReceiverInfo(id){
   catch(e){toast(e.message||'复制收件信息失败')}
 }
 function packingRows(x){
-  const groups=materialGroups(x.sequence||[]);
+  const groups=sequenceMaterialGroups(x.sequence||[]);
   const groupRows=groups.map(item=>`<tr><td>${esc(item.name||item.id||'-')}</td><td>${esc([item.category,item.series,item.grade,item.size?`${item.size}mm`:'' ].filter(Boolean).join(' · '))}</td><td>${esc(item.sku||item.id||'-')}</td><td>${item.qty}</td></tr>`).join('');
   const sequenceRows=(x.sequence||[]).map((item,index)=>`<tr><td>${index+1}</td><td>${esc(item.name||item.id||'-')}</td><td>${esc([item.series,item.grade,item.size?`${item.size}mm`:'' ].filter(Boolean).join(' · '))}</td><td>${esc(item.sku||item.id||'-')}</td></tr>`).join('');
   return {groupRows,sequenceRows};
@@ -135,7 +226,7 @@ function switchPage(page){
   state.page=page;document.querySelectorAll('.nav-item').forEach(x=>x.classList.toggle('active',x.dataset.page===page));
   document.querySelectorAll('.page-view').forEach(x=>x.classList.toggle('hide',x.id!==page));
   $('pageEyebrow').textContent=pageMeta[page][0];$('pageTitle').textContent=pageMeta[page][1];
-  ({overview:loadDashboard,orders:loadOrders,materials:loadMaterials,content:loadBlocks,bannerContent:loadHomeBanners,communityContent:loadCommunityPosts,recommendContent:loadRecommendationPlans,users:loadUsers,insights:loadInsights,dailyRules:loadDailyRules,admins:loadAdmins,system:loadSystemStatus}[page]||(()=>{}))();
+  ({overview:loadDashboard,orders:loadOrders,materials:loadMaterials,warehouse:loadWarehouse,content:loadBlocks,bannerContent:loadHomeBanners,communityContent:loadCommunityPosts,recommendContent:loadRecommendationPlans,users:loadUsers,insights:loadInsights,dailyRules:loadDailyRules,admins:loadAdmins,system:loadSystemStatus}[page]||(()=>{}))();
 }
 function refreshCurrent(){switchPage(state.page);toast('数据已刷新')}
 function statusPill(status,text){const cls=['refund_requested','after_sale'].includes(status)?'danger':['pending_payment','pending_ship'].includes(status)?'warn':['closed','refunded'].includes(status)?'muted':'';return `<span class="status-pill ${cls}">${esc(text||status)}</span>`}
@@ -241,13 +332,13 @@ function braceletPreview(sequence,size=300){
     return `<div class="preview-bead" title="${esc(`${index+1}. ${item.name||item.id||''} ${item.size||''}mm`)}" style="left:${left}px;top:${top}px;width:${bead}px;height:${bead}px">${bg}</div>`;
   }).join('')}<div class="preview-center"><b>${items.length}</b><span>颗珠子</span></div></div>`;
 }
-function materialGroups(sequence){
+function sequenceMaterialGroups(sequence){
   const groups=new Map();
   (sequence||[]).forEach(item=>{const key=item.sku||item.id||item.name;const row=groups.get(key)||{...item,qty:0};row.qty+=1;groups.set(key,row)});
   return [...groups.values()];
 }
 function designShowcase(x,withButton=true){
-  const design=x.design||x.saved_design?.design||{},summary=design.summary||{},groups=materialGroups(x.sequence||[]);
+  const design=x.design||x.saved_design?.design||{},summary=design.summary||{},groups=sequenceMaterialGroups(x.sequence||[]);
   return `<div class="design-showcase">
     <div class="design-preview-wrap">${braceletPreview(x.sequence||[],260)}</div>
     <div class="design-showcase-copy">
@@ -294,7 +385,7 @@ function refundReviewPanel(x){
 async function openDesign(id){
   const x=state.currentOrder?.order_id===id?state.currentOrder:await api(`/api/v1/admin/orders/${encodeURIComponent(id)}`);
   state.currentOrder=x;
-  const design=x.design||x.saved_design?.design||{},summary=design.summary||{},groups=materialGroups(x.sequence||[]);
+  const design=x.design||x.saved_design?.design||{},summary=design.summary||{},groups=sequenceMaterialGroups(x.sequence||[]);
   const groupCards=groups.map(item=>`<div class="material-summary-card">${item.image_url?`<img src="${esc(item.image_url)}">`:`<i style="background:${esc(item.color||'#d9ddd7')}"></i>`}<div><b>${esc(item.name||item.id||'-')}</b><span>${[item.category,item.series,item.grade,item.size?`${item.size}mm`:''].filter(Boolean).map(esc).join(' · ')}</span><small>${esc(item.sku||item.id||'-')}</small></div><strong>× ${item.qty}</strong></div>`).join('');
   const sequence=(x.sequence||[]).map((item,index)=>`<div class="sequence-item"><div class="sequence-index">${String(index+1).padStart(2,'0')}</div>${item.image_url?`<img class="sequence-image" src="${esc(item.image_url)}">`:`<div class="sequence-image placeholder"></div>`}<div class="sequence-copy"><b>${esc(item.name||item.id||'-')}</b><span>${[item.category,item.series,item.grade,item.size?`${item.size}mm`:''].filter(Boolean).map(esc).join(' · ')}</span><small>${esc(item.sku||item.id||'-')}</small></div><div class="sequence-price">${money(item.price)}</div></div>`).join('');
   openDrawer('DIY DESIGN DETAIL',`DIY方案 ${x.design_id||''}`,`
@@ -462,96 +553,24 @@ async function submitRefundSync(id){
     toast('微信退款状态已同步');
   }catch(e){toast(e.message||'同步失败')}
 }
-async function loadMaterials(){
-  const qs=new URLSearchParams({keyword:formValue('materialKeyword'),top:formValue('materialTop'),element:formValue('materialElement'),status:formValue('materialStatus'),sort_by:state.materialUi.sortBy,sort_order:state.materialUi.sortOrder});
-  const rows=await api(`/api/v1/admin/materials?${qs}`);state.cache.materials=rows;renderMaterialsTable();
-}
-function materialGroupKey(x){return `${x.top||''}::${x.category||''}::${x.series||x.name||''}`}
-function materialGroups(){
-  const map=new Map();
-  (state.cache.materials||[]).forEach(x=>{const key=materialGroupKey(x),g=map.get(key)||{key,top:x.top,category:x.category,series:x.series||x.name,items:[]};g.items.push(x);map.set(key,g)});
-  return [...map.values()].map(g=>{g.items.sort((a,b)=>num(a.size)-num(b.size));g.totalStock=g.items.reduce((s,x)=>s+num(x.stock),0);g.enabledCount=g.items.filter(x=>x.enabled!==0).length;g.minPrice=Math.min(...g.items.map(x=>num(x.price)));g.maxPrice=Math.max(...g.items.map(x=>num(x.price)));g.image=(g.items.find(x=>x.image_url)||{}).image_url;g.element=[...new Set(g.items.map(x=>x.element).filter(Boolean))].join('/');return g});
-}
 function sortHeader(label,key){const active=state.materialUi.sortBy===key;return `<button class="sort-head ${active?'active':''}" onclick="sortMaterials('${key}')">${label}${active?(state.materialUi.sortOrder==='asc'?' ↑':' ↓'):' ↕'}</button>`}
-function renderMaterialsTable(){
-  const groups=materialGroups();
-  if(!groups.length){$('materialsTable').innerHTML='<div class="empty-table">暂无数据</div>';return}
-  updateMaterialBulkState();
-  const allIds=(state.cache.materials||[]).map(x=>x.id),allSelected=allIds.length&&allIds.every(id=>state.materialUi.selected.has(id));
-  const rows=groups.map(g=>{
-    const expanded=state.materialUi.expanded.has(g.key),groupSelected=g.items.every(x=>state.materialUi.selected.has(x.id));
-    const priceText=g.minPrice===g.maxPrice?money(g.minPrice):`${money(g.minPrice)} - ${money(g.maxPrice)}`;
-    const head=`<tr class="spu-row">
-      <td class="col-check"><input type="checkbox" ${groupSelected?'checked':''} onchange="toggleMaterialGroup('${esc(g.key)}',this.checked)"></td>
-      <td class="col-image"><button class="mini-btn expand-btn" onclick="toggleMaterialExpand('${esc(g.key)}')">${expanded?'－':'＋'}</button>${materialThumb(g.image,g.series)}</td>
-      <td class="col-name"><b>${esc(g.series)}</b><br><small>${topLabel(g.top)} / ${esc(g.category)} · ${g.items.length} 个规格</small></td>
-      <td class="col-size">${esc(g.items.map(x=>`${x.size}mm`).join(' / '))}</td>
-      <td class="col-price"><b>${priceText}</b></td><td class="col-stock">${g.totalStock}</td><td class="col-element">${elementTags(g.element)}</td>
-      <td class="col-status">${statusPill(g.enabledCount?'enabled':'closed',`${g.enabledCount}/${g.items.length} 启用`)}</td>
-      <td class="col-actions"><div class="table-actions"><button class="mini-btn" onclick="toggleMaterialExpand('${esc(g.key)}')">${expanded?'收起':'展开'}</button></div></td>
-    </tr>`;
-    const children=expanded?g.items.map(x=>`<tr class="sku-row">
-      <td class="col-check"><input type="checkbox" ${state.materialUi.selected.has(x.id)?'checked':''} onchange="toggleMaterialSelect('${esc(x.id)}',this.checked)"></td>
-      <td class="col-image">${materialThumb(x.image_url,x.name)}</td><td class="col-name"><b>${esc(x.name)}</b><br><small>${esc(x.skuId)}</small></td>
-      <td class="col-size">${esc(x.grade||'-')} · ${x.size}mm</td><td class="col-price"><b>${money(x.price)}</b></td>
-      <td class="col-stock"><input class="inline-number" type="number" min="0" value="${num(x.stock)}" onchange="updateMaterialStock('${esc(x.id)}',this.value)"></td>
-      <td class="col-element">${elementTags(x.element)}</td><td class="col-status">${statusPill(x.enabled?'enabled':'closed',x.enabled?'启用':'停用')}</td>
-      <td class="col-actions"><div class="table-actions"><button class="mini-btn" onclick="editMaterial('${esc(x.id)}')">编辑</button><button class="mini-btn danger" onclick="deleteMaterial('${esc(x.id)}')">删除</button></div></td>
-    </tr>`).join(''):'';
-    return head+children;
-  }).join('');
-  $('materialsTable').innerHTML=`<table class="data-table material-tree"><thead><tr><th class="col-check"><input type="checkbox" ${allSelected?'checked':''} onchange="toggleAllMaterials(this.checked)"></th><th class="col-image">图片</th><th class="col-name">SPU / SKU</th><th class="col-size">${sortHeader('尺寸','size')}</th><th class="col-price">${sortHeader('价格','price')}</th><th class="col-stock">${sortHeader('库存','stock')}</th><th class="col-element">${sortHeader('五行','element')}</th><th class="col-status">状态</th><th class="col-actions">操作</th></tr></thead><tbody>${rows}</tbody></table>`;
-}
 function materialThumb(url,name){return url?`<span class="thumb-wrap"><img class="thumb material-thumb" src="${esc(url)}"><span class="thumb-pop"><img src="${esc(url)}"><b>${esc(name||'')}</b></span></span>`:`<span class="thumb material-thumb placeholder-thumb">未传图</span>`}
-function elementTags(value){const items=String(value||'-').split('/').filter(Boolean);return `<div class="element-tags">${items.map(x=>`<span class="element-${esc(x)}">${esc(x)}</span>`).join('')}</div>`}
 function updateMaterialBulkState(){const count=selectedMaterialIds().length;if($('materialSelectedCount'))$('materialSelectedCount').textContent=count?`已选 ${count} 项`:'未选择';document.querySelectorAll('.bulk-btn').forEach(btn=>{btn.disabled=!count;btn.classList.toggle('active',!!count)})}
 function sortMaterials(key){if(state.materialUi.sortBy===key){state.materialUi.sortOrder=state.materialUi.sortOrder==='asc'?'desc':'asc'}else{state.materialUi.sortBy=key;state.materialUi.sortOrder='asc'}loadMaterials()}
 function toggleMaterialExpand(key){state.materialUi.expanded.has(key)?state.materialUi.expanded.delete(key):state.materialUi.expanded.add(key);renderMaterialsTable()}
 function toggleMaterialSelect(id,checked){checked?state.materialUi.selected.add(id):state.materialUi.selected.delete(id);renderMaterialsTable()}
-function toggleMaterialGroup(key,checked){const g=materialGroups().find(x=>x.key===key);(g?.items||[]).forEach(x=>checked?state.materialUi.selected.add(x.id):state.materialUi.selected.delete(x.id));renderMaterialsTable()}
-function toggleAllMaterials(checked){(state.cache.materials||[]).forEach(x=>checked?state.materialUi.selected.add(x.id):state.materialUi.selected.delete(x.id));renderMaterialsTable()}
-function selectedMaterialIds(){return [...state.materialUi.selected].filter(id=>(state.cache.materials||[]).some(x=>x.id===id))}
 async function batchMaterials(action){
   const ids=selectedMaterialIds();if(!ids.length){toast('请先勾选珠材');return}
-  let value=null,label={enable:'启用',disable:'禁用',price:'改价',stock:'改库存',delete:'删除'}[action]||action;
+  let value=null,label={enable:'启用',disable:'禁用',price:'改价',stock:'改库存',safety_stock:'改安全库存',delete:'删除'}[action]||action;
   if(action==='price'){value=prompt(`将 ${ids.length} 个 SKU 的价格改为：`);if(value===null)return}
   if(action==='stock'){value=prompt(`将 ${ids.length} 个 SKU 的库存改为：`);if(value===null)return}
+  if(action==='safety_stock'){value=prompt(`将 ${ids.length} 个 SKU 的安全库存改为：`);if(value===null)return}
   if(action==='delete'&&!confirm(`确定删除 ${ids.length} 个 SKU 吗？此操作不可恢复。`))return;
   await api('/api/v1/admin/materials/batch',{method:'POST',body:JSON.stringify({ids,action,value})});
   state.materialUi.selected.clear();await Promise.all([loadMaterials(),loadDashboard()]);toast(`批量${label}已完成`);
 }
-async function updateMaterialStock(id,value){await api('/api/v1/admin/materials/batch',{method:'POST',body:JSON.stringify({ids:[id],action:'stock',value:+value})});const item=state.cache.materials.find(x=>x.id===id);if(item)item.stock=+value;toast('库存已更新')}
+async function updateMaterialStock(id,value){await api('/api/v1/admin/materials/batch',{method:'POST',body:JSON.stringify({ids:[id],action:'stock',value:+value})});const item=state.cache.materials.find(x=>x.id===id);if(item){item.stock=+value;if(item.sku){item.sku.stock=+value;item.sku.stock_status=stockStatus(+value,item.sku.safety_stock)}}toast('库存已更新');await loadMaterials()}
 const MATERIAL_SIZE_OPTIONS=[8,9,10,11,12,13,14,15];
-function newMaterial(){renderMaterial({top:'bead',element:'水',color:'#dfe3e5',shine:'#ffffff',enabled:false,sort_order:0,stock:0,size:8,weight:1,price:0.01})}
-function editMaterial(id){renderMaterial(state.cache.materials.find(x=>x.id===id))}
-function renderMaterial(x){
-  const imageUrls=(x.image_urls||x.image_pool||[]).join('\n');
-  const isEdit=!!x.id;
-  openDrawer('PRODUCT EDITOR',isEdit?'编辑珠材':'新增珠材',`<div class="form-grid material-form">
-  <label>ID<input id="mat_id" class="readonly-input" value="${esc(x.id||'')}" placeholder="后端自动生成" readonly></label>
-  <label>SKU<input id="mat_sku" class="readonly-input" value="${esc(x.skuId||'')}" placeholder="系统按类型/品种/尺寸自动生成" readonly></label>
-  ${selectField('mat_top','类型',x.top||'bead',[['bead','珠珠'],['accessory','配饰'],['pendant','花托']])}
-  <label>${fieldLabel('分类',true)}<input id="mat_category" value="${esc(x.category||'')}" placeholder="如：发晶 / 天然晶石"></label>
-  <label>${fieldLabel('品种',false)}<input id="mat_series" value="${esc(x.series||x.name||'')}" placeholder="同一材质的 SPU 名称"></label>
-  ${field('mat_grade','等级',x.grade||'')}
-  <label>${fieldLabel('名称',true)}<input id="mat_name" value="${esc(x.name||'')}" placeholder="如：南红玛瑙"></label>
-  <label>${fieldLabel('功效',true)}<input id="mat_effect" value="${esc(x.effect||'')}" placeholder="如：活力与自信"></label>
-  <label>${fieldLabel('五行',true)}<input id="mat_element" value="${esc(x.element||'')}" placeholder="金 / 木 / 水 / 火 / 土"></label>
-  <label>${fieldLabel('价格',true)}<input id="mat_price" type="number" step="0.01" min="0" value="${esc(x.price??0)}" oninput="syncSpecDefaults()"></label>
-  <label>${fieldLabel('尺寸 mm',true)}<input id="mat_size" type="number" min="1" step="0.1" value="${esc(x.size||8)}"></label>
-  <label>${fieldLabel('重量 g',true)}<input id="mat_weight" type="number" min="0" step="0.01" value="${esc(x.weight||1)}" oninput="syncSpecDefaults()"></label>
-  <label>${fieldLabel('库存',true)}<input id="mat_stock" type="number" min="0" step="1" value="${esc(x.stock||0)}" oninput="syncSpecDefaults();guardMaterialEnabled()"></label>
-  ${colorControl('mat_color','主色',x.color||'#dfe3e5')}
-  ${colorControl('mat_shine','高光',x.shine||'#ffffff')}
-  <label>排序<input id="mat_sort" type="number" value="${esc(x.sort_order||0)}"><small class="help-text">数字越小越靠前，默认 0。</small></label>
-  ${selectField('mat_enabled','状态',String((x.enabled!==0)&&(x.stock||0)>0),[['true','启用'],['false','停用']])}
-  <section class="full material-form-notice">库存为 0 时系统会自动停用，避免前端出现“上架但售罄”的冲突。</section>
-  ${isEdit?'':materialSpecConfig(x)}
-  ${imageUploadField('mat_image','珠材主图 / CDN 图片',x.image_url||'','material',true)}
-  ${materialMultiImageField('mat_images',imageUrls)}
-  </div><div class="form-actions"><button class="btn secondary" onclick="closeDrawer()">取消</button><button class="btn primary" onclick="saveMaterial()">保存珠材</button></div>`);
-  guardMaterialEnabled();
-}
 function colorControl(id,label,value){
   const safe=normalizeHexColor(value,'#dfe3e5');
   return `<label class="color-control">${fieldLabel(label,false)}<div><input id="${id}_picker" type="color" value="${esc(safe)}" oninput="syncColorText('${id}',this.value)"><input id="${id}" value="${esc(safe)}" placeholder="#dfe3e5" oninput="syncColorPicker('${id}')"></div></label>`;
@@ -575,7 +594,9 @@ function specRow(size,x){
   return `<div class="spec-row" data-size="${size}">
     <label class="spec-check"><input type="checkbox" id="mat_spec_${size}_enabled" ${checked}>${size}mm</label>
     <label>价格<input id="mat_spec_${size}_price" type="number" min="0" step="0.01" value="${esc(x.price??0)}"></label>
+    <label>成本<input id="mat_spec_${size}_cost" type="number" min="0" step="0.01" value="${esc(x.cost_price??0)}"></label>
     <label>库存<input id="mat_spec_${size}_stock" type="number" min="0" step="1" value="${esc(x.stock||0)}"></label>
+    <label>安全库存<input id="mat_spec_${size}_safety" type="number" min="0" step="1" value="${esc(x.safety_stock||0)}"></label>
     <label>重量<input id="mat_spec_${size}_weight" type="number" min="0" step="0.01" value="${esc(x.weight||1)}"></label>
   </div>`;
 }
@@ -583,41 +604,13 @@ function toggleMaterialSpecMode(){const multi=formValue('mat_spec_mode')==='mult
 function syncSpecDefaults(){
   MATERIAL_SIZE_OPTIONS.forEach(size=>{
     if($(`mat_spec_${size}_price`))$(`mat_spec_${size}_price`).value=formValue('mat_price')||0;
+    if($(`mat_spec_${size}_cost`))$(`mat_spec_${size}_cost`).value=formValue('mat_cost_price')||0;
     if($(`mat_spec_${size}_stock`))$(`mat_spec_${size}_stock`).value=formValue('mat_stock')||0;
+    if($(`mat_spec_${size}_safety`))$(`mat_spec_${size}_safety`).value=formValue('mat_safety_stock')||0;
     if($(`mat_spec_${size}_weight`))$(`mat_spec_${size}_weight`).value=formValue('mat_weight')||1;
   });
 }
 function guardMaterialEnabled(){const stock=num(formValue('mat_stock'));if(stock<=0&&$('mat_enabled'))$('mat_enabled').value='false'}
-function materialSkuToken(value,fallback='item'){
-  const text=String(value||'').trim().toLowerCase();
-  const latin=text.replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
-  if(latin)return latin.slice(0,24);
-  let hash=0;for(let i=0;i<text.length;i++)hash=((hash<<5)-hash)+text.charCodeAt(i)|0;
-  return `${fallback}-${Math.abs(hash).toString(16).slice(0,8)||'new'}`;
-}
-function buildMaterialSku(payload){
-  const size=Number(payload.size||0);
-  const sizeText=Number.isInteger(size)?`${size}mm`:`${String(size).replace('.','p')}mm`;
-  return `${materialSkuToken(payload.top,'type')}-${materialSkuToken(payload.series||payload.name||payload.category,'item')}-${sizeText}`;
-}
-function validateMaterialForm(){
-  const required=[['mat_category','分类'],['mat_name','名称'],['mat_effect','功效'],['mat_element','五行'],['mat_image','珠材主图']];
-  for(const [id,label] of required){if(!validateRequired(id,label))return false}
-  return validateNumber('mat_price','价格',0)&&validateNumber('mat_size','尺寸',1)&&validateNumber('mat_weight','重量',0)&&validateNumber('mat_stock','库存',0)&&validateNumber('mat_sort','排序',0);
-}
-function materialBasePayload(){
-  const stock=num(formValue('mat_stock'));
-  return {id:formValue('mat_id'),skuId:formValue('mat_sku'),top:formValue('mat_top'),category:formValue('mat_category'),series:formValue('mat_series')||formValue('mat_name'),grade:formValue('mat_grade'),name:formValue('mat_name'),effect:formValue('mat_effect'),element:formValue('mat_element'),price:num(formValue('mat_price')),size:num(formValue('mat_size'),8),weight:num(formValue('mat_weight'),1),stock, color:normalizeHexColor(formValue('mat_color')),shine:normalizeHexColor(formValue('mat_shine'),'#ffffff'),sort_order:num(formValue('mat_sort')),enabled:formValue('mat_enabled')==='true'&&stock>0,image_url:formValue('mat_image'),image_urls:splitList(formValue('mat_images')),image_path:''};
-}
-function materialSpecPayloads(base){
-  if(formValue('mat_spec_mode')!=='multi')return [base];
-  return MATERIAL_SIZE_OPTIONS.filter(size=>$(`mat_spec_${size}_enabled`)?.checked).map(size=>{
-    const stock=num(formValue(`mat_spec_${size}_stock`));
-    const item={...base,id:'',skuId:'',size,price:num(formValue(`mat_spec_${size}_price`)),stock,weight:num(formValue(`mat_spec_${size}_weight`)),enabled:stock>0&&formValue('mat_enabled')==='true'};
-    item.skuId=buildMaterialSku(item);
-    return item;
-  });
-}
 function materialMultiImageField(id,value=''){
   const list=splitList(value);
   return `<section class="full multi-image-field">
@@ -673,22 +666,691 @@ async function uploadMaterialMultiImages(id,files=[],category='material'){
   toast(`已追加 ${added.length} 张图片`);
 }
 function dropMaterialMultiImages(event,id,category){event.preventDefault();uploadMaterialMultiImages(id,Array.from(event.dataTransfer?.files||[]),category)}
-async function saveMaterial(){
-  if(!validateMaterialForm())return;
-  const base=materialBasePayload();
-  if(!base.id&&!base.skuId)base.skuId=buildMaterialSku(base);
-  const payloads=materialSpecPayloads(base);
-  if(!payloads.length){toast('请至少选择一个规格');return}
-  const zeroEnabled=payloads.some(x=>x.stock<=0&&formValue('mat_enabled')==='true');
-  if(zeroEnabled)toast('库存为 0 的规格已自动停用');
-  if(base.id){
-    await api(`/api/v1/admin/materials/${encodeURIComponent(base.id)}`,{method:'PUT',body:JSON.stringify(base)});
-  }else{
-    for(const payload of payloads)await api('/api/v1/admin/materials',{method:'POST',body:JSON.stringify(payload)});
-  }
-  closeDrawer();await Promise.all([loadMaterials(),loadDashboard()]);toast(payloads.length>1?`已生成 ${payloads.length} 个规格 SKU`:'珠材已保存')
+function matSku(x={}){return x.sku||{}}
+function matEnergy(x={}){return x.energy||{}}
+function matVisual(x={}){return x.visual||{}}
+function matRules(x={}){return x.rules||{}}
+function matTextList(value){return Array.isArray(value)?value.filter(Boolean).join('\n'):String(value||'')}
+function matJson(value){try{return JSON.stringify(value||{},null,2)}catch(e){return '{}'}}
+function materialOptions(){return {...DEFAULT_MATERIAL_OPTIONS,...(state.cache.materialOptions||{})}}
+function optionList(key){return materialOptions()[key]||[]}
+function optionLabel(key,value){const item=optionList(key).find(x=>x.key===value||x.label===value);return item?item.label:(value||'')}
+function materialOptionTypes(){return materialOptions().option_types||MATERIAL_OPTION_TYPE_ORDER.map(key=>({key,label:MATERIAL_OPTION_TYPE_LABELS[key]||key}))}
+function materialOptionItems(){return materialOptions().option_items||[]}
+function materialOptionTypeLabel(type){return (materialOptionTypes().find(x=>x.key===type)||{}).label||MATERIAL_OPTION_TYPE_LABELS[type]||type}
+function materialFieldSpecs(){return materialOptions().field_specs||DEFAULT_MATERIAL_OPTIONS.field_specs}
+function materialFieldSpec(key){return (materialFieldSpecs().material_fields||[]).find(x=>x.key===key)||{}}
+function materialOptionTypeSpec(type){return materialOptionTypes().find(x=>x.key===type)||(materialFieldSpecs().option_types||[]).find(x=>x.key===type)||{}}
+function materialControlLabel(value){
+  return ({single_select:'单选',multi_select:'多选',taxonomy_select:'分类字典',number:'数值',text:'文本',textarea:'长文本',upload:'上传',upload_list:'多图上传',readonly:'系统生成'})[value]||value||'-';
 }
-async function deleteMaterial(id){if(!confirm('确定删除这个珠材吗？删除后不可恢复。'))return;await api(`/api/v1/admin/materials/${encodeURIComponent(id)}`,{method:'DELETE'});state.materialUi.selected.delete(id);await loadMaterials();toast('珠材已删除')}
+function materialValueKindLabel(value){
+  return ({enum_key:'枚举 key',tag_key:'标签 key',rule_key:'规则 key',taxonomy_key:'分类 key',system_key:'系统 key',money:'金额',quantity:'数量',free_text:'自由文本',asset_url:'资源 URL',asset_url_list:'资源列表'})[value]||value||'-';
+}
+function materialKnownOption(type,value){
+  if(!value)return true;
+  const text=String(value);
+  return optionList(type).some(item=>item.key===text||item.label===text);
+}
+function validateKnownMaterialOption(type,value,label,required=false){
+  if(!value){
+    if(required){toast(`${label}不能为空`);return false}
+    return true;
+  }
+  if(!materialKnownOption(type,value)){toast(`${label} 包含未维护选项：${value}，请先到字段字典维护`);return false}
+  return true;
+}
+function validateKnownMaterialOptionList(type,values,label,required=false){
+  const list=(values||[]).filter(Boolean);
+  if(required&&!list.length){toast(`${label}不能为空`);return false}
+  const invalid=list.find(value=>!materialKnownOption(type,value));
+  if(invalid){toast(`${label} 包含未维护选项：${invalid}，请先到字段字典维护`);return false}
+  return true;
+}
+function materialCardinalityLabel(value){return ({one:'单值',many:'多值'})[value]||value||''}
+function materialMetaPills(spec={}){
+  const pills=[materialControlLabel(spec.control),materialValueKindLabel(spec.value_kind),materialCardinalityLabel(spec.cardinality),spec.mutable===false?'固定':'可维护'].filter(Boolean);
+  return `<div class="field-meta-pills">${pills.map(x=>`<span>${esc(x)}</span>`).join('')}</div>`;
+}
+function materialGovernanceGuide(){
+  const g=materialFieldSpecs().governance||{};
+  return `<div class="material-governance-guide">
+    <b>字段口径</b>
+    <span>分类、品种、五行、愿景、规则、形制等确定字段统一走字典 / 枚举 key。</span>
+    <span>${esc(g.free_text_usage||'供应商、采购备注、故事等不确定性内容保留文本框。')}</span>
+  </div>`;
+}
+const ELEMENT_KEY_ALIASES={金:'metal',木:'wood',水:'water',火:'fire',土:'earth',metal:'metal',wood:'wood',water:'water',fire:'fire',earth:'earth'};
+function normalizeElementKey(value){return ELEMENT_KEY_ALIASES[String(value||'').trim()]||String(value||'').trim()}
+function checkboxGroup(id,label,options=[],selected=[],required=false){
+  const values=new Set((selected||[]).map(String).map(x=>id==='mat_secondary_elements'?normalizeElementKey(x):x).filter(Boolean));
+  const merged=[...options];
+  values.forEach(value=>{
+    if(!merged.some(item=>item.key===value||item.label===value)){
+      merged.push({key:value,label:value});
+    }
+  });
+  return `<label class="full choice-field">${fieldLabel(label,required)}<div class="choice-grid" id="${id}_choices">${merged.map(item=>`
+    <label class="choice-pill"><input type="checkbox" name="${id}" value="${esc(item.key)}" ${values.has(item.key)||values.has(item.label)?'checked':''}>${esc(item.label)}</label>`).join('')}</div></label>`;
+}
+function checkboxValues(name){return [...document.querySelectorAll(`input[name="${name}"]:checked`)].map(x=>x.value)}
+function selectOptions(options=[],selected='',placeholder='请选择'){
+  const current=String(selected||'');
+  const hasCurrent=!current||options.some(item=>item.key===current||item.label===current);
+  return `<option value="">${esc(placeholder)}</option>${!hasCurrent?`<option value="${esc(current)}" selected>${esc(current)}</option>`:''}${options.map(item=>`<option value="${esc(item.key)}" ${item.key===current||item.label===current?'selected':''}>${esc(item.label)}</option>`).join('')}`;
+}
+const STRUCTURED_MATERIAL_PARAM_KEYS=['bead_shape','surface_finish','transparency_level','texture_features','batch_variation','hole_diameter_mm','size_tolerance_mm'];
+function materialParamSelect(id,label,optionKey,value='',placeholder='请选择'){
+  return `<label>${fieldLabel(label,false)}<select id="${id}">${selectOptions(optionList(optionKey),value,placeholder)}</select></label>`;
+}
+function materialParamsExtraJson(params={}){
+  const extra={...(params||{})};
+  STRUCTURED_MATERIAL_PARAM_KEYS.forEach(key=>delete extra[key]);
+  return matJson(extra);
+}
+function optionalNumberPayload(id){
+  const text=formValue(id);
+  if(!text)return null;
+  const value=num(text,NaN);
+  return Number.isFinite(value)&&value>=0?value:null;
+}
+function materialParamPayload(){
+  const params=parseJsonField('mat_material_params_extra');
+  const pairs=[
+    ['bead_shape',formValue('mat_bead_shape')],
+    ['surface_finish',formValue('mat_surface_finish')],
+    ['transparency_level',formValue('mat_transparency_level')],
+    ['batch_variation',formValue('mat_batch_variation')]
+  ];
+  pairs.forEach(([key,value])=>{if(value)params[key]=value;else delete params[key]});
+  const textureFeatures=checkboxValues('mat_texture_features');
+  if(textureFeatures.length)params.texture_features=textureFeatures;else delete params.texture_features;
+  const hole=optionalNumberPayload('mat_hole_diameter');
+  const tolerance=optionalNumberPayload('mat_size_tolerance');
+  if(hole!==null)params.hole_diameter_mm=hole;else delete params.hole_diameter_mm;
+  if(tolerance!==null)params.size_tolerance_mm=tolerance;else delete params.size_tolerance_mm;
+  return params;
+}
+function multiSelectField(id,label,options=[],selected=[]){
+  const values=new Set((selected||[]).map(String));
+  return `<label>${fieldLabel(label,false)}<select id="${id}" multiple size="6">${options.map(item=>`<option value="${esc(item.key)}" ${values.has(item.key)?'selected':''}>${esc(item.label)}</option>`).join('')}</select><small class="help-text">按住 Ctrl/Command 可多选</small></label>`;
+}
+function multiSelectValues(id){return [...($(id)?.selectedOptions||[])].map(x=>x.value)}
+function activeTaxonomy(){return state.cache.materialTaxonomy||materialOptions().taxonomy||[]}
+function categoriesForTop(top='bead',includeDisabled=false){return activeTaxonomy().filter(x=>x.kind==='category'&&(x.top||'bead')===(top||'bead')&&(includeDisabled||x.enabled!==false))}
+function categoryForName(top,name){return categoriesForTop(top,true).find(x=>x.name===name)}
+function seriesForCategoryName(top,categoryName,includeDisabled=false){
+  const category=categoryForName(top,categoryName);
+  return (category?.series||[]).filter(x=>includeDisabled||x.enabled!==false);
+}
+async function ensureMaterialAdminMeta(){
+  if(!state.cache.materialOptions){
+    const data=await api('/api/v1/admin/material-options');
+    state.cache.materialOptions={...DEFAULT_MATERIAL_OPTIONS,...data};
+    state.cache.materialTaxonomy=data.taxonomy||[];
+  }
+  populateMaterialCategoryFilter();
+}
+function populateMaterialCategoryFilter(){
+  const select=$('materialCategory');if(!select)return;
+  const top=formValue('materialTop');
+  const show=!top||top==='bead';
+  select.classList.toggle('hide',!show);
+  if(!show){select.value='';return}
+  const current=select.value;
+  const categories=categoriesForTop('bead');
+  select.innerHTML=`<option value="">全部珠珠分类</option>${categories.map(x=>`<option value="${esc(x.name)}">${esc(x.name)}</option>`).join('')}`;
+  select.value=categories.some(x=>x.name===current)?current:'';
+}
+async function handleMaterialTopChange(){if(formValue('materialTop')!=='bead'&&$('materialCategory'))$('materialCategory').value='';populateMaterialCategoryFilter();await loadMaterials()}
+function categorySelectField(top,selected){
+  const categories=categoriesForTop(top,true);
+  const exists=categories.some(x=>x.name===selected);
+  return `<label>${fieldLabel('分类',true)}<select id="mat_category" onchange="updateMaterialSeriesOptions()"><option value="">请选择分类</option>${selected&&!exists?`<option value="${esc(selected)}" selected>${esc(selected)}</option>`:''}${categories.map(x=>`<option value="${esc(x.name)}" ${x.name===selected?'selected':''} ${x.enabled===false?'disabled':''}>${esc(x.name)}${x.enabled===false?'（已停用）':''}</option>`).join('')}</select></label>`;
+}
+function seriesSelectField(top,categoryName,selected){
+  const list=seriesForCategoryName(top,categoryName,true);
+  const exists=list.some(x=>x.name===selected);
+  return `<label>${fieldLabel('品种',true)}<select id="mat_series"><option value="">请选择品种</option>${selected&&!exists?`<option value="${esc(selected)}" selected>${esc(selected)}</option>`:''}${list.map(x=>`<option value="${esc(x.name)}" ${x.name===selected?'selected':''} ${x.enabled===false?'disabled':''}>${esc(x.name)}${x.enabled===false?'（已停用）':''}</option>`).join('')}</select></label>`;
+}
+function updateMaterialCategoryOptions(selected=''){
+  const top=formValue('mat_top')||'bead',select=$('mat_category');
+  if(!select)return;
+  const categories=categoriesForTop(top,true);
+  const current=selected||select.value;
+  const exists=categories.some(x=>x.name===current);
+  select.innerHTML=`<option value="">请选择分类</option>${current&&!exists?`<option value="${esc(current)}" selected>${esc(current)}</option>`:''}${categories.map(x=>`<option value="${esc(x.name)}" ${x.name===current?'selected':''} ${x.enabled===false?'disabled':''}>${esc(x.name)}${x.enabled===false?'（已停用）':''}</option>`).join('')}`;
+  updateMaterialSeriesOptions();
+}
+function updateMaterialSeriesOptions(selected=''){
+  const top=formValue('mat_top')||'bead',categoryName=formValue('mat_category'),select=$('mat_series');
+  if(!select)return;
+  const list=seriesForCategoryName(top,categoryName,true);
+  const current=selected||select.value;
+  const exists=list.some(x=>x.name===current);
+  select.innerHTML=`<option value="">请选择品种</option>${current&&!exists?`<option value="${esc(current)}" selected>${esc(current)}</option>`:''}${list.map(x=>`<option value="${esc(x.name)}" ${x.name===current?'selected':''} ${x.enabled===false?'disabled':''}>${esc(x.name)}${x.enabled===false?'（已停用）':''}</option>`).join('')}`;
+}
+function validateMaterialTaxonomySelection(){
+  const top=formValue('mat_top')||'bead';
+  const categoryName=formValue('mat_category');
+  const seriesName=formValue('mat_series');
+  const category=categoryForName(top,categoryName);
+  if(!category||category.enabled===false){toast(`分类未维护或已停用：${categoryName||'-'}，请先到分类/品种维护`);return false}
+  const series=(category.series||[]).find(x=>x.name===seriesName);
+  if(!series||series.enabled===false){toast(`品种未维护或已停用：${categoryName||'-'} / ${seriesName||'-'}，请先到分类/品种维护`);return false}
+  return true;
+}
+function conflictMaterialOptions(currentCode=''){
+  const map=new Map();
+  (state.cache.materials||[]).forEach(item=>{
+    const s=matSku(item),code=s.material_code||item.material_code;
+    if(!code||code===currentCode||map.has(code))return;
+    map.set(code,{key:code,label:`${s.series||s.name||code} · ${s.category||''}`});
+  });
+  return [...map.values()];
+}
+function materialGroupKey(x){const s=matSku(x);return `${s.top||''}::${s.category||''}::${s.material_code||''}`}
+async function loadMaterials(){
+  await ensureMaterialAdminMeta();
+  const qs=new URLSearchParams({keyword:formValue('materialKeyword'),top:formValue('materialTop'),category:formValue('materialTop')==='bead'||!formValue('materialTop')?formValue('materialCategory'):'',element:formValue('materialElement'),status:formValue('materialStatus'),stock_state:formValue('materialStockState'),margin:formValue('materialMargin'),quality:formValue('materialQuality'),spec_state:formValue('materialSpecState'),sort_by:state.materialUi.sortBy,sort_order:state.materialUi.sortOrder});
+  const groups=await api(`/api/v1/admin/material-spus?${qs}`);
+  state.cache.materialSpus=Array.isArray(groups)?groups:[];
+  state.cache.materials=state.cache.materialSpus.flatMap(g=>Array.isArray(g.items)?g.items:[]);
+  renderMaterialsTable();
+}
+function materialGroups(){
+  if((state.cache.materialSpus||[]).length){
+    return state.cache.materialSpus.map(g=>({
+      ...g,
+      items:Array.isArray(g.items)?g.items:[],
+      sku:g.sku||{},
+      energy:g.energy||{},
+      visual:g.visual||{},
+      image:g.image||g.spu?.image||'',
+      sizes:g.sizes||((g.spu?.sizes||[]).join(' / ')),
+      totalStock:num(g.totalStock??g.spu?.total_stock),
+      enabledCount:num(g.enabledCount??g.spu?.enabled_count),
+      minPrice:num(g.minPrice??g.spu?.min_price),
+      maxPrice:num(g.maxPrice??g.spu?.max_price),
+      minCost:num(g.minCost??g.spu?.min_cost),
+      maxCost:num(g.maxCost??g.spu?.max_cost),
+      minMarginRate:num(g.minMarginRate??g.spu?.min_margin_rate),
+      maxMarginRate:num(g.maxMarginRate??g.spu?.max_margin_rate),
+      marginRiskCount:num(g.marginRiskCount??g.spu?.margin_risk_count),
+      marginLossCount:num(g.marginLossCount??g.spu?.margin_loss_count),
+      inventoryCostValue:num(g.inventoryCostValue??g.spu?.inventory_cost_value),
+      inventoryRetailValue:num(g.inventoryRetailValue??g.spu?.inventory_retail_value),
+      inventoryMarginValue:num(g.inventoryMarginValue??g.spu?.inventory_margin_value),
+      lowStockCount:num(g.lowStockCount??g.spu?.low_stock_count),
+      outStockCount:num(g.outStockCount??g.spu?.out_stock_count),
+      qualityScore:num(g.qualityScore??g.spu?.quality_score),
+      minQualityScore:num(g.minQualityScore??g.spu?.min_quality_score),
+      qualityIssueCount:num(g.qualityIssueCount??g.spu?.quality_issue_count),
+      qualityRiskCount:num(g.qualityRiskCount??g.spu?.quality_risk_count),
+      sizeValues:g.sizeValues||g.spu?.size_values||[],
+      requiredSizes:g.requiredSizes||g.spu?.required_sizes||[],
+      missingSizes:g.missingSizes||g.spu?.missing_sizes||[],
+      specStatus:g.specStatus||g.spu?.spec_status||'partial',
+      specCoverage:num(g.specCoverage??g.spu?.spec_coverage)
+    }));
+  }
+  const map=new Map();
+  (state.cache.materials||[]).forEach(x=>{
+    const s=matSku(x),e=matEnergy(x),v=matVisual(x),key=materialGroupKey(x);
+    const g=map.get(key)||{key,sku:s,energy:e,visual:v,items:[]};
+    g.items.push(x);map.set(key,g);
+  });
+  return [...map.values()].map(g=>{
+    g.items.sort((a,b)=>num(matSku(a).size_mm)-num(matSku(b).size_mm));
+    g.totalStock=g.items.reduce((sum,x)=>sum+num(matSku(x).stock),0);
+    g.enabledCount=g.items.filter(x=>matSku(x).enabled).length;
+    g.lowStockCount=g.items.filter(x=>stockStatus(matSku(x).stock,matSku(x).safety_stock,matSku(x).stock_status)==='low').length;
+    g.outStockCount=g.items.filter(x=>stockStatus(matSku(x).stock,matSku(x).safety_stock,matSku(x).stock_status)==='out').length;
+    g.qualityScore=Math.round(g.items.reduce((sum,x)=>sum+num(x.quality?.score),0)/Math.max(g.items.length,1));
+    g.minQualityScore=Math.min(...g.items.map(x=>num(x.quality?.score)));
+    g.qualityIssueCount=g.items.reduce((sum,x)=>sum+num(x.quality?.issue_count),0);
+    g.qualityRiskCount=g.items.filter(x=>x.quality?.level==='risk').length;
+    g.minPrice=Math.min(...g.items.map(x=>num(matSku(x).price_per_bead)));
+    g.maxPrice=Math.max(...g.items.map(x=>num(matSku(x).price_per_bead)));
+    g.minCost=Math.min(...g.items.map(x=>num(matSku(x).cost_price)));
+    g.maxCost=Math.max(...g.items.map(x=>num(matSku(x).cost_price)));
+    g.minMarginRate=Math.min(...g.items.map(x=>num(matSku(x).margin_rate)));
+    g.maxMarginRate=Math.max(...g.items.map(x=>num(matSku(x).margin_rate)));
+    g.marginRiskCount=g.items.filter(x=>['loss','low'].includes(matSku(x).margin_status)).length;
+    g.marginLossCount=g.items.filter(x=>matSku(x).margin_status==='loss').length;
+    g.inventoryCostValue=g.items.reduce((sum,x)=>sum+num(matSku(x).inventory_cost_value),0);
+    g.inventoryRetailValue=g.items.reduce((sum,x)=>sum+num(matSku(x).inventory_retail_value),0);
+    g.inventoryMarginValue=g.items.reduce((sum,x)=>sum+num(matSku(x).inventory_margin_value),0);
+    g.image=(g.items.find(x=>matVisual(x).thumbnail_url)||{}).visual?.thumbnail_url||matVisual(g.items[0]||{}).thumbnail_url;
+    const sizeValues=[...new Set(g.items.map(x=>num(matSku(x).size_mm)).filter(Boolean).filter(x=>Number.isInteger(x)))].sort((a,b)=>a-b);
+    const requiredSizes=(matSku(g.items[0]||{}).top||'')==='bead'?[8,9,10,11,12,13,14,15]:[];
+    const missingSizes=requiredSizes.filter(size=>!sizeValues.includes(size));
+    g.sizeValues=sizeValues;g.requiredSizes=requiredSizes;g.missingSizes=missingSizes;
+    g.specStatus=!requiredSizes.length?'not_applicable':!sizeValues.length?'empty':missingSizes.length?'partial':'complete';
+    g.specCoverage=requiredSizes.length?(requiredSizes.length-missingSizes.length)/requiredSizes.length:1;
+    g.sizes=[...new Set(g.items.map(x=>`${matSku(x).size_mm}mm`).filter(Boolean))].join(' / ');
+    return g;
+  });
+}
+function materialEnergyTags(item){
+  const e=matEnergy(item);
+  const tags=[e.primary_element,...(e.secondary_elements||[])].map(normalizeElementKey).filter(Boolean);
+  return `<div class="element-tags">${tags.map(x=>`<span class="element-${esc(x)}">${esc(optionLabel('elements',x)||x)}</span>`).join('')}</div>`;
+}
+function materialKnowledgeChips(list=[],empty='未配置',type=''){
+  const items=(Array.isArray(list)?list:[]).filter(Boolean).slice(0,5);
+  return items.length?`<div class="knowledge-chips">${items.map(x=>`<span>${esc(type?(optionLabel(type,x)||x):x)}</span>`).join('')}</div>`:`<small>${empty}</small>`;
+}
+function pct(value){return `${Math.round(num(value)*100)}%`}
+function marginBadge(sku={}){
+  const status=sku.margin_status||'unknown';
+  const labels={unknown:'未设成本',loss:'成本倒挂',low:'低毛利',normal:'毛利'};
+  const text=status==='unknown'?labels.unknown:`${labels[status]||labels.normal} ${pct(sku.margin_rate)}`;
+  return `<div class="margin-badge margin-${esc(status)}"><span>${esc(text)}</span>${num(sku.cost_price)>0?`<small>成本 ${money(sku.cost_price)}</small>`:''}</div>`;
+}
+function groupMarginBadge(g){
+  const status=g.marginLossCount?'loss':g.marginRiskCount?'low':g.minCost<=0?'unknown':'normal';
+  const labels={unknown:'成本未全',loss:`倒挂 ${g.marginLossCount}`,low:`低毛利 ${g.marginRiskCount}`,normal:`毛利 ${pct(g.minMarginRate)}`};
+  return `<div class="margin-badge margin-${esc(status)}"><span>${esc(labels[status])}</span>${g.maxCost>0?`<small>成本 ${money(g.minCost)}-${money(g.maxCost)}</small>`:''}</div>`;
+}
+function inventoryBadge(sku={}){
+  if(!num(sku.stock))return '';
+  const hasCost=num(sku.cost_price)>0;
+  return `<div class="inventory-badge"><small>${hasCost?`成本额 ${money(sku.inventory_cost_value)}`:'成本额 -'}</small><small>零售额 ${money(sku.inventory_retail_value)}</small></div>`;
+}
+function groupInventoryBadge(g){
+  if(!num(g.totalStock))return '';
+  return `<div class="inventory-badge"><small>成本额 ${money(g.inventoryCostValue)}</small><small>零售额 ${money(g.inventoryRetailValue)}</small></div>`;
+}
+function qualityBadge(quality={}){
+  const score=num(quality.score),level=quality.level||'risk';
+  const labels={excellent:'资料优秀',good:'资料完整',warn:'需完善',risk:'上架风险'};
+  const issues=(quality.issues||[]).slice(0,3).map(x=>x.label).join('、');
+  return `<div class="quality-badge quality-${esc(level)}"><span>${esc(labels[level]||labels.risk)} · ${score}</span>${issues?`<small>${esc(issues)}</small>`:''}</div>`;
+}
+function groupQualityBadge(g){
+  const level=g.qualityRiskCount?'risk':g.minQualityScore>=90?'excellent':g.minQualityScore>=75?'good':'warn';
+  const text=g.qualityRiskCount?`风险 ${g.qualityRiskCount}`:g.qualityIssueCount?`问题 ${g.qualityIssueCount}`:'无风险';
+  return `<div class="quality-badge quality-${esc(level)}"><span>资料 ${num(g.minQualityScore||g.qualityScore)}分</span><small>${esc(text)}</small></div>`;
+}
+function stockStatus(stock=0,safety=0,status=''){
+  if(status)return status;
+  const current=num(stock),safe=num(safety);
+  if(current<=0)return 'out';
+  if(safe>0&&current<=safe)return 'low';
+  return 'normal';
+}
+function stockBadge(stock=0,safety=0,status=''){
+  const state=stockStatus(stock,safety,status);
+  const labels={normal:'库存正常',low:'低库存',out:'缺货'};
+  const safeText=num(safety)>0?`<small>安全库存 ${num(safety)}</small>`:'';
+  return `<div class="stock-badge stock-${esc(state)}"><span>${esc(labels[state]||labels.normal)}</span>${safeText}</div>`;
+}
+function specBadge(group={}){
+  const status=group.specStatus||'partial';
+  const labels={complete:'规格齐全',partial:`缺 ${group.missingSizes?.length||0} 个规格`,empty:'无规格',not_applicable:'不适用'};
+  const missing=(group.missingSizes||[]).length?`<small>缺 ${group.missingSizes.map(x=>`${x}mm`).join(' / ')}</small>`:'';
+  const coverage=status==='not_applicable'?'':`<small>覆盖 ${Math.round(num(group.specCoverage)*100)}%</small>`;
+  return `<div class="spec-badge spec-${esc(status)}"><span>${esc(labels[status]||labels.partial)}</span>${missing||coverage}</div>`;
+}
+function renderMaterialsTable(){
+  const groups=materialGroups();
+  if(!groups.length){$('materialsTable').innerHTML='<div class="empty-table">暂无材料数据</div>';return}
+  updateMaterialBulkState();
+  const allIds=(state.cache.materials||[]).map(x=>matSku(x).id),allSelected=allIds.length&&allIds.every(id=>state.materialUi.selected.has(id));
+  const rows=groups.map(g=>{
+    const expanded=state.materialUi.expanded.has(g.key),groupSelected=g.items.every(x=>state.materialUi.selected.has(matSku(x).id));
+    const s=g.sku,e=g.energy,priceText=g.minPrice===g.maxPrice?money(g.minPrice):`${money(g.minPrice)} - ${money(g.maxPrice)}`;
+    const head=`<tr class="spu-row knowledge-row">
+      <td class="col-check"><input type="checkbox" ${groupSelected?'checked':''} onchange="toggleMaterialGroup('${esc(g.key)}',this.checked)"></td>
+      <td class="col-image"><button class="mini-btn expand-btn" onclick="toggleMaterialExpand('${esc(g.key)}')">${expanded?'−':'+'}</button>${materialThumb(g.image,s.name)}</td>
+      <td class="col-name"><b>${esc(s.series||s.name)}</b><br><small>${esc(s.material_code)} · ${topLabel(s.top)} / ${esc(s.category)}</small>${materialKnowledgeChips(e.effects,'未配功效','effects')}</td>
+      <td class="col-size">${esc(g.sizes||'-')}${specBadge(g)}</td>
+      <td class="col-price"><b>${priceText}</b>${groupMarginBadge(g)}</td>
+      <td class="col-stock"><b>${g.totalStock}</b>${g.outStockCount||g.lowStockCount?`<small class="stock-alert">${g.outStockCount?`缺货 ${g.outStockCount}`:''}${g.lowStockCount?` 低库存 ${g.lowStockCount}`:''}</small>`:''}${groupInventoryBadge(g)}</td>
+      <td class="col-element">${materialEnergyTags(g.items[0]||{})}</td>
+      <td class="col-quality">${groupQualityBadge(g)}</td>
+      <td class="col-status">${statusPill(g.enabledCount?'enabled':'closed',`${g.enabledCount}/${g.items.length} 启用`)}</td>
+      <td class="col-actions"><div class="table-actions"><button class="mini-btn" onclick="toggleMaterialExpand('${esc(g.key)}')">${expanded?'收起':'展开'}</button></div></td>
+    </tr>`;
+    const children=expanded?g.items.map(x=>{
+      const sx=matSku(x),ex=matEnergy(x),vx=matVisual(x);
+      return `<tr class="sku-row">
+        <td class="col-check"><input type="checkbox" ${state.materialUi.selected.has(sx.id)?'checked':''} onchange="toggleMaterialSelect('${esc(sx.id)}',this.checked)"></td>
+        <td class="col-image">${materialThumb(vx.thumbnail_url,sx.name)}</td>
+        <td class="col-name"><b>${esc(sx.name)}</b><br><small>${esc(optionLabel('grades',sx.grade)||sx.grade||'无等级')} · ${esc(sx.sku_id)}</small>${materialKnowledgeChips(ex.chakras,'未配脉轮','chakras')}</td>
+        <td class="col-size">${sx.size_mm}mm</td>
+        <td class="col-price"><b>${money(sx.price_per_bead)}</b>${marginBadge(sx)}</td>
+        <td class="col-stock"><input class="inline-number" type="number" min="0" value="${num(sx.stock)}" onchange="updateMaterialStock('${esc(sx.id)}',this.value)">${stockBadge(sx.stock,sx.safety_stock,sx.stock_status)}${inventoryBadge(sx)}</td>
+        <td class="col-element">${materialEnergyTags(x)}</td>
+        <td class="col-quality">${qualityBadge(x.quality||{})}</td>
+        <td class="col-status">${statusPill(sx.enabled?'enabled':'closed',sx.enabled?'启用':'停用')}</td>
+        <td class="col-actions"><div class="table-actions"><button class="mini-btn" onclick="editMaterial('${esc(sx.id)}')">编辑</button><button class="mini-btn" onclick="openMaterialAuditLogs('${esc(sx.id)}')">记录</button><button class="mini-btn danger" onclick="deleteMaterial('${esc(sx.id)}')">删除</button></div></td>
+      </tr>`;
+    }).join(''):'';
+    return head+children;
+  }).join('');
+  $('materialsTable').innerHTML=`<table class="data-table material-tree"><thead><tr><th class="col-check"><input type="checkbox" ${allSelected?'checked':''} onchange="toggleAllMaterials(this.checked)"></th><th class="col-image">图片</th><th class="col-name">材料知识 / SKU</th><th class="col-size">${sortHeader('珠径','size')}</th><th class="col-price">${sortHeader('单颗价','price')}</th><th class="col-stock">${sortHeader('库存','stock')}</th><th class="col-element">${sortHeader('能量','element')}</th><th class="col-quality">资料质量</th><th class="col-status">状态</th><th class="col-actions">操作</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+function toggleMaterialGroup(key,checked){const g=materialGroups().find(x=>x.key===key);(g?.items||[]).forEach(x=>checked?state.materialUi.selected.add(matSku(x).id):state.materialUi.selected.delete(matSku(x).id));renderMaterialsTable()}
+function toggleAllMaterials(checked){(state.cache.materials||[]).forEach(x=>checked?state.materialUi.selected.add(matSku(x).id):state.materialUi.selected.delete(matSku(x).id));renderMaterialsTable()}
+function selectedMaterialIds(){return [...state.materialUi.selected].filter(id=>(state.cache.materials||[]).some(x=>matSku(x).id===id))}
+async function newMaterial(){await ensureMaterialAdminMeta();renderMaterial({sku:{top:'bead',size_mm:8,weight_g:1,price_per_bead:0.01,cost_price:0,safety_stock:0,supplier_name:'',purchase_note:'',stock:0,enabled:false,sort_order:0},energy:{primary_element:'water',secondary_elements:[],effects:[],chakras:[],wish_pools:[],mood_tags:[],visual_tags:[]},visual:{color_hex:'#dfe3e5',shine_hex:'#ffffff',image_urls:[]},rules:{allowed_roles:['primary','support','accent'],match_rules:['no_limit'],care_tags:[],conflict_codes:[]}})}
+async function editMaterial(id){await ensureMaterialAdminMeta();renderMaterial((state.cache.materials||[]).find(x=>matSku(x).id===id))}
+function renderMaterial(x={}){
+  const s=matSku(x),e=matEnergy(x),v=matVisual(x),r=matRules(x),isEdit=!!s.id;
+  const params=v.material_params||{};
+  const imageUrls=(v.image_urls||[]).join('\n');
+  const top=s.top||'bead';
+  const category=s.category||'';
+  const series=s.series||s.name||'';
+  const primaryElement=normalizeElementKey(e.primary_element||x.element||'water');
+  openDrawer('MATERIAL KNOWLEDGE',isEdit?'编辑材料':'新增材料',`<div class="form-grid material-form material-knowledge-form">
+    <section class="full">${materialGovernanceGuide()}</section>
+    <section class="full material-form-section"><h3>基础 SKU</h3><div class="form-grid">
+      <label>ID<input id="mat_id" class="readonly-input" value="${esc(s.id||'')}" readonly></label>
+      <label>SKU<input id="mat_sku" class="readonly-input" value="${esc(s.sku_id||'')}" readonly></label>
+      <label>材料编码<input id="mat_code" class="readonly-input" value="${esc(s.material_code||'')}" placeholder="保存时自动生成" readonly></label>
+      <label>类型<select id="mat_top" onchange="updateMaterialCategoryOptions()"><option value="bead" ${top==='bead'?'selected':''}>珠珠</option><option value="accessory" ${top==='accessory'?'selected':''}>配饰</option><option value="pendant" ${top==='pendant'?'selected':''}>花托/吊坠</option></select></label>
+      ${categorySelectField(top,category)}
+      ${seriesSelectField(top,category,series)}
+      <label>等级<select id="mat_grade">${selectOptions(optionList('grades'),s.grade||'','请选择等级')}</select></label>
+      <label>${fieldLabel('展示名称',true)}<input id="mat_name" value="${esc(s.name||'')}" placeholder="绿幽灵"></label>
+      <label>${fieldLabel('单颗价格',true)}<input id="mat_price" type="number" step="0.01" min="0" value="${esc(s.price_per_bead??0)}" oninput="syncSpecDefaults()"></label>
+      <label>${fieldLabel('珠径 mm',true)}<input id="mat_size" type="number" min="1" step="0.1" value="${esc(s.size_mm||8)}"></label>
+      <label>${fieldLabel('重量 g',true)}<input id="mat_weight" type="number" min="0" step="0.01" value="${esc(s.weight_g||1)}" oninput="syncSpecDefaults()"></label>
+      <label>${fieldLabel('库存',true)}<input id="mat_stock" type="number" min="0" step="1" value="${esc(s.stock||0)}" oninput="syncSpecDefaults();guardMaterialEnabled()"></label>
+      <label>排序<input id="mat_sort" type="number" value="${esc(s.sort_order||0)}"></label>
+      ${selectField('mat_enabled','状态',String(!!s.enabled&&num(s.stock)>0),[['true','启用'],['false','停用']])}
+    </div></section>
+    <section class="full material-form-section"><h3>库存与成本</h3><div class="form-grid">
+      <label>成本价<input id="mat_cost_price" type="number" min="0" step="0.01" value="${esc(s.cost_price??0)}"></label>
+      <label>安全库存<input id="mat_safety_stock" type="number" min="0" step="1" value="${esc(s.safety_stock??0)}"></label>
+      <label class="full">供应商 / 货源<input id="mat_supplier_name" value="${esc(s.supplier_name||'')}" placeholder="如：某某工作室 / 市场档口 / 自采"></label>
+      <label class="full">采购备注<textarea id="mat_purchase_note" placeholder="记录批次、成色差异、补货周期、采购注意事项">${esc(s.purchase_note||'')}</textarea></label>
+    </div></section>
+    <section class="full material-form-section"><h3>能量知识</h3><div class="form-grid">
+      <label>${fieldLabel('主五行',true)}<select id="mat_primary_element">${selectOptions(optionList('elements'),primaryElement,'请选择主五行')}</select></label>
+      ${checkboxGroup('mat_secondary_elements','副五行',optionList('elements'),e.secondary_elements||[],false)}
+      ${checkboxGroup('mat_effects','核心功效标签',optionList('effects'),e.effects||[],true)}
+      ${checkboxGroup('mat_chakras','对应脉轮',optionList('chakras'),e.chakras||[],false)}
+      ${checkboxGroup('mat_wish_pools','适用愿景池',optionList('wish_pools'),e.wish_pools||[],false)}
+      <label>色彩倾向<select id="mat_color_family">${selectOptions(optionList('color_families'),e.color_family||'','请选择色彩倾向')}</select></label>
+      ${checkboxGroup('mat_mood_tags','情绪标签',optionList('mood_tags'),e.mood_tags||[],false)}
+      ${checkboxGroup('mat_visual_tags','视觉标签',optionList('visual_tags'),e.visual_tags||[],false)}
+      <label class="full">材质故事<textarea id="mat_story">${esc(x.story||'')}</textarea></label>
+    </div></section>
+    <section class="full material-form-section"><h3>视觉资产</h3><div class="form-grid">
+      ${colorControl('mat_color','主题色',v.color_hex||'#dfe3e5')}
+      ${colorControl('mat_shine','高光色',v.shine_hex||'#ffffff')}
+      ${imageUploadField('mat_image','2D 缩略图 / CDN 图片',v.thumbnail_url||'','material',true)}
+      ${materialMultiImageField('mat_images',imageUrls)}
+      <label>Diffuse 贴图 URL<input id="mat_diffuse_map" value="${esc(v.asset?.diffuse_map_url||'')}"></label>
+      <label>Normal 贴图 URL<input id="mat_normal_map" value="${esc(v.asset?.normal_map_url||'')}"></label>
+      <label>GLB 模型 URL<input id="mat_glb_model" value="${esc(v.asset?.glb_model_url||'')}"></label>
+    </div></section>
+    <section class="full material-form-section"><h3>材质属性</h3><div class="form-grid">
+      ${materialParamSelect('mat_bead_shape','珠体形制','bead_shapes',params.bead_shape||'round','请选择珠体形制')}
+      ${materialParamSelect('mat_surface_finish','表面工艺','surface_finishes',params.surface_finish||'glossy','请选择表面工艺')}
+      ${materialParamSelect('mat_transparency_level','通透度','transparency_levels',params.transparency_level||'','请选择通透度')}
+      ${materialParamSelect('mat_batch_variation','批次差异','batch_variation_levels',params.batch_variation||'','请选择批次差异')}
+      ${checkboxGroup('mat_texture_features','纹理 / 内含特征',optionList('texture_features'),params.texture_features||[],false)}
+      <label>孔径 mm<input id="mat_hole_diameter" type="number" min="0" step="0.01" value="${esc(params.hole_diameter_mm??'')}" placeholder="如 1.0"></label>
+      <label>尺寸误差 mm<input id="mat_size_tolerance" type="number" min="0" step="0.01" value="${esc(params.size_tolerance_mm??'')}" placeholder="如 0.2"></label>
+      <label class="full">高级补充 JSON<textarea id="mat_material_params_extra" placeholder='仅填写少见参数，如 {"origin":"Brazil"}'>${esc(materialParamsExtraJson(params))}</textarea></label>
+    </div></section>
+    <section class="full material-form-section"><h3>规则约束</h3><div class="form-grid">
+      ${checkboxGroup('mat_allowed_roles','允许角色',optionList('roles'),r.allowed_roles||['primary','support','accent'],false)}
+      ${checkboxGroup('mat_match_rules','搭配规则',optionList('match_rules'),r.match_rules||['no_limit'],false)}
+      ${checkboxGroup('mat_care_tags','佩戴养护',optionList('care_tags'),r.care_tags||[],false)}
+      ${multiSelectField('mat_conflict_codes','互斥材料',conflictMaterialOptions(s.material_code),r.conflict_codes||[])}
+    </div></section>
+    ${isEdit?'':materialSpecConfig({size:s.size_mm,price:s.price_per_bead,stock:s.stock,weight:s.weight_g})}
+  </div><div class="form-actions"><button class="btn secondary" onclick="closeDrawer()">取消</button><button class="btn primary" onclick="saveMaterial()">保存材料</button></div>`);
+  updateMaterialSeriesOptions(series);
+  guardMaterialEnabled();
+}
+function parseJsonField(id){
+  const text=formValue(id);
+  if(!text)return {};
+  try{return JSON.parse(text)}catch(e){toast(`${id} 不是合法 JSON`);throw e}
+}
+function validateMaterialForm(){
+  const required=[['mat_category','分类'],['mat_series','品种'],['mat_name','展示名称'],['mat_primary_element','主五行'],['mat_image','缩略图']];
+  for(const [id,label] of required){if(!validateRequired(id,label))return false}
+  if(!validateMaterialTaxonomySelection())return false;
+  if(!checkboxValues('mat_effects').length){toast('核心功效不能为空');return false}
+  if(!validateKnownMaterialOption('elements',formValue('mat_primary_element'),'主五行',true))return false;
+  if(!validateKnownMaterialOption('grades',formValue('mat_grade'),'品质等级'))return false;
+  if(!validateKnownMaterialOption('color_families',formValue('mat_color_family'),'色彩倾向'))return false;
+  if(!validateKnownMaterialOptionList('elements',checkboxValues('mat_secondary_elements'),'副五行'))return false;
+  if(!validateKnownMaterialOptionList('effects',checkboxValues('mat_effects'),'核心功效',true))return false;
+  if(!validateKnownMaterialOptionList('chakras',checkboxValues('mat_chakras'),'对应脉轮'))return false;
+  if(!validateKnownMaterialOptionList('wish_pools',checkboxValues('mat_wish_pools'),'适用愿景'))return false;
+  if(!validateKnownMaterialOptionList('mood_tags',checkboxValues('mat_mood_tags'),'情绪标签'))return false;
+  if(!validateKnownMaterialOptionList('visual_tags',checkboxValues('mat_visual_tags'),'视觉标签'))return false;
+  if(!validateKnownMaterialOptionList('roles',checkboxValues('mat_allowed_roles'),'允许角色'))return false;
+  if(!validateKnownMaterialOptionList('match_rules',checkboxValues('mat_match_rules'),'搭配规则'))return false;
+  if(!validateKnownMaterialOptionList('care_tags',checkboxValues('mat_care_tags'),'佩戴养护'))return false;
+  if(!validateKnownMaterialOption('bead_shapes',formValue('mat_bead_shape'),'珠体形制'))return false;
+  if(!validateKnownMaterialOption('surface_finishes',formValue('mat_surface_finish'),'表面工艺'))return false;
+  if(!validateKnownMaterialOption('transparency_levels',formValue('mat_transparency_level'),'通透度'))return false;
+  if(!validateKnownMaterialOption('batch_variation_levels',formValue('mat_batch_variation'),'批次差异'))return false;
+  if(!validateKnownMaterialOptionList('texture_features',checkboxValues('mat_texture_features'),'纹理/内含特征'))return false;
+  if(formValue('mat_hole_diameter')&&!validateNumber('mat_hole_diameter','孔径',0))return false;
+  if(formValue('mat_size_tolerance')&&!validateNumber('mat_size_tolerance','尺寸误差',0))return false;
+  return validateNumber('mat_price','单颗价格',0)&&validateNumber('mat_size','珠径',1)&&validateNumber('mat_weight','重量',0)&&validateNumber('mat_stock','库存',0)&&validateNumber('mat_cost_price','成本价',0)&&validateNumber('mat_safety_stock','安全库存',0)&&validateNumber('mat_sort','排序',0);
+}
+function materialBasePayload(){
+  const stock=num(formValue('mat_stock'));
+  const imageUrls=splitList(formValue('mat_images'));
+  const thumbnail=formValue('mat_image')||imageUrls[0]||'';
+  const effects=checkboxValues('mat_effects');
+  const effectText=optionLabel('effects',effects[0])||effects[0]||'';
+  return {
+    id:formValue('mat_id'),skuId:formValue('mat_sku'),material_code:formValue('mat_code'),top:formValue('mat_top'),
+    category:formValue('mat_category'),series:formValue('mat_series'),grade:formValue('mat_grade'),name:formValue('mat_name'),
+    primary_element:formValue('mat_primary_element'),secondary_elements:checkboxValues('mat_secondary_elements').filter(x=>x!==formValue('mat_primary_element')),
+    effects,chakras:checkboxValues('mat_chakras'),wish_pools:checkboxValues('mat_wish_pools'),
+    color_family:formValue('mat_color_family'),mood_tags:checkboxValues('mat_mood_tags'),visual_tags:checkboxValues('mat_visual_tags'),
+    story:formValue('mat_story'),price_per_bead:num(formValue('mat_price')),size_mm:num(formValue('mat_size'),8),weight_g:num(formValue('mat_weight'),1),
+    cost_price:num(formValue('mat_cost_price')),safety_stock:num(formValue('mat_safety_stock')),supplier_name:formValue('mat_supplier_name'),purchase_note:formValue('mat_purchase_note'),
+    stock,color_hex:normalizeHexColor(formValue('mat_color')),shine_hex:normalizeHexColor(formValue('mat_shine'),'#ffffff'),
+    thumbnail_url:thumbnail,image_url:thumbnail,image_urls:imageUrls,sort_order:num(formValue('mat_sort')),enabled:formValue('mat_enabled')==='true'&&stock>0,
+    asset:{thumbnail_url:thumbnail,diffuse_map_url:formValue('mat_diffuse_map'),normal_map_url:formValue('mat_normal_map'),glb_model_url:formValue('mat_glb_model')},
+    material_params:materialParamPayload(),allowed_roles:checkboxValues('mat_allowed_roles'),match_rules:checkboxValues('mat_match_rules'),care_tags:checkboxValues('mat_care_tags'),conflict_codes:multiSelectValues('mat_conflict_codes'),
+    effect:effectText,element:formValue('mat_primary_element'),color:normalizeHexColor(formValue('mat_color')),shine:normalizeHexColor(formValue('mat_shine'),'#ffffff'),price:num(formValue('mat_price')),size:num(formValue('mat_size'),8),weight:num(formValue('mat_weight'),1),image_path:''
+  };
+}
+function materialSpecPayloads(base){
+  if(formValue('mat_spec_mode')!=='multi')return [base];
+  return MATERIAL_SIZE_OPTIONS.filter(size=>$(`mat_spec_${size}_enabled`)?.checked).map(size=>{
+    const stock=num(formValue(`mat_spec_${size}_stock`));
+    const price=num(formValue(`mat_spec_${size}_price`));
+    const cost=num(formValue(`mat_spec_${size}_cost`));
+    const safety=num(formValue(`mat_spec_${size}_safety`));
+    const weight=num(formValue(`mat_spec_${size}_weight`));
+    return {...base,id:'',skuId:'',size_mm:size,size,price_per_bead:price,price,cost_price:cost,safety_stock:safety,stock,weight_g:weight,weight,enabled:stock>0&&formValue('mat_enabled')==='true'};
+  });
+}
+async function refreshMaterialOptions(){
+  const data=await api('/api/v1/admin/material-options');
+  state.cache.materialOptions={...DEFAULT_MATERIAL_OPTIONS,...data};
+  state.cache.materialTaxonomy=data.taxonomy||[];
+  populateMaterialCategoryFilter();
+}
+async function openMaterialTaxonomy(){
+  await ensureMaterialAdminMeta();
+  renderMaterialTaxonomy();
+}
+function taxonomyCategoryOptionHtml(selected=''){
+  return categoriesForTop('bead',true).map(x=>`<option value="${esc(x.id)}" ${x.id===selected?'selected':''}>${esc(x.name)}${x.enabled===false?'（已停用）':''}</option>`).join('');
+}
+function renderMaterialTaxonomy(){
+  const categories=categoriesForTop('bead',true);
+  const rows=categories.map(cat=>`
+    <div class="taxonomy-card ${cat.enabled===false?'disabled':''}">
+      <div class="taxonomy-head"><div><b>${esc(cat.name)}</b><span>珠珠一级分类 · ${cat.series?.length||0} 个品种</span></div><div class="table-actions">
+        <button class="mini-btn" onclick="fillMaterialCategoryForm('${esc(cat.id)}')">编辑</button>
+        <button class="mini-btn danger" onclick="disableMaterialTaxonomy('${esc(cat.id)}')">停用</button>
+      </div></div>
+      <div class="taxonomy-series">${(cat.series||[]).map(item=>`<span class="${item.enabled===false?'muted':''}">${esc(item.name)}<button onclick="fillMaterialSeriesForm('${esc(item.id)}','${esc(cat.id)}')">编辑</button><button onclick="disableMaterialTaxonomy('${esc(item.id)}')">停用</button></span>`).join('')||'<small>暂无品种</small>'}</div>
+    </div>`).join('');
+  openDrawer('MATERIAL TAXONOMY','分类 / 品种维护',`
+    <div class="content-hint">先维护珠珠一级分类，再在分类下维护具体品种。新增材料时只能从这里选择，避免手动输入导致格式混乱。</div>
+    <section class="material-form-section"><h3>一级分类</h3><div class="form-grid">
+      <input id="tax_category_id" type="hidden">
+      ${selectField('tax_category_top','类型','bead',[['bead','珠珠']])}
+      <label>${fieldLabel('分类名称',true)}<input id="tax_category_name" placeholder="如：白水晶 / 发晶 / 天然晶石"></label>
+      <label>排序<input id="tax_category_sort" type="number" value="0"></label>
+      ${selectField('tax_category_enabled','状态','true',[['true','启用'],['false','停用']])}
+    </div><div class="form-actions inline-actions"><button class="btn secondary compact" onclick="clearMaterialCategoryForm()">清空</button><button class="btn primary compact" onclick="saveMaterialCategory()">保存分类</button></div></section>
+    <section class="material-form-section"><h3>分类下品种</h3><div class="form-grid">
+      <input id="tax_series_id" type="hidden">
+      <label>${fieldLabel('所属分类',true)}<select id="tax_series_category"><option value="">请选择分类</option>${taxonomyCategoryOptionHtml()}</select></label>
+      <label>${fieldLabel('品种名称',true)}<input id="tax_series_name" placeholder="如：喜马拉雅白水晶 / 绿幽灵"></label>
+      <label>排序<input id="tax_series_sort" type="number" value="0"></label>
+      ${selectField('tax_series_enabled','状态','true',[['true','启用'],['false','停用']])}
+    </div><div class="form-actions inline-actions"><button class="btn secondary compact" onclick="clearMaterialSeriesForm()">清空</button><button class="btn primary compact" onclick="saveMaterialSeries()">保存品种</button></div></section>
+    <section class="material-form-section"><h3>现有分类与品种</h3><div class="taxonomy-list">${rows||'<div class="empty-inline">暂无分类</div>'}</div></section>
+  `);
+}
+function clearMaterialCategoryForm(){['tax_category_id','tax_category_name'].forEach(id=>$(id).value='');$('tax_category_sort').value=0;$('tax_category_enabled').value='true'}
+function clearMaterialSeriesForm(){['tax_series_id','tax_series_name'].forEach(id=>$(id).value='');$('tax_series_category').value='';$('tax_series_sort').value=0;$('tax_series_enabled').value='true'}
+function findTaxonomyItem(id){
+  for(const cat of categoriesForTop('bead',true)){
+    if(cat.id===id)return cat;
+    const child=(cat.series||[]).find(x=>x.id===id);
+    if(child)return child;
+  }
+  return null;
+}
+function fillMaterialCategoryForm(id){
+  const item=findTaxonomyItem(id);if(!item)return;
+  $('tax_category_id').value=item.id;$('tax_category_top').value=item.top||'bead';$('tax_category_name').value=item.name||'';$('tax_category_sort').value=item.sort_order||0;$('tax_category_enabled').value=String(item.enabled!==false);
+}
+function fillMaterialSeriesForm(id,categoryId){
+  const item=findTaxonomyItem(id);if(!item)return;
+  $('tax_series_id').value=item.id;$('tax_series_category').value=categoryId||item.parent_id||'';$('tax_series_name').value=item.name||'';$('tax_series_sort').value=item.sort_order||0;$('tax_series_enabled').value=String(item.enabled!==false);
+}
+async function saveMaterialCategory(){
+  const name=formValue('tax_category_name');if(!name){toast('请填写分类名称');return}
+  await api('/api/v1/admin/material-taxonomy/categories',{method:'POST',body:JSON.stringify({id:formValue('tax_category_id'),top:formValue('tax_category_top')||'bead',name,sort_order:num(formValue('tax_category_sort')),enabled:formValue('tax_category_enabled')==='true'})});
+  await refreshMaterialOptions();renderMaterialTaxonomy();toast('分类已保存');
+}
+async function saveMaterialSeries(){
+  const category_id=formValue('tax_series_category'),name=formValue('tax_series_name');if(!category_id){toast('请选择所属分类');return}if(!name){toast('请填写品种名称');return}
+  await api('/api/v1/admin/material-taxonomy/series',{method:'POST',body:JSON.stringify({id:formValue('tax_series_id'),category_id,name,sort_order:num(formValue('tax_series_sort')),enabled:formValue('tax_series_enabled')==='true'})});
+  await refreshMaterialOptions();renderMaterialTaxonomy();toast('品种已保存');
+}
+async function disableMaterialTaxonomy(id){
+  if(!confirm('确定停用这个分类/品种吗？已绑定材料不会删除，但新增材料时默认不再选择。'))return;
+  await api(`/api/v1/admin/material-taxonomy/${encodeURIComponent(id)}`,{method:'DELETE'});
+  await refreshMaterialOptions();renderMaterialTaxonomy();toast('已停用');
+}
+function materialOptionTypeOptionsHtml(selected=''){
+  return materialOptionTypes().map(x=>`<option value="${esc(x.key)}" ${x.key===selected?'selected':''}>${esc(x.label)}</option>`).join('');
+}
+function optionItemsForType(type,includeDisabled=true){
+  return materialOptionItems().filter(x=>x.option_type===type&&(includeDisabled||x.enabled!==false));
+}
+async function openMaterialOptionDictionary(){
+  await ensureMaterialAdminMeta();
+  renderMaterialOptionDictionary();
+}
+function renderMaterialOptionDictionary(selectedType=''){
+  const types=materialOptionTypes();
+  const currentType=selectedType||types[0]?.key||'wish_pools';
+  const sections=types.map(type=>{
+    const spec=materialOptionTypeSpec(type.key);
+    const items=optionItemsForType(type.key,true);
+    return `<div class="taxonomy-card option-dict-card ${type.key===currentType?'active':''}">
+      <div class="taxonomy-head"><div><b>${esc(type.label)}</b><span>${items.filter(x=>x.enabled!==false).length}/${items.length} 个可用选项 · ${esc(materialControlLabel(spec.control))}</span>${materialMetaPills(spec)}${spec.description?`<p class="field-meta-desc">${esc(spec.description)}</p>`:''}</div><button class="mini-btn" onclick="selectMaterialOptionType('${esc(type.key)}')">新增到此组</button></div>
+      <div class="taxonomy-series option-dict-series">${items.map(item=>`<span class="${item.enabled===false?'muted':''}"><b>${esc(item.label)}</b><small>${esc(item.key)}</small><button onclick="fillMaterialOptionForm('${esc(item.id)}')">编辑</button><button onclick="disableMaterialOptionItem('${esc(item.id)}')">停用</button></span>`).join('')||'<small>暂无选项</small>'}</div>
+    </div>`;
+  }).join('');
+  openDrawer('MATERIAL DICTIONARY','字段字典维护',`
+    <div class="content-hint">这里维护会参与筛选、推荐和规则判断的结构化字段。运营只需要填写中文名称，系统会自动生成稳定 key；字段类型会标明它是单选、多选、标签还是规则，避免把确定字段误做成自由文本。</div>
+    <section class="material-form-section"><h3>新增 / 编辑选项</h3><div class="form-grid">
+      <input id="dict_option_id" type="hidden">
+      <label>${fieldLabel('字段类型',true)}<select id="dict_option_type">${materialOptionTypeOptionsHtml(currentType)}</select></label>
+      <label>${fieldLabel('选项名称',true)}<input id="dict_option_label" placeholder="如：低压防护 / 温柔表达 / 冰透感"></label>
+      <label>系统 key<input id="dict_option_key" class="readonly-input" placeholder="保存时自动生成" readonly></label>
+      <label>排序<input id="dict_option_sort" type="number" value="0"></label>
+      ${selectField('dict_option_enabled','状态','true',[['true','启用'],['false','停用']])}
+    </div><div class="form-actions inline-actions"><button class="btn secondary compact" onclick="clearMaterialOptionForm()">清空</button><button class="btn primary compact" onclick="saveMaterialOptionItem()">保存选项</button></div></section>
+    <section class="material-form-section"><h3>现有字段选项</h3><div class="taxonomy-list option-dict-list">${sections||'<div class="empty-inline">暂无字段选项</div>'}</div></section>
+  `);
+}
+function selectMaterialOptionType(type){if($('dict_option_type'))$('dict_option_type').value=type}
+function clearMaterialOptionForm(){
+  ['dict_option_id','dict_option_label','dict_option_key'].forEach(id=>$(id).value='');
+  $('dict_option_sort').value=0;
+  $('dict_option_enabled').value='true';
+}
+function findMaterialOptionItem(id){return materialOptionItems().find(x=>x.id===id)}
+function fillMaterialOptionForm(id){
+  const item=findMaterialOptionItem(id);if(!item)return;
+  $('dict_option_id').value=item.id;
+  $('dict_option_type').value=item.option_type;
+  $('dict_option_label').value=item.label||'';
+  $('dict_option_key').value=item.key||'';
+  $('dict_option_sort').value=item.sort_order||0;
+  $('dict_option_enabled').value=String(item.enabled!==false);
+}
+async function saveMaterialOptionItem(){
+  const label=formValue('dict_option_label');if(!label){toast('请填写选项名称');return}
+  const option_type=formValue('dict_option_type');if(!option_type){toast('请选择字段类型');return}
+  await api('/api/v1/admin/material-option-items',{method:'POST',body:JSON.stringify({id:formValue('dict_option_id'),option_type,label,sort_order:num(formValue('dict_option_sort')),enabled:formValue('dict_option_enabled')==='true'})});
+  await refreshMaterialOptions();renderMaterialOptionDictionary(option_type);toast('字段选项已保存');
+}
+async function disableMaterialOptionItem(id){
+  if(!confirm('确定停用这个字段选项吗？历史材料不会被删除，但新增/编辑时默认不再选择。'))return;
+  const item=findMaterialOptionItem(id);
+  await api(`/api/v1/admin/material-option-items/${encodeURIComponent(id)}`,{method:'DELETE'});
+  await refreshMaterialOptions();renderMaterialOptionDictionary(item?.option_type);toast('字段选项已停用');
+}
+function materialAuditImageCount(value){
+  if(Array.isArray(value))return value.length;
+  const text=String(value||'').trim();
+  if(!text)return 0;
+  try{const parsed=JSON.parse(text);if(Array.isArray(parsed))return parsed.filter(Boolean).length}catch(e){}
+  return splitList(text).length;
+}
+function materialAuditDiff(before={},after={}){
+  const fields=[
+    ['name','名称',v=>v||'-'],
+    ['label','选项名称',v=>v||'-'],
+    ['kind','层级',v=>({category:'分类',series:'品种'})[v]||v||'-'],
+    ['option_type','字典类型',v=>materialOptionTypeLabel(v)],
+    ['option_key','字典 key',v=>v||'-'],
+    ['price','价格',v=>money(v)],
+    ['stock','库存',v=>num(v)],
+    ['enabled','状态',v=>Number(v)?'启用':'停用'],
+    ['category','分类',v=>v||'-'],
+    ['series','品种',v=>v||'-'],
+    ['element','五行',v=>optionLabel('elements',v)||v||'-'],
+    ['sort_order','排序',v=>num(v)],
+    ['image_url','主图',v=>v?'已配置':'未配置'],
+    ['image_urls_json','多图',v=>`${materialAuditImageCount(v)} 张`]
+  ];
+  const changed=fields.filter(([key])=>String(before?.[key]??'')!==String(after?.[key]??''));
+  return changed.length?changed.slice(0,8).map(([key,label,fmt])=>`<span><b>${esc(label)}</b>${esc(fmt(before?.[key]))} → ${esc(fmt(after?.[key]))}</span>`).join(''):'<small>无核心字段差异</small>';
+}
+function materialAuditTargetLabel(type){
+  return ({material:'SKU 材料',material_taxonomy:'分类 / 品种',material_option:'字段字典'})[type]||type||'材料资料';
+}
+async function openMaterialAuditLogs(materialId=''){
+  const qs=new URLSearchParams({material_id:materialId||'',limit:'120'});
+  const rows=await api(`/api/v1/admin/materials/audit-logs?${qs}`);
+  const title=materialId?'材料变更记录':'最近材料变更记录';
+  const cards=rows.map(log=>`<article class="material-audit-card">
+    <div class="audit-head"><div><b>${esc(log.summary||log.action)}</b><span>${esc(log.action)} · ${fmtTime(log.created_at)}</span></div><small>${esc(log.actor_name||'系统')}</small></div>
+    <div class="audit-target"><span>目标：${esc(materialAuditTargetLabel(log.target_type))}</span><span>目标 ID：${esc(log.target_id||log.material_id||'-')}</span>${log.material_code?`<span>材料编码：${esc(log.material_code)}</span>`:''}</div>
+    <div class="audit-diff">${materialAuditDiff(log.before||{},log.after||{})}</div>
+  </article>`).join('');
+  openDrawer('MATERIAL AUDIT',title,`<div class="content-hint">用于追踪珠材资料、价格、库存、状态、图片和分类品种等关键变更，方便运营复盘和客服对账。</div><div class="material-audit-list">${cards||'<div class="empty-inline">暂无变更记录</div>'}</div>`);
+}
 async function loadBlocks(){const rows=await api(`/api/v1/admin/blocks?section=${encodeURIComponent(formValue('blockSection'))}`);state.cache.blocks=rows;$('blocksTable').innerHTML=table(['页面/板块','标题','副标题','状态','排序','操作'],rows.map(x=>[esc(x.section),`<b>${esc(x.title)}</b>`,esc(x.subtitle||'-'),statusPill(x.status,x.status),x.sort_order,`<div class="table-actions"><button class="mini-btn" onclick="editBlock('${esc(x.block_id)}')">编辑</button><button class="mini-btn danger" onclick="deleteBlock('${esc(x.block_id)}')">删除</button></div>`]))}
 function newBlock(){renderBlock({section:'home',status:'draft',sort_order:0})}function editBlock(id){renderBlock(state.cache.blocks.find(x=>x.block_id===id))}
 function renderBlock(x){openDrawer('CONTENT EDITOR',x.block_id?'编辑运营内容':'新增运营内容',`<div class="form-grid">${field('block_id','内容 ID',x.block_id||'')}${field('block_section','页面 / section',x.section||'home')}${field('block_title','标题',x.title||'','text','full')}${field('block_subtitle','副标题',x.subtitle||'','text','full')}${field('block_image','图片 URL',x.image_url||'','url','full')}${field('block_action_text','按钮文案',x.action_text||'')}${field('block_action_url','跳转地址',x.action_url||'')}${field('block_sort','排序',x.sort_order||0,'number')}${selectField('block_status','状态',x.status||'draft',[['draft','草稿'],['published','已发布'],['hidden','隐藏']])}<label class="full">正文<textarea id="block_body">${esc(x.body||'')}</textarea></label></div><div class="form-actions"><button class="btn secondary" onclick="closeDrawer()">取消</button><button class="btn primary" onclick="saveBlock()">保存内容</button></div>`)}
@@ -1194,6 +1856,283 @@ function topLabel(v){return({bead:'珠珠',accessory:'配饰',incense:'合香珠
 function fmtTime(v){if(!v)return'-';const d=new Date(v);return Number.isNaN(d.getTime())?esc(v):d.toLocaleString('zh-CN',{hour12:false})}
 function openDrawer(eyebrow,title,html){$('drawerEyebrow').textContent=eyebrow;$('drawerTitle').textContent=title;$('drawerBody').innerHTML=html;$('drawerMask').classList.remove('hide');$('drawer').classList.remove('hide')}
 function closeDrawer(){$('drawerMask').classList.add('hide');$('drawer').classList.add('hide')}
+async function ensureWarehouseOptions(force=false){
+  if(force||!state.cache.warehouse.options)state.cache.warehouse.options=await api('/api/v1/admin/warehouse/options');
+  renderWarehouseFilters();
+  return state.cache.warehouse.options;
+}
+function warehouseSelectOptions(list,value='',placeholder='请选择'){
+  return `<option value="">${esc(placeholder)}</option>${(list||[]).filter(x=>x.enabled!==false).map(x=>{
+    const id=x.item_id||x.supplier_id||x.location_id||x.channel_id||x.key;
+    const label=x.display_name||x.name||x.label||id;
+    return `<option value="${esc(id)}" ${String(id)===String(value)?'selected':''}>${esc(label)}</option>`;
+  }).join('')}`;
+}
+function warehouseTypeLabel(type){return ({bead:'散珠',accessory:'配件',thread:'线材',package:'包装',tool:'工具/耗材'})[type]||type||'-'}
+function warehouseMovementLabel(type){return ({inbound:'入库',sale_out:'销售出库',manual_out:'人工出库',manual_in:'人工入库',return_in:'退货入库',damage_out:'损耗出库',sample_out:'样品出库',gift_out:'赠品出库',stocktake_gain:'盘盈',stocktake_loss:'盘亏'})[type]||type||'-'}
+function warehouseOptionLabel(list,value,fallback='-'){
+  const text=String(value||'');
+  const item=(list||[]).find(x=>String(x.key)===text||String(x.label)===text);
+  return item?.label||text||fallback;
+}
+function warehouseOptionKey(list,value,defaultKey=''){
+  const text=String(value||'');
+  const item=(list||[]).find(x=>String(x.key)===text||String(x.label)===text);
+  return item?.key||text||defaultKey;
+}
+function renderWarehouseFilters(){
+  const options=state.cache.warehouse.options||{};
+  if($('warehouseItemType'))$('warehouseItemType').innerHTML=warehouseSelectOptions(options.item_types||[],$('warehouseItemType').value,'全部类型');
+  if($('warehouseMovementType'))$('warehouseMovementType').innerHTML=warehouseSelectOptions(options.movement_types||[],$('warehouseMovementType').value,'全部流水');
+  if($('warehouseMovementChannel'))$('warehouseMovementChannel').innerHTML=warehouseSelectOptions(options.channels||[],$('warehouseMovementChannel').value,'全部渠道');
+}
+async function loadWarehouse(){
+  await ensureWarehouseOptions();
+  await switchWarehouseTab(state.warehouseTab||'overview',true);
+}
+async function switchWarehouseTab(tab,force=false){
+  state.warehouseTab=tab;
+  document.querySelectorAll('[data-warehouse-tab]').forEach(x=>x.classList.toggle('active',x.dataset.warehouseTab===tab));
+  document.querySelectorAll('.warehouse-view').forEach(x=>x.classList.add('hide'));
+  const view=$(`warehouse${tab.charAt(0).toUpperCase()+tab.slice(1)}View`);
+  if(view)view.classList.remove('hide');
+  if(tab==='overview')return loadWarehouseOverview();
+  if(tab==='items')return loadWarehouseItems();
+  if(tab==='inbound')return loadWarehouseInbound();
+  if(tab==='outbound')return loadWarehouseOutbound();
+  if(tab==='movements')return loadWarehouseMovements();
+  if(tab==='settings')return loadWarehouseSettings(force);
+}
+async function loadWarehouseOverview(){
+  const d=await api('/api/v1/admin/warehouse/overview');
+  state.cache.warehouse.overview=d;
+  const s=d.stats||{};
+  $('warehouseStats').innerHTML=[
+    ['库存品类',s.item_count||0,'已建档的仓库实物'],
+    ['实物库存',s.total_stock||0,'当前剩余数量'],
+    ['库存成本',money(s.stock_value||0),'按批次成本估算'],
+    ['有效批次',s.batch_count||0,`${s.zero_stock_items||0} 个零库存品类`],
+  ].map(([title,value,desc])=>`<div class="stat-card"><span>${esc(title)}</span><b>${esc(value)}</b><em>${esc(desc)}</em></div>`).join('');
+  $('warehouseLowStock').innerHTML=table(['库存品','编码','库存','批次'],(d.low_stock_items||[]).map(x=>[
+    `<b>${esc(x.display_name)}</b><br><small>${esc([x.category,x.color_label,x.grade_label||x.grade].filter(Boolean).join(' / ')||'-')}</small>`,
+    esc(x.item_code),
+    `<b class="${x.actual_stock<=0?'danger-text':''}">${x.actual_stock} ${esc(x.unit_label||warehouseOptionLabel(state.cache.warehouse.options?.unit_options,x.unit,'颗'))}</b>`,
+    x.batch_count||0
+  ]));
+  $('warehouseRecentMovements').innerHTML=table(['时间','库存品','类型','数量','渠道'],(d.recent_movements||[]).map(x=>[
+    fmtTime(x.occurred_at),
+    `<b>${esc(x.item_name)}</b><br><small>${esc(x.item_code)}</small>`,
+    warehouseMovementLabel(x.movement_type),
+    x.quantity,
+    esc(x.channel_name||'-')
+  ]));
+}
+async function loadWarehouseItems(){
+  await ensureWarehouseOptions();
+  const qs=new URLSearchParams({
+    keyword:formValue('warehouseKeyword'),
+    category:formValue('warehouseCategory'),
+    item_type:formValue('warehouseItemType'),
+    enabled:formValue('warehouseEnabled'),
+    limit:'500'
+  });
+  state.cache.warehouse.items=await api(`/api/v1/admin/warehouse/items?${qs}`);
+  renderWarehouseItemsTable();
+}
+function renderWarehouseItemsTable(){
+  const rows=(state.cache.warehouse.items||[]).map(x=>[
+    x.image_urls?.[0]?`<img class="table-thumb" src="${esc(x.image_urls[0])}">`:'<div class="table-thumb placeholder"></div>',
+    `<b>${esc(x.display_name)}</b><br><small>编码：${esc(x.item_code)} · ${warehouseTypeLabel(x.item_type)}</small><br><small>${esc([x.category,x.color_label,x.grade_label||x.grade].filter(Boolean).join(' / ')||'-')}</small>`,
+    `<b>${x.actual_stock}</b> ${esc(x.unit_label||warehouseOptionLabel(state.cache.warehouse.options?.unit_options,x.unit,'颗'))}<br><small>${x.batch_count||0} 个批次</small>`,
+    `${x.avg_cost?money(x.avg_cost):'-'}<br><small>成本额 ${money(x.stock_cost_value||0)}</small>`,
+    statusPill(x.enabled?'enabled':'disabled',x.enabled?'启用':'停用'),
+    `<div class="table-actions">
+      <button class="mini-btn" onclick="editWarehouseItem('${esc(x.item_id)}')">编辑</button>
+      <button class="mini-btn primary" onclick="prefillWarehouseInbound('${esc(x.item_id)}')">入库</button>
+      <button class="mini-btn warn" onclick="prefillWarehouseOutbound('${esc(x.item_id)}')">出库</button>
+      <button class="mini-btn danger" onclick="deleteWarehouseItem('${esc(x.item_id)}')">停用</button>
+    </div>`
+  ]);
+  $('warehouseItemsTable').innerHTML=table(['图片','库存品 / 编码','当前库存','平均成本','状态','操作'],rows);
+}
+function warehouseItemById(id){return (state.cache.warehouse.items||[]).find(x=>x.item_id===id)}
+function newWarehouseItem(){renderWarehouseItemForm({enabled:true,item_type:'bead',unit:'piece',grade:'ungraded'})}
+function editWarehouseItem(id){renderWarehouseItemForm(warehouseItemById(id)||{})}
+function renderWarehouseItemForm(x){
+  const opts=state.cache.warehouse.options||{};
+  openDrawer('WAREHOUSE ITEM',x.item_id?'编辑库存品':'新增库存品',`
+    <div class="form-grid">
+      <input id="wh_item_id" type="hidden" value="${esc(x.item_id||'')}">
+      ${field('wh_item_code','库存编码（留空自动生成纯数字）',x.item_code||'')}
+      <label>类型<select id="wh_item_type">${(opts.item_types||[]).map(o=>`<option value="${esc(o.key)}" ${o.key===(x.item_type||'bead')?'selected':''}>${esc(o.label)}</option>`).join('')}</select></label>
+      ${field('wh_material_name','品名',x.material_name||'')}
+      ${field('wh_category','分类',x.category||'')}
+      ${field('wh_size','尺寸 mm',x.size_mm||0,'number')}
+      <label>等级<select id="wh_grade">${warehouseSelectOptions(opts.grade_options||[],warehouseOptionKey(opts.grade_options||[],x.grade,'ungraded'),'请选择等级')}</select></label>
+      ${field('wh_color','颜色标签',x.color_label||'')}
+      ${field('wh_quality','品质标签',x.quality_label||'')}
+      ${field('wh_origin','产地/来源',x.origin_place||'')}
+      <label>单位<select id="wh_unit">${warehouseSelectOptions(opts.unit_options||[],warehouseOptionKey(opts.unit_options||[],x.unit,'piece'),'请选择单位')}</select></label>
+      <label class="full">图片 URL（多张换行）<textarea id="wh_images">${esc((x.image_urls||[]).join('\n'))}</textarea></label>
+      <label class="full">备注<textarea id="wh_remark">${esc(x.remark||'')}</textarea></label>
+      <label>状态<select id="wh_enabled"><option value="true" ${x.enabled!==false?'selected':''}>启用</option><option value="false" ${x.enabled===false?'selected':''}>停用</option></select></label>
+    </div>
+    <div class="form-actions"><button class="btn secondary" onclick="closeDrawer()">取消</button><button class="btn primary" onclick="saveWarehouseItem()">保存库存品</button></div>
+  `);
+}
+async function saveWarehouseItem(){
+  const id=formValue('wh_item_id');
+  const payload={
+    item_code:formValue('wh_item_code'),
+    item_type:formValue('wh_item_type'),
+    material_name:formValue('wh_material_name'),
+    category:formValue('wh_category'),
+    size_mm:num(formValue('wh_size')),
+    grade:formValue('wh_grade'),
+    color_label:formValue('wh_color'),
+    quality_label:formValue('wh_quality'),
+    origin_place:formValue('wh_origin'),
+    unit:formValue('wh_unit')||'piece',
+    image_urls_text:formValue('wh_images'),
+    remark:formValue('wh_remark'),
+    enabled:formValue('wh_enabled')==='true'
+  };
+  if(!payload.material_name){toast('请填写品名');return}
+  await api(id?`/api/v1/admin/warehouse/items/${encodeURIComponent(id)}`:'/api/v1/admin/warehouse/items',{method:id?'PUT':'POST',body:JSON.stringify(payload)});
+  closeDrawer();await loadWarehouseItems();toast('库存品已保存');
+}
+async function deleteWarehouseItem(id){
+  if(!confirm('确定停用这个库存品吗？有库存余量时不会允许删除。'))return;
+  await api(`/api/v1/admin/warehouse/items/${encodeURIComponent(id)}`,{method:'DELETE'});
+  await loadWarehouseItems();toast('库存品已停用');
+}
+async function loadWarehouseInbound(){
+  await Promise.all([ensureWarehouseOptions(),loadWarehouseItems()]);
+  renderWarehouseInboundForm();
+  await loadWarehouseBatches();
+}
+function renderWarehouseInboundForm(selectedItemId=''){
+  const w=state.cache.warehouse,opts=w.options||{};
+  $('warehouseInboundForm').innerHTML=`
+    <div class="form-grid compact-form">
+      <label>库存品<select id="wh_in_item">${warehouseSelectOptions(w.items||[],selectedItemId,'请选择库存品')}</select></label>
+      <label>数量<input id="wh_in_qty" type="number" min="1" value="1"></label>
+      <label>单颗/单位成本<input id="wh_in_cost" type="number" min="0" step="0.01" value="0"></label>
+      <label>供应商<select id="wh_in_supplier">${warehouseSelectOptions(opts.suppliers||[],'','默认供应商')}</select></label>
+      <label>仓位<select id="wh_in_location">${warehouseSelectOptions(opts.locations||[],'','主仓')}</select></label>
+      <label>采购日期<input id="wh_in_purchase" type="date"></label>
+      <label class="full">质检说明<textarea id="wh_in_quality" placeholder="例如：颜色偏粉、冰裂明显、适合直播散卖"></textarea></label>
+      <label class="full">备注<textarea id="wh_in_remark"></textarea></label>
+    </div>
+    <div class="form-actions"><button class="btn primary" onclick="submitWarehouseInbound()">确认入库</button></div>
+  `;
+}
+async function submitWarehouseInbound(){
+  const payload={item_id:formValue('wh_in_item'),quantity:num(formValue('wh_in_qty')),unit_cost:num(formValue('wh_in_cost')),supplier_id:formValue('wh_in_supplier'),location_id:formValue('wh_in_location'),purchase_date:formValue('wh_in_purchase'),quality_note:formValue('wh_in_quality'),remark:formValue('wh_in_remark')};
+  if(!payload.item_id){toast('请选择库存品');return}
+  if(payload.quantity<=0){toast('入库数量必须大于 0');return}
+  await api('/api/v1/admin/warehouse/inbound',{method:'POST',body:JSON.stringify(payload)});
+  await loadWarehouseInbound();toast('入库已记录');
+}
+async function loadWarehouseBatches(){
+  state.cache.warehouse.batches=await api('/api/v1/admin/warehouse/batches?limit=200');
+  $('warehouseBatchesTable').innerHTML=table(['批次号','库存品','余量/入库','成本','仓位/供应商','入库时间'],(state.cache.warehouse.batches||[]).map(x=>[
+    `<b>${esc(x.batch_no)}</b><br><small>${esc(x.status)}</small>`,
+    `<b>${esc(x.item_name)}</b><br><small>${esc(x.item_code)}</small>`,
+    `<b>${x.remaining_quantity}</b> / ${x.inbound_quantity}`,
+    `${money(x.unit_cost)}<br><small>合计 ${money(x.total_cost)}</small>`,
+    `${esc(x.location_name||'-')}<br><small>${esc(x.supplier_name||'-')}</small>`,
+    fmtTime(x.inbound_at)
+  ]));
+}
+async function loadWarehouseOutbound(){
+  await Promise.all([ensureWarehouseOptions(),loadWarehouseItems()]);
+  renderWarehouseOutboundForm();
+}
+function renderWarehouseOutboundForm(selectedItemId=''){
+  const w=state.cache.warehouse,opts=w.options||{};
+  $('warehouseOutboundForm').innerHTML=`
+    <div class="form-grid compact-form">
+      <label>库存品<select id="wh_out_item">${warehouseSelectOptions(w.items||[],selectedItemId,'请选择库存品')}</select></label>
+      <label>出库类型<select id="wh_out_type">${warehouseSelectOptions((opts.movement_types||[]).filter(x=>!['manual_in','return_in','stocktake_gain'].includes(x.key)),'sale_out','请选择类型')}</select></label>
+      <label>出库渠道<select id="wh_out_channel">${warehouseSelectOptions(opts.channels||[],'','请选择渠道')}</select></label>
+      <label>数量<input id="wh_out_qty" type="number" min="1" value="1"></label>
+      <label>外部订单号<input id="wh_out_order" placeholder="抖音/微信/线下单号，可为空"></label>
+      <label>外部平台<input id="wh_out_platform" placeholder="douyin / wechat / offline"></label>
+      <label class="full">原因<textarea id="wh_out_reason" placeholder="销售出库、拍摄样品、损耗、盘亏等"></textarea></label>
+      <label class="full">备注<textarea id="wh_out_remark"></textarea></label>
+    </div>
+    <div class="form-actions"><button class="btn primary" onclick="submitWarehouseOutbound()">确认出库</button></div>
+  `;
+}
+async function submitWarehouseOutbound(){
+  const payload={item_id:formValue('wh_out_item'),movement_type:formValue('wh_out_type')||'sale_out',channel_id:formValue('wh_out_channel'),quantity:num(formValue('wh_out_qty')),external_order_no:formValue('wh_out_order'),external_platform:formValue('wh_out_platform'),reason:formValue('wh_out_reason'),remark:formValue('wh_out_remark')};
+  if(!payload.item_id){toast('请选择库存品');return}
+  if(payload.quantity<=0){toast('出库数量必须大于 0');return}
+  await api('/api/v1/admin/warehouse/outbound',{method:'POST',body:JSON.stringify(payload)});
+  await Promise.all([loadWarehouseItems(),loadWarehouseMovements()]);toast('出库已记录');
+}
+function prefillWarehouseInbound(itemId){state.warehouseTab='inbound';switchWarehouseTab('inbound').then(()=>{if($('wh_in_item'))$('wh_in_item').value=itemId})}
+function prefillWarehouseOutbound(itemId){state.warehouseTab='outbound';switchWarehouseTab('outbound').then(()=>{if($('wh_out_item'))$('wh_out_item').value=itemId})}
+async function loadWarehouseMovements(){
+  await ensureWarehouseOptions();
+  const qs=new URLSearchParams({keyword:formValue('warehouseMovementKeyword'),movement_type:formValue('warehouseMovementType'),channel_id:formValue('warehouseMovementChannel'),start_date:formValue('warehouseMovementStart'),end_date:formValue('warehouseMovementEnd'),limit:'500'});
+  state.cache.warehouse.movements=await api(`/api/v1/admin/warehouse/movements?${qs}`);
+  $('warehouseMovementsTable').innerHTML=table(['时间','流水号','库存品','类型','数量','批次/渠道','外部单号','操作人'],(state.cache.warehouse.movements||[]).map(x=>[
+    fmtTime(x.occurred_at),
+    esc(x.movement_no),
+    `<b>${esc(x.item_name)}</b><br><small>${esc(x.item_code)}</small>`,
+    warehouseMovementLabel(x.movement_type),
+    `<b>${x.quantity}</b><br><small>${x.before_quantity} → ${x.after_quantity}</small>`,
+    `${esc(x.batch_no||'-')}<br><small>${esc(x.channel_name||'-')}</small>`,
+    esc(x.external_order_no||'-'),
+    esc(x.operator_name||'-')
+  ]));
+}
+async function loadWarehouseSettings(force=false){
+  await ensureWarehouseOptions(true);
+  const opts=state.cache.warehouse.options||{};
+  $('warehouseSuppliersTable').innerHTML=table(['编码','供应商','联系人','状态','操作'],(opts.suppliers||[]).map(x=>[
+    esc(x.supplier_code),`<b>${esc(x.name)}</b><br><small>${esc(x.remark||'-')}</small>`,`${esc(x.contact_name||'-')}<br><small>${esc(x.phone||'')}</small>`,statusPill(x.enabled?'enabled':'disabled',x.enabled?'启用':'停用'),`<button class="mini-btn" onclick="editWarehouseSupplier('${esc(x.supplier_id)}')">编辑</button>`
+  ]));
+  $('warehouseLocationsTable').innerHTML=table(['编码','仓位','位置','状态','操作'],(opts.locations||[]).map(x=>[
+    esc(x.location_code),`<b>${esc(x.name)}</b><br><small>${esc(x.remark||'-')}</small>`,[x.area,x.shelf,x.box_no].filter(Boolean).map(esc).join(' / ')||'-',statusPill(x.enabled?'enabled':'disabled',x.enabled?'启用':'停用'),`<button class="mini-btn" onclick="editWarehouseLocation('${esc(x.location_id)}')">编辑</button>`
+  ]));
+  $('warehouseChannelsTable').innerHTML=table(['编码','渠道','类型','状态','操作'],(opts.channels||[]).map(x=>[
+    esc(x.channel_code),`<b>${esc(x.name)}</b><br><small>${esc(x.remark||'-')}</small>`,esc(x.channel_type),statusPill(x.enabled?'enabled':'disabled',x.enabled?'启用':'停用'),`<button class="mini-btn" onclick="editWarehouseChannel('${esc(x.channel_id)}')">编辑</button>`
+  ]));
+}
+function warehouseBasicForm(kind,x={}){
+  const maps={supplier:['供应商','supplier','supplier_id','supplier_code',['contact_name','联系人'],['phone','电话'],['address','地址']],location:['仓位','location','location_id','location_code',['area','区域'],['shelf','货架'],['box_no','盒号']],channel:['渠道','channel','channel_id','channel_code',['channel_type','类型'],['remark','备注']]};
+  const m=maps[kind],idField=m[2],codeField=m[3];
+  openDrawer('WAREHOUSE SETTING',`${x[idField]?'编辑':'新增'}${m[0]}`,`
+    <div class="form-grid">
+      <input id="wh_basic_kind" type="hidden" value="${kind}">
+      <input id="wh_basic_id" type="hidden" value="${esc(x[idField]||'')}">
+      ${field('wh_basic_code','编码（可留空）',x[codeField]||'')}
+      ${field('wh_basic_name',`${m[0]}名称`,x.name||'')}
+      ${m.slice(4).map(([key,label])=>field(`wh_basic_${key}`,label,x[key]||'')).join('')}
+      <label>状态<select id="wh_basic_enabled"><option value="true" ${x.enabled!==false?'selected':''}>启用</option><option value="false" ${x.enabled===false?'selected':''}>停用</option></select></label>
+    </div>
+    <div class="form-actions"><button class="btn secondary" onclick="closeDrawer()">取消</button><button class="btn primary" onclick="saveWarehouseBasic()">保存</button></div>
+  `);
+}
+function newWarehouseSupplier(){warehouseBasicForm('supplier',{})}
+function editWarehouseSupplier(id){warehouseBasicForm('supplier',(state.cache.warehouse.options?.suppliers||[]).find(x=>x.supplier_id===id)||{})}
+function newWarehouseLocation(){warehouseBasicForm('location',{})}
+function editWarehouseLocation(id){warehouseBasicForm('location',(state.cache.warehouse.options?.locations||[]).find(x=>x.location_id===id)||{})}
+function newWarehouseChannel(){warehouseBasicForm('channel',{})}
+function editWarehouseChannel(id){warehouseBasicForm('channel',(state.cache.warehouse.options?.channels||[]).find(x=>x.channel_id===id)||{})}
+async function saveWarehouseBasic(){
+  const kind=formValue('wh_basic_kind'),id=formValue('wh_basic_id'),payload={name:formValue('wh_basic_name'),enabled:formValue('wh_basic_enabled')==='true'};
+  if(!payload.name){toast('请填写名称');return}
+  if(kind==='supplier')Object.assign(payload,{supplier_id:id,supplier_code:formValue('wh_basic_code'),contact_name:formValue('wh_basic_contact_name'),phone:formValue('wh_basic_phone'),address:formValue('wh_basic_address')});
+  if(kind==='location')Object.assign(payload,{location_id:id,location_code:formValue('wh_basic_code'),area:formValue('wh_basic_area'),shelf:formValue('wh_basic_shelf'),box_no:formValue('wh_basic_box_no')});
+  if(kind==='channel')Object.assign(payload,{channel_id:id,channel_code:formValue('wh_basic_code'),channel_type:formValue('wh_basic_channel_type')||'manual',remark:formValue('wh_basic_remark')});
+  const path={supplier:'/api/v1/admin/warehouse/suppliers',location:'/api/v1/admin/warehouse/locations',channel:'/api/v1/admin/warehouse/channels'}[kind];
+  await api(path,{method:'POST',body:JSON.stringify(payload)});
+  closeDrawer();state.cache.warehouse.options=null;await loadWarehouseSettings(true);toast('基础资料已保存');
+}
 if(state.token)boot();
 
 // Banner / 内容图片上传组件文案兜底覆盖：修复旧实现中的乱码占位和错误提示。

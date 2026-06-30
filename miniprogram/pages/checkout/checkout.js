@@ -62,6 +62,8 @@ function normalizeSequenceItem(entry = {}, index = 0) {
     subText: [size ? `${size}mm` : '', category].filter(Boolean).join(' · '),
     price: moneyValue(entry.price, entry.priceText, entry.amount, fallback.price),
     weight: Number(entry.weight || 0),
+    color: entry.color || '',
+    shine: entry.shine || '',
     image_url: entry.image_url || imageUrls[0] || '',
     image_urls: imageUrls
   };
@@ -195,15 +197,33 @@ Page({
     const sequence = this.data.sequence || [];
     if (!design || !sequence.length) return;
     try {
-      const payload = await getMaterials();
+      const payload = await getMaterials({ silent: true, timeout: 8000 });
       const materials = payload.materials || [];
       if (!materials.length) return;
       const byId = {};
       const bySku = {};
       materials.forEach(material => {
-        if (material.id) byId[String(material.id)] = material;
-        if (material.skuId) bySku[String(material.skuId)] = material;
-        if (material.sku) bySku[String(material.sku)] = material;
+        const sku = material.sku || {};
+        const visual = material.visual || {};
+        const energy = material.energy || {};
+        const normalized = {
+          ...material,
+          id: sku.id || material.id,
+          skuId: sku.sku_id || material.skuId || material.sku_id,
+          name: sku.name || material.name,
+          category: sku.category || material.category,
+          series: sku.series || material.series,
+          grade: sku.grade || material.grade,
+          effect: (energy.effects || []).join(' / ') || material.effect,
+          element: energy.primary_element || material.element,
+          size: sku.size_mm || material.size,
+          price: sku.price_per_bead || material.price,
+          weight: sku.weight_g || material.weight,
+          image_url: visual.thumbnail_url || material.image_url,
+          image_urls: visual.image_urls || material.image_urls || material.image_pool || []
+        };
+        if (normalized.id) byId[String(normalized.id)] = normalized;
+        if (normalized.skuId) bySku[String(normalized.skuId)] = normalized;
       });
 
       const changed = [];
@@ -233,6 +253,8 @@ Page({
           diameter: material.size || item.diameter,
           price: currentPrice,
           weight: material.weight || item.weight,
+          color: material.color || item.color,
+          shine: material.shine || item.shine,
           image_url: item.image_url || material.image_url || firstImageUrl(material),
           image_urls: material.image_urls || material.image_pool || item.image_urls || [],
           snapshot_at: item.snapshot_at || new Date().toISOString()
@@ -265,7 +287,7 @@ Page({
         });
       }
     } catch (error) {
-      console.warn('refresh checkout material prices failed:', error);
+      console.warn('refresh checkout material prices failed:', error.message || error);
     }
   },
 
@@ -282,9 +304,13 @@ Page({
       return {
         ...item,
         image_url: placement.image_url || item.image_url || firstImageUrl(item),
-        style: `width:${size}rpx;height:${size}rpx;margin-left:-${size / 2}rpx;margin-top:-${size / 2}rpx;transform:rotate(${angle}deg) translateY(-${radius}rpx) rotate(${-angle}deg);`
+        style: `width:${size}rpx;height:${size}rpx;margin-left:-${size / 2}rpx;margin-top:-${size / 2}rpx;background:${this.buildPreviewBeadBackground(item)};transform:rotate(${angle}deg) translateY(-${radius}rpx) rotate(${-angle}deg);`
       };
     });
+  },
+
+  buildPreviewBeadBackground(item = {}) {
+    return `radial-gradient(circle at 32% 28%, ${item.shine || '#fff'} 0 12%, ${item.color || '#d8d2c8'} 16% 60%, rgba(0,0,0,.20) 100%)`;
   },
 
   formatAmount(value) {
