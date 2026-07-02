@@ -121,22 +121,6 @@
       <view class="dimension-copy">{{viewDaily.dimensionCommentary}}</view>
     </view>
 
-    <view class="crystal-card yu-card">
-      <view class="card-title"><text class="title-icon purple">✦</text>今日水晶建议</view>
-      <view class="combo-list">
-        <view class="combo-item" wx:for="{{viewDaily.combo}}" wx:key="label">
-          <view class="combo-index" style="background: {{item.color}};">{{item.index}}</view>
-          <image wx:if="{{item.imageUrl}}" class="crystal-orb crystal-orb-image" src="{{item.imageUrl}}" mode="aspectFill"></image>
-          <view wx:else class="crystal-orb" style="{{item.orbStyle}}"></view>
-          <view class="combo-copy">
-            <view class="combo-name">{{item.label}}：{{item.name}}</view>
-            <view class="combo-role">{{item.role}}</view>
-            <view wx:if="{{item.reason}}" class="combo-reason">{{item.reason}}</view>
-          </view>
-        </view>
-      </view>
-    </view>
-
     <view class="wear-card yu-card">
       <view class="card-title"><text class="title-icon green">☘</text>今日佩戴建议</view>
       <view class="wear-line">
@@ -175,12 +159,6 @@
           <view class="plan-style">{{viewDaily.plan.style}}</view>
         </view>
         <view class="plan-mark">DIY</view>
-      </view>
-      <view class="plan-visual">
-        <block wx:for="{{viewDaily.plan.visuals}}" wx:key="index">
-          <image wx:if="{{item.imageUrl}}" class="plan-orb plan-orb-image" src="{{item.imageUrl}}" mode="aspectFill"></image>
-          <view wx:else class="plan-orb" style="{{item.style}}"></view>
-        </block>
       </view>
       <view class="plan-desc">{{viewDaily.plan.description}}</view>
       <view class="plan-tags">

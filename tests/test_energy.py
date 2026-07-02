@@ -100,10 +100,26 @@ def test_recommendation_primary_follows_wish_and_support_avoids_primary_elements
     recommendation = RecommendationEngine().recommend(request, energy)
     primary = recommendation["primary"]
 
-    assert primary["name"] in {"钛晶", "黄水晶", "金发晶", "太阳石"}
+    assert primary["code"] in {"titanium_quartz", "citrine", "gold_rutilated_quartz", "sunstone"}
     excluded = {primary["element"], *primary["secondary_elements"]}
     assert recommendation["supporting"][0]["element"] not in excluded
     assert len(recommendation["bracelet_plan"]["layout"]) == recommendation["bracelet_plan"]["estimated_bead_count"]
+
+
+def test_recommendation_uses_preferred_bead_size_in_items_and_layout():
+    request = make_request(bead_size_mm=10)
+    energy = EnergyCalculator().calculate(request)
+    recommendation = RecommendationEngine().recommend(request, energy)
+
+    plan = recommendation["bracelet_plan"]
+
+    assert plan["bead_size_mm"] == 10
+    assert recommendation["primary"]["bead_size_mm"] == 10
+    assert all(item["bead_size_mm"] == 10 for item in recommendation["supporting"])
+    assert {item["bead_size_mm"] for item in plan["items"]} == {10}
+    assert {item["bead_size_mm"] for item in plan["layout"]} == {10}
+    assert {item["actual_material_size_mm"] for item in plan["items"]} == {10}
+    assert all(item["material_id"] for item in plan["items"])
 
 
 def test_recommendation_respects_material_role_rules_for_primary():

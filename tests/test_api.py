@@ -50,6 +50,35 @@ def test_compact_material_search_omits_catalog_metadata_and_honors_limit():
         assert isinstance(item["rules"]["allowed_roles"], list)
 
 
+def test_workspace_material_catalog_supports_paged_slim_payload():
+    response = client.get("/api/v1/materials?top=bead&page=1&page_size=2&slim=true")
+    data = response.json()["data"]
+
+    assert response.status_code == 200
+    assert data["pagination"]["page"] == 1
+    assert data["pagination"]["page_size"] == 2
+    assert len(data["materials"]) <= 2
+    assert "categories_by_top" in data
+    assert "series_by_category" in data
+    if data["materials"]:
+        item = data["materials"][0]
+        assert {"id", "name", "price", "size", "image_url"}.issubset(item)
+        assert "rules" not in item
+        assert "image_pool" not in item
+
+        detail_response = client.get(f"/api/v1/materials?ids={item['id']}&slim=true")
+        detail_data = detail_response.json()["data"]
+        assert detail_response.status_code == 200
+        assert [material["id"] for material in detail_data["materials"]] == [item["id"]]
+
+        for lookup_key in (item.get("skuId"), item.get("material_code")):
+            if lookup_key and lookup_key != item["id"]:
+                alias_response = client.get(f"/api/v1/materials?ids={lookup_key}&slim=true")
+                alias_data = alias_response.json()["data"]
+                assert alias_response.status_code == 200
+                assert item["id"] in [material["id"] for material in alias_data["materials"]]
+
+
 def test_admin_material_options_expose_field_governance_specs(tmp_path):
     from app.admin_service import AdminService
 
@@ -200,6 +229,75 @@ def test_admin_material_spu_reports_size_coverage_and_missing_specs(tmp_path):
     ]
 
 
+def test_admin_material_spu_pagination_keeps_legacy_list_response(tmp_path):
+    from app.admin_service import AdminService
+
+    service = AdminService(tmp_path / "material-spu-pagination.db")
+    for index, series in enumerate(("Page Quartz A", "Page Quartz B", "Page Quartz C"), start=1):
+        ensure_material_taxonomy(service, "page-quartz", series)
+        service.save_material(
+            {
+                "id": f"page_quartz_{index}_8",
+                "skuId": f"page_quartz_{index}_8",
+                "material_code": f"page_quartz_{index}",
+                "top": "bead",
+                "category": "page-quartz",
+                "series": series,
+                "name": series,
+                "primary_element": "water",
+                "effects": ["focus"],
+                "price_per_bead": index,
+                "size_mm": 8,
+                "weight_g": 1,
+                "stock": 3,
+                "sort_order": index,
+                "thumbnail_url": f"https://cdn-test.yustream.cn/materials/beads/page-quartz-{index}.png",
+            }
+        )
+
+    legacy = service.list_material_spus(keyword="Page Quartz")
+    page = service.list_material_spus(keyword="Page Quartz", page=2, page_size=1)
+
+    assert isinstance(legacy, list)
+    assert len(legacy) == 3
+    assert page["pagination"]["page"] == 2
+    assert page["pagination"]["page_size"] == 1
+    assert page["pagination"]["total"] == 3
+    assert page["pagination"]["total_pages"] == 3
+    assert [item["sku"]["series"] for item in page["items"]] == ["Page Quartz B"]
+
+    ensure_material_taxonomy(service, "filter-gem", "Filter Gem")
+    for enabled, size in ((True, 8), (False, 10)):
+        service.save_material(
+            {
+                "id": f"filter_gem_{size}",
+                "skuId": f"filter_gem_{size}",
+                "material_code": "filter_gem",
+                "top": "bead",
+                "category": "filter-gem",
+                "series": "Filter Gem",
+                "name": "Filter Gem",
+                "primary_element": "water",
+                "effects": ["focus"],
+                "price_per_bead": 2,
+                "size_mm": size,
+                "weight_g": 1,
+                "stock": 3,
+                "enabled": enabled,
+                "sort_order": size,
+                "thumbnail_url": f"https://cdn-test.yustream.cn/materials/beads/filter-gem-{size}.png",
+            }
+        )
+
+    enabled_page = service.list_material_spus(keyword="Filter Gem", status="enabled", page=1, page_size=10)
+    disabled_page = service.list_material_spus(keyword="Filter Gem", status="disabled", page=1, page_size=10)
+
+    assert len(enabled_page["items"]) == 1
+    assert [item["sku"]["enabled"] for item in enabled_page["items"][0]["items"]] == [True]
+    assert len(disabled_page["items"]) == 1
+    assert [item["sku"]["enabled"] for item in disabled_page["items"][0]["items"]] == [False]
+
+
 def test_admin_material_saves_structured_knowledge_without_legacy_required_fields(tmp_path):
     from app.admin_service import AdminService
 
@@ -235,6 +333,85 @@ def test_admin_material_saves_structured_knowledge_without_legacy_required_field
     assert saved["energy"]["effects"] == ["career", "focus"]
     assert saved["visual"]["thumbnail_url"].endswith("/moss.png")
     assert saved["rules"]["allowed_roles"] == ["primary", "support"]
+
+
+def test_admin_material_prefers_sku_image_over_shared_knowledge_asset(tmp_path):
+    import json
+
+    from app.admin_service import AdminService
+
+    service = AdminService(tmp_path / "shared-knowledge-image.db")
+    sku_image = "https://cdn-test.yustream.cn/materials/beads/current-green.png"
+    shared_image = "https://cdn-test.yustream.cn/materials/beads/old-shared-matcha.png"
+
+    with service.connect() as connection:
+        connection.execute(
+            """
+            INSERT INTO material_knowledge
+            (code, name, primary_element, secondary_elements_json, chakras_json, chakra_weights_json,
+             effects_json, wish_pools_json, color_family, mood_tags_json, visual_tags_json, story,
+             allowed_roles_json, conflict_codes_json, match_rules_json, care_tags_json,
+             material_params_json, asset_json, enabled, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "shared_green_phantom",
+                "Shared Green Phantom",
+                "wood",
+                "[]",
+                "[]",
+                "{}",
+                json.dumps(["growth"]),
+                "[]",
+                "green",
+                "[]",
+                "[]",
+                "",
+                json.dumps(["primary"]),
+                "[]",
+                json.dumps(["no_limit"]),
+                "[]",
+                "{}",
+                json.dumps({"thumbnail_url": shared_image}),
+                1,
+                "2026-07-01T00:00:00Z",
+                "2026-07-01T00:00:00Z",
+            ),
+        )
+        material = service.public_material(
+            {
+                "id": "sku_green_8",
+                "skuId": "sku_green_8",
+                "top": "bead",
+                "category": "ghost",
+                "series": "Green Phantom",
+                "material_code": "shared_green_phantom",
+                "grade": "entry",
+                "name": "Green Phantom",
+                "effect": "growth",
+                "element": "wood",
+                "price": 1,
+                "size": 8,
+                "weight": 1,
+                "cost_price": 0,
+                "safety_stock": 0,
+                "supplier_name": "",
+                "purchase_note": "",
+                "color": "#6b9f78",
+                "shine": "#e5f4e8",
+                "image_path": "",
+                "image_url": sku_image,
+                "image_urls_json": json.dumps([sku_image]),
+                "stock": 1,
+                "enabled": 1,
+                "sort_order": 1,
+            },
+            connection,
+        )
+
+    assert material["visual"]["thumbnail_url"] == sku_image
+    assert material["thumbnail_url"] == sku_image
+    assert material["visual"]["asset"]["thumbnail_url"] == sku_image
 
 
 def test_admin_material_keeps_ops_fields_internal_to_admin(tmp_path):
@@ -1289,6 +1466,29 @@ def test_diy_design_list_and_delete(tmp_path):
     assert service.list_designs("design-user") == []
 
 
+def test_shared_diy_design_endpoint_allows_view_without_owner_user_id(tmp_path, monkeypatch):
+    from app import api as api_module
+
+    service = OrderService(tmp_path / "shared-design.db")
+    saved = service.save_design(
+        {
+            "user_id": "share-owner",
+            "design": {"selected": ["clearQuartz8"], "summary": {"price": 128}},
+            "sequence": [{"id": "clearQuartz8", "name": "白水晶", "size": 8}],
+        }
+    )
+    monkeypatch.setattr(api_module, "order_service", service)
+
+    private_response = client.get(f"/api/v1/diy-designs/{saved['design_id']}?user_id=viewer")
+    shared_response = client.get(f"/api/v1/diy-designs/shared/{saved['design_id']}")
+
+    assert private_response.status_code == 404
+    assert shared_response.status_code == 200
+    assert shared_response.json()["data"]["user_id"] == ""
+    assert shared_response.json()["data"]["design"]["selected"] == ["clearQuartz8"]
+    assert shared_response.json()["data"]["sequence"][0]["name"] == "白水晶"
+
+
 def test_cart_items_can_be_created_updated_and_cleared(tmp_path):
     service = OrderService(tmp_path / "cart-assets.db")
     item = service.save_cart_item(
@@ -1418,9 +1618,13 @@ def test_calculate_returns_ui_ready_result():
     data = response.json()["data"]
 
     assert response.status_code == 200
+    assert "charset=utf-8" in response.headers["content-type"].lower()
     assert data["chart"]["type"] == "radar"
     assert data["primary_crystal"]["role"] == "主石"
     assert data["bracelet_plan"]["layout"]
+    assert data["zodiac_analysis"]["name"] == "狮子座"
+    assert data["zodiac_analysis"]["element"] == "火象"
+    assert data["zodiac_analysis"]["suggestion"]
 
 
 def test_two_step_energy_to_diy_workbench_flow():
@@ -1433,6 +1637,7 @@ def test_two_step_energy_to_diy_workbench_flow():
     assert energy_response.status_code == 200
     assert energy_data["status"] == "energy_ready"
     assert energy_data["next_step"]["action"] == "open_wrist_size_form"
+    assert energy_data["zodiac_analysis"]["name"] == "狮子座"
     assert "bracelet_plan" not in energy_data
 
     recommendation_response = client.post(

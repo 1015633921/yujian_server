@@ -4,6 +4,8 @@ page {
 
 .cart-page {
   min-height: 100vh;
+  box-sizing: border-box;
+  padding-bottom: calc(40rpx + env(safe-area-inset-bottom));
 }
 
 .cart-nav {
@@ -42,8 +44,7 @@ page {
 }
 
 .manage-button::after,
-.checkout-button::after,
-.delete-selected::after,
+.item-action::after,
 .empty-primary::after,
 .empty-secondary::after {
   border: 0;
@@ -87,36 +88,11 @@ page {
 .cart-item {
   position: relative;
   display: grid;
-  grid-template-columns: 38rpx 142rpx 1fr;
+  grid-template-columns: 142rpx minmax(0, 1fr);
   align-items: center;
   gap: 18rpx;
   padding: 20rpx;
   border-radius: 24rpx;
-}
-
-.check-dot {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 34rpx;
-  height: 34rpx;
-  border: 2rpx solid #d4d7d0;
-  border-radius: 50%;
-  color: #fff;
-  background: #fff;
-  font-size: 20rpx;
-  font-weight: 900;
-}
-
-.check-dot.checked {
-  border-color: var(--yu-color-blue);
-  background: var(--yu-color-blue);
-}
-
-.check-dot.small {
-  width: 30rpx;
-  height: 30rpx;
-  font-size: 18rpx;
 }
 
 .item-preview {
@@ -233,31 +209,47 @@ page {
   font-weight: 800;
 }
 
-.qty-control {
-  display: grid;
-  grid-template-columns: 44rpx 52rpx 44rpx;
-  align-items: center;
-  height: 42rpx;
-  overflow: hidden;
-  border: var(--yu-line-hair);
-  border-radius: var(--yu-radius-pill);
-  background: rgba(255, 255, 255, .78);
-}
-
-.qty-btn,
-.qty-value {
+.item-actions {
   display: flex;
   align-items: center;
-  justify-content: center;
-  height: 42rpx;
-  color: var(--yu-color-anchor-dark);
-  font-size: 20rpx;
-  font-weight: 800;
+  justify-content: flex-end;
+  flex: none;
+  width: 204rpx;
+  gap: 10rpx;
 }
 
-.qty-value {
-  border-right: var(--yu-line-hair);
-  border-left: var(--yu-line-hair);
+.item-action {
+  box-sizing: border-box;
+  display: flex;
+  flex: 0 0 82rpx;
+  align-items: center;
+  justify-content: center;
+  width: 82rpx;
+  min-width: 0;
+  height: 58rpx;
+  min-height: 58rpx;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--yu-radius-pill);
+  font-size: 22rpx;
+  font-weight: 900;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.action-secondary {
+  color: var(--yu-color-anchor-dark);
+  background: rgba(255, 255, 255, .86);
+  box-shadow: inset 0 0 0 1rpx rgba(32, 32, 31, .08), 0 8rpx 18rpx rgba(45, 43, 37, .06);
+}
+
+.action-primary {
+  flex-basis: 112rpx;
+  width: 112rpx;
+  color: #fff;
+  background: linear-gradient(135deg, #2f322f 0%, #141614 100%);
+  box-shadow: 0 12rpx 26rpx rgba(26, 28, 25, .16);
 }
 
 .item-delete {
@@ -270,81 +262,6 @@ page {
   background: rgba(200, 59, 61, .08);
   font-size: 19rpx;
   font-weight: 800;
-}
-
-.bottom-spacer {
-  height: 170rpx;
-}
-
-.checkout-bar {
-  position: fixed;
-  left: 24rpx;
-  right: 24rpx;
-  bottom: calc(24rpx + env(safe-area-inset-bottom));
-  z-index: 20;
-  display: grid;
-  grid-template-columns: auto 1fr auto;
-  align-items: center;
-  gap: 18rpx;
-  padding: 16rpx;
-  border: var(--yu-line-hair);
-  border-radius: 28rpx;
-  background: rgba(255, 255, 255, .94);
-  box-shadow: 0 16rpx 42rpx rgba(20, 20, 20, .1);
-  backdrop-filter: blur(18rpx);
-}
-
-.select-all {
-  display: flex;
-  align-items: center;
-  gap: 10rpx;
-  color: var(--yu-color-text-secondary);
-  font-size: 21rpx;
-  font-weight: 800;
-}
-
-.checkout-summary {
-  min-width: 0;
-  text-align: right;
-  color: var(--yu-color-text-regular);
-  font-size: 22rpx;
-  font-weight: 800;
-}
-
-.checkout-price {
-  color: var(--yu-color-anchor-dark);
-  font-size: 28rpx;
-  font-weight: 900;
-}
-
-.checkout-button,
-.delete-selected {
-  height: 76rpx;
-  min-height: 76rpx;
-  margin: 0;
-  padding: 0 32rpx;
-  border: 0;
-  border-radius: 22rpx;
-  color: #fff;
-  font-size: 24rpx;
-  font-weight: 900;
-  line-height: 76rpx;
-}
-
-.checkout-button {
-  background: var(--yu-color-anchor-dark);
-  box-shadow: 0 12rpx 24rpx rgba(20, 20, 20, .16);
-}
-
-.checkout-button.disabled {
-  color: rgba(32, 32, 31, .58);
-  background: rgba(32, 32, 31, .14);
-  opacity: 1;
-  box-shadow: none;
-}
-
-.delete-selected {
-  background: var(--yu-color-red);
 }
 
 .empty-state {
@@ -413,7 +330,7 @@ page {
 
 @media (max-width: 360px) {
   .cart-item {
-    grid-template-columns: 34rpx 116rpx 1fr;
+    grid-template-columns: 116rpx minmax(0, 1fr);
     gap: 14rpx;
     padding: 18rpx;
   }
@@ -429,86 +346,30 @@ page {
     gap: 10rpx;
   }
 
+  .item-actions {
+    width: 196rpx;
+    gap: 8rpx;
+  }
+
+  .item-action {
+    flex-basis: 80rpx;
+    width: 80rpx;
+    font-size: 21rpx;
+  }
+
+  .action-primary {
+    flex-basis: 108rpx;
+    width: 108rpx;
+  }
+
   .list-head {
     align-items: flex-start;
     flex-direction: column;
   }
-
-  .checkout-bar {
-    left: 16rpx;
-    right: 16rpx;
-    grid-template-columns: auto 1fr;
-  }
-
-  .checkout-button,
-  .delete-selected {
-    grid-column: 1 / -1;
-    width: 100%;
-  }
 }
 
-/* WeUI-like cart controls. */
-.manage-button,
-.checkout-button,
-.delete-selected,
-.qty-btn {
-  box-sizing: border-box;
-}
-
-.manage-button::after,
-.checkout-button::after,
-.delete-selected::after,
-.qty-btn::after {
-  border: 0;
-}
-
-.checkout-bar {
-  box-sizing: border-box;
-  border-top: 1rpx solid rgba(32, 32, 31, .08);
-  background: rgba(251, 250, 247, .96);
-  box-shadow: 0 -14rpx 34rpx rgba(45, 43, 37, .07);
-  backdrop-filter: blur(18rpx);
-  grid-template-columns: auto minmax(0, 1fr) minmax(190rpx, auto);
-}
-
-.checkout-button,
-.delete-selected {
-  box-sizing: border-box;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  max-width: 100%;
-  height: 82rpx;
-  min-height: 82rpx;
-  min-width: 190rpx;
-  margin: 0;
-  padding: 0 24rpx;
-  border-radius: 999rpx;
-  line-height: 1;
-  white-space: nowrap;
-}
-
-@media (max-width: 360px) {
-  .checkout-button,
-  .delete-selected {
-    min-width: 0;
-    width: 100%;
-  }
-}
-
-.checkout-button {
-  background: linear-gradient(135deg, #2f322f 0%, #141614 100%);
-  box-shadow: 0 14rpx 32rpx rgba(26, 28, 25, .16);
-}
-
-.delete-selected {
-  background: linear-gradient(135deg, #c95c50, #9d3e35);
-}
-
-.checkout-button:active,
-.delete-selected:active,
 .manage-button:active,
-.qty-btn:active {
+.item-action:active {
   opacity: .86;
   transform: scale(.985);
 }

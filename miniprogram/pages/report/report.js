@@ -8,6 +8,19 @@ const ELEMENT_META = {
   水: { key: 'water', color: '#4E7893', softColor: 'rgba(78,120,147,.12)' }
 };
 const ELEMENT_ORDER = ['木', '火', '土', '金', '水'];
+const API_ELEMENT_ORDER = ['金', '木', '水', '火', '土'];
+const ELEMENT_NAME_ALIASES = {
+  metal: '金',
+  wood: '木',
+  water: '水',
+  fire: '火',
+  earth: '土',
+  jin: '金',
+  mu: '木',
+  shui: '水',
+  huo: '火',
+  tu: '土'
+};
 const STEPS = [
   { key: 'basic', index: 1, label: '基础信息', activeClass: 'done' },
   { key: 'wish', index: 2, label: '核心愿望', activeClass: 'done' },
@@ -15,7 +28,9 @@ const STEPS = [
   { key: 'analysis', index: 4, label: '能量分析', activeClass: 'active' }
 ];
 const POSTER_WIDTH = 750;
-const POSTER_HEIGHT = 1200;
+const POSTER_MIN_HEIGHT = 2180;
+const POSTER_MAX_HEIGHT = 4096;
+const POSTER_MAX_BITMAP_SIDE = 4096;
 const WRIST_RULER_MIN = 10;
 const WRIST_RULER_MAX = 25;
 const WRIST_RULER_STEP = 0.1;
@@ -27,6 +42,59 @@ function safeText(value, fallback = '') {
   if (value === null || value === undefined) return fallback;
   const text = String(value).trim();
   return text || fallback;
+}
+
+function repairMojibakeText(value) {
+  const text = safeText(value);
+  if (!text) return '';
+  const codes = [];
+  for (let index = 0; index < text.length; index += 1) {
+    const code = text.charCodeAt(index);
+    if (code > 255) return text;
+    codes.push(`%${code.toString(16).padStart(2, '0')}`);
+  }
+  try {
+    return decodeURIComponent(codes.join(''));
+  } catch (error) {
+    return text;
+  }
+}
+
+function normalizeElementName(value) {
+  const text = safeText(value);
+  if (ELEMENT_META[text]) return text;
+  const repaired = repairMojibakeText(text);
+  if (ELEMENT_META[repaired]) return repaired;
+  const lowered = text.toLowerCase();
+  return ELEMENT_NAME_ALIASES[lowered] || '';
+}
+
+function applyEnergyValue(target, name, value, options = {}) {
+  const element = normalizeElementName(name);
+  const numeric = Number(value);
+  if (!element || !Number.isFinite(numeric)) return;
+  if (options.onlyIfMissing && target[element] !== undefined) return;
+  target[element] = Math.max(0, numeric);
+}
+
+function normalizeEnergyProfile(report = {}) {
+  const normalized = {};
+  const profile = report.final_energy_profile || {};
+  Object.keys(profile).forEach(name => {
+    applyEnergyValue(normalized, name, profile[name]);
+  });
+
+  const chart = report.chart || {};
+  const values = Array.isArray(chart.values) ? chart.values : [];
+  const indicators = Array.isArray(chart.indicator) ? chart.indicator : [];
+  indicators.forEach((item, index) => {
+    const name = typeof item === 'string' ? item : item && item.name;
+    applyEnergyValue(normalized, name, values[index], { onlyIfMissing: true });
+  });
+  API_ELEMENT_ORDER.forEach((name, index) => {
+    applyEnergyValue(normalized, name, values[index], { onlyIfMissing: true });
+  });
+  return normalized;
 }
 
 function drawRoundRect(ctx, x, y, width, height, radius) {
@@ -57,32 +125,63 @@ function strokeRoundRect(ctx, x, y, width, height, radius, color, lineWidth = 1)
   ctx.stroke();
 }
 
-function drawWrappedText(ctx, text, x, y, maxWidth, lineHeight, maxLines) {
+function getWrappedTextLines(ctx, text, maxWidth, maxLines) {
   const chars = safeText(text).split('');
+  const limit = Number.isFinite(maxLines) && maxLines > 0 ? maxLines : Infinity;
+  const result = [];
   let line = '';
-  let lines = 0;
-  let cursorY = y;
   for (let index = 0; index < chars.length; index += 1) {
     const testLine = line + chars[index];
     const isLast = index === chars.length - 1;
     if (ctx.measureText(testLine).width > maxWidth && line) {
-      lines += 1;
-      if (lines >= maxLines) {
+      if (result.length >= limit - 1) {
         const ellipsis = `${line.slice(0, Math.max(0, line.length - 1))}…`;
-        ctx.fillText(ellipsis, x, cursorY);
-        return cursorY + lineHeight;
+        result.push(ellipsis);
+        return result;
       }
-      ctx.fillText(line, x, cursorY);
-      cursorY += lineHeight;
+      result.push(line);
       line = chars[index];
     } else {
       line = testLine;
     }
     if (isLast && line) {
-      ctx.fillText(line, x, cursorY);
-      cursorY += lineHeight;
+      result.push(line);
     }
   }
+  return result;
+}
+
+function drawWrappedText(ctx, text, x, y, maxWidth, lineHeight, maxLines) {
+  const lines = getWrappedTextLines(ctx, text, maxWidth, maxLines);
+  let cursorY = y;
+  lines.forEach(line => {
+    ctx.fillText(line, x, cursorY);
+    cursorY += lineHeight;
+  });
+  return cursorY;
+}
+
+function measureWrappedText(ctx, text, maxWidth, lineHeight, maxLines) {
+  return getWrappedTextLines(ctx, text, maxWidth, maxLines).length * lineHeight;
+}
+
+function fitTextToWidth(ctx, text, maxWidth) {
+  const value = safeText(text);
+  if (!value || ctx.measureText(value).width <= maxWidth) return value;
+  let fitted = value;
+  while (fitted.length > 1 && ctx.measureText(`${fitted}…`).width > maxWidth) {
+    fitted = fitted.slice(0, -1);
+  }
+  return `${fitted}…`;
+}
+
+function drawWrappedTextTop(ctx, text, x, y, maxWidth, lineHeight, maxLines) {
+  const lines = getWrappedTextLines(ctx, text, maxWidth, maxLines);
+  let cursorY = y;
+  lines.forEach(line => {
+    ctx.fillText(line, x, cursorY);
+    cursorY += lineHeight;
+  });
   return cursorY;
 }
 
@@ -119,7 +218,7 @@ function drawPosterElementRows(ctx, elements, x, y, width) {
 function drawPosterTags(ctx, keywords, x, y, maxWidth) {
   let cursorX = x;
   let cursorY = y;
-  const tags = keywords.length ? keywords.slice(0, 4) : [{ label: '清透' }, { label: '稳定' }, { label: '调和' }];
+  const tags = Array.isArray(keywords) && keywords.length ? keywords : [{ label: '清透' }, { label: '稳定' }, { label: '调和' }];
   tags.forEach(item => {
     const label = safeText(item.label, '能量标签');
     ctx.font = '700 24px "PingFang SC", "Microsoft YaHei", sans-serif';
@@ -131,10 +230,103 @@ function drawPosterTags(ctx, keywords, x, y, maxWidth) {
     fillRoundRect(ctx, cursorX, cursorY, tagWidth, 40, 20, '#F8F6F1');
     strokeRoundRect(ctx, cursorX, cursorY, tagWidth, 40, 20, '#E5E2DC', 1);
     ctx.fillStyle = '#4F5F52';
-    ctx.fillText(label, cursorX + 21, cursorY + 27);
+    ctx.fillText(fitTextToWidth(ctx, label, tagWidth - 42), cursorX + 21, cursorY + 27);
     cursorX += tagWidth + 12;
   });
   return cursorY + 48;
+}
+
+function measurePosterTags(ctx, keywords, x, y, maxWidth) {
+  let cursorX = x;
+  let cursorY = y;
+  const tags = Array.isArray(keywords) && keywords.length ? keywords : [{ label: '清透' }, { label: '稳定' }, { label: '调和' }];
+  tags.forEach(item => {
+    const label = safeText(item.label, '能量标签');
+    ctx.font = '700 24px "PingFang SC", "Microsoft YaHei", sans-serif';
+    const tagWidth = Math.min(210, Math.max(104, ctx.measureText(label).width + 42));
+    if (cursorX + tagWidth > x + maxWidth) {
+      cursorX = x;
+      cursorY += 54;
+    }
+    cursorX += tagWidth + 12;
+  });
+  return cursorY + 48 - y;
+}
+
+function measurePosterTextCard(ctx, rows, width, options = {}) {
+  const paddingX = 32;
+  const paddingTop = 30;
+  const paddingBottom = 32;
+  const contentWidth = width - paddingX * 2;
+  const safeRows = rows.filter(item => safeText(item && item.text));
+  let height = paddingTop + 36 + 26 + paddingBottom;
+
+  safeRows.forEach((item, index) => {
+    if (index > 0) height += 26;
+    if (item.label) height += 32;
+    ctx.font = '500 22px "PingFang SC", "Microsoft YaHei", sans-serif';
+    height += measureWrappedText(ctx, item.text, contentWidth, 34, item.maxLines || options.maxTextLines || 4);
+    if (item.meta) {
+      ctx.font = '600 20px "PingFang SC", "Microsoft YaHei", sans-serif';
+      height += 10 + measureWrappedText(ctx, item.meta, contentWidth, 28, item.metaMaxLines || 2);
+    }
+  });
+  return Math.max(options.minHeight || 160, height);
+}
+
+function drawPosterTextCard(ctx, title, rows, x, y, width, options = {}) {
+  const paddingX = 32;
+  const paddingTop = 30;
+  const contentWidth = width - paddingX * 2;
+  const safeRows = rows.filter(item => safeText(item && item.text));
+  const height = measurePosterTextCard(ctx, rows, width, options);
+
+  fillRoundRect(ctx, x, y, width, height, 28, options.background || '#FFFFFF');
+  strokeRoundRect(ctx, x, y, width, height, 28, options.borderColor || '#E5E2DC', 1);
+
+  ctx.fillStyle = '#20201F';
+  ctx.font = '800 30px "PingFang SC", "Microsoft YaHei", sans-serif';
+  ctx.textBaseline = 'top';
+  ctx.fillText(title, x + paddingX, y + paddingTop);
+
+  let cursorY = y + paddingTop + 62;
+  safeRows.forEach((item, index) => {
+    if (index > 0) {
+      cursorY += 26;
+      ctx.strokeStyle = 'rgba(32, 32, 31, .07)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(x + paddingX, cursorY - 14);
+      ctx.lineTo(x + width - paddingX, cursorY - 14);
+      ctx.stroke();
+    }
+    if (item.label) {
+      ctx.fillStyle = item.accent || options.accent || '#365C9C';
+      ctx.font = '800 22px "PingFang SC", "Microsoft YaHei", sans-serif';
+      ctx.fillText(fitTextToWidth(ctx, item.label, contentWidth), x + paddingX, cursorY);
+      cursorY += 32;
+    }
+    ctx.fillStyle = item.color || '#64615B';
+    ctx.font = '500 22px "PingFang SC", "Microsoft YaHei", sans-serif';
+    cursorY = drawWrappedTextTop(
+      ctx,
+      item.text,
+      x + paddingX,
+      cursorY,
+      contentWidth,
+      34,
+      item.maxLines || options.maxTextLines || 4
+    );
+    if (item.meta) {
+      cursorY += 10;
+      ctx.fillStyle = 'rgba(32, 32, 31, .45)';
+      ctx.font = '600 20px "PingFang SC", "Microsoft YaHei", sans-serif';
+      cursorY = drawWrappedTextTop(ctx, item.meta, x + paddingX, cursorY, contentWidth, 28, item.metaMaxLines || 2);
+    }
+  });
+
+  ctx.textBaseline = 'alphabetic';
+  return y + height;
 }
 
 Page({
@@ -182,7 +374,7 @@ Page({
   },
 
   buildViewReport(report) {
-    const profile = report.final_energy_profile || {};
+    const profile = normalizeEnergyProfile(report);
     const rawElements = ELEMENT_ORDER.map(name => ({
       ...ELEMENT_META[name],
       name,
@@ -215,6 +407,7 @@ Page({
       bazi: this.buildBaziView(report.bazi_basis || {}),
       chakra: this.buildChakraView(report.chakra_analysis || {}),
       mood: this.buildMoodView(report.mood_analysis || {}),
+      zodiac: this.buildZodiacView(report.zodiac_analysis || {}),
       recommendationStrategy: report.recommendation_strategy || '',
       recommendationReasons: this.buildRecommendationReasons(report, elements),
       elements,
@@ -303,6 +496,25 @@ Page({
       subtitle: mood.subtitle || '未选择直觉色彩',
       summary: mood.summary || '未选择色彩时，系统不额外偏向某一组情绪色。',
       colors: Array.isArray(mood.colors) ? mood.colors : []
+    };
+  },
+
+  buildZodiacView(zodiac) {
+    const keywords = Array.isArray(zodiac.keywords)
+      ? zodiac.keywords
+      : (Array.isArray(zodiac.traits) ? zodiac.traits : []);
+    return {
+      name: zodiac.name || '',
+      englishName: zodiac.english_name || '',
+      dateRange: zodiac.date_range || '',
+      element: zodiac.element || '',
+      modality: zodiac.modality || '',
+      keywords,
+      keywordText: keywords.join(' / '),
+      summary: zodiac.summary || '',
+      wuxingHint: zodiac.wuxing_hint || '',
+      integration: zodiac.integration || '',
+      suggestion: zodiac.suggestion || ''
     };
   },
 
@@ -744,28 +956,43 @@ Page({
         const rawDpr = (wx.getWindowInfo && wx.getWindowInfo().pixelRatio)
           || (wx.getSystemInfoSync && wx.getSystemInfoSync().pixelRatio)
           || 1;
-        const dpr = Math.min(2, Math.max(1, rawDpr));
-        canvas.width = POSTER_WIDTH * dpr;
-        canvas.height = POSTER_HEIGHT * dpr;
         const ctx = canvas.getContext('2d');
-        if (ctx.setTransform) ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-        else ctx.scale(dpr, dpr);
-        this.posterCanvasState = { canvas, ctx, dpr, width: POSTER_WIDTH, height: POSTER_HEIGHT };
+        this.posterCanvasState = { canvas, ctx, rawDpr, dpr: 1, width: POSTER_WIDTH, height: 0 };
+        this.resizePosterCanvas(this.posterCanvasState, POSTER_MIN_HEIGHT);
         resolve(this.posterCanvasState);
       });
     });
   },
 
+  getPosterDpr(height) {
+    const rawDpr = Number(this.posterCanvasState && this.posterCanvasState.rawDpr) || 1;
+    const sideSafeDpr = POSTER_MAX_BITMAP_SIDE / Math.max(1, height);
+    return Math.max(1, Math.min(2, rawDpr, sideSafeDpr));
+  },
+
+  resizePosterCanvas(state, height) {
+    const posterHeight = Math.max(POSTER_MIN_HEIGHT, Math.min(POSTER_MAX_HEIGHT, Math.ceil(height)));
+    const dpr = this.getPosterDpr(posterHeight);
+    if (state.height === posterHeight && state.dpr === dpr) return;
+    state.dpr = dpr;
+    state.height = posterHeight;
+    state.canvas.width = Math.round(POSTER_WIDTH * dpr);
+    state.canvas.height = Math.round(posterHeight * dpr);
+    state.ctx = state.canvas.getContext('2d');
+    if (state.ctx.setTransform) state.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    else state.ctx.scale(dpr, dpr);
+  },
+
   generateReportPoster() {
     return this.ensurePosterCanvas().then(state => {
-      this.drawReportPoster(state);
+      const posterHeight = this.drawReportPoster(state);
       return new Promise((resolve, reject) => {
         wx.canvasToTempFilePath({
           canvas: state.canvas,
           fileType: 'jpg',
           quality: 0.94,
-          destWidth: POSTER_WIDTH * state.dpr,
-          destHeight: POSTER_HEIGHT * state.dpr,
+          destWidth: Math.round(POSTER_WIDTH * state.dpr),
+          destHeight: Math.round(posterHeight * state.dpr),
           success: res => resolve(res.tempFilePath),
           fail: reject
         }, this);
@@ -774,7 +1001,7 @@ Page({
   },
 
   drawReportPoster(state) {
-    const ctx = state.ctx;
+    let ctx = state.ctx;
     const report = this.data.report || {};
     const view = this.data.viewReport || this.buildViewReport(report);
     const input = report.input_summary || {};
@@ -787,13 +1014,107 @@ Page({
     const elements = view.elements || [];
     const strongest = safeText(view.strongest, '优势');
     const weakest = safeText(view.weakest, '待补');
+    const bazi = view.bazi || {};
+    const chakra = view.chakra || {};
+    const mood = view.mood || {};
+    const zodiac = view.zodiac || {};
+    const cardX = 44;
+    const cardWidth = 662;
+    const contentX = 76;
+    const contentWidth = 598;
+    const heroY = 140;
+    const heroHeight = 380;
+    const elementY = heroY + heroHeight + 26;
+    const elementHeight = 302;
+    const keywordY = elementY + elementHeight + 26;
 
-    ctx.clearRect(0, 0, POSTER_WIDTH, POSTER_HEIGHT);
-    const bg = ctx.createLinearGradient(0, 0, 0, POSTER_HEIGHT);
+    const baziDetail = [
+      bazi.dayMaster ? `日主：${bazi.dayMaster}` : '',
+      bazi.strength ? `强弱：${bazi.strength}` : '',
+      bazi.usefulText ? `喜用：${bazi.usefulText}` : ''
+    ].filter(Boolean).join(' · ');
+    const baziRows = [
+      { label: '排盘', text: bazi.pillarsText || view.trueSolarTime || '已按真太阳时排盘', color: '#20201F' },
+      { label: '日主与喜用', text: baziDetail || '系统已结合出生信息完成五行底色分析。' },
+      { label: '推荐策略', text: bazi.strategy || view.recommendationStrategy || '系统会结合五行比例、核心愿望和佩戴舒适度生成推荐方案。' }
+    ];
+    const liveRows = [
+      {
+        label: '七脉轮',
+        text: `${safeText(chakra.name, '未选择')}｜${safeText(chakra.summary, '系统按中性状态参与计算。')}`,
+        accent: '#647C70'
+      },
+      {
+        label: '直觉色彩',
+        text: `${safeText(mood.name, '未选择')}｜${safeText(mood.summary, '未选择色彩时，系统不额外偏向某一组情绪色。')}`,
+        accent: '#8B82B3'
+      }
+    ];
+    const zodiacRows = zodiac.name ? [
+      {
+        label: '星座底色',
+        text: `${safeText(zodiac.name)} · ${safeText(zodiac.element, '星座气质')} · ${safeText(zodiac.modality, '节奏')}`,
+        meta: safeText(zodiac.keywordText, ''),
+        accent: '#9D7A3F'
+      },
+      {
+        label: '五行参照',
+        text: safeText(zodiac.wuxingHint, '星座气质会作为五行报告外的性格侧写参考。'),
+        accent: '#9D7A3F'
+      },
+      {
+        label: '调和建议',
+        text: safeText(zodiac.suggestion, zodiac.integration || '保持温和节奏，让优势被看见，也给待补能量留出空间。'),
+        accent: '#9D7A3F'
+      }
+    ] : [];
+    const seasonalRows = [
+      { label: '周期', text: `${safeText(seasonal.period, '当前流月')} · ${safeText(seasonal.seasonal_element, strongest)}气当令` },
+      { label: '能量提示', text: safeText(seasonal.seasonal_copy || seasonal.notice, '当下适合观察自己的能量节奏。') },
+      { label: '流失点', text: safeText(seasonal.drain_point, `${weakest}能量适合慢慢补足，不宜一次调整太多。`) },
+      { label: '调和建议', text: suggestion, accent: '#365C9C' }
+    ];
+    const recommendRows = (view.recommendationReasons || []).map(item => ({
+      label: `${item.index} ${item.title}`,
+      text: item.desc,
+      meta: item.meta,
+      accent: '#9D7A3F'
+    }));
+
+    ctx.font = '700 24px "PingFang SC", "Microsoft YaHei", sans-serif';
+    const tagHeight = measurePosterTags(ctx, view.keywords || [], contentX, 0, contentWidth);
+    ctx.font = '500 22px "PingFang SC", "Microsoft YaHei", sans-serif';
+    const summaryHeight = measureWrappedText(ctx, summaryText, contentWidth, 32);
+    const keywordHeight = Math.max(252, 30 + 36 + 18 + tagHeight + 18 + summaryHeight + 32);
+    const baziHeight = measurePosterTextCard(ctx, baziRows, cardWidth, { minHeight: 190 });
+    const liveHeight = measurePosterTextCard(ctx, liveRows, cardWidth, { minHeight: 230 });
+    const zodiacHeight = zodiacRows.length ? measurePosterTextCard(ctx, zodiacRows, cardWidth, { minHeight: 220 }) : 0;
+    const seasonalHeight = measurePosterTextCard(ctx, seasonalRows, cardWidth, { minHeight: 270 });
+    const recommendHeight = measurePosterTextCard(ctx, recommendRows, cardWidth, { minHeight: 300 });
+
+    let cursorY = keywordY + keywordHeight + 26;
+    const baziY = cursorY;
+    cursorY += baziHeight + 26;
+    const liveY = cursorY;
+    cursorY += liveHeight + 26;
+    const zodiacY = cursorY;
+    if (zodiacRows.length) cursorY += zodiacHeight + 26;
+    const seasonalY = cursorY;
+    cursorY += seasonalHeight + 26;
+    const recommendY = cursorY;
+    cursorY += recommendHeight + 30;
+    const footerY = cursorY;
+    const posterHeight = Math.max(POSTER_MIN_HEIGHT, Math.min(POSTER_MAX_HEIGHT, footerY + 150));
+
+    this.resizePosterCanvas(state, posterHeight);
+    ctx = state.ctx;
+
+    ctx.clearRect(0, 0, POSTER_WIDTH, posterHeight);
+    const bg = ctx.createLinearGradient(0, 0, 0, posterHeight);
     bg.addColorStop(0, '#FBFAF7');
     bg.addColorStop(1, '#F1EEE7');
     ctx.fillStyle = bg;
-    ctx.fillRect(0, 0, POSTER_WIDTH, POSTER_HEIGHT);
+    ctx.fillRect(0, 0, POSTER_WIDTH, posterHeight);
 
     ctx.fillStyle = '#20201F';
     ctx.font = '800 28px "PingFang SC", "Microsoft YaHei", sans-serif';
@@ -805,18 +1126,23 @@ Page({
     ctx.fillText('LIGHT STUDIO LAB', 692, 82);
     ctx.textAlign = 'left';
 
-    fillRoundRect(ctx, 44, 140, 662, 360, 32, '#FFFFFF');
-    strokeRoundRect(ctx, 44, 140, 662, 360, 32, '#E5E2DC', 1);
+    fillRoundRect(ctx, cardX, heroY, cardWidth, heroHeight, 32, '#FFFFFF');
+    strokeRoundRect(ctx, cardX, heroY, cardWidth, heroHeight, 32, '#E5E2DC', 1);
     ctx.fillStyle = '#20201F';
     ctx.font = '900 44px "PingFang SC", "Microsoft YaHei", sans-serif';
-    drawWrappedText(ctx, mainTitle, 76, 206, 336, 54, 2);
+    drawWrappedText(ctx, mainTitle, contentX, 206, 336, 54, 2);
     ctx.fillStyle = '#64615B';
     ctx.font = '500 24px "PingFang SC", "Microsoft YaHei", sans-serif';
-    drawWrappedText(ctx, `愿望：${wishText}`, 76, 320, 340, 34, 2);
+    drawWrappedText(ctx, `愿望：${wishText}`, contentX, 320, 340, 34, 2);
     ctx.fillStyle = '#8B8881';
     ctx.font = '600 22px "PingFang SC", "Microsoft YaHei", sans-serif';
-    ctx.fillText(`MBTI：${safeText(view.mbti, '未填写')}`, 76, 420);
-    ctx.fillText(`偏强 ${strongest} · 待补 ${weakest}`, 76, 456);
+    ctx.fillText(`MBTI：${safeText(view.mbti, '未填写')}`, contentX, 420);
+    ctx.fillText(
+      zodiac.name ? `星座：${safeText(zodiac.name)} · ${safeText(zodiac.element, '星座气质')}` : `偏强 ${strongest} · 待补 ${weakest}`,
+      contentX,
+      456
+    );
+    if (zodiac.name) ctx.fillText(`偏强 ${strongest} · 待补 ${weakest}`, contentX, 492);
 
     drawElementRing(ctx, elements, 560, 296, 96, 24);
     fillRoundRect(ctx, 494, 230, 132, 132, 66, '#FBFAF7');
@@ -829,34 +1155,48 @@ Page({
     ctx.fillText(view.statusText, 560, 330);
     ctx.textAlign = 'left';
 
-    fillRoundRect(ctx, 44, 526, 662, 302, 28, '#FFFFFF');
-    strokeRoundRect(ctx, 44, 526, 662, 302, 28, '#E5E2DC', 1);
+    fillRoundRect(ctx, cardX, elementY, cardWidth, elementHeight, 28, '#FFFFFF');
+    strokeRoundRect(ctx, cardX, elementY, cardWidth, elementHeight, 28, '#E5E2DC', 1);
     ctx.fillStyle = '#20201F';
     ctx.font = '800 30px "PingFang SC", "Microsoft YaHei", sans-serif';
-    ctx.fillText('五行比例', 76, 584);
-    drawPosterElementRows(ctx, elements, 76, 622, 598);
+    ctx.fillText('五行比例', contentX, elementY + 58);
+    drawPosterElementRows(ctx, elements, contentX, elementY + 96, contentWidth);
 
-    fillRoundRect(ctx, 44, 854, 662, 204, 28, '#FFFFFF');
-    strokeRoundRect(ctx, 44, 854, 662, 204, 28, '#E5E2DC', 1);
+    fillRoundRect(ctx, cardX, keywordY, cardWidth, keywordHeight, 28, '#FFFFFF');
+    strokeRoundRect(ctx, cardX, keywordY, cardWidth, keywordHeight, 28, '#E5E2DC', 1);
     ctx.fillStyle = '#20201F';
     ctx.font = '800 30px "PingFang SC", "Microsoft YaHei", sans-serif';
-    ctx.fillText('专属关键词', 76, 912);
-    const afterTagsY = drawPosterTags(ctx, view.keywords || [], 76, 934, 598);
+    ctx.fillText('专属关键词', contentX, keywordY + 58);
+    const afterTagsY = drawPosterTags(ctx, view.keywords || [], contentX, keywordY + 80, contentWidth);
     ctx.fillStyle = '#64615B';
     ctx.font = '500 22px "PingFang SC", "Microsoft YaHei", sans-serif';
-    drawWrappedText(ctx, summaryText, 76, afterTagsY + 8, 598, 32, 2);
+    drawWrappedText(ctx, summaryText, contentX, afterTagsY + 14, contentWidth, 32);
 
-    fillRoundRect(ctx, 44, 1080, 662, 74, 24, '#20201F');
+    drawPosterTextCard(ctx, '命盘底色', baziRows, cardX, baziY, cardWidth, { minHeight: 190, accent: '#365C9C' });
+    drawPosterTextCard(ctx, '当下能量', liveRows, cardX, liveY, cardWidth, { minHeight: 230, accent: '#647C70' });
+    if (zodiacRows.length) {
+      drawPosterTextCard(ctx, '星座气质', zodiacRows, cardX, zodiacY, cardWidth, { minHeight: 220, accent: '#9D7A3F' });
+    }
+    drawPosterTextCard(ctx, '近期能量提示', seasonalRows, cardX, seasonalY, cardWidth, { minHeight: 270, accent: '#365C9C' });
+    drawPosterTextCard(ctx, '推荐依据', recommendRows, cardX, recommendY, cardWidth, { minHeight: 300, accent: '#9D7A3F' });
+
+    fillRoundRect(ctx, cardX, footerY, cardWidth, 92, 24, '#20201F');
     ctx.fillStyle = '#FFFFFF';
     ctx.font = '800 24px "PingFang SC", "Microsoft YaHei", sans-serif';
-    ctx.fillText('调和建议', 76, 1125);
+    ctx.fillText('生成专属手串', contentX, footerY + 38);
     ctx.font = '500 22px "PingFang SC", "Microsoft YaHei", sans-serif';
-    drawWrappedText(ctx, suggestion, 188, 1125, 390, 28, 1);
+    ctx.fillText('打开小程序继续编辑 DIY 方案', contentX, footerY + 68);
     ctx.textAlign = 'right';
     ctx.fillStyle = '#D8D4CC';
     ctx.font = '700 20px "PingFang SC", "Microsoft YaHei", sans-serif';
-    ctx.fillText('打开小程序生成你的专属手串', 674, 1125);
+    ctx.fillText('LIGHT STUDIO LAB', 674, footerY + 54);
     ctx.textAlign = 'left';
+
+    ctx.fillStyle = '#8B8881';
+    ctx.font = '500 18px "PingFang SC", "Microsoft YaHei", sans-serif';
+    ctx.fillText('本测算用于文化体验与个性化 DIY 推荐', contentX, footerY + 128);
+
+    return posterHeight;
   },
 
   goBack() {

@@ -34,22 +34,6 @@ const COLOR_DOTS = {
   茶褐: '#B99B7D',
   奶油白: '#F4EBD9'
 };
-const CRYSTAL_COLORS = {
-  海蓝宝: '#7DC7E7',
-  白水晶: '#E7EEF2',
-  月光石: '#E9E4DB',
-  黄水晶: '#E3B64C',
-  粉晶: '#EFB4C2',
-  石榴石: '#AF3842',
-  茶晶: '#9A8068',
-  赤铁矿: '#74797D',
-  黑曜石: '#30343A',
-  黑发晶: '#34343A',
-  蓝发晶: '#527FA3',
-  绿幽灵: '#5F8E68',
-  绿松石: '#66B9AD'
-};
-
 const STATUS_GROUPS = [
   { key: 'emotion', label: '情绪' },
   { key: 'energy', label: '精力' },
@@ -95,11 +79,6 @@ const GOAL_OPTIONS = [
   { key: 'move_task', label: '推进任务', wish: '招财进宝/事业腾飞' },
   { key: 'low_pressure_protect', label: '低压防护', wish: '辟邪防小人/消除焦虑' }
 ];
-
-function firstText(value, fallback = '') {
-  if (Array.isArray(value)) return value.filter(Boolean)[0] || fallback;
-  return value || fallback;
-}
 
 function decorateOptions(options, selectedKey) {
   return options.map(item => ({
@@ -180,41 +159,6 @@ function buildSelectedStatusView(options = [], selectedKeys = []) {
       emoji: item.emoji || ''
     }))
   };
-}
-
-function optimizeRemoteImageUrl(url) {
-  if (!url || !/^https:\/\/.+(?:myqcloud\.com|yustream\.cn)\//.test(url)) return url || '';
-  if (url.includes('/materials/beads/real/')) return url;
-  if (url.includes('imageMogr2/')) return url;
-  const separator = url.includes('?') ? '&' : '?';
-  return `${url}${separator}imageMogr2/thumbnail/360x360/format/webp/quality/88`;
-}
-
-function imagePoolFrom(...sources) {
-  const pool = [];
-  sources.filter(Boolean).forEach(source => {
-    ['image_urls', 'image_pool', 'imageUrls', 'imagePool'].forEach(key => {
-      if (Array.isArray(source[key])) {
-        source[key].forEach(url => {
-          const optimized = optimizeRemoteImageUrl(url);
-          if (optimized) pool.push(optimized);
-        });
-      }
-    });
-    const direct = optimizeRemoteImageUrl(source.image_url || source.imageUrl || source.cover_url || source.coverUrl);
-    if (direct) pool.unshift(direct);
-  });
-  const seen = {};
-  return pool.filter(url => {
-    if (seen[url]) return false;
-    seen[url] = true;
-    return true;
-  });
-}
-
-function imageUrlFrom(sources, index = 0) {
-  const pool = imagePoolFrom(...sources);
-  return pool.length ? pool[Math.abs(index) % pool.length] : '';
 }
 
 function normalizeRuleOptions(payload = {}) {
@@ -364,8 +308,6 @@ Page({
     const keywords = Array.isArray(raw.keywords) && raw.keywords.length
       ? raw.keywords.slice(0, 3)
       : [raw.daily_keyword || raw.theme || '稳定', '表达', '清透'].slice(0, 3);
-    const crystals = raw.recommended_crystals || [];
-    const combo = this.buildCombo(raw.crystal_combo, crystals);
     const dimensions = this.buildDimensions(raw.dimensions, raw.energy_profile, score);
     const wearing = raw.wearing_guide || {};
     const actionAdvice = raw.action_advice || raw.actions || [];
@@ -396,8 +338,6 @@ Page({
       seasonHint,
       dimensions,
       dimensionCommentary: raw.dimension_commentary || '先完成一件确定的小事，再推进复杂任务。',
-      combo,
-      recommendedNames: combo.map(item => item.name).filter(Boolean).slice(0, 3).join(' · '),
       wearing: wearingView,
       actions: (actionAdvice.length ? actionAdvice : [
         '先完成一件确定的小事，再推进复杂任务。',
@@ -410,8 +350,7 @@ Page({
         mainColors: dailyPlan.main_colors || ['冰蓝', '透明', '奶白'],
         beadSizes: dailyPlan.bead_sizes || ['6mm', '8mm'],
         wristHint: dailyPlan.wrist_hint || '将按你在 DIY 工作台选择的手围自动排布。',
-        description: dailyPlan.description || `以${firstText(crystals.map(item => item.name), '今日主石')}作为主石，生成可继续编辑的方案。`,
-        visuals: this.buildPlanVisuals(crystals, combo)
+        description: dailyPlan.description || '结合今日能量方向生成可继续编辑的手串方案。'
       },
       elementBars: this.buildElementBars(raw.energy_profile || {})
     };
@@ -426,58 +365,6 @@ Page({
       drainPoint: seasonHint.drain_point || seasonHint.drainPoint || `${supportElement}能量不足时，容易出现注意力分散或节奏断档。`,
       suggestion: seasonHint.suggestion || '先完成一件确定的小事，再推进需要沟通、创意或临场判断的任务。'
     };
-  },
-
-  buildCombo(combo, crystals) {
-    if (combo) {
-      return ['main', 'support', 'balance', 'accent']
-        .map(key => combo[key])
-        .filter(Boolean)
-        .map((item, index) => {
-          const crystal = crystals[index] || {};
-          const color = this.crystalColor(item.name, crystal || item);
-          const imageUrl = imageUrlFrom([item, crystal], index);
-          return {
-            ...item,
-            index: index + 1,
-            label: item.label || ['主石', '辅石', '平衡石', '点缀'][index],
-            color,
-            imageUrl,
-            orbStyle: this.orbStyle(color)
-          };
-        });
-    }
-    const fallback = crystals.length ? crystals : [
-      { name: '海蓝宝', reason: '表达、沟通、舒缓紧张感' },
-      { name: '白水晶', reason: '清透、放大整体能量' },
-      { name: '月光石', reason: '柔和情绪、增加稳定陪伴感' }
-    ];
-    return fallback.slice(0, 3).map((item, index) => ({
-      index: index + 1,
-      label: ['主石', '辅石', '平衡石'][index],
-      name: item.name,
-      role: item.role || item.reason || '适合今日状态',
-      reason: item.reason || '',
-      color: this.crystalColor(item.name, item),
-      imageUrl: imageUrlFrom([item], index),
-      orbStyle: this.orbStyle(this.crystalColor(item.name, item))
-    })).concat([{
-      index: 4,
-      label: '点缀',
-      name: '银色隔片 / 透明隔珠',
-      role: '让整体更清爽',
-      color: '#CBD0D2',
-      imageUrl: '',
-      orbStyle: this.orbStyle('#CBD0D2')
-    }]);
-  },
-
-  crystalColor(name, crystal) {
-    return (crystal && crystal.color) || CRYSTAL_COLORS[name] || '#DDE4E2';
-  },
-
-  orbStyle(color) {
-    return `background: radial-gradient(circle at 30% 24%, #fff 0 10%, ${color} 22% 62%, rgba(35,35,35,.22) 100%);`;
   },
 
   buildDimensions(dimensions, profile, score) {
@@ -512,32 +399,6 @@ Page({
         value,
         width: `${value}%`,
         description: ''
-      };
-    });
-  },
-
-  buildPlanVisuals(crystals, combo) {
-    const visualSources = [
-      ...crystals.filter(item => imagePoolFrom(item).length),
-      ...combo.filter(item => imagePoolFrom(item).length)
-    ];
-    const names = [
-      ...combo.map(item => item.name).filter(Boolean),
-      ...crystals.map(item => item.name).filter(Boolean)
-    ];
-    const fallback = ['海蓝宝', '白水晶', '月光石', '白水晶', '海蓝宝'];
-    const source = visualSources.length ? visualSources : (names.length ? names : fallback);
-    return Array.from({ length: 9 }, (_, index) => {
-      const item = source[index % source.length];
-      const name = typeof item === 'string' ? item : item.name;
-      const imageUrl = typeof item === 'string' ? '' : imageUrlFrom([item], index);
-      const color = (typeof item === 'string' ? CRYSTAL_COLORS[name] : this.crystalColor(name, item)) || '#E6ECEB';
-      return {
-        index,
-        name,
-        imageUrl,
-        color,
-        style: `background: radial-gradient(circle at 30% 24%, #fff 0 10%, ${color} 22% 62%, rgba(35,35,35,.22) 100%);`
       };
     });
   },

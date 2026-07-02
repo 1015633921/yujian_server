@@ -61,11 +61,12 @@ Light Studio Lab 明亮高定工作室。
 4. 检查不同手机宽度、状态栏、胶囊按钮和安全区域。
 5. 输出修改文件清单、验证结果和仍存在的风险。
 6. 不要在未验证的情况下声称任务完成。
+7. 默认不要运行 Minium 小程序自动化测试；除非用户明确要求，否则测试命令必须跳过 `tests/minium`。
 
 ## 当前项目命令
 
 - 后端本地启动：`.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000`
-- 后端测试：`.\.venv_codex\Scripts\python.exe -m pytest -q`
+- 后端/普通测试（跳过 Minium）：`.\.venv_codex\Scripts\python.exe -m pytest -q --ignore=tests\minium`
 - Python 语法检查：`.\.venv_codex\Scripts\python.exe -m py_compile <file>`
 - 小程序依赖安装：`cd miniprogram && npm install`
 - 小程序 JS 语法检查：`node --check <file>`

@@ -6,9 +6,9 @@ const state = {
   admin: null,
   page: 'overview',
   insight: 'assessments',
-  materialUi: { selected: new Set(), expanded: new Set(), sortBy: 'sort_order', sortOrder: 'asc' },
+  materialUi: { selected: new Set(), expanded: new Set(), sortBy: 'sort_order', sortOrder: 'asc', page: 1, pageSize: 20, total: 0, totalPages: 1, filterSignature: '' },
   warehouseTab: 'overview',
-  cache: { materials: [], materialSpus: [], materialOptions: null, materialTaxonomy: [], blocks: [], homeBanners: [], orders: [], communityPosts: [], recommendationPlans: [], admins: [], loginLogs: [], dailyRules: null, warehouse: { items: [], options: null, batches: [], movements: [], overview: null } }
+  cache: { materials: [], materialSpus: [], materialRefs: [], materialOptions: null, materialTaxonomy: [], blocks: [], homeBanners: [], orders: [], communityPosts: [], recommendationPlans: [], admins: [], loginLogs: [], dailyRules: null, warehouse: { items: [], options: null, batches: [], movements: [], overview: null } }
 };
 const pageMeta = {
   overview:['BUSINESS OVERVIEW','经营概览'],orders:['ORDER FULFILLMENT','订单履约'],
@@ -842,7 +842,8 @@ function validateMaterialTaxonomySelection(){
 }
 function conflictMaterialOptions(currentCode=''){
   const map=new Map();
-  (state.cache.materials||[]).forEach(item=>{
+  const source=(state.cache.materialRefs&&state.cache.materialRefs.length)?state.cache.materialRefs:(state.cache.materials||[]);
+  source.forEach(item=>{
     const s=matSku(item),code=s.material_code||item.material_code;
     if(!code||code===currentCode||map.has(code))return;
     map.set(code,{key:code,label:`${s.series||s.name||code} · ${s.category||''}`});
@@ -850,11 +851,45 @@ function conflictMaterialOptions(currentCode=''){
   return [...map.values()];
 }
 function materialGroupKey(x){const s=matSku(x);return `${s.top||''}::${s.category||''}::${s.material_code||''}`}
+async function ensureMaterialRefs(){
+  if(state.cache.materialRefs&&state.cache.materialRefs.length)return;
+  try{state.cache.materialRefs=await api('/api/v1/admin/material-refs?limit=1000')}catch(e){state.cache.materialRefs=[]}
+}
+function materialFilterParams(){
+  return {
+    keyword:formValue('materialKeyword'),
+    top:formValue('materialTop'),
+    category:formValue('materialTop')==='bead'||!formValue('materialTop')?formValue('materialCategory'):'',
+    element:formValue('materialElement'),
+    status:formValue('materialStatus'),
+    stock_state:formValue('materialStockState'),
+    margin:formValue('materialMargin'),
+    quality:formValue('materialQuality'),
+    spec_state:formValue('materialSpecState'),
+    sort_by:state.materialUi.sortBy,
+    sort_order:state.materialUi.sortOrder
+  };
+}
+function materialFilterSignature(params=materialFilterParams()){return JSON.stringify(params)}
 async function loadMaterials(){
   await ensureMaterialAdminMeta();
-  const qs=new URLSearchParams({keyword:formValue('materialKeyword'),top:formValue('materialTop'),category:formValue('materialTop')==='bead'||!formValue('materialTop')?formValue('materialCategory'):'',element:formValue('materialElement'),status:formValue('materialStatus'),stock_state:formValue('materialStockState'),margin:formValue('materialMargin'),quality:formValue('materialQuality'),spec_state:formValue('materialSpecState'),sort_by:state.materialUi.sortBy,sort_order:state.materialUi.sortOrder});
-  const groups=await api(`/api/v1/admin/material-spus?${qs}`);
-  state.cache.materialSpus=Array.isArray(groups)?groups:[];
+  const params=materialFilterParams(),signature=materialFilterSignature(params);
+  if(signature!==state.materialUi.filterSignature){
+    state.materialUi.page=1;state.materialUi.selected.clear();state.materialUi.expanded.clear();state.materialUi.filterSignature=signature;
+  }
+  const qs=new URLSearchParams({...params,page:state.materialUi.page,page_size:state.materialUi.pageSize});
+  const payload=await api(`/api/v1/admin/material-spus?${qs}`);
+  const groups=Array.isArray(payload)?payload:(payload.items||[]);
+  const pagination=payload.pagination||{page:state.materialUi.page,page_size:state.materialUi.pageSize,total:groups.length,total_pages:1};
+  if(!groups.length&&pagination.total&&state.materialUi.page>pagination.total_pages){
+    state.materialUi.page=Math.max(1,pagination.total_pages||1);
+    return loadMaterials();
+  }
+  state.materialUi.page=pagination.page||state.materialUi.page;
+  state.materialUi.pageSize=pagination.page_size||state.materialUi.pageSize;
+  state.materialUi.total=pagination.total??groups.length;
+  state.materialUi.totalPages=pagination.total_pages||1;
+  state.cache.materialSpus=groups;
   state.cache.materials=state.cache.materialSpus.flatMap(g=>Array.isArray(g.items)?g.items:[]);
   renderMaterialsTable();
 }
@@ -993,10 +1028,26 @@ function specBadge(group={}){
   const coverage=status==='not_applicable'?'':`<small>覆盖 ${Math.round(num(group.specCoverage)*100)}%</small>`;
   return `<div class="spec-badge spec-${esc(status)}"><span>${esc(labels[status]||labels.partial)}</span>${missing||coverage}</div>`;
 }
+function materialPagination(){
+  const ui=state.materialUi,total=num(ui.total),page=Math.max(1,num(ui.page)||1),pageSize=Math.max(1,num(ui.pageSize)||20),totalPages=Math.max(1,num(ui.totalPages)||1);
+  const start=total?(page-1)*pageSize+1:0,end=total?Math.min(total,page*pageSize):0;
+  return `<div class="table-pagination material-pagination">
+    <div class="pagination-summary">共 <b>${total}</b> 个商品组<span>${start}-${end}</span></div>
+    <div class="pagination-actions">
+      <label>每页<select onchange="setMaterialPageSize(this.value)"><option value="10" ${pageSize===10?'selected':''}>10</option><option value="20" ${pageSize===20?'selected':''}>20</option><option value="50" ${pageSize===50?'selected':''}>50</option><option value="100" ${pageSize===100?'selected':''}>100</option></select></label>
+      <button class="mini-btn" ${page<=1?'disabled':''} onclick="setMaterialPage(${page-1})">上一页</button>
+      <span class="pagination-page">${page} / ${totalPages}</span>
+      <button class="mini-btn" ${page>=totalPages?'disabled':''} onclick="setMaterialPage(${page+1})">下一页</button>
+    </div>
+  </div>`;
+}
+function setMaterialPage(page){const totalPages=Math.max(1,num(state.materialUi.totalPages)||1);state.materialUi.page=Math.max(1,Math.min(totalPages,num(page)||1));loadMaterials()}
+function setMaterialPageSize(value){state.materialUi.pageSize=Math.max(1,Math.min(100,num(value)||20));state.materialUi.page=1;loadMaterials()}
 function renderMaterialsTable(){
   const groups=materialGroups();
-  if(!groups.length){$('materialsTable').innerHTML='<div class="empty-table">暂无材料数据</div>';return}
   updateMaterialBulkState();
+  const pager=materialPagination();
+  if(!groups.length){$('materialsTable').innerHTML=`${pager}<div class="empty-table">暂无材料数据</div>`;return}
   const allIds=(state.cache.materials||[]).map(x=>matSku(x).id),allSelected=allIds.length&&allIds.every(id=>state.materialUi.selected.has(id));
   const rows=groups.map(g=>{
     const expanded=state.materialUi.expanded.has(g.key),groupSelected=g.items.every(x=>state.materialUi.selected.has(matSku(x).id));
@@ -1030,13 +1081,13 @@ function renderMaterialsTable(){
     }).join(''):'';
     return head+children;
   }).join('');
-  $('materialsTable').innerHTML=`<table class="data-table material-tree"><thead><tr><th class="col-check"><input type="checkbox" ${allSelected?'checked':''} onchange="toggleAllMaterials(this.checked)"></th><th class="col-image">图片</th><th class="col-name">材料知识 / SKU</th><th class="col-size">${sortHeader('珠径','size')}</th><th class="col-price">${sortHeader('单颗价','price')}</th><th class="col-stock">${sortHeader('库存','stock')}</th><th class="col-element">${sortHeader('能量','element')}</th><th class="col-quality">资料质量</th><th class="col-status">状态</th><th class="col-actions">操作</th></tr></thead><tbody>${rows}</tbody></table>`;
+  $('materialsTable').innerHTML=`${pager}<table class="data-table material-tree"><thead><tr><th class="col-check"><input type="checkbox" ${allSelected?'checked':''} onchange="toggleAllMaterials(this.checked)"></th><th class="col-image">图片</th><th class="col-name">材料知识 / SKU</th><th class="col-size">${sortHeader('珠径','size')}</th><th class="col-price">${sortHeader('单颗价','price')}</th><th class="col-stock">${sortHeader('库存','stock')}</th><th class="col-element">${sortHeader('能量','element')}</th><th class="col-quality">资料质量</th><th class="col-status">状态</th><th class="col-actions">操作</th></tr></thead><tbody>${rows}</tbody></table>${pager}`;
 }
 function toggleMaterialGroup(key,checked){const g=materialGroups().find(x=>x.key===key);(g?.items||[]).forEach(x=>checked?state.materialUi.selected.add(matSku(x).id):state.materialUi.selected.delete(matSku(x).id));renderMaterialsTable()}
 function toggleAllMaterials(checked){(state.cache.materials||[]).forEach(x=>checked?state.materialUi.selected.add(matSku(x).id):state.materialUi.selected.delete(matSku(x).id));renderMaterialsTable()}
 function selectedMaterialIds(){return [...state.materialUi.selected].filter(id=>(state.cache.materials||[]).some(x=>matSku(x).id===id))}
-async function newMaterial(){await ensureMaterialAdminMeta();renderMaterial({sku:{top:'bead',size_mm:8,weight_g:1,price_per_bead:0.01,cost_price:0,safety_stock:0,supplier_name:'',purchase_note:'',stock:0,enabled:false,sort_order:0},energy:{primary_element:'water',secondary_elements:[],effects:[],chakras:[],wish_pools:[],mood_tags:[],visual_tags:[]},visual:{color_hex:'#dfe3e5',shine_hex:'#ffffff',image_urls:[]},rules:{allowed_roles:['primary','support','accent'],match_rules:['no_limit'],care_tags:[],conflict_codes:[]}})}
-async function editMaterial(id){await ensureMaterialAdminMeta();renderMaterial((state.cache.materials||[]).find(x=>matSku(x).id===id))}
+async function newMaterial(){await Promise.all([ensureMaterialAdminMeta(),ensureMaterialRefs()]);renderMaterial({sku:{top:'bead',size_mm:8,weight_g:1,price_per_bead:0.01,cost_price:0,safety_stock:0,supplier_name:'',purchase_note:'',stock:0,enabled:false,sort_order:0},energy:{primary_element:'water',secondary_elements:[],effects:[],chakras:[],wish_pools:[],mood_tags:[],visual_tags:[]},visual:{color_hex:'#dfe3e5',shine_hex:'#ffffff',image_urls:[]},rules:{allowed_roles:['primary','support','accent'],match_rules:['no_limit'],care_tags:[],conflict_codes:[]}})}
+async function editMaterial(id){await Promise.all([ensureMaterialAdminMeta(),ensureMaterialRefs()]);renderMaterial((state.cache.materials||[]).find(x=>matSku(x).id===id))}
 function renderMaterial(x={}){
   const s=matSku(x),e=matEnergy(x),v=matVisual(x),r=matRules(x),isEdit=!!s.id;
   const params=v.material_params||{};
@@ -1172,6 +1223,26 @@ function materialSpecPayloads(base){
     const weight=num(formValue(`mat_spec_${size}_weight`));
     return {...base,id:'',skuId:'',size_mm:size,size,price_per_bead:price,price,cost_price:cost,safety_stock:safety,stock,weight_g:weight,weight,enabled:stock>0&&formValue('mat_enabled')==='true'};
   });
+}
+async function saveMaterial(){
+  if(!validateMaterialForm())return;
+  let base;
+  try{base=materialBasePayload()}catch(e){if(e instanceof SyntaxError)return;toast(e.message||'材料表单解析失败');return}
+  const payloads=materialSpecPayloads(base);
+  const isEdit=!!base.id;
+  try{
+    toast('正在保存材料');
+    if(isEdit){
+      await api(`/api/v1/admin/materials/${encodeURIComponent(base.id)}`,{method:'PUT',body:JSON.stringify(base)});
+    }else{
+      for(const payload of payloads){
+        await api('/api/v1/admin/materials',{method:'POST',body:JSON.stringify(payload)});
+      }
+    }
+    closeDrawer();
+    await Promise.all([loadMaterials(),loadDashboard(),refreshMaterialOptions()]);
+    toast(payloads.length>1?`已保存 ${payloads.length} 个规格`:'材料已保存');
+  }catch(e){toast(e.message||'保存材料失败')}
 }
 async function refreshMaterialOptions(){
   const data=await api('/api/v1/admin/material-options');

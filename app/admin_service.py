@@ -5,7 +5,7 @@ import json
 import os
 import re
 import secrets
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from .avatar_storage import AvatarStorage
@@ -45,7 +45,7 @@ from .wechat_trade_service import WechatTradeService
 
 
 def now_iso() -> str:
-    return datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 def json_text(value: Any) -> str:
@@ -4059,9 +4059,141 @@ class AdminService:
         quality: str = "",
         stock_state: str = "",
         margin: str = "",
+        spec_state: str = "",
         sort_by: str = "sort_order",
         sort_order: str = "asc",
     ) -> list[dict[str, Any]]:
+        clauses, params = self.material_filter_sql(
+            keyword=keyword,
+            top=top,
+            category=category,
+            element=element,
+            status=status,
+        )
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        order_by, direction = self.material_sort_sql(sort_by, sort_order)
+        with self.connect() as connection:
+            rows = connection.execute(
+                f"SELECT * FROM managed_materials {where} ORDER BY {order_by} {direction}, updated_at DESC",
+                params,
+            ).fetchall()
+            materials = [self.public_material(dict(row), connection) for row in rows]
+        if quality:
+            materials = [item for item in materials if self.material_matches_quality(item, quality)]
+        if stock_state:
+            materials = [item for item in materials if self.material_matches_stock_state(item, stock_state)]
+        if margin:
+            materials = [item for item in materials if self.material_matches_margin(item, margin)]
+        return materials
+
+    def list_materials_paginated(
+        self,
+        keyword: str = "",
+        top: str = "",
+        category: str = "",
+        element: str = "",
+        status: str = "",
+        quality: str = "",
+        stock_state: str = "",
+        margin: str = "",
+        spec_state: str = "",
+        sort_by: str = "sort_order",
+        sort_order: str = "asc",
+        page: int = 1,
+        page_size: int = 50,
+    ) -> dict[str, Any]:
+        page, page_size, offset = self.normalize_pagination(page, page_size)
+        if quality or stock_state or margin:
+            materials = self.list_materials(
+                keyword=keyword,
+                top=top,
+                category=category,
+                element=element,
+                status=status,
+                quality=quality,
+                stock_state=stock_state,
+                margin=margin,
+                sort_by=sort_by,
+                sort_order=sort_order,
+            )
+            total = len(materials)
+            return self.paginated_payload(materials[offset : offset + page_size], total, page, page_size)
+
+        clauses, params = self.material_filter_sql(
+            keyword=keyword,
+            top=top,
+            category=category,
+            element=element,
+            status=status,
+        )
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        order_by, direction = self.material_sort_sql(sort_by, sort_order)
+        with self.connect() as connection:
+            total = connection.execute(f"SELECT COUNT(*) AS c FROM managed_materials {where}", params).fetchone()["c"]
+            rows = connection.execute(
+                f"SELECT * FROM managed_materials {where} ORDER BY {order_by} {direction}, updated_at DESC LIMIT ? OFFSET ?",
+                [*params, page_size, offset],
+            ).fetchall()
+            materials = [self.public_material(dict(row), connection) for row in rows]
+        return self.paginated_payload(materials, int(total or 0), page, page_size)
+
+    @staticmethod
+    def normalize_pagination(page: int = 1, page_size: int = 50) -> tuple[int, int, int]:
+        safe_page = max(1, int(page or 1))
+        safe_page_size = max(1, min(int(page_size or 50), 100))
+        return safe_page, safe_page_size, (safe_page - 1) * safe_page_size
+
+    @staticmethod
+    def paginated_payload(items: list[dict[str, Any]], total: int, page: int, page_size: int) -> dict[str, Any]:
+        total_pages = max(1, (int(total or 0) + page_size - 1) // page_size)
+        return {
+            "items": items,
+            "pagination": {
+                "page": page,
+                "page_size": page_size,
+                "total": int(total or 0),
+                "total_pages": total_pages,
+                "has_prev": page > 1,
+                "has_next": page < total_pages,
+            },
+        }
+
+    @staticmethod
+    def material_sort_sql(sort_by: str = "sort_order", sort_order: str = "asc") -> tuple[str, str]:
+        sort_columns = {
+            "sort_order": "sort_order",
+            "price": "price",
+            "size": "size",
+            "element": "element",
+            "stock": "stock",
+            "updated_at": "updated_at",
+        }
+        order_by = sort_columns.get(sort_by, "sort_order")
+        direction = "DESC" if str(sort_order).lower() == "desc" else "ASC"
+        return order_by, direction
+
+    @staticmethod
+    def material_spu_sort_sql(sort_by: str = "sort_order", sort_order: str = "asc") -> tuple[str, str]:
+        sort_columns = {
+            "sort_order": "sort_order_value",
+            "price": "price_value",
+            "size": "size_value",
+            "element": "element_value",
+            "stock": "stock_value",
+            "updated_at": "updated_at_value",
+        }
+        order_by = sort_columns.get(sort_by, "sort_order_value")
+        direction = "DESC" if str(sort_order).lower() == "desc" else "ASC"
+        return order_by, direction
+
+    @staticmethod
+    def material_filter_sql(
+        keyword: str = "",
+        top: str = "",
+        category: str = "",
+        element: str = "",
+        status: str = "",
+    ) -> tuple[list[str], list[Any]]:
         clauses = []
         params: list[Any] = []
         if top:
@@ -4087,30 +4219,44 @@ class AdminService:
             )
             value = f"%{keyword.strip()}%"
             params.extend([value, value, value, value, value, value, value])
-        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
-        sort_columns = {
-            "sort_order": "sort_order",
-            "price": "price",
-            "size": "size",
-            "element": "element",
-            "stock": "stock",
-            "updated_at": "updated_at",
-        }
-        order_by = sort_columns.get(sort_by, "sort_order")
-        direction = "DESC" if str(sort_order).lower() == "desc" else "ASC"
+        return clauses, params
+
+    def list_material_refs(self, keyword: str = "", limit: int = 1000) -> list[dict[str, Any]]:
+        safe_limit = max(1, min(int(limit or 1000), 3000))
+        clauses, params = self.material_filter_sql(keyword=keyword, status="")
+        clauses.append("COALESCE(material_code, '') <> ''")
+        where = f"WHERE {' AND '.join(clauses)}"
+        params.append(safe_limit)
         with self.connect() as connection:
             rows = connection.execute(
-                f"SELECT * FROM managed_materials {where} ORDER BY {order_by} {direction}, updated_at DESC",
+                f"""
+                SELECT material_code,
+                       COALESCE(top, '') AS top,
+                       COALESCE(category, '') AS category,
+                       COALESCE(NULLIF(series, ''), name, '') AS series,
+                       MIN(sort_order) AS sort_order_value,
+                       MAX(updated_at) AS updated_at_value
+                FROM managed_materials
+                {where}
+                GROUP BY material_code, COALESCE(top, ''), COALESCE(category, ''), COALESCE(NULLIF(series, ''), name, '')
+                ORDER BY sort_order_value ASC, updated_at_value DESC
+                LIMIT ?
+                """,
                 params,
             ).fetchall()
-            materials = [self.public_material(dict(row), connection) for row in rows]
-        if quality:
-            materials = [item for item in materials if self.material_matches_quality(item, quality)]
-        if stock_state:
-            materials = [item for item in materials if self.material_matches_stock_state(item, stock_state)]
-        if margin:
-            materials = [item for item in materials if self.material_matches_margin(item, margin)]
-        return materials
+        return [
+            {
+                "material_code": row["material_code"],
+                "sku": {
+                    "material_code": row["material_code"],
+                    "top": row["top"],
+                    "category": row["category"],
+                    "series": row["series"],
+                    "name": row["series"],
+                },
+            }
+            for row in rows
+        ]
 
     def material_spu_group(self, items: list[dict[str, Any]]) -> dict[str, Any]:
         first = items[0]
@@ -4277,7 +4423,23 @@ class AdminService:
         spec_state: str = "",
         sort_by: str = "sort_order",
         sort_order: str = "asc",
-    ) -> list[dict[str, Any]]:
+        page: int | None = None,
+        page_size: int | None = None,
+    ) -> list[dict[str, Any]] | dict[str, Any]:
+        paginated = page is not None or page_size is not None
+        if paginated and not (quality or stock_state or margin or spec_state):
+            return self.list_material_spus_paginated(
+                keyword=keyword,
+                top=top,
+                category=category,
+                element=element,
+                status=status,
+                sort_by=sort_by,
+                sort_order=sort_order,
+                page=page or 1,
+                page_size=page_size or 20,
+            )
+
         materials = self.list_materials(
             keyword=keyword,
             top=top,
@@ -4303,7 +4465,114 @@ class AdminService:
         result = [self.material_spu_group(items) for items in groups.values()]
         if spec_state:
             result = [group for group in result if self.material_spu_matches_spec_state(group, spec_state)]
+        if paginated:
+            page, page_size, offset = self.normalize_pagination(page or 1, page_size or 20)
+            total = len(result)
+            return self.paginated_payload(result[offset : offset + page_size], total, page, page_size)
         return result
+
+    def list_material_spus_paginated(
+        self,
+        keyword: str = "",
+        top: str = "",
+        category: str = "",
+        element: str = "",
+        status: str = "",
+        sort_by: str = "sort_order",
+        sort_order: str = "asc",
+        page: int = 1,
+        page_size: int = 20,
+    ) -> dict[str, Any]:
+        page, page_size, offset = self.normalize_pagination(page, page_size)
+        clauses, params = self.material_filter_sql(
+            keyword=keyword,
+            top=top,
+            category=category,
+            element=element,
+            status=status,
+        )
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        group_exprs = [
+            "COALESCE(top, '')",
+            "COALESCE(category, '')",
+            "COALESCE(NULLIF(series, ''), name, '')",
+            "COALESCE(material_code, '')",
+        ]
+        group_select = ", ".join(
+            f"{expr} AS {alias}"
+            for expr, alias in zip(group_exprs, ("group_top", "group_category", "group_series", "group_material_code"))
+        )
+        group_by = ", ".join(group_exprs)
+        order_by, direction = self.material_spu_sort_sql(sort_by, sort_order)
+        grouped_sql = f"""
+            SELECT {group_select},
+                   MIN(sort_order) AS sort_order_value,
+                   MIN(price) AS price_value,
+                   MIN(size) AS size_value,
+                   MIN(element) AS element_value,
+                   SUM(stock) AS stock_value,
+                   MAX(updated_at) AS updated_at_value
+            FROM managed_materials
+            {where}
+            GROUP BY {group_by}
+        """
+        with self.connect() as connection:
+            total = connection.execute(f"SELECT COUNT(*) AS c FROM ({grouped_sql}) material_groups", params).fetchone()["c"]
+            group_rows = connection.execute(
+                f"""
+                SELECT * FROM ({grouped_sql}) material_groups
+                ORDER BY {order_by} {direction}, updated_at_value DESC
+                LIMIT ? OFFSET ?
+                """,
+                [*params, page_size, offset],
+            ).fetchall()
+            if not group_rows:
+                return self.paginated_payload([], int(total or 0), page, page_size)
+
+            row_clauses = []
+            row_params: list[Any] = []
+            group_order: dict[tuple[str, str, str, str], int] = {}
+            for index, row in enumerate(group_rows):
+                key = (
+                    row["group_top"] or "",
+                    row["group_category"] or "",
+                    row["group_series"] or "",
+                    row["group_material_code"] or "",
+                )
+                group_order[key] = index
+                row_clauses.append(
+                    "(COALESCE(top, '') = ? AND COALESCE(category, '') = ? AND COALESCE(NULLIF(series, ''), name, '') = ? AND COALESCE(material_code, '') = ?)"
+                )
+                row_params.extend(key)
+
+            sku_where = [f"({' OR '.join(row_clauses)})"]
+            if clauses:
+                sku_where.append(" AND ".join(clauses))
+            sku_rows = connection.execute(
+                f"""
+                SELECT * FROM managed_materials
+                WHERE {' AND '.join(sku_where)}
+                ORDER BY sort_order ASC, updated_at DESC
+                """,
+                [*row_params, *params],
+            ).fetchall()
+            materials = [self.public_material(dict(row), connection) for row in sku_rows]
+
+        groups: dict[tuple[str, str, str, str], list[dict[str, Any]]] = {}
+        for item in materials:
+            sku = item.get("sku") or {}
+            key = (
+                sku.get("top") or item.get("top") or "",
+                sku.get("category") or item.get("category") or "",
+                sku.get("series") or item.get("series") or item.get("name") or "",
+                sku.get("material_code") or item.get("material_code") or "",
+            )
+            groups.setdefault(key, []).append(item)
+        result = [
+            self.material_spu_group(items)
+            for key, items in sorted(groups.items(), key=lambda pair: group_order.get(pair[0], 10**9))
+        ]
+        return self.paginated_payload(result, int(total or 0), page, page_size)
 
     def save_material(
         self,

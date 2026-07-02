@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from .database import connect_database
@@ -43,7 +43,7 @@ JSON_DICT_FIELDS = {
 
 
 def now_iso() -> str:
-    return datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 def json_text(value: Any, default: Any = None) -> str:
@@ -515,7 +515,7 @@ def enrich_materials_with_knowledge(
         code = item["material_code"]
         knowledge = knowledge_map.get(code) or fallback_knowledge_for_material(item)
         asset = clean_dict(knowledge.get("asset"))
-        thumbnail_url = asset.get("thumbnail_url") or item.get("image_url") or ""
+        thumbnail_url = item.get("image_url") or asset.get("thumbnail_url") or ""
         material_params = clean_dict(knowledge.get("material_params"))
         sizes = size_map.get(code) or unique_list([item.get("size")])
         energy = {

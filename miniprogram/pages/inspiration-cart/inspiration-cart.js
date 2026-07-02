@@ -241,12 +241,6 @@ function normalizeCartItem(item = {}, index = 0) {
 Page({
   data: {
     items: [],
-    selectedKeys: [],
-    selectedCount: 0,
-    selectedQty: 0,
-    subtotal: 0,
-    subtotalText: '0.00',
-    allSelected: false,
     manageMode: false
   },
 
@@ -273,33 +267,16 @@ Page({
     } catch (error) {
       console.warn('load cart fallback:', error.message || error);
     }
-    const items = cart.map(normalizeCartItem);
-    const validKeys = new Set(items.map(item => item.key));
-    let selectedKeys = (this.data.selectedKeys || []).filter(key => validKeys.has(key));
-    if (!selectedKeys.length && items.length === 1) selectedKeys = [items[0].key];
-    this.applySelection(items, selectedKeys);
+    this.applyItems(cart.map(normalizeCartItem));
   },
 
-  applySelection(items, selectedKeys) {
-    const selectedSet = new Set(selectedKeys);
+  applyItems(items) {
     const nextItems = items.map(item => ({
       ...item,
-      selected: selectedSet.has(item.key),
       lineTotal: Number((item.price * item.qty).toFixed(2)),
       lineTotalText: toMoney(item.price * item.qty)
     }));
-    const selectedItems = nextItems.filter(item => item.selected);
-    const selectedQty = selectedItems.reduce((sum, item) => sum + item.qty, 0);
-    const subtotal = selectedItems.reduce((sum, item) => sum + item.price * item.qty, 0);
-    this.setData({
-      items: nextItems,
-      selectedKeys,
-      selectedCount: selectedItems.length,
-      selectedQty,
-      subtotal: Number(subtotal.toFixed(2)),
-      subtotalText: toMoney(subtotal),
-      allSelected: items.length > 0 && selectedItems.length === items.length
-    });
+    this.setData({ items: nextItems });
   },
 
   persistItems(items) {
@@ -332,19 +309,6 @@ Page({
     this.setData({ manageMode: !this.data.manageMode });
   },
 
-  toggleSelect(e) {
-    const key = e.currentTarget.dataset.key;
-    const selected = new Set(this.data.selectedKeys);
-    if (selected.has(key)) selected.delete(key);
-    else selected.add(key);
-    this.applySelection(this.data.items, Array.from(selected));
-  },
-
-  selectAll() {
-    const selectedKeys = this.data.allSelected ? [] : this.data.items.map(item => item.key);
-    this.applySelection(this.data.items, selectedKeys);
-  },
-
   async changeQty(e) {
     const key = e.currentTarget.dataset.key;
     const delta = Number(e.currentTarget.dataset.delta || 0);
@@ -362,7 +326,7 @@ Page({
       }
     }
     this.persistItems(items);
-    this.applySelection(items, this.data.selectedKeys);
+    this.applyItems(items);
   },
 
   async removeItem(e) {
@@ -378,44 +342,9 @@ Page({
       }
     }
     const items = this.data.items.filter(item => item.key !== key);
-    const selectedKeys = this.data.selectedKeys.filter(itemKey => itemKey !== key);
     this.persistItems(items);
-    this.applySelection(items, selectedKeys);
+    this.applyItems(items);
     wx.showToast({ title: '已移出购物车', icon: 'none' });
-  },
-
-  removeSelected() {
-    if (!this.data.selectedKeys.length) {
-      wx.showToast({ title: '请先选择方案', icon: 'none' });
-      return;
-    }
-    wx.showModal({
-      title: '移出购物车？',
-      content: `将移出 ${this.data.selectedCount} 个方案，确定继续吗？`,
-      confirmText: '删除',
-      confirmColor: '#C83B3D',
-      success: res => {
-        if (!res.confirm) return;
-        this.removeSelectedItems();
-      }
-    });
-  },
-
-  async removeSelectedItems() {
-    const selectedSet = new Set(this.data.selectedKeys);
-    const selectedItems = this.data.items.filter(item => selectedSet.has(item.key));
-    try {
-      const user = await auth.requireLogin('登录后才能更新购物车。');
-      await Promise.all(selectedItems
-        .filter(item => item.cart_item_id)
-        .map(item => deleteCartItem(item.cart_item_id, user.user_id)));
-    } catch (error) {
-      wx.showToast({ title: error.message || '删除购物车失败', icon: 'none' });
-      return;
-    }
-    const items = this.data.items.filter(item => !selectedSet.has(item.key));
-    this.persistItems(items);
-    this.applySelection(items, []);
   },
 
   buildDesignPayload(item = {}) {
@@ -441,26 +370,26 @@ Page({
     };
   },
 
-  openDesign(e) {
+  findItemByEvent(e) {
     const key = e.currentTarget.dataset.key;
-    const item = this.data.items.find(entry => entry.key === key);
+    return this.data.items.find(entry => entry.key === key);
+  },
+
+  editDesign(e) {
+    const item = this.findItemByEvent(e);
     if (!item) return;
     wx.setStorageSync('currentDesign', this.buildDesignPayload(item));
     wx.setStorageSync('workspaceOpenDesign', 'cart');
     wx.switchTab({ url: '/pages/workspace/workspace' });
   },
 
-  checkoutSelected() {
-    const selectedItems = this.data.items.filter(item => item.selected);
-    if (!selectedItems.length) {
-      wx.showToast({ title: '请先选择方案', icon: 'none' });
-      return;
-    }
-    if (selectedItems.length > 1) {
-      wx.showToast({ title: '一次先结算一个方案', icon: 'none' });
-      return;
-    }
-    const item = selectedItems[0];
+  openDesign(e) {
+    this.editDesign(e);
+  },
+
+  checkoutDesign(e) {
+    const item = this.findItemByEvent(e);
+    if (!item) return;
     wx.setStorageSync('currentDesign', this.buildDesignPayload(item));
     wx.navigateTo({ url: '/pages/checkout/checkout' });
   },

@@ -112,7 +112,14 @@
   </view>
 
   <view class="menu-card yu-card">
-    <view class="menu-row" bindtap="contactCustomer">
+    <button
+      class="menu-row menu-contact-button"
+      open-type="contact"
+      session-from="profile_help_customer"
+      show-message-card="{{true}}"
+      send-message-title="宇涧水晶帮助与客服"
+      send-message-path="/pages/profile/profile"
+    >
       <view class="menu-left">
         <view class="menu-icon help">客</view>
         <view>
@@ -121,7 +128,7 @@
         </view>
       </view>
       <view class="menu-arrow">></view>
-    </view>
+    </button>
     <view class="menu-divider"></view>
     <view class="menu-row" bindtap="openSettings">
       <view class="menu-left">

@@ -613,10 +613,6 @@ Page({
     wx.showToast({ title: '优惠券功能准备中', icon: 'none' });
   },
 
-  contactCustomer() {
-    wx.showToast({ title: '可通过订单详情联系商家', icon: 'none' });
-  },
-
   openSettings() {
     this.openPrivacyContract();
   },

@@ -2,35 +2,39 @@
   <view class="studio-top">
     <view class="title-row">
       <view class="back-btn" catchtap="goBack" hover-class="back-btn-press" aria-role="button" aria-label="返回"></view>
+      <view class="more-btn" catchtap="openToolbox" hover-class="more-btn-press" aria-role="button" aria-label="更多操作">
+        <view class="more-dot"></view>
+        <view class="more-dot"></view>
+        <view class="more-dot"></view>
+      </view>
     </view>
   </view>
 
   <view class="canvas-area">
-    <view class="studio-count-pill {{countOverClass}}" bindtap="openWristSetting">
-      <view class="count-gem"></view>
-      <view class="count-copy">
-        <view class="count-row">
-          <text class="count-prefix">已选</text>
-          <view class="count-main">{{summary.count}}/18</view>
-          <text class="count-unit">颗</text>
-        </view>
-        <view class="count-wrist">当前腕围 {{wristSize}}cm</view>
-        <view class="count-current-length">当前串长 {{summary.length}}cm</view>
+    <view class="studio-metrics {{countOverClass}}" bindtap="openWristSetting">
+      <view class="studio-metric">
+        <view class="studio-metric-label">手串颗数</view>
+        <view class="studio-metric-value">{{summary.count}}<text class="studio-metric-sub">/18 颗</text></view>
+      </view>
+      <view class="studio-metric">
+        <view class="studio-metric-label">适合腕围</view>
+        <view class="studio-metric-value">{{wristSize}}<text class="studio-metric-sub"> cm</text></view>
+      </view>
+      <view class="studio-metric">
+        <view class="studio-metric-label">当前串长</view>
+        <view class="studio-metric-value">{{summary.length}}<text class="studio-metric-sub"> cm</text></view>
       </view>
     </view>
 
-    <view class="tray-theme-switch">
-      <view class="tray-theme-dots">
-        <view
-          wx:for="{{trayThemeItems}}"
-          wx:key="value"
-          class="tray-theme-option {{item.activeClass}}"
-          data-theme="{{item.value}}"
-          bindtap="selectTrayTheme"
-        >
-          <view class="tray-theme-dot {{item.dotClass}}"></view>
-        </view>
+    <view class="tray-theme-switch" bindtap="cycleTrayTheme" hover-class="tray-theme-press" aria-role="button" aria-label="切换托盘颜色">
+      <view class="tray-theme-label">托盘颜色</view>
+      <view class="tray-theme-current">
+        <view class="tray-theme-dot {{trayTheme}}"></view>
       </view>
+    </view>
+
+    <view class="wrist-guide-entry" catchtap="openWristGuideModal" data-tab="workspace" hover-class="wrist-guide-entry-press" aria-role="button" aria-label="手围与工作台指南">
+      <view class="wrist-guide-entry-icon">?</view>
     </view>
 
     <view class="bracelet-stage">
@@ -43,7 +47,7 @@
         ></image>
         <view class="bracelet-string {{braceletStringClass}}" style="{{stringStyle}}"></view>
         <canvas
-          wx:if="{{useCanvasRenderer}}"
+          wx:if="{{useCanvasRenderer && workspaceCanvasVisible}}"
           id="braceletCanvas"
           class="bracelet-canvas"
           type="2d"
@@ -54,7 +58,7 @@
           catchtouchcancel="onBraceletCanvasTouchEnd"
         ></canvas>
         <view
-          wx:if="{{useCanvasRenderer}}"
+          wx:if="{{useCanvasRenderer && workspaceCanvasVisible}}"
           class="bracelet-touch-layer"
           catchtouchstart="onBraceletCanvasTouchStart"
           catchtouchmove="onBraceletCanvasTouchMove"
@@ -85,31 +89,30 @@
       </view>
     </view>
 
-    <view class="tool-strip">
-      <view class="tool-item {{canUndo ? '' : 'disabled'}}" bindtap="undo">
-        <view class="tool-icon tool-undo"></view>
-        <view class="tool-label">撤销</view>
-      </view>
-      <view class="tool-item" bindtap="openWristSetting">
-        <view class="tool-icon tool-wrist"></view>
-        <view class="tool-label">手围</view>
-      </view>
-      <view class="tool-item {{shuffleButtonClass}}" bindtap="toggleStringMode">
-        <view class="tool-icon {{isLooseMode ? 'tool-string' : 'tool-release'}}"></view>
-        <view class="tool-label">{{isLooseMode ? '成串' : '打散'}}</view>
-      </view>
-      <view class="tool-item {{showEnergyPanel ? 'active' : ''}}" bindtap="toggleEnergyPanel">
-        <view class="tool-icon tool-energy"></view>
-        <view class="tool-label">五行</view>
-      </view>
-      <view class="tool-item" bindtap="saveDraft">
-        <view class="tool-icon tool-save"></view>
-        <view class="tool-label">保存</view>
-      </view>
-      <view class="tool-item danger" bindtap="confirmClearDesign">
-        <view class="tool-icon tool-clear"></view>
-        <view class="tool-label">清空</view>
-      </view>
+    <view class="plate-tool plate-tool-left-one {{canUndo ? '' : 'disabled'}}" catchtap="undo" hover-class="plate-tool-press" aria-role="button" aria-label="撤回">
+      <view class="plate-tool-icon plate-icon-undo"></view>
+    </view>
+    <view class="plate-tool plate-tool-left-two" catchtap="openWristSetting" hover-class="plate-tool-press" aria-role="button" aria-label="调整腕围">
+      <view class="plate-tool-icon plate-icon-wrist"></view>
+      <view class="plate-tool-label">腕围{{wristSize}}cm</view>
+    </view>
+    <view class="plate-tool plate-tool-share {{sharingDesign ? 'disabled' : ''}}" catchtap="prepareShareDesign" hover-class="plate-tool-press" aria-role="button" aria-label="分享方案">
+      <view class="plate-tool-icon plate-icon-share"></view>
+    </view>
+
+    <view class="plate-tool plate-tool-right-one" catchtap="saveDraft" hover-class="plate-tool-press" aria-role="button" aria-label="保存方案">
+      <view class="plate-tool-icon plate-icon-save"></view>
+    </view>
+    <view class="plate-tool plate-tool-right-two {{showEnergyPanel ? 'active' : ''}}" catchtap="toggleEnergyPanel" hover-class="plate-tool-press" aria-role="button" aria-label="五行图">
+      <view class="plate-tool-icon plate-icon-energy"></view>
+    </view>
+    <view class="plate-tool plate-tool-right-three danger" catchtap="confirmClearDesign" hover-class="plate-tool-press" aria-role="button" aria-label="清空">
+      <view class="plate-tool-icon plate-icon-clear"></view>
+    </view>
+
+    <view class="plate-random-btn {{shuffleButtonClass}}" catchtap="toggleStringMode" hover-class="plate-random-press" aria-role="button" aria-label="随机成串">
+      <view class="plate-random-icon"></view>
+      <view class="plate-random-text">{{randomTitle}}</view>
     </view>
 
     <view wx:if="{{showEnergyPanel}}" class="energy-floating-card">
@@ -131,41 +134,75 @@
       </view>
     </view>
 
-    <view wx:if="{{selectedBeadIndex > -1}}" class="order-panel">
-      <view class="order-title">第 {{selectedBeadIndex + 1}} 颗</view>
+    <view wx:if="{{selectedBeadInfo}}" class="order-panel bead-info-panel">
+      <view class="bead-info-copy">
+        <view class="order-title">第 {{selectedBeadInfo.position}} 颗</view>
+        <view class="bead-info-name"><text class="bead-info-label">品名</text>{{selectedBeadInfo.name}}</view>
+        <view class="bead-info-meta"><text class="bead-info-label">珠径</text>{{selectedBeadInfo.diameterText}}</view>
+      </view>
       <view class="order-actions">
-        <button data-direction="-1" bindtap="moveSelectedOrder">前移</button>
-        <button data-direction="1" bindtap="moveSelectedOrder">后移</button>
-        <button class="danger" data-index="{{selectedBeadIndex}}" bindtap="removeItem">删除</button>
+        <button class="danger" data-index="{{selectedBeadInfo.index}}" bindtap="removeItem">删除</button>
       </view>
     </view>
   </view>
 
   <canvas
-    wx:if="{{useCanvasRenderer}}"
+    wx:if="{{useCanvasRenderer && workspaceCanvasVisible}}"
     id="workspaceFlightCanvas"
     class="workspace-flight-canvas {{canvasFlightActive ? 'active' : ''}}"
     type="2d"
     canvas-id="workspaceFlightCanvas"
   ></canvas>
 
-  <view wx:if="{{flightBead && !useCanvasRenderer}}" class="flight-bead" style="{{flightBead.style}}" animation="{{flightBead.animation}}">
+  <view wx:if="{{flightBead && !useCanvasRenderer && workspaceCanvasVisible}}" class="flight-bead" style="{{flightBead.style}}" animation="{{flightBead.animation}}">
     <image wx:if="{{flightBead.image_url}}" class="flight-bead-image" src="{{flightBead.image_url}}" mode="aspectFit"></image>
     <view wx:else class="flight-bead-fallback" style="background: radial-gradient(circle at 32% 26%, {{flightBead.shine}} 0 10%, {{flightBead.color}} 12% 58%, rgba(0,0,0,.22) 100%);"></view>
   </view>
 
   <view class="material-drawer">
     <view class="top-tabs">
-      <view wx:for="{{topTabs}}" wx:key="key" class="top-tab {{item.className}}" data-top="{{item.value}}" bindtap="selectTop">{{item.label}}</view>
+      <view wx:for="{{topTabs}}" wx:for-index="tabIndex" wx:key="key" class="top-tab {{item.className}} {{tabIndex === topTabs.length - 1 ? 'last' : ''}}" data-top="{{item.value}}" bindtap="selectTop">{{item.label}}</view>
+      <view class="drawer-checkout">
+        <view class="drawer-price-block">
+          <text>当前方案</text>
+          <view>¥{{summary.priceText}}</view>
+        </view>
+      </view>
     </view>
 
     <view class="drawer-body">
-      <scroll-view class="category-rail" scroll-y>
-        <view wx:for="{{categories}}" wx:key="value" class="category-item {{item.className}}" data-category="{{item.value}}" bindtap="selectCategory">{{item.label}}</view>
+      <scroll-view class="category-rail" scroll-y scroll-into-view="{{activeCategoryAnchor}}" scroll-with-animation="{{true}}">
+        <view wx:for="{{categories}}" wx:key="value" id="{{item.anchorId}}" class="category-item {{item.className}}" data-category="{{item.value}}" bindtap="selectCategory">{{item.label}}</view>
+        <view wx:if="{{categoryRailSeries.length}}" class="category-series-panel">
+          <view class="category-series-title">品种</view>
+          <view
+            wx:for="{{categoryRailSeries}}"
+            wx:key="value"
+            id="{{item.anchorId}}"
+            class="category-series-item {{item.className}}"
+            data-series="{{item.value}}"
+            bindtap="selectSeries"
+          >{{item.label}}</view>
+        </view>
       </scroll-view>
 
       <view class="material-content">
-        <view class="filter-summary">{{filterSummary}}</view>
+        <view class="material-search-row">
+          <view class="material-search-box">
+            <view class="material-search-icon"></view>
+            <input
+              class="material-search-input"
+              value="{{materialSearchKeyword}}"
+              placeholder="搜索珠子名称 / 品种"
+              placeholder-class="material-search-placeholder"
+              confirm-type="search"
+              bindinput="onMaterialSearchInput"
+              bindconfirm="submitMaterialSearch"
+            />
+            <view wx:if="{{materialSearchKeyword}}" class="material-search-clear" catchtap="clearMaterialSearch">×</view>
+          </view>
+          <view class="material-search-cart" catchtap="addDesignToCart" aria-role="button" aria-label="加入购物车">加入购物车</view>
+        </view>
         <view wx:if="{{showWorkspaceGuide}}" class="workspace-guide-card">
           <view class="workspace-guide-head">
             <view>
@@ -188,16 +225,11 @@
             <view class="workspace-guide-secondary" catchtap="dismissWorkspaceGuide" data-forever="true">不再提示</view>
           </view>
         </view>
-        <scroll-view wx:if="{{seriesOptions.length > 1}}" class="series-scroll" scroll-x enhanced="{{true}}" bounces="{{true}}" show-scrollbar="{{false}}">
+        <scroll-view wx:if="{{seriesOptions.length > 1}}" class="series-scroll" scroll-x enhanced="{{true}}" bounces="{{true}}" show-scrollbar="{{false}}" scroll-into-view="{{activeSeriesAnchor}}" scroll-with-animation="{{true}}">
           <view class="series-tabs">
-            <view wx:for="{{seriesOptions}}" wx:key="value" class="series-tab {{item.className}}" data-series="{{item.value}}" bindtap="selectSeries">{{item.label}}</view>
+            <view wx:for="{{seriesOptions}}" wx:key="value" id="{{item.anchorId}}" class="series-tab {{item.className}}" data-series="{{item.value}}" bindtap="selectSeries">{{item.label}}</view>
           </view>
         </scroll-view>
-        <view wx:if="{{showTip}}" class="tip-bar">
-          <text class="tip-icon">💡</text>
-          <text>长按材料可查看实拍图，点击即可投入圆盘</text>
-          <text class="tip-close" bindtap="closeTip">×</text>
-        </view>
         <view wx:if="{{materialsLoading}}" class="material-load-state">正在同步最新珠材，图片加载时会先显示柔光占位</view>
         <view wx:if="{{materialsErrorText}}" class="material-load-state material-load-warning">{{materialsErrorText}}</view>
 
@@ -235,29 +267,15 @@
           </view>
           <view wx:else class="material-empty-state">
             <text wx:if="{{materialsErrorText}}">{{materialsErrorText}}</text>
+            <text wx:elif="{{materialSearchKeyword}}">没有匹配的珠子</text>
             <text wx:else>暂无可用珠材</text>
           </view>
-          <view wx:if="{{hasMoreMaterials}}" class="load-more-hint">上滑加载更多材料</view>
+          <view wx:if="{{materialsLoadingMore}}" class="load-more-hint">正在加载更多材料...</view>
+          <view wx:elif="{{hasMoreMaterials}}" class="load-more-hint">上滑加载更多材料</view>
         </scroll-view>
       </view>
     </view>
 
-    <view class="checkout-bar">
-      <view class="checkout-summary">
-        <text>当前方案</text>
-        <view class="checkout-price">¥{{summary.priceText}}</view>
-        <view class="checkout-metrics">
-          <view class="checkout-metric checkout-metric-action" bindtap="openWristSetting">
-            <text>戴法</text>
-            <view>{{wearStyleText}}</view>
-          </view>
-        </view>
-      </view>
-      <view class="checkout-actions">
-        <button class="cart-btn" bindtap="addDesignToCart">加入购物车</button>
-        <button class="finish-btn" bindtap="goToCheckout">完成定制 →</button>
-      </view>
-    </view>
   </view>
 
   <view wx:if="{{showWristPicker}}" class="wrist-picker-mask" bindtap="closeWristSetting">
@@ -265,7 +283,7 @@
       <view class="wrist-picker-head">
         <view>
           <view class="wrist-picker-title">选择手围</view>
-          <view class="wrist-picker-subtitle">设置腕围与戴法，系统会同步更新当前方案适配参考。</view>
+          <view class="wrist-picker-subtitle">设置腕围，系统会同步更新当前方案适配参考。</view>
         </view>
         <view class="wrist-picker-close" bindtap="closeWristSetting">×</view>
       </view>
@@ -304,25 +322,49 @@
         </scroll-view>
       </view>
       <view class="wrist-ruler-range">{{wristRulerRangeText}}</view>
-      <view class="wear-style-section">
-        <view class="wear-style-section-title">戴法</view>
-        <view class="wear-style-options">
-          <view
-            wx:for="{{wearStyleOptions}}"
-            wx:key="value"
-            class="wear-style-option {{item.className}}"
-            data-style="{{item.value}}"
-            bindtap="selectWearStyle"
-          >
-            <view class="wear-style-option-main">
-              <view class="wear-style-option-title">{{item.label}}</view>
-              <view class="wear-style-option-desc">{{item.desc}}</view>
+      <button class="wrist-ruler-confirm" catchtap="confirmWristRuler">确认手围</button>
+    </view>
+  </view>
+
+  <view wx:if="{{showWristGuideModal}}" class="wrist-guide-mask" bindtap="closeWristGuideModal">
+    <view class="wrist-guide-sheet" catchtap="stopPropagation">
+      <view class="wrist-guide-head">
+        <view>
+          <view class="wrist-guide-title">手围与工作台指南</view>
+          <view class="wrist-guide-subtitle">先熟悉工作台按钮，再按需要查看手围测量。</view>
+        </view>
+        <view class="wrist-guide-close" bindtap="closeWristGuideModal">×</view>
+      </view>
+      <view class="wrist-guide-tabs">
+        <view
+          wx:for="{{wristGuideTabs}}"
+          wx:key="key"
+          class="wrist-guide-tab {{activeWristGuideTab === item.key ? 'active' : ''}}"
+          data-tab="{{item.key}}"
+          bindtap="switchWristGuideTab"
+        >{{item.label}}</view>
+      </view>
+      <scroll-view class="wrist-guide-body" scroll-y enhanced="{{true}}" show-scrollbar="{{false}}">
+        <image
+          wx:if="{{activeWristGuideTab === 'measure'}}"
+          class="wrist-guide-image"
+          src="{{wristMeasureGuideImageUrl}}"
+          mode="widthFix"
+          binderror="onWristGuideImageError"
+        ></image>
+        <view wx:else class="workspace-help-list">
+          <view wx:for="{{workspaceUsageGuide}}" wx:key="tag" class="workspace-help-item">
+            <view class="workspace-help-tag">
+              <view class="workspace-help-icon plate-tool-icon {{item.iconClass}}"></view>
+              <view class="workspace-help-tag-text">{{item.tag}}</view>
             </view>
-            <view class="wear-style-check"></view>
+            <view class="workspace-help-copy">
+              <view class="workspace-help-title">{{item.title}}</view>
+              <view class="workspace-help-desc">{{item.desc}}</view>
+            </view>
           </view>
         </view>
-      </view>
-      <button class="wrist-ruler-confirm" bindtap="confirmWristRuler">确认手围</button>
+      </scroll-view>
     </view>
   </view>
 
@@ -335,6 +377,28 @@
       <view class="energy-modal-body">
         <image class="energy-modal-svg" src="{{energyChartSvgUrl}}" mode="widthFix"></image>
       </view>
+    </view>
+  </view>
+
+  <view wx:if="{{showShareSheet}}" class="share-sheet-mask" bindtap="closeShareSheet">
+    <view class="share-sheet" catchtap="stopPropagation">
+      <view class="share-sheet-head">
+        <view>
+          <view class="share-sheet-title">分享当前方案</view>
+          <view class="share-sheet-subtitle">好友打开后直达 DIY 工作台查看这条方案。</view>
+        </view>
+        <view class="share-sheet-close" bindtap="closeShareSheet">×</view>
+      </view>
+      <view class="share-sheet-card">
+        <image wx:if="{{sharePreviewImage}}" class="share-sheet-preview" src="{{sharePreviewImage}}" mode="aspectFill"></image>
+        <view wx:else class="share-sheet-preview share-sheet-placeholder"></view>
+        <view class="share-sheet-card-copy">
+          <view class="share-sheet-card-title">{{shareDesignTitle}}</view>
+          <view class="share-sheet-card-desc">{{summary.count}} 颗 · {{wristSize}}cm · ¥{{summary.priceText}}</view>
+        </view>
+      </view>
+      <button class="share-sheet-primary" open-type="share">分享给好友</button>
+      <button class="share-sheet-secondary" bindtap="closeShareSheet">继续编辑</button>
     </view>
   </view>
 </view>

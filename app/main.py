@@ -7,6 +7,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
+from contextlib import asynccontextmanager
 import os
 import threading
 import time
@@ -15,12 +16,38 @@ from .admin_api import admin_router
 from .admin_page import admin_page
 from .api import legacy_router, order_service, router
 
+
+def logistics_sync_loop() -> None:
+    interval = max(300, int(os.getenv("LOGISTICS_SYNC_INTERVAL_SECONDS", "1800")))
+    while True:
+        time.sleep(interval)
+        try:
+            order_service.refresh_active_shipments()
+        except Exception:
+            # 单次第三方物流异常不能影响主服务，下一轮会继续重试。
+            continue
+
+
+def start_logistics_sync_worker() -> None:
+    if str(os.getenv("LOGISTICS_SYNC_ENABLED", "true")).lower() not in {"1", "true", "yes", "on"}:
+        return
+    worker = threading.Thread(target=logistics_sync_loop, name="logistics-sync", daemon=True)
+    worker.start()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    start_logistics_sync_worker()
+    yield
+
+
 app = FastAPI(
     title="宇涧水晶 DIY API",
     description="专属水晶测算、五行能量画像与手串定制推荐服务",
     version="2.0.0",
     docs_url="/docs",
     redoc_url="/redoc",
+    lifespan=lifespan,
 )
 
 app.add_middleware(
@@ -39,6 +66,9 @@ app.include_router(admin_router)
 @app.middleware("http")
 async def admin_static_cache_control(request: Request, call_next):
     response = await call_next(request)
+    content_type = response.headers.get("content-type", "")
+    if content_type.startswith("application/json") and "charset=" not in content_type.lower():
+        response.headers["Content-Type"] = "application/json; charset=utf-8"
     path = request.url.path
     if path == "/admin":
         response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
@@ -53,25 +83,6 @@ async def admin_static_cache_control(request: Request, call_next):
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 STATIC_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
-
-
-def logistics_sync_loop() -> None:
-    interval = max(300, int(os.getenv("LOGISTICS_SYNC_INTERVAL_SECONDS", "1800")))
-    while True:
-        time.sleep(interval)
-        try:
-            order_service.refresh_active_shipments()
-        except Exception:
-            # 单次第三方物流异常不能影响主服务，下一轮会继续重试。
-            continue
-
-
-@app.on_event("startup")
-def start_logistics_sync() -> None:
-    if str(os.getenv("LOGISTICS_SYNC_ENABLED", "true")).lower() not in {"1", "true", "yes", "on"}:
-        return
-    worker = threading.Thread(target=logistics_sync_loop, name="logistics-sync", daemon=True)
-    worker.start()
 
 
 @app.get("/", tags=["system"])

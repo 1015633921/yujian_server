@@ -80,8 +80,27 @@ def material_catalog(
     keyword: str | None = Query(default=None, max_length=40, description="搜索关键词"),
     compact: bool = Query(default=False, description="仅返回材料结果，适用于搜索页"),
     limit: int | None = Query(default=None, ge=1, le=100, description="最多返回数量"),
+    category: str | None = Query(default=None, max_length=80),
+    series: str | None = Query(default=None, max_length=120),
+    page: int | None = Query(default=None, ge=1),
+    page_size: int | None = Query(default=None, ge=1, le=60),
+    slim: bool = Query(default=False),
+    ids: str | None = Query(default=None, max_length=2000),
 ):
-    return success(list_materials(top=top, keyword=keyword, compact=compact, limit=limit))
+    return success(
+        list_materials(
+            top=top,
+            keyword=keyword,
+            compact=compact,
+            limit=limit,
+            category=category,
+            series=series,
+            page=page,
+            page_size=page_size,
+            slim=slim,
+            ids=ids,
+        )
+    )
 
 
 @router.get("/content-blocks", summary="content blocks")
@@ -283,6 +302,16 @@ def list_diy_designs(
     limit: int = Query(default=50, ge=1, le=100),
 ):
     return success(order_service.list_designs(user_id=user_id, limit=limit, status=status))
+
+
+@router.get("/diy-designs/shared/{design_id}", summary="获取公开分享 DIY 方案")
+def get_shared_diy_design(design_id: str):
+    try:
+        design = order_service.get_design(design_id)
+        design["user_id"] = ""
+        return success(design)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.get("/diy-designs/{design_id}", summary="获取 DIY 方案")

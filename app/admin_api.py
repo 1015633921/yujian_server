@@ -841,11 +841,29 @@ def materials(
     spec_state: str = Query(default="", max_length=20),
     sort_by: str = Query(default="sort_order", max_length=40),
     sort_order: str = Query(default="asc", max_length=10),
+    page: int | None = Query(default=None, ge=1),
+    page_size: int | None = Query(default=None, ge=1, le=100),
     authorization: str | None = Header(default=None),
 ):
     require_admin(authorization)
+    if page is None and page_size is None:
+        return success(
+            admin_service.list_materials(
+                keyword=keyword,
+                top=top,
+                category=category,
+                element=element,
+                status=status,
+                quality=quality,
+                stock_state=stock_state,
+                margin=margin,
+                spec_state=spec_state,
+                sort_by=sort_by,
+                sort_order=sort_order,
+            )
+        )
     return success(
-        admin_service.list_materials(
+        admin_service.list_materials_paginated(
             keyword=keyword,
             top=top,
             category=category,
@@ -857,6 +875,8 @@ def materials(
             spec_state=spec_state,
             sort_by=sort_by,
             sort_order=sort_order,
+            page=page or 1,
+            page_size=page_size or 50,
         )
     )
 
@@ -871,8 +891,11 @@ def material_spus(
     quality: str = Query(default="", max_length=30),
     stock_state: str = Query(default="", max_length=20),
     margin: str = Query(default="", max_length=20),
+    spec_state: str = Query(default="", max_length=20),
     sort_by: str = Query(default="sort_order", max_length=40),
     sort_order: str = Query(default="asc", max_length=10),
+    page: int | None = Query(default=None, ge=1),
+    page_size: int | None = Query(default=None, ge=1, le=100),
     authorization: str | None = Header(default=None),
 ):
     require_admin(authorization)
@@ -886,8 +909,11 @@ def material_spus(
             quality=quality,
             stock_state=stock_state,
             margin=margin,
+            spec_state=spec_state,
             sort_by=sort_by,
             sort_order=sort_order,
+            page=page,
+            page_size=page_size,
         )
     )
 
@@ -896,6 +922,16 @@ def material_spus(
 def material_options(authorization: str | None = Header(default=None)):
     require_admin(authorization)
     return success(admin_service.material_options_payload())
+
+
+@admin_router.get("/material-refs", summary="后台材料轻量引用列表")
+def material_refs(
+    keyword: str = Query(default="", max_length=80),
+    limit: int = Query(default=1000, ge=1, le=3000),
+    authorization: str | None = Header(default=None),
+):
+    require_admin(authorization)
+    return success(admin_service.list_material_refs(keyword=keyword, limit=limit))
 
 
 @admin_router.get("/material-taxonomy", summary="后台材料分类与品种")
