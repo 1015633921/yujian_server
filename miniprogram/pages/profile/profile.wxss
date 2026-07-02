@@ -289,6 +289,22 @@ page {
   padding: 18rpx 0;
 }
 
+.menu-contact-button {
+  width: 100%;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: 1;
+  text-align: left;
+}
+
+.menu-contact-button::after {
+  border: 0;
+}
+
 .menu-left {
   display: flex;
   align-items: center;

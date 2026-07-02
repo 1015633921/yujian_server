@@ -104,7 +104,14 @@
       <text>不确定时，将按中午 12:00 估算。</text>
     </view>
 
-    <picker mode="region" level="city" value="{{form.birthRegion}}" bindchange="onRegionChange">
+    <picker
+      mode="multiSelector"
+      range="{{birthRegionColumns}}"
+      value="{{birthRegionIndex}}"
+      bindchange="onRegionChange"
+      bindcolumnchange="onBirthRegionColumnChange"
+      bindcancel="onBirthRegionCancel"
+    >
       <view class="form-row picker-row last-row">
         <view class="row-label">出生地点</view>
         <view class="row-value">{{form.birthRegion[0]}} {{form.birthRegion[1]}}</view>

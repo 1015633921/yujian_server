@@ -36,7 +36,7 @@ function logRequestFailure(label, payload, options = {}) {
     message: payload.message
   };
   if (options.silent) {
-    console.warn(label, data);
+    if (options.debug) console.warn(label, data);
     return;
   }
   console.error(label, data);
@@ -327,6 +327,15 @@ function getMaterials(options = {}) {
   if (options.keyword) query.push(`keyword=${encodeURIComponent(options.keyword)}`);
   if (options.compact) query.push('compact=true');
   if (options.limit) query.push(`limit=${encodeURIComponent(options.limit)}`);
+  if (options.category) query.push(`category=${encodeURIComponent(options.category)}`);
+  if (options.series) query.push(`series=${encodeURIComponent(options.series)}`);
+  if (options.page) query.push(`page=${encodeURIComponent(options.page)}`);
+  if (options.pageSize || options.page_size) query.push(`page_size=${encodeURIComponent(options.pageSize || options.page_size)}`);
+  if (options.slim) query.push('slim=true');
+  if (options.ids && options.ids.length) {
+    const ids = Array.isArray(options.ids) ? options.ids.join(',') : options.ids;
+    query.push(`ids=${encodeURIComponent(ids)}`);
+  }
   return request(`/api/v1/materials${query.length ? `?${query.join('&')}` : ''}`, {
     silent: !!options.silent,
     timeout: options.timeout
@@ -397,6 +406,10 @@ function createOrder(payload) {
 
 function saveDIYDesign(payload) {
   return request('/api/v1/diy-designs', { method: 'POST', data: payload });
+}
+
+function getSharedDIYDesign(designId, options = {}) {
+  return request(`/api/v1/diy-designs/shared/${encodeURIComponent(designId)}`, options);
 }
 
 function getCartItems(userId, options = {}) {
@@ -538,6 +551,7 @@ module.exports = {
   getRecommendationPlans,
   getRecommendationPlan,
   saveDIYDesign,
+  getSharedDIYDesign,
   getCartItems,
   saveCartItem,
   updateCartItem,

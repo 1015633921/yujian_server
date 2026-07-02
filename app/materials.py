@@ -273,41 +273,210 @@ def with_cdn_url(item: dict) -> dict:
     }
 
 
+ALL_OPTION_LABEL = "\u5168\u90e8"
+
+
+def normalize_material_id_list(ids: str | list[str] | tuple[str, ...] | None) -> list[str]:
+    if not ids:
+        return []
+    values: list[str] = []
+    if isinstance(ids, str):
+        raw_values = ids.replace("\r", ",").replace("\n", ",").split(",")
+    else:
+        raw_values = []
+        for value in ids:
+            raw_values.extend(str(value or "").split(","))
+    for value in raw_values:
+        text = str(value or "").strip()
+        if text and text not in values:
+            values.append(text)
+    return values
+
+
+def is_all_option(value: str | None) -> bool:
+    return not value or str(value).strip() == ALL_OPTION_LABEL
+
+
+def slim_material(item: dict) -> dict:
+    sku = item.get("sku") or {}
+    energy = item.get("energy") or {}
+    visual = item.get("visual") or {}
+    image_url = (
+        visual.get("thumbnail_url")
+        or visual.get("image_url")
+        or item.get("thumbnail_url")
+        or item.get("image_url")
+        or ""
+    )
+    effects = energy.get("effects") or item.get("effects") or []
+    if isinstance(effects, str):
+        effects = [effects]
+    primary_element = energy.get("primary_element") or item.get("primary_element") or item.get("element") or ""
+    price = sku.get("price_per_bead") if sku else None
+    size = sku.get("size_mm") if sku else None
+    weight = sku.get("weight_g") if sku else None
+    return {
+        "id": sku.get("id") or item.get("id") or "",
+        "skuId": sku.get("sku_id") or item.get("skuId") or item.get("sku_id") or "",
+        "sku_id": sku.get("sku_id") or item.get("sku_id") or item.get("skuId") or "",
+        "material_code": sku.get("material_code") or item.get("material_code") or "",
+        "top": sku.get("top") or item.get("top") or "",
+        "category": sku.get("category") or item.get("category") or "",
+        "series": sku.get("series") or item.get("series") or item.get("name") or "",
+        "grade": sku.get("grade") or item.get("grade") or "",
+        "name": sku.get("name") or item.get("name") or "",
+        "price": float(price if price not in (None, "") else item.get("price") or 0),
+        "size": float(size if size not in (None, "") else item.get("size") or 0),
+        "weight": float(weight if weight not in (None, "") else item.get("weight") or 0),
+        "stock": int(float(sku.get("stock") if sku else item.get("stock") or 0)),
+        "enabled": bool(sku.get("enabled") if sku and "enabled" in sku else item.get("enabled", True)),
+        "sort_order": int(float(sku.get("sort_order") if sku else item.get("sort_order") or item.get("sortOrder") or 0)),
+        "element": primary_element,
+        "primary_element": primary_element,
+        "effects": effects,
+        "effect": " / ".join(str(value) for value in effects if value) or item.get("effect") or "",
+        "color": visual.get("color_hex") or item.get("color") or "",
+        "shine": visual.get("shine_hex") or item.get("shine") or "",
+        "image_url": image_url,
+        "thumbnail_url": image_url,
+    }
+
+
+def paginate_materials(materials: list[dict], page: int | None, page_size: int | None) -> tuple[list[dict], dict]:
+    current_page = max(1, int(page or 1))
+    size = max(1, min(60, int(page_size or 24)))
+    total = len(materials)
+    start = (current_page - 1) * size
+    end = start + size
+    return materials[start:end], {
+        "page": current_page,
+        "page_size": size,
+        "total": total,
+        "has_more": end < total,
+    }
+
+
 def list_materials(
     top: str | None = None,
     keyword: str | None = None,
     compact: bool = False,
     limit: int | None = None,
+    category: str | None = None,
+    series: str | None = None,
+    page: int | None = None,
+    page_size: int | None = None,
+    slim: bool = False,
+    ids: str | list[str] | tuple[str, ...] | None = None,
 ) -> dict:
     version = material_catalog_version()
-    cache_key = (top or "", keyword or "", bool(compact), int(limit or 0), version.get("version", ""))
+    material_ids = normalize_material_id_list(ids)
+    use_pagination = page is not None or page_size is not None
+    cache_key = (
+        top or "",
+        keyword or "",
+        category or "",
+        series or "",
+        tuple(material_ids),
+        bool(compact),
+        bool(slim),
+        int(limit or 0),
+        int(page or 0),
+        int(page_size or 0),
+        version.get("version", ""),
+    )
     cached = _MATERIAL_PAYLOAD_CACHE.get(cache_key)
     if cached and time.time() - cached.get("_cached_at", 0) < MATERIAL_CACHE_TTL_SECONDS:
         return {k: v for k, v in cached.items() if k != "_cached_at"}
 
-    db_materials = list_db_materials(top=top, keyword=keyword, limit=limit)
+    if use_pagination and slim and not material_ids:
+        db_page = list_db_materials_page(
+            top=top,
+            keyword=keyword,
+            category=category,
+            series=series,
+            page=page,
+            page_size=page_size,
+        )
+        if db_page is not None:
+            materials, pagination = db_page
+            payload = {"materials": [slim_material(item) for item in materials], "pagination": pagination}
+            if not compact:
+                payload = {**build_material_payload(payload["materials"], version), "pagination": pagination}
+            _MATERIAL_PAYLOAD_CACHE[cache_key] = {**payload, "_cached_at": time.time()}
+            return payload
+
+    db_materials = list_db_materials(
+        top=top,
+        keyword=keyword,
+        limit=None if use_pagination else limit,
+        category=category,
+        series=series,
+        ids=material_ids,
+        enrich=not slim,
+    )
     if db_materials is not None:
+        materials = db_materials
+        pagination = None
+        if use_pagination:
+            materials, pagination = paginate_materials(materials, page, page_size)
+        if slim:
+            materials = [slim_material(item) for item in materials]
         if compact:
-            return {"materials": db_materials}
-        payload = build_material_payload(db_materials, version)
+            payload = {"materials": materials}
+            if pagination:
+                payload["pagination"] = pagination
+            return payload
+        payload = build_material_payload(materials, version)
+        if pagination:
+            payload["pagination"] = pagination
         _MATERIAL_PAYLOAD_CACHE[cache_key] = {**payload, "_cached_at": time.time()}
         return payload
 
-    materials = filter_static_materials(top=top, keyword=keyword)
-    if limit:
+    materials = filter_static_materials(top=top, keyword=keyword, category=category, series=series, ids=material_ids)
+    pagination = None
+    if use_pagination:
+        materials, pagination = paginate_materials(materials, page, page_size)
+    elif limit:
         materials = materials[:limit]
+    if slim:
+        materials = [slim_material(item) for item in materials]
     if compact:
-        return {"materials": materials}
+        payload = {"materials": materials}
+        if pagination:
+            payload["pagination"] = pagination
+        return payload
     payload = build_material_payload(materials, version)
+    if pagination:
+        payload["pagination"] = pagination
     _MATERIAL_PAYLOAD_CACHE[cache_key] = {**payload, "_cached_at": time.time()}
     return payload
 
 
-def filter_static_materials(top: str | None = None, keyword: str | None = None) -> list[dict]:
+def filter_static_materials(
+    top: str | None = None,
+    keyword: str | None = None,
+    category: str | None = None,
+    series: str | None = None,
+    ids: list[str] | None = None,
+) -> list[dict]:
     search_terms = [item.lower() for item in expand_search_terms(keyword)]
+    id_set = set(ids or [])
     materials = []
     for item in MATERIAL_CATALOG:
+        item_identifiers = {
+            str(item.get("id") or ""),
+            str(item.get("skuId") or ""),
+            str(item.get("sku_id") or ""),
+            str(item.get("material_code") or ""),
+        }
         if top and item["top"] != top:
+            continue
+        if id_set and not (id_set & item_identifiers):
+            continue
+        if not is_all_option(category) and item.get("category") != category:
+            continue
+        item_series = item.get("series") or item.get("name") or ""
+        if not is_all_option(series) and item_series != series:
             continue
         haystack = " ".join(
             str(item.get(key, ""))
@@ -322,10 +491,11 @@ def filter_static_materials(top: str | None = None, keyword: str | None = None) 
 def build_material_payload(materials: list[dict], version: dict | None = None) -> dict:
     categories_by_top = {}
     series_by_category = {}
+    db_facets = list_db_material_facets()
     for tab in TOP_TABS:
-        db_pool = list_db_materials(top=tab["key"], keyword=None)
-        pool = db_pool if db_pool is not None else [item for item in MATERIAL_CATALOG if item["top"] == tab["key"]]
-        categories_by_top[tab["key"]] = ["全部", *sorted({item["category"] for item in pool})]
+        pool = db_facets if db_facets is not None else MATERIAL_CATALOG
+        pool = [item for item in pool if item.get("top") == tab["key"]]
+        categories_by_top[tab["key"]] = [ALL_OPTION_LABEL, *sorted({item["category"] for item in pool if item.get("category")})]
         for item in pool:
             category_key = f"{tab['key']}::{item.get('category', '')}"
             series = item.get("series") or item.get("name") or ""
@@ -339,7 +509,7 @@ def build_material_payload(materials: list[dict], version: dict | None = None) -
         "top_tabs": TOP_TABS,
         "categories_by_top": categories_by_top,
         "series_by_category": {
-            key: ["全部", *sorted(values)]
+            key: [ALL_OPTION_LABEL, *sorted(values)]
             for key, values in series_by_category.items()
         },
         "materials": materials,
@@ -372,22 +542,49 @@ def material_catalog_version() -> dict:
     return {"version": f"{total}:{updated_at}:{MATERIAL_SORT_POLICY_VERSION}", "updated_at": updated_at}
 
 
-def list_db_materials(
-    top: str | None = None,
-    keyword: str | None = None,
-    limit: int | None = None,
-) -> list[dict] | None:
+def list_db_material_facets() -> list[dict] | None:
     try:
         from .repository import DB_PATH
     except Exception:
         return None
     if not use_mysql() and not DB_PATH.exists():
         return None
+    try:
+        with connect_database() as connection:
+            rows = connection.execute(
+                """
+                SELECT top, category, series, name
+                FROM managed_materials
+                WHERE enabled = 1
+                """
+            ).fetchall()
+    except Exception:
+        return None
+    return [dict(row) for row in rows]
+
+
+def build_db_material_filters(
+    top: str | None = None,
+    keyword: str | None = None,
+    category: str | None = None,
+    series: str | None = None,
+    ids: list[str] | None = None,
+) -> tuple[list[str], list[str]]:
     clauses = ["enabled = 1"]
     params: list[str] = []
     if top:
         clauses.append("top = ?")
         params.append(top)
+    if ids:
+        placeholders = ",".join("?" for _ in ids)
+        clauses.append(f"(id IN ({placeholders}) OR skuId IN ({placeholders}) OR material_code IN ({placeholders}))")
+        params.extend([*ids, *ids, *ids])
+    if not is_all_option(category):
+        clauses.append("category = ?")
+        params.append(category or "")
+    if not is_all_option(series):
+        clauses.append("COALESCE(NULLIF(series, ''), name) = ?")
+        params.append(series or "")
     search_terms = expand_search_terms(keyword)
     if search_terms:
         fields = ["name", "category", "series", "grade", "effect", "element", "skuId"]
@@ -396,15 +593,77 @@ def list_db_materials(
             term_clauses.append("(" + " OR ".join(f"{field} LIKE ?" for field in fields) + ")")
             params.extend([f"%{term}%"] * len(fields))
         clauses.append("(" + " OR ".join(term_clauses) + ")")
+    return clauses, params
+
+
+def list_db_materials_page(
+    top: str | None = None,
+    keyword: str | None = None,
+    category: str | None = None,
+    series: str | None = None,
+    page: int | None = None,
+    page_size: int | None = None,
+) -> tuple[list[dict], dict] | None:
+    try:
+        from .repository import DB_PATH
+    except Exception:
+        return None
+    if not use_mysql() and not DB_PATH.exists():
+        return None
+    current_page = max(1, int(page or 1))
+    size = max(1, min(60, int(page_size or 24)))
+    offset = (current_page - 1) * size
+    clauses, params = build_db_material_filters(top=top, keyword=keyword, category=category, series=series)
+    where = " AND ".join(clauses)
+    try:
+        with connect_database() as connection:
+            total_row = connection.execute(f"SELECT COUNT(*) AS total FROM managed_materials WHERE {where}", params).fetchone()
+            rows = connection.execute(
+                f"""
+                SELECT *
+                FROM managed_materials
+                WHERE {where}
+                ORDER BY sort_order ASC, updated_at DESC, id ASC
+                LIMIT ? OFFSET ?
+                """,
+                [*params, size, offset],
+            ).fetchall()
+    except Exception:
+        return None
+    total = int(total_row["total"] or 0)
+    return [normalize_db_material(dict(row)) for row in rows], {
+        "page": current_page,
+        "page_size": size,
+        "total": total,
+        "has_more": offset + size < total,
+    }
+
+
+def list_db_materials(
+    top: str | None = None,
+    keyword: str | None = None,
+    limit: int | None = None,
+    category: str | None = None,
+    series: str | None = None,
+    ids: list[str] | None = None,
+    enrich: bool = True,
+) -> list[dict] | None:
+    try:
+        from .repository import DB_PATH
+    except Exception:
+        return None
+    if not use_mysql() and not DB_PATH.exists():
+        return None
+    clauses, params = build_db_material_filters(top=top, keyword=keyword, category=category, series=series, ids=ids)
     try:
         with connect_database() as connection:
             sql = f"SELECT * FROM managed_materials WHERE {' AND '.join(clauses)} ORDER BY sort_order ASC, updated_at DESC"
             rows = connection.execute(sql, params).fetchall()
     except Exception:
         return None
-    materials = enrich_materials_with_knowledge(
-        sort_materials_for_customer([normalize_db_material(dict(row)) for row in rows])
-    )
+    materials = [normalize_db_material(dict(row)) for row in rows]
+    if enrich:
+        materials = enrich_materials_with_knowledge(sort_materials_for_customer(materials))
     if limit:
         materials = materials[:limit]
     return materials

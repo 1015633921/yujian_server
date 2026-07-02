@@ -2,7 +2,7 @@
   <view class="cart-nav">
     <view>
       <view class="nav-title">购物车</view>
-      <view class="nav-subtitle">已选 {{selectedCount}} 个方案 · 共 {{items.length}} 个方案</view>
+      <view class="nav-subtitle">共 {{items.length}} 个定制方案</view>
     </view>
     <button wx:if="{{items.length}}" class="manage-button" bindtap="toggleManageMode">{{manageMode ? '完成' : '管理'}}</button>
   </view>
@@ -11,17 +11,13 @@
     <view class="list-head">
       <view>
         <view class="list-title">定制方案</view>
-        <view class="list-subtitle">这里只展示从 DIY 工作台加入购物车的方案；灵感收藏不会出现在这里。</view>
+        <view class="list-subtitle">每个方案可单独修改或结算；灵感收藏不会出现在这里。</view>
       </view>
-      <view class="list-badge">{{selectedCount}} / {{items.length}}</view>
+      <view class="list-badge">{{items.length}} 个</view>
     </view>
 
     <view class="cart-list">
-      <view wx:for="{{items}}" wx:key="key" class="cart-item yu-card" data-key="{{item.key}}" bindtap="openDesign">
-        <view class="check-dot {{item.selected ? 'checked' : ''}}" data-key="{{item.key}}" catchtap="toggleSelect">
-          <text wx:if="{{item.selected}}">✓</text>
-        </view>
-
+      <view wx:for="{{items}}" wx:key="key" class="cart-item yu-card" data-key="{{item.key}}">
         <view class="item-preview tone-{{item.tone}}">
           <image wx:if="{{item.imageUrl}}" class="item-image" src="{{item.imageUrl}}" mode="aspectFill" lazy-load="{{true}}" />
           <view wx:else class="mini-ring">
@@ -35,35 +31,18 @@
           <view class="item-recipe">{{item.recipeText}}</view>
           <view class="item-bottom">
             <view>
-              <view class="item-price">¥{{item.lineTotalText}}</view>
-              <view class="cart-label">单价 ¥{{item.priceText}}</view>
+              <view class="item-price">¥{{item.priceText}}</view>
+              <view class="cart-label">方案价</view>
             </view>
-            <view class="qty-control">
-              <view class="qty-btn" data-key="{{item.key}}" data-delta="-1" catchtap="changeQty">-</view>
-              <view class="qty-value">{{item.qty}}</view>
-              <view class="qty-btn" data-key="{{item.key}}" data-delta="1" catchtap="changeQty">+</view>
+            <view class="item-actions">
+              <button class="item-action action-secondary" data-key="{{item.key}}" catchtap="editDesign">修改</button>
+              <button class="item-action action-primary" data-key="{{item.key}}" catchtap="checkoutDesign">去结算</button>
             </view>
           </view>
         </view>
 
         <view wx:if="{{manageMode}}" class="item-delete" data-key="{{item.key}}" catchtap="removeItem">删除</view>
       </view>
-    </view>
-
-    <view class="bottom-spacer"></view>
-    <view class="checkout-bar">
-      <view class="select-all" bindtap="selectAll">
-        <view class="check-dot small {{allSelected ? 'checked' : ''}}">
-          <text wx:if="{{allSelected}}">✓</text>
-        </view>
-        <text>全选</text>
-      </view>
-      <view class="checkout-summary">
-        <text>合计：</text>
-        <text class="checkout-price">¥{{subtotalText}}</text>
-      </view>
-      <button wx:if="{{manageMode}}" class="delete-selected" bindtap="removeSelected">删除</button>
-      <button wx:else class="checkout-button {{selectedCount ? '' : 'disabled'}}" disabled="{{!selectedCount}}" bindtap="checkoutSelected">去结算({{selectedCount}})</button>
     </view>
   </block>
 

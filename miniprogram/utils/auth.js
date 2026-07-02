@@ -2,6 +2,11 @@ const api = require('./api');
 
 const USER_KEY = 'currentUser';
 const USER_ID_KEY = 'userId';
+const AUTH_DEBUG_LOGS = false;
+
+function logAuthWarning(...args) {
+  if (AUTH_DEBUG_LOGS) console.warn(...args);
+}
 
 function getStoredUser() {
   return wx.getStorageSync(USER_KEY) || null;
@@ -146,7 +151,7 @@ async function requireLogin(message = '请先登录后继续') {
   try {
     return await silentLogin();
   } catch (error) {
-    console.warn('refresh wechat login failed:', error.message || error);
+    logAuthWarning('refresh wechat login failed:', error.message || error);
   }
   const confirmed = await new Promise((resolve) => {
     wx.showModal({

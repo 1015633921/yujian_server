@@ -93,6 +93,28 @@
     </view>
   </view>
 
+  <view class="zodiac-card yu-card" wx:if="{{viewReport.zodiac.name}}">
+    <view class="zodiac-head">
+      <view>
+        <view class="card-title">星座气质解析</view>
+        <view class="zodiac-meta">{{viewReport.zodiac.dateRange}} · {{viewReport.zodiac.element}} · {{viewReport.zodiac.modality}}</view>
+      </view>
+      <view class="zodiac-mark">{{viewReport.zodiac.name}}</view>
+    </view>
+    <view class="zodiac-summary">{{viewReport.zodiac.summary}}</view>
+    <view class="zodiac-tags" wx:if="{{viewReport.zodiac.keywords.length}}">
+      <view wx:for="{{viewReport.zodiac.keywords}}" wx:key="*this" class="zodiac-tag">{{item}}</view>
+    </view>
+    <view class="zodiac-line">
+      <text>五行参照</text>
+      <view>{{viewReport.zodiac.wuxingHint}}</view>
+    </view>
+    <view class="zodiac-line">
+      <text>调和建议</text>
+      <view>{{viewReport.zodiac.suggestion}}</view>
+    </view>
+  </view>
+
   <view class="keyword-card yu-card">
     <view class="card-title">能量关键词</view>
     <view class="keyword-desc">提炼属于你的禅意 / 国风气质标签</view>
@@ -135,8 +157,8 @@
   </view>
 
   <view class="why-recommend-card yu-card">
-    <view class="card-title">为什么推荐这些水晶</view>
-    <view class="why-recommend-desc">系统会把命盘底色、愿望场景和当下状态一起折算到材料库，而不是只看单一标签。</view>
+    <view class="card-title">后续方案如何匹配</view>
+    <view class="why-recommend-desc">系统会把命盘底色、愿望场景和当下状态折算成材料筛选权重，用于下一步生成可编辑的 DIY 手串方案。</view>
     <view class="why-recommend-list">
       <view wx:for="{{viewReport.recommendationReasons}}" wx:key="index" class="why-recommend-row">
         <view class="why-recommend-index">{{item.index}}</view>
@@ -198,7 +220,9 @@
       </view>
       <view class="poster-close" bindtap="closePosterModal">×</view>
     </view>
-    <image class="poster-preview" src="{{posterPath}}" mode="aspectFit" show-menu-by-longpress="{{true}}" bindtap="previewPoster"></image>
+    <scroll-view class="poster-preview-scroll" scroll-y enhanced show-scrollbar="{{false}}">
+      <image class="poster-preview" src="{{posterPath}}" mode="widthFix" show-menu-by-longpress="{{true}}" bindtap="previewPoster"></image>
+    </scroll-view>
     <view class="poster-actions">
       <button class="poster-secondary" bindtap="closePosterModal">稍后</button>
       <button class="poster-primary" loading="{{posterSaving}}" disabled="{{posterSaving}}" bindtap="savePosterImage">保存海报</button>

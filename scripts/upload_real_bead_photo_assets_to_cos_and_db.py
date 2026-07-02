@@ -28,6 +28,7 @@ GENERIC_PHOTO_RE = re.compile(r"^(IMG|DSC|PXL|WX|MMEXPORT|SCREENSHOT)[_ -]?\d+",
 
 @dataclass
 class AssetGroup:
+    top: str
     series: str
     source_folder: str
     slug: str
@@ -140,6 +141,19 @@ CODE_META: dict[str, dict[str, object]] = {
     "aurora_quartz": {"category": "天然晶石", "effect": "inspiration", "element": "water", "color": "#b8c7d8", "shine": "#f3f8ff", "sort_order": 840},
 }
 
+CODE_META_ALIASES: dict[str, str] = {
+    "colorful_rabbit_hair": "rabbit_hair_quartz",
+    "red_rabbit_hair": "rabbit_hair_quartz",
+    "yellow_rabbit_hair": "rabbit_hair_quartz",
+    "green_rabbit_hair": "rabbit_hair_quartz",
+    "one_line_phantom": "layered_phantom",
+    "four_seasons_phantom": "colorful_phantom",
+    "red_phantom_basin": "red_phantom",
+    "green_phantom_starry": "green_phantom",
+    "green_phantom_half_basin": "green_phantom",
+    "snowflake_phantom": "white_phantom",
+}
+
 EFFECT_ALIASES = {
     "clarity": "focus",
     "grounding": "calm",
@@ -167,6 +181,16 @@ def normalize_effect_key(value: object) -> str:
         "vitality",
         "wealth",
     } else DEFAULT_META["effect"]
+
+
+def code_meta_for(material_code: str) -> dict[str, object]:
+    code = str(material_code or "").strip()
+    if code in CODE_META:
+        return CODE_META[code]
+    alias = CODE_META_ALIASES.get(code)
+    if alias:
+        return CODE_META.get(alias, {})
+    return {}
 
 
 def parse_args() -> argparse.Namespace:
@@ -234,8 +258,13 @@ def group_slug(series: str, material_code: str) -> str:
     return "material"
 
 
+def normalize_top(value: object) -> str:
+    top = str(value or "bead").strip().lower()
+    return top if top in {"bead", "accessory", "pendant"} else "bead"
+
+
 def load_asset_groups(args: argparse.Namespace) -> list[AssetGroup]:
-    raw_groups: dict[tuple[str, str], list[dict]] = defaultdict(list)
+    raw_groups: dict[tuple[str, str, str], list[dict]] = defaultdict(list)
     for manifest in sorted(args.manifest_root.glob("*/manifest.json")):
         rows = json.loads(manifest.read_text(encoding="utf-8"))
         for row in rows:
@@ -247,19 +276,21 @@ def load_asset_groups(args: argparse.Namespace) -> list[AssetGroup]:
                 continue
             source_folder = infer_group_category(row)
             material_code = str(row.get("material_code") or "").strip() or infer_material_code(series, source_folder)
-            raw_groups[(material_code, series)].append(
-                {**row, "series_label": series, "source_folder": source_folder, "material_code": material_code}
+            top = normalize_top(row.get("top"))
+            raw_groups[(top, material_code, series)].append(
+                {**row, "top": top, "series_label": series, "source_folder": source_folder, "material_code": material_code}
             )
 
     groups: list[AssetGroup] = []
     prefix = args.cos_prefix.strip("/")
-    for (material_code, series), rows in sorted(raw_groups.items(), key=lambda item: (item[0][0], item[0][1])):
+    for (top, material_code, series), rows in sorted(raw_groups.items(), key=lambda item: (item[0][0], item[0][1], item[0][2])):
         slug = group_slug(series, material_code)
         files = [Path(row["app_webp"]) for row in rows]
         keys = [f"{prefix}/{slug}/{index:02d}-{path.name}" for index, path in enumerate(files, start=1)]
         urls = [public_url(args, key) for key in keys]
         groups.append(
             AssetGroup(
+                top=top,
                 series=series,
                 source_folder=str(rows[0].get("source_folder") or rows[0].get("series") or ""),
                 slug=slug,
@@ -375,7 +406,7 @@ def select_existing_rows(connection, group: AssetGroup) -> list[dict]:
         WHERE top = ? AND series = ?
         ORDER BY size
         """,
-        ("bead", group.series),
+        (group.top, group.series),
     ).fetchall()
     if exact:
         return [dict(row) for row in exact]
@@ -395,20 +426,21 @@ def meta_for_group(group: AssetGroup, existing: list[dict]) -> dict:
             "price": float(first.get("price") or 0.01),
             "stock": int(first.get("stock") or 99),
         }
-    meta = {**DEFAULT_META, **CODE_META.get(group.material_code, {})}
-    if group.source_folder:
+    code_meta = code_meta_for(group.material_code)
+    meta = {**DEFAULT_META, **code_meta}
+    if group.source_folder and not code_meta:
         meta["category"] = group.source_folder
     meta["effect"] = normalize_effect_key(meta.get("effect"))
     return {**meta, "price": 0.01, "stock": 99}
 
 
 def deterministic_id(group: AssetGroup, size: int) -> str:
-    digest = hashlib.sha1(f"{group.material_code}|{group.series}|{size}".encode("utf-8")).hexdigest()[:18]
+    digest = hashlib.sha1(f"{group.top}|{group.material_code}|{group.series}|{size}".encode("utf-8")).hexdigest()[:18]
     return f"real_{digest}"
 
 
 def deterministic_sku(group: AssetGroup, size: int) -> str:
-    value = int(hashlib.sha1(f"sku|{group.material_code}|{group.series}|{size}".encode("utf-8")).hexdigest()[:13], 16)
+    value = int(hashlib.sha1(f"sku|{group.top}|{group.material_code}|{group.series}|{size}".encode("utf-8")).hexdigest()[:13], 16)
     return f"{value % 10_000_000_000_000:013d}"
 
 
@@ -427,17 +459,17 @@ def insert_material_row(connection, group: AssetGroup, meta: dict, size: int, of
         (
             deterministic_id(group, size),
             deterministic_sku(group, size),
-            "bead",
+            group.top,
             meta["category"],
             group.series,
             group.material_code,
-            "天然级",
+            "配件" if group.top == "accessory" else "天然级",
             group.series,
             meta["effect"],
             meta["element"],
             meta["price"],
             float(size),
-            round((size / 8) ** 3 * 1.2, 2),
+            0 if group.top != "bead" else round((size / 8) ** 3 * 1.2, 2),
             meta["color"],
             meta["shine"],
             0,
@@ -479,16 +511,18 @@ def bind_groups(groups: list[AssetGroup], create_missing: bool) -> dict[str, int
                         (image_path, primary_url, urls_json, group.material_code, now, row["id"]),
                     )
                     stats["updated_rows"] += 1
-                for offset, size in enumerate(SIZES):
-                    if size not in existing_sizes:
-                        insert_material_row(connection, group, meta, size, offset, now)
-                        stats["created_rows"] += 1
+                if group.top == "bead":
+                    for offset, size in enumerate(SIZES):
+                        if size not in existing_sizes:
+                            insert_material_row(connection, group, meta, size, offset, now)
+                            stats["created_rows"] += 1
             else:
                 if not create_missing:
                     stats["skipped_groups"] += 1
                     continue
                 stats["created_groups"] += 1
-                for offset, size in enumerate(SIZES):
+                target_sizes = SIZES if group.top == "bead" else (0,)
+                for offset, size in enumerate(target_sizes):
                     insert_material_row(connection, group, meta, size, offset, now)
                     stats["created_rows"] += 1
             stats["groups"] += 1
@@ -512,7 +546,7 @@ def print_preview(groups: list[AssetGroup]) -> None:
             existing = select_existing_rows(connection, group)
             action = "update" if existing else "create"
             print(
-                f"{action:6s} code={group.material_code:<28s} series={group.series} "
+                f"{action:6s} top={group.top:<9s} code={group.material_code:<28s} series={group.series} "
                 f"assets={len(group.files)} rows={len(existing)} slug={group.slug}"
             )
 

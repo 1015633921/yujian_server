@@ -5,6 +5,8 @@ from .material_knowledge import (
     build_primary_pools,
     build_recommendation_catalog,
     crystal_elements,
+    material_code_from_payload,
+    material_code_token,
     merge_taxonomy,
     unique_list,
 )
@@ -192,7 +194,8 @@ class RecommendationEngine:
         useful_elements = [element for element in energy.get("useful_elements", []) if element in ELEMENTS]
         catalog = self.catalog()
         primary_pools = self.primary_pools(catalog)
-        primary_code = self.select_primary(request, energy, context, catalog, primary_pools)
+        available_codes = self.available_catalog_codes(catalog, request.bead_size_mm)
+        primary_code = self.select_primary(request, energy, context, catalog, primary_pools, available_codes)
         primary_data = catalog[primary_code]
         excluded = {primary_data["element"], *primary_data["secondary_elements"]}
         support_element = self.select_support_element(final, excluded, useful_elements)
@@ -205,6 +208,7 @@ class RecommendationEngine:
             context,
             catalog,
             primary_pools,
+            available_codes,
         )
         bead_count = max(12, min(28, round(request.wrist_size_cm * 10 / request.bead_size_mm)))
         primary_quantity = 1
@@ -215,7 +219,7 @@ class RecommendationEngine:
             primary_code,
             role="主石",
             quantity=primary_quantity,
-            bead_size_mm=request.bead_size_mm + 2,
+            bead_size_mm=request.bead_size_mm,
             reason=f"你的首要愿望是“{primary_wish}”，主石优先承接这份当下诉求。",
             catalog=catalog,
         )
@@ -232,7 +236,7 @@ class RecommendationEngine:
                 support_codes[1],
                 role="点睛配珠",
                 quantity=accent_quantity,
-                bead_size_mm=max(4, request.bead_size_mm - 2),
+                bead_size_mm=request.bead_size_mm,
                 reason="作为两侧点睛珠，帮助主石与调和配珠之间形成更柔和的能量过渡。",
                 catalog=catalog,
             ),
@@ -273,10 +277,14 @@ class RecommendationEngine:
         context: dict,
         catalog: dict,
         primary_pools: dict[str, list[str]],
+        available_codes: set[str] | None = None,
     ) -> str:
         pool = set(primary_pools[request.primary_core_wish])
+        candidates = [code for code in catalog if not available_codes or code in available_codes]
+        if not candidates:
+            candidates = list(catalog)
         return max(
-            catalog,
+            candidates,
             key=lambda code: (
                 RecommendationEngine.score_crystal(
                     code, request, energy, context, role="primary", catalog=catalog, primary_pools=primary_pools
@@ -304,6 +312,7 @@ class RecommendationEngine:
         context: dict,
         catalog: dict,
         primary_pools: dict[str, list[str]],
+        available_codes: set[str] | None = None,
     ) -> list[str]:
         support_candidates = [
             code
@@ -314,6 +323,11 @@ class RecommendationEngine:
             and "avoid_dense" not in RecommendationEngine.rule_list(crystal, "match_rules")
             and not RecommendationEngine.conflicts_with(code, crystal, {primary_code}, catalog)
         ]
+        available_support_candidates = [
+            code for code in support_candidates if not available_codes or code in available_codes
+        ]
+        if available_support_candidates:
+            support_candidates = available_support_candidates
         if not support_candidates:
             support_candidates = [
                 code
@@ -344,6 +358,11 @@ class RecommendationEngine:
             and RecommendationEngine.role_allowed(crystal, "accent")
             and not RecommendationEngine.conflicts_with(code, crystal, {primary_code, first}, catalog)
         ]
+        available_accent_candidates = [
+            code for code in accent_candidates if not available_codes or code in available_codes
+        ]
+        if available_accent_candidates:
+            accent_candidates = available_accent_candidates
         if not accent_candidates:
             accent_candidates = [
                 code
@@ -468,6 +487,10 @@ class RecommendationEngine:
         catalog = catalog or RecommendationEngine.catalog()
         crystal = catalog[code]
         taxonomy = merge_taxonomy(code, crystal)
+        material = RecommendationEngine.resolve_material_for_code(code, bead_size_mm, crystal.get("name") or "")
+        material_image_url = material.get("image_url") or material.get("thumbnail_url") or ""
+        material_size = RecommendationEngine.material_size_mm(material)
+        material_id = str(material.get("id") or "")
         return {
             "code": code,
             "name": crystal["name"],
@@ -482,7 +505,13 @@ class RecommendationEngine:
             "reason": reason,
             "quantity": quantity,
             "bead_size_mm": bead_size_mm,
-            "image_url": (crystal.get("asset") or {}).get("thumbnail_url", ""),
+            "preferred_bead_size_mm": bead_size_mm,
+            "material_id": material_id,
+            "source_material_id": material_id,
+            "sku_id": material.get("skuId") or material.get("sku_id") or "",
+            "material_code": material.get("material_code") or code,
+            "actual_material_size_mm": material_size or bead_size_mm,
+            "image_url": material_image_url or (crystal.get("asset") or {}).get("thumbnail_url", ""),
             "rules": {
                 "allowed_roles": unique_list(crystal.get("allowed_roles")),
                 "conflict_codes": unique_list(crystal.get("conflict_codes")),
@@ -491,6 +520,127 @@ class RecommendationEngine:
             },
             "material_params": crystal.get("material_params") or {},
         }
+
+    @staticmethod
+    def material_size_mm(material: dict | None) -> float:
+        if not material:
+            return 0
+        size = material.get("size") or material.get("size_mm")
+        if size in (None, ""):
+            sku = material.get("sku") or {}
+            size = sku.get("size_mm")
+        try:
+            return float(size or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    @staticmethod
+    def material_sort_order(material: dict | None) -> int:
+        if not material:
+            return 0
+        sort_order = material.get("sort_order") or material.get("sortOrder")
+        if sort_order in (None, ""):
+            sku = material.get("sku") or {}
+            sort_order = sku.get("sort_order")
+        try:
+            return int(float(sort_order or 0))
+        except (TypeError, ValueError):
+            return 0
+
+    @staticmethod
+    def material_matches_code(material: dict, code: str) -> bool:
+        target = material_code_token(code)
+        tokens = {
+            material_code_token(material.get("id")),
+            material_code_token(material.get("skuId")),
+            material_code_token(material.get("sku_id")),
+            material_code_token(material.get("material_code")),
+            material_code_token(material_code_from_payload(material)),
+        }
+        return target in tokens
+
+    @staticmethod
+    def material_matches_name(material: dict, name: str) -> bool:
+        target = str(name or "").strip()
+        if not target:
+            return False
+        text = " ".join(
+            str(material.get(key) or "")
+            for key in ("name", "category", "series", "skuId", "sku_id", "material_code", "effect")
+        )
+        return target in text
+
+    @staticmethod
+    def material_matches_size(material: dict, bead_size_mm: int) -> bool:
+        target_size = float(bead_size_mm or 0)
+        size = RecommendationEngine.material_size_mm(material)
+        return bool(target_size and size and abs(size - target_size) <= 0.25)
+
+    @staticmethod
+    def load_bead_inventory() -> tuple[list[dict], bool]:
+        from .materials import MATERIAL_CATALOG, list_db_materials
+
+        db_materials = list_db_materials(top="bead", enrich=False)
+        if db_materials is not None:
+            return db_materials, True
+        return MATERIAL_CATALOG, False
+
+    @staticmethod
+    def material_matches_catalog_entry(material: dict, code: str, crystal: dict) -> bool:
+        return RecommendationEngine.material_matches_code(material, code) or RecommendationEngine.material_matches_name(
+            material,
+            crystal.get("name") or "",
+        )
+
+    @staticmethod
+    def available_catalog_codes(catalog: dict[str, dict], bead_size_mm: int) -> set[str]:
+        try:
+            materials, _ = RecommendationEngine.load_bead_inventory()
+        except Exception:
+            return set()
+        available: set[str] = set()
+        exact_materials = [item for item in materials if RecommendationEngine.material_matches_size(item, bead_size_mm)]
+        for code, crystal in catalog.items():
+            if any(RecommendationEngine.material_matches_catalog_entry(item, code, crystal) for item in exact_materials):
+                available.add(code)
+        return available
+
+    @staticmethod
+    def choose_closest_material(candidates: list[dict], bead_size_mm: int) -> dict:
+        if not candidates:
+            return {}
+        exact_candidates = [
+            item for item in candidates
+            if RecommendationEngine.material_matches_size(item, bead_size_mm)
+        ]
+        if exact_candidates:
+            candidates = exact_candidates
+        target_size = float(bead_size_mm or 8)
+        return min(
+            candidates,
+            key=lambda item: (
+                abs((RecommendationEngine.material_size_mm(item) or target_size) - target_size),
+                RecommendationEngine.material_sort_order(item),
+                str(item.get("id") or ""),
+            ),
+        )
+
+    @staticmethod
+    def resolve_material_for_code(code: str, bead_size_mm: int, crystal_name: str = "") -> dict:
+        try:
+            materials, _ = RecommendationEngine.load_bead_inventory()
+            candidates = [
+                item for item in materials
+                if RecommendationEngine.material_matches_code(item, code)
+            ]
+            if not candidates and crystal_name:
+                candidates = [
+                    item for item in materials
+                    if RecommendationEngine.material_matches_name(item, crystal_name)
+                ]
+            return RecommendationEngine.choose_closest_material(candidates, bead_size_mm)
+        except Exception:
+            return {}
 
     @staticmethod
     def build_layout(bead_count: int, primary: dict, supporting: list[dict]) -> list[dict]:
@@ -505,6 +655,12 @@ class RecommendationEngine:
                     "crystal_name": item["name"],
                     "role": item["role"],
                     "color": item["color"],
+                    "bead_size_mm": item.get("bead_size_mm"),
+                    "preferred_bead_size_mm": item.get("preferred_bead_size_mm") or item.get("bead_size_mm"),
+                    "material_id": item.get("material_id", ""),
+                    "source_material_id": item.get("source_material_id", ""),
+                    "sku_id": item.get("sku_id", ""),
+                    "material_code": item.get("material_code", item["code"]),
                 }
             )
         return layout

@@ -45,7 +45,6 @@
 .daily-hero-card,
 .choice-card,
 .dimension-card,
-.crystal-card,
 .wear-card,
 .action-card,
 .plan-card,
@@ -546,69 +545,6 @@
   line-height: 1.65;
 }
 
-.crystal-card {
-  background:
-    radial-gradient(circle at 100% 12%, rgba(125,98,204,.13), transparent 28%),
-    linear-gradient(180deg, rgba(255,255,255,.94), rgba(255,255,255,.86));
-}
-
-.combo-list {
-  margin-top: 18rpx;
-}
-
-.combo-item {
-  display: grid;
-  grid-template-columns: 42rpx 58rpx minmax(0, 1fr);
-  gap: 16rpx;
-  align-items: center;
-  padding: 18rpx 0;
-  border-bottom: 1rpx solid rgba(229,226,220,.72);
-}
-
-.combo-item:last-child {
-  border-bottom: 0;
-}
-
-.combo-index {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 38rpx;
-  height: 38rpx;
-  border-radius: 50%;
-  color: #fff;
-  font-size: 20rpx;
-  font-weight: 900;
-}
-
-.crystal-orb {
-  width: 54rpx;
-  height: 54rpx;
-  border-radius: 50%;
-  background: rgba(255,255,255,.84);
-  box-shadow: 0 8rpx 16rpx rgba(35,35,35,.12), inset 0 0 0 1rpx rgba(255,255,255,.52);
-}
-
-.crystal-orb-image {
-  display: block;
-  border: 2rpx solid rgba(255,255,255,.86);
-  box-shadow: 0 10rpx 18rpx rgba(35,35,35,.13);
-}
-
-.combo-name {
-  color: #202320;
-  font-size: 25rpx;
-  font-weight: 880;
-}
-
-.combo-role,
-.combo-reason {
-  margin-top: 7rpx;
-  color: #80857D;
-  font-size: 22rpx;
-  line-height: 1.45;
-}
-
 .wear-card {
   background:
     radial-gradient(circle at 98% 18%, rgba(93,140,73,.12), transparent 28%),
@@ -700,40 +636,6 @@
   font-weight: 760;
 }
 
-.plan-visual {
-  position: relative;
-  height: 118rpx;
-  margin: 18rpx 0 2rpx;
-}
-
-.plan-visual::before {
-  content: "";
-  position: absolute;
-  left: 26rpx;
-  right: 26rpx;
-  top: 54rpx;
-  height: 2rpx;
-  border-radius: 999rpx;
-  background: rgba(54, 92, 156, .12);
-}
-
-.plan-orb {
-  position: relative;
-  z-index: 1;
-  display: inline-block;
-  width: 48rpx;
-  height: 48rpx;
-  margin: 34rpx -4rpx 0 0;
-  border-radius: 50%;
-  background: rgba(255,255,255,.86);
-  box-shadow: 0 8rpx 16rpx rgba(35,35,35,.12), inset 0 0 0 1rpx rgba(255,255,255,.55);
-}
-
-.plan-orb-image {
-  border: 2rpx solid rgba(255,255,255,.86);
-  box-shadow: 0 9rpx 18rpx rgba(35,35,35,.14);
-}
-
 .plan-tags text {
   color: #64715D;
   background: rgba(100,124,112,.10);
@@ -807,11 +709,6 @@
   .dimension-row {
     grid-template-columns: 36rpx 106rpx minmax(0, 1fr) 44rpx;
     gap: 10rpx;
-  }
-
-  .combo-item {
-    grid-template-columns: 38rpx 50rpx minmax(0, 1fr);
-    gap: 12rpx;
   }
 
   .daily-bottom {

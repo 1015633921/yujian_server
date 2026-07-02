@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 from .energy import ELEMENTS, ENERGY_WEIGHTS, EnergyCalculator, MBTI_MAPPING, PLACE_COORDINATES, WISH_MAPPING
 from .fortune.chakra import public_chakra_options
 from .fortune.mood_palette import public_mood_palettes
+from .fortune.zodiac import calculate_zodiac_analysis
 from .recommendation import RecommendationEngine, interpretation
 from .repository import AssessmentRepository
 from .schemas import AssessmentRequest, DIYRecommendationRequest
@@ -74,6 +75,7 @@ class AssessmentService:
         created_at = datetime.now(CHINA_TZ).isoformat()
         energy_keywords = self.energy_keywords(energy["final"], energy["strongest"], energy["weakest"], request.core_wishes)
         seasonal_energy = self.seasonal_energy_prompt(energy["final"], energy["strongest"], energy["weakest"])
+        zodiac_analysis = calculate_zodiac_analysis(request.birthday, energy["strongest"], energy["weakest"])
         result = {
             "assessment_id": uuid.uuid4().hex,
             "created_at": created_at,
@@ -83,6 +85,7 @@ class AssessmentService:
             "name_analysis": energy["name_analysis"],
             "chakra_analysis": energy["chakra_analysis"],
             "mood_analysis": energy["mood_analysis"],
+            "zodiac_analysis": zodiac_analysis,
             "useful_elements": energy["useful_elements"],
             "recommendation_strategy": energy["recommendation_strategy"],
             "final_energy_profile": energy["final"],
@@ -134,6 +137,7 @@ class AssessmentService:
         energy = self.energy_calculator.calculate(request)
         energy_keywords = self.energy_keywords(energy["final"], energy["strongest"], energy["weakest"], request.core_wishes)
         seasonal_energy = self.seasonal_energy_prompt(energy["final"], energy["strongest"], energy["weakest"])
+        zodiac_analysis = calculate_zodiac_analysis(request.birthday, energy["strongest"], energy["weakest"])
         result = {
             "assessment_id": uuid.uuid4().hex,
             "created_at": datetime.now(CHINA_TZ).isoformat(),
@@ -144,6 +148,7 @@ class AssessmentService:
             "name_analysis": energy["name_analysis"],
             "chakra_analysis": energy["chakra_analysis"],
             "mood_analysis": energy["mood_analysis"],
+            "zodiac_analysis": zodiac_analysis,
             "useful_elements": energy["useful_elements"],
             "recommendation_strategy": energy["recommendation_strategy"],
             "final_energy_profile": energy["final"],
@@ -399,6 +404,8 @@ class AssessmentService:
             enriched["energy_keywords"] = cls.energy_keywords(final_profile, strongest, weakest, core_wishes)
         if not enriched.get("seasonal_energy"):
             enriched["seasonal_energy"] = cls.seasonal_energy_prompt(final_profile, strongest, weakest)
+        if not enriched.get("zodiac_analysis"):
+            enriched["zodiac_analysis"] = calculate_zodiac_analysis(input_summary.get("birthday"), strongest, weakest)
         return enriched
 
     def get(self, assessment_id: str) -> dict | None:
