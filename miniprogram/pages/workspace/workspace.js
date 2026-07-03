@@ -2432,7 +2432,7 @@ Page({
     const normal = [];
     const floating = [];
     sprites.forEach(sprite => {
-      if (sprite.dragging || sprite.active) floating.push(sprite);
+      if (sprite.dragging || sprite.deleteReady) floating.push(sprite);
       else normal.push(sprite);
     });
     normal.concat(floating).forEach(sprite => this.drawCanvasBead(ctx, sprite));
@@ -2546,6 +2546,12 @@ Page({
       const canvas = wx.createOffscreenCanvas({ type: '2d', width: bucket, height: bucket });
       const ctx = canvas.getContext('2d');
       const radius = bucket / 2;
+      if (sourceImage) {
+        ctx.clearRect(0, 0, bucket, bucket);
+        ctx.drawImage(sourceImage, 0, 0, bucket, bucket);
+        this.canvasTextureCache[key] = { ready: true, canvas };
+        return canvas;
+      }
       ctx.save();
       ctx.beginPath();
       ctx.arc(radius, radius, radius, 0, Math.PI * 2);
@@ -2557,28 +2563,21 @@ Page({
       gradient.addColorStop(1, 'rgba(32,24,18,0.28)');
       ctx.fillStyle = gradient;
       ctx.fillRect(0, 0, bucket, bucket);
-      if (sourceImage) {
-        const imageInset = -bucket * 0.025;
-        ctx.globalAlpha = 0.98;
-        ctx.drawImage(sourceImage, imageInset, imageInset, bucket - imageInset * 2, bucket - imageInset * 2);
-        ctx.globalAlpha = 1;
-      } else {
-        ctx.fillStyle = 'rgba(255,255,255,0.52)';
-        ctx.beginPath();
-        ctx.arc(bucket * 0.38, bucket * 0.34, bucket * 0.11, 0, Math.PI * 2);
-        ctx.fill();
-      }
+      ctx.fillStyle = 'rgba(255,255,255,0.52)';
+      ctx.beginPath();
+      ctx.arc(bucket * 0.38, bucket * 0.34, bucket * 0.11, 0, Math.PI * 2);
+      ctx.fill();
       const shade = ctx.createRadialGradient(bucket * 0.36, bucket * 0.32, bucket * 0.08, radius, radius, radius);
       shade.addColorStop(0, 'rgba(255,255,255,0.03)');
       shade.addColorStop(0.62, 'rgba(255,255,255,0)');
-      shade.addColorStop(1, sourceImage ? 'rgba(0,0,0,0.12)' : 'rgba(0,0,0,0.20)');
+      shade.addColorStop(1, 'rgba(0,0,0,0.20)');
       ctx.fillStyle = shade;
       ctx.fillRect(0, 0, bucket, bucket);
       ctx.restore();
       ctx.beginPath();
       ctx.arc(radius, radius, radius - 0.8, 0, Math.PI * 2);
-      ctx.strokeStyle = sourceImage ? 'rgba(32,32,31,0.18)' : 'rgba(255,255,255,0.16)';
-      ctx.lineWidth = sourceImage ? 1.2 : 0.8;
+      ctx.strokeStyle = 'rgba(255,255,255,0.16)';
+      ctx.lineWidth = 0.8;
       ctx.stroke();
       this.canvasTextureCache[key] = { ready: true, canvas };
       return canvas;
@@ -2595,30 +2594,55 @@ Page({
     ctx.save();
     ctx.globalAlpha = sprite.deleteReady ? 0.58 : 1;
     ctx.translate(sprite.x, sprite.y);
+    const hasImage = Boolean(sprite.item.image_url);
+    if (!sprite.screenSpace) {
+      const shadowStrength = hasImage ? 1 : 0.82;
+      ctx.save();
+      ctx.translate(radius * 0.26, radius * 0.90);
+      ctx.scale(1.22, 0.44);
+      const softShadow = ctx.createRadialGradient(0, 0, radius * 0.10, 0, 0, radius * 0.96);
+      softShadow.addColorStop(0, `rgba(42, 33, 24, ${0.30 * shadowStrength})`);
+      softShadow.addColorStop(0.40, `rgba(42, 33, 24, ${0.16 * shadowStrength})`);
+      softShadow.addColorStop(0.72, `rgba(42, 33, 24, ${0.055 * shadowStrength})`);
+      softShadow.addColorStop(1, 'rgba(44, 36, 26, 0)');
+      ctx.fillStyle = softShadow;
+      ctx.beginPath();
+      ctx.arc(0, 0, radius * 0.96, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+
+      ctx.save();
+      ctx.translate(radius * 0.22, radius * 1.02);
+      ctx.scale(0.78, 0.20);
+      const contactShadow = ctx.createRadialGradient(0, 0, radius * 0.02, 0, 0, radius * 0.76);
+      contactShadow.addColorStop(0, `rgba(30, 24, 18, ${0.38 * shadowStrength})`);
+      contactShadow.addColorStop(0.42, `rgba(30, 24, 18, ${0.20 * shadowStrength})`);
+      contactShadow.addColorStop(0.72, `rgba(30, 24, 18, ${0.07 * shadowStrength})`);
+      contactShadow.addColorStop(1, 'rgba(34, 27, 20, 0)');
+      ctx.fillStyle = contactShadow;
+      ctx.beginPath();
+      ctx.arc(0, 0, radius * 0.76, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
     ctx.rotate((Number(sprite.rotation) || 0) * Math.PI / 180);
-    ctx.save();
-    ctx.shadowColor = 'rgba(42, 31, 22, 0.20)';
-    ctx.shadowBlur = sprite.screenSpace ? 6 : 8;
-    ctx.shadowOffsetY = sprite.screenSpace ? 2 : 3;
-    ctx.fillStyle = 'rgba(0,0,0,0.02)';
-    ctx.beginPath();
-    ctx.arc(0, 0, radius - 0.6, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
     if (sprite.active || sprite.deleteReady) {
       ctx.save();
       ctx.beginPath();
       ctx.arc(0, 0, radius + (sprite.deleteReady ? 5 : 4), 0, Math.PI * 2);
-      ctx.strokeStyle = sprite.deleteReady ? 'rgba(188, 62, 55, 0.86)' : 'rgba(18, 18, 18, 0.82)';
+      ctx.strokeStyle = sprite.deleteReady
+        ? 'rgba(188, 62, 55, 0.86)'
+        : (hasImage ? 'rgba(196, 151, 78, 0.88)' : 'rgba(18, 18, 18, 0.82)');
       ctx.lineWidth = sprite.deleteReady ? 3 : 2.5;
       ctx.stroke();
       ctx.restore();
     }
     ctx.save();
-    ctx.beginPath();
-    ctx.arc(0, 0, radius, 0, Math.PI * 2);
-    ctx.clip();
-    const hasImage = Boolean(sprite.item.image_url);
+    if (!hasImage) {
+      ctx.beginPath();
+      ctx.arc(0, 0, radius, 0, Math.PI * 2);
+      ctx.clip();
+    }
     const texture = this.getCanvasBeadTexture(sprite.item, size);
     const image = texture ? null : this.getCanvasImage(sprite.item.image_url);
     if (texture) {
@@ -2647,11 +2671,13 @@ Page({
       ctx.fillRect(-radius, -radius, size, size);
     }
     ctx.restore();
-    ctx.beginPath();
-    ctx.arc(0, 0, radius - 1, 0, Math.PI * 2);
-    ctx.strokeStyle = hasImage ? 'rgba(32,32,31,0.20)' : 'rgba(255,255,255,0.16)';
-    ctx.lineWidth = hasImage ? 1.1 : 0.8;
-    ctx.stroke();
+    if (!hasImage) {
+      ctx.beginPath();
+      ctx.arc(0, 0, radius - 1, 0, Math.PI * 2);
+      ctx.strokeStyle = 'rgba(255,255,255,0.16)';
+      ctx.lineWidth = 0.8;
+      ctx.stroke();
+    }
     ctx.restore();
   },
 
@@ -3888,11 +3914,28 @@ Page({
     });
   },
 
-  async addDesignToCart() {
+  validateStringedDesignForCart() {
     if (!this.data.selected.length) {
       wx.showToast({ title: '请先选择珠子', icon: 'none' });
-      return;
+      return false;
     }
+    if (this.data.selected.length < MIN_STRING_BEAD_COUNT) {
+      wx.showToast({ title: `至少选择${MIN_STRING_BEAD_COUNT}颗珠子成串`, icon: 'none' });
+      return false;
+    }
+    if (this.data.isShuffling || this.data.isStringingFinishing) {
+      wx.showToast({ title: '正在成串，请稍候', icon: 'none' });
+      return false;
+    }
+    if (this.data.isLooseMode) {
+      wx.showToast({ title: '请先收拢成串后再加入购物车', icon: 'none' });
+      return false;
+    }
+    return true;
+  },
+
+  async addDesignToCart() {
+    if (!this.validateStringedDesignForCart()) return;
     let user;
     try {
       user = await auth.requireLogin('登录后才能保存购物车方案预览。');
@@ -4573,17 +4616,49 @@ Page({
   selectBead(e) {
     if (Date.now() < (this.suppressBeadTapUntil || 0)) return;
     const index = Number(e.currentTarget.dataset.index);
+    this.showSelectedBeadInfo(index);
+  },
+
+  showSelectedBeadInfo(index, selected = this.data.selected, placements = this.data.placements) {
+    const beadIndex = Number(index);
+    if (!Number.isInteger(beadIndex) || beadIndex < 0) return;
     const updates = {
-      selectedBeadIndex: index,
-      selectedBeadInfo: this.buildSelectedBeadInfo(index)
+      selectedBeadIndex: beadIndex,
+      selectedBeadInfo: this.buildSelectedBeadInfo(beadIndex, selected, placements)
     };
     (this.data.selectedItems || []).forEach((item, itemIndex) => {
-      const selected = itemIndex === index;
-      if (item.selected !== selected) {
-        updates[`selectedItems[${itemIndex}].selected`] = selected;
+      const isSelected = itemIndex === beadIndex;
+      if (item.selected !== isSelected) {
+        updates[`selectedItems[${itemIndex}].selected`] = isSelected;
+      }
+      const classNames = String(item.className || '').split(/\s+/).filter(name => name && name !== 'active');
+      if (isSelected) classNames.push('active');
+      const nextClassName = classNames.join(' ');
+      if (nextClassName !== item.className) {
+        updates[`selectedItems[${itemIndex}].className`] = nextClassName;
       }
     });
-    this.setData(updates);
+    this.setData(updates, () => {
+      if (this.data.useCanvasRenderer) this.scheduleCanvasRender(true);
+    });
+  },
+
+  closeSelectedBeadInfo() {
+    const updates = {
+      selectedBeadIndex: -1,
+      selectedBeadInfo: null
+    };
+    (this.data.selectedItems || []).forEach((item, itemIndex) => {
+      if (item.selected) updates[`selectedItems[${itemIndex}].selected`] = false;
+      const classNames = String(item.className || '').split(/\s+/).filter(name => name && name !== 'active');
+      const nextClassName = classNames.join(' ');
+      if (nextClassName !== item.className) {
+        updates[`selectedItems[${itemIndex}].className`] = nextClassName;
+      }
+    });
+    this.setData(updates, () => {
+      if (this.data.useCanvasRenderer) this.scheduleCanvasRender(true);
+    });
   },
 
   onBeadTouchStart(e) {
@@ -4780,6 +4855,10 @@ Page({
         draggingBeadIndex: -1,
         dragDeleteArmed: false
       });
+      if (!state.moved) {
+        this.showSelectedBeadInfo(state.currentIndex);
+        return;
+      }
       if (shouldDelete) {
         this.removeItemAt(state.currentIndex, { pushHistory: false });
         wx.showToast({ title: '已移出圆盘', icon: 'none' });
@@ -4796,6 +4875,14 @@ Page({
     const shouldDelete = this.data.dragDeleteArmed;
     if (state.moved) this.suppressBeadTapUntil = Date.now() + 320;
     this.dragState = null;
+    if (!state.moved) {
+      Body.setStatic(state.body, false);
+      this.setData({ draggingBeadIndex: -1, dragDeleteArmed: false }, () => {
+        this.showSelectedBeadInfo(state.index);
+      });
+      this.runPhysics();
+      return;
+    }
     if (shouldDelete) {
       Composite.remove(this.physicsEngine.world, state.body);
       this.physicsBodies = this.physicsBodies.filter(body => body !== state.body);
@@ -4956,23 +5043,22 @@ Page({
     return `${text}mm`;
   },
 
-  buildSelectedBeadInfo(index, selected = this.data.selected, placements = this.data.placements) {
+  buildSelectedBeadInfo(index, selected = this.data.selected) {
     const beadIndex = Number(index);
     if (!Number.isInteger(beadIndex) || beadIndex < 0 || beadIndex >= (selected || []).length) return null;
     const id = selected[beadIndex];
     const material = this.findMaterialById(id) || {};
-    const placement = (placements || [])[beadIndex] || {};
     const name = material.name || material.series || material.category || id || '未命名珠子';
     const diameter = material.size || material.size_mm || (material.sku && material.sku.size_mm) || '';
+    const price = Number(material.price || 0);
+    const priceText = Number.isFinite(price) && price > 0 ? `¥${price.toFixed(2).replace(/\.00$/, '')}` : '--';
     return {
       index: beadIndex,
       position: beadIndex + 1,
       id,
       name,
-      category: material.category || '',
-      series: material.series || '',
       diameterText: this.formatBeadDiameter(diameter),
-      imageUrl: placement.image_url || material.image_url || ''
+      priceText
     };
   },
 
@@ -5015,7 +5101,7 @@ Page({
       const faceRotation = this.data.isLooseMode
         ? 0
         : (Math.round(Number(placement.rotation || 0) / 180) * 180);
-      const background = this.buildBeadBackground(item);
+      const background = item.image_url ? 'transparent' : this.buildBeadBackground(item);
       const classes = [];
       if (item.image_url) classes.push('has-image');
       if (index === this.data.selectedBeadIndex) classes.push('active');

@@ -109,6 +109,28 @@ class MaterialSeriesPayload(BaseModel):
     id: str | None = None
     category_id: str
     name: str
+    material_code: str | None = ""
+    color: str | None = "#dfe3e5"
+    shine: str | None = "#ffffff"
+    image_path: str | None = ""
+    image_url: str | None = ""
+    image_urls: list[str] = Field(default_factory=list)
+    primary_element: str | None = ""
+    secondary_elements: list[str] = Field(default_factory=list)
+    chakras: list[str] = Field(default_factory=list)
+    chakra_weights: dict = Field(default_factory=dict)
+    effects: list[str] = Field(default_factory=list)
+    wish_pools: list[str] = Field(default_factory=list)
+    color_family: str | None = ""
+    mood_tags: list[str] = Field(default_factory=list)
+    visual_tags: list[str] = Field(default_factory=list)
+    story: str | None = ""
+    allowed_roles: list[str] = Field(default_factory=list)
+    conflict_codes: list[str] = Field(default_factory=list)
+    match_rules: list[str] = Field(default_factory=list)
+    care_tags: list[str] = Field(default_factory=list)
+    material_params: dict = Field(default_factory=dict)
+    asset: dict = Field(default_factory=dict)
     sort_order: int = 0
     enabled: bool = True
 

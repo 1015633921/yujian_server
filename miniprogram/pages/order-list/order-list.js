@@ -10,6 +10,7 @@ const STATUS_TITLE = {
   done: '已完成'
 };
 const ORDER_RING_LIMIT = 18;
+const ORDER_TRAY_IMAGE = '/assets/workspace/tray-yustream-transparent-user-20260701-v6.webp';
 
 Page({
   data: {
@@ -83,6 +84,8 @@ Page({
       bom,
       materialCount: sequence.length || bom.reduce((sum, row) => sum + Number(row.qty || row.quantity || 1), 0),
       previewImage,
+      trayImage: ORDER_TRAY_IMAGE,
+      trayImageFailed: false,
       previewBeads: this.buildPreviewBeads(
         sequence.length ? sequence : bom,
         (design && design.placements) || item.placements || []
@@ -183,6 +186,15 @@ Page({
     const id = e.currentTarget.dataset.id;
     const orders = (this.data.orders || []).map(order => (
       order.id === id ? { ...order, previewImage: '' } : order
+    ));
+    this.setData({ orders });
+    this.applyFilter();
+  },
+
+  onTrayImageError(e) {
+    const id = e.currentTarget.dataset.id;
+    const orders = (this.data.orders || []).map(order => (
+      order.id === id ? { ...order, trayImageFailed: true } : order
     ));
     this.setData({ orders });
     this.applyFilter();

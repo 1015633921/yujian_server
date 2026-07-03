@@ -63,6 +63,7 @@ def test_workspace_material_catalog_supports_paged_slim_payload():
     if data["materials"]:
         item = data["materials"][0]
         assert {"id", "name", "price", "size", "image_url"}.issubset(item)
+        assert isinstance(item.get("image_urls"), list)
         assert "rules" not in item
         assert "image_pool" not in item
 
@@ -77,6 +78,32 @@ def test_workspace_material_catalog_supports_paged_slim_payload():
                 alias_data = alias_response.json()["data"]
                 assert alias_response.status_code == 200
                 assert item["id"] in [material["id"] for material in alias_data["materials"]]
+
+
+def test_slim_material_preserves_image_url_pool_for_workspace_randomization():
+    from app.materials import slim_material
+
+    image_urls = [
+        "https://cdn-test.yustream.cn/materials/beads/rose-a.webp",
+        "https://cdn-test.yustream.cn/materials/beads/rose-b.webp",
+    ]
+
+    material = slim_material({
+        "id": "rose8",
+        "skuId": "rose",
+        "top": "bead",
+        "category": "水晶",
+        "series": "粉晶",
+        "name": "粉晶",
+        "price": 1,
+        "size": 8,
+        "weight": 1,
+        "image_url": image_urls[0],
+        "image_urls": image_urls,
+    })
+
+    assert material["image_url"] == image_urls[0]
+    assert material["image_urls"] == image_urls
 
 
 def test_admin_material_options_expose_field_governance_specs(tmp_path):

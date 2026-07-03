@@ -17,11 +17,12 @@
         <view class="order-status">{{item.status}}</view>
       </view>
       <view class="order-card-content">
-        <view wx:if="{{item.previewImage || item.previewBeads.length}}" class="order-ring-preview">
-          <image wx:if="{{item.previewImage}}" class="order-preview-image" src="{{item.previewImage}}" mode="aspectFill" data-id="{{item.id}}" binderror="onPreviewImageError"></image>
+        <view class="order-ring-preview {{item.trayImageFailed ? 'tray-image-failed' : ''}}">
+          <image class="order-tray-image" src="{{item.trayImage}}" mode="aspectFit" data-id="{{item.id}}" binderror="onTrayImageError"></image>
+          <image wx:if="{{item.previewImage && !item.previewBeads.length}}" class="order-preview-image" src="{{item.previewImage}}" mode="aspectFit" data-id="{{item.id}}" binderror="onPreviewImageError"></image>
           <view class="order-ring-plate"></view>
-          <view wx:if="{{!item.previewImage}}" class="order-ring-track"></view>
-          <view wx:if="{{!item.previewImage}}" wx:for="{{item.previewBeads}}" wx:for-item="bead" wx:key="key" class="order-ring-bead" style="{{bead.style}}">
+          <view wx:if="{{item.previewBeads.length}}" class="order-ring-track"></view>
+          <view wx:if="{{item.previewBeads.length}}" wx:for="{{item.previewBeads}}" wx:for-item="bead" wx:key="key" class="order-ring-bead" style="{{bead.style}}">
             <image wx:if="{{bead.image_url}}" src="{{bead.image_url}}" mode="aspectFill"></image>
           </view>
         </view>

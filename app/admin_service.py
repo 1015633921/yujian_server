@@ -26,10 +26,12 @@ from .materials import (
 from .material_knowledge import (
     enrich_material_with_knowledge,
     enrich_materials_with_knowledge,
+    fetch_knowledge_map,
     has_explicit_knowledge,
     infer_material_code_from_text,
     material_code_from_payload,
     material_code_token,
+    normalize_knowledge_payload,
     upsert_material_knowledge,
 )
 from .material_options import (
@@ -606,6 +608,12 @@ class AdminService:
                     kind VARCHAR(20) NOT NULL,
                     top VARCHAR(40) NOT NULL DEFAULT 'bead',
                     name VARCHAR(160) NOT NULL,
+                    material_code VARCHAR(160) NOT NULL DEFAULT '',
+                    color VARCHAR(40) NOT NULL DEFAULT '',
+                    shine VARCHAR(40) NOT NULL DEFAULT '',
+                    image_path VARCHAR(1000),
+                    image_url VARCHAR(2000),
+                    image_urls_json LONGTEXT,
                     sort_order INT NOT NULL DEFAULT 0,
                     enabled TINYINT NOT NULL DEFAULT 1,
                     created_at VARCHAR(40) NOT NULL,
@@ -613,6 +621,19 @@ class AdminService:
                 )
                 """
             )
+            rows = connection.execute("SHOW COLUMNS FROM material_taxonomy").fetchall()
+            columns = {row["Field"] for row in rows}
+            additions = {
+                "material_code": "ALTER TABLE material_taxonomy ADD COLUMN material_code VARCHAR(160) NOT NULL DEFAULT ''",
+                "color": "ALTER TABLE material_taxonomy ADD COLUMN color VARCHAR(40) NOT NULL DEFAULT ''",
+                "shine": "ALTER TABLE material_taxonomy ADD COLUMN shine VARCHAR(40) NOT NULL DEFAULT ''",
+                "image_path": "ALTER TABLE material_taxonomy ADD COLUMN image_path VARCHAR(1000)",
+                "image_url": "ALTER TABLE material_taxonomy ADD COLUMN image_url VARCHAR(2000)",
+                "image_urls_json": "ALTER TABLE material_taxonomy ADD COLUMN image_urls_json LONGTEXT",
+            }
+            for column, sql in additions.items():
+                if column not in columns:
+                    connection.execute(sql)
             return
         connection.execute(
             """
@@ -622,6 +643,12 @@ class AdminService:
                 kind TEXT NOT NULL,
                 top TEXT NOT NULL DEFAULT 'bead',
                 name TEXT NOT NULL,
+                material_code TEXT NOT NULL DEFAULT '',
+                color TEXT NOT NULL DEFAULT '',
+                shine TEXT NOT NULL DEFAULT '',
+                image_path TEXT,
+                image_url TEXT,
+                image_urls_json TEXT,
                 sort_order INTEGER NOT NULL DEFAULT 0,
                 enabled INTEGER NOT NULL DEFAULT 1,
                 created_at TEXT NOT NULL,
@@ -629,6 +656,18 @@ class AdminService:
             )
             """
         )
+        columns = {row["name"] for row in connection.execute("PRAGMA table_info(material_taxonomy)").fetchall()}
+        additions = {
+            "material_code": "ALTER TABLE material_taxonomy ADD COLUMN material_code TEXT NOT NULL DEFAULT ''",
+            "color": "ALTER TABLE material_taxonomy ADD COLUMN color TEXT NOT NULL DEFAULT ''",
+            "shine": "ALTER TABLE material_taxonomy ADD COLUMN shine TEXT NOT NULL DEFAULT ''",
+            "image_path": "ALTER TABLE material_taxonomy ADD COLUMN image_path TEXT",
+            "image_url": "ALTER TABLE material_taxonomy ADD COLUMN image_url TEXT",
+            "image_urls_json": "ALTER TABLE material_taxonomy ADD COLUMN image_urls_json TEXT",
+        }
+        for column, sql in additions.items():
+            if column not in columns:
+                connection.execute(sql)
 
     def _upsert_taxonomy_if_missing(
         self,
@@ -689,6 +728,52 @@ class AdminService:
                     parent_id=category_id,
                     sort_order=sort_order,
                 )
+
+    def public_taxonomy_visual(self, row: dict[str, Any]) -> dict[str, Any]:
+        image_path = row.get("image_path") or ""
+        image_url = normalize_material_image_url(row.get("image_url")) or material_url_from_path(image_path)
+        image_urls = clean_image_urls(row.get("image_urls_json") or row.get("image_urls"), image_url, image_path)
+        if not image_url and image_urls:
+            image_url = image_urls[0]
+        return {
+            "material_code": row.get("material_code") or "",
+            "color": row.get("color") or "",
+            "shine": row.get("shine") or "",
+            "image_path": image_path,
+            "image_url": image_url,
+            "image_urls": image_urls,
+            "image_pool": image_urls,
+        }
+
+    def get_series_taxonomy(
+        self,
+        connection,
+        *,
+        top: str,
+        category: str,
+        series: str,
+        include_disabled: bool = False,
+    ) -> dict[str, Any] | None:
+        clauses = [
+            "s.kind='series'",
+            "c.kind='category'",
+            "s.parent_id=c.item_id",
+            "s.top=?",
+            "c.name=?",
+            "s.name=?",
+        ]
+        params: list[Any] = [top or "bead", category or "", series or ""]
+        if not include_disabled:
+            clauses.extend(["s.enabled=1", "c.enabled=1"])
+        row = connection.execute(
+            f"""
+            SELECT s.*, c.name AS category_name
+            FROM material_taxonomy s, material_taxonomy c
+            WHERE {' AND '.join(clauses)}
+            """,
+            params,
+        ).fetchone()
+        return dict(row) if row else None
 
     def _repair_material_code_collisions(self, connection) -> None:
         """修复历史编辑导致的「品种正确、内部编码仍是旧品种」问题。"""
@@ -949,9 +1034,30 @@ class AdminService:
         ).fetchone()
         if not series:
             raise ValueError(f"品种未维护或已停用：{category_name} / {series_name}，请先到分类/品种维护")
+        series_payload = dict(series)
+        explicit_material_code = str(clean.get("material_code") or "").strip()
+        material_code = explicit_material_code or series_payload.get("material_code") or material_code_from_payload(
+            {**clean, "top": category["top"] or top, "category": category["name"], "series": series["name"], "name": series["name"]}
+        )
+        knowledge = fetch_knowledge_map([material_code], connection).get(material_code) or normalize_knowledge_payload(
+            {**clean, "material_code": material_code, "name": series["name"]},
+            clean,
+        )
         clean["top"] = category["top"] or top
         clean["category"] = category["name"]
         clean["series"] = series["name"]
+        clean["material_code"] = material_code
+        clean["primary_element"] = clean.get("primary_element") or knowledge.get("primary_element") or ""
+        clean["element"] = clean.get("element") or clean["primary_element"]
+        if not clean.get("effects"):
+            clean["effects"] = knowledge.get("effects") or []
+        if not clean.get("effect") and clean.get("effects"):
+            clean["effect"] = clean["effects"][0]
+        visual = self.public_taxonomy_visual(series_payload)
+        clean["color"] = visual.get("color") or clean.get("color") or "#dfe3e5"
+        clean["color_hex"] = clean.get("color_hex") or clean["color"]
+        clean["shine"] = visual.get("shine") or clean.get("shine") or "#ffffff"
+        clean["shine_hex"] = clean.get("shine_hex") or clean["shine"]
         return clean
 
     def list_material_taxonomy(
@@ -974,9 +1080,13 @@ class AdminService:
                 f"SELECT * FROM material_taxonomy {where} ORDER BY sort_order ASC, name ASC",
                 params,
             ).fetchall()
+            raw_rows = [dict(row) for row in rows]
+            knowledge_map = fetch_knowledge_map(
+                [row.get("material_code") or "" for row in raw_rows if row.get("kind") == "series"],
+                conn,
+            )
             categories: dict[str, dict[str, Any]] = {}
-            for raw in rows:
-                row = dict(raw)
+            for row in raw_rows:
                 item = {
                     "id": row["item_id"],
                     "parent_id": row.get("parent_id") or "",
@@ -989,11 +1099,12 @@ class AdminService:
                 if item["kind"] == "category":
                     item["series"] = []
                     categories[item["id"]] = item
-            for raw in rows:
-                row = dict(raw)
+            for row in raw_rows:
                 if row["kind"] != "series":
                     continue
                 parent_id = row.get("parent_id") or ""
+                visual = self.public_taxonomy_visual(row)
+                knowledge = knowledge_map.get(visual.get("material_code") or "") or {}
                 series_item = {
                     "id": row["item_id"],
                     "parent_id": parent_id,
@@ -1002,6 +1113,27 @@ class AdminService:
                     "name": row["name"],
                     "sort_order": row["sort_order"],
                     "enabled": bool(row["enabled"]),
+                    **visual,
+                    "energy": {
+                        "primary_element": knowledge.get("primary_element") or "",
+                        "secondary_elements": knowledge.get("secondary_elements") or [],
+                        "chakras": knowledge.get("chakras") or [],
+                        "chakra_weights": knowledge.get("chakra_weights") or {},
+                        "effects": knowledge.get("effects") or [],
+                        "wish_pools": knowledge.get("wish_pools") or [],
+                        "color_family": knowledge.get("color_family") or "",
+                        "mood_tags": knowledge.get("mood_tags") or [],
+                        "visual_tags": knowledge.get("visual_tags") or [],
+                        "story": knowledge.get("story") or "",
+                    },
+                    "rules": {
+                        "allowed_roles": knowledge.get("allowed_roles") or [],
+                        "conflict_codes": knowledge.get("conflict_codes") or [],
+                        "match_rules": knowledge.get("match_rules") or [],
+                        "care_tags": knowledge.get("care_tags") or [],
+                    },
+                    "material_params": knowledge.get("material_params") or {},
+                    "asset": knowledge.get("asset") or {},
                 }
                 if parent_id in categories:
                     categories[parent_id]["series"].append(series_item)
@@ -1025,6 +1157,22 @@ class AdminService:
             self._ensure_material_taxonomy_schema(connection)
             existing = connection.execute("SELECT * FROM material_taxonomy WHERE item_id = ?", (item_id,)).fetchone()
             before = dict(existing) if existing else None
+            before_top = str((before or {}).get("top") or top).strip()
+            before_name = str((before or {}).get("name") or name).strip()
+            if before and (before_top != top or before_name != name):
+                child_rows = connection.execute(
+                    """
+                    SELECT name FROM material_taxonomy
+                    WHERE kind='series' AND parent_id=? AND COALESCE(name, '') <> ''
+                    """,
+                    (item_id,),
+                ).fetchall()
+                child_names = {str(row["name"] or "").strip() for row in child_rows}
+                if len(child_names) > 1 and name in child_names:
+                    raise ValueError(
+                        f"正在编辑一级分类，保存后会影响 {len(child_names)} 个品种；"
+                        f"如果只想修改「{name}」，请点该行的「编辑品种」。"
+                    )
             if existing:
                 connection.execute(
                     """
@@ -1043,6 +1191,24 @@ class AdminService:
                     """,
                     (item_id, top, name, sort_order, enabled, timestamp, timestamp),
                 )
+            if before and (before_top != top or before_name != name):
+                connection.execute(
+                    """
+                    UPDATE material_taxonomy
+                    SET top=?, updated_at=?
+                    WHERE kind='series' AND parent_id=?
+                    """,
+                    (top, timestamp, item_id),
+                )
+                if self.table_exists(connection, "managed_materials"):
+                    connection.execute(
+                        """
+                        UPDATE managed_materials
+                        SET top=?, category=?, updated_at=?
+                        WHERE top=? AND category=?
+                        """,
+                        (top, name, timestamp, before_top, before_name),
+                    )
             after = {
                 "item_id": item_id,
                 "parent_id": "",
@@ -1086,30 +1252,124 @@ class AdminService:
             item_id = str(payload.get("id") or self.material_taxonomy_id("series", top, name, category_id)).strip()
             existing = connection.execute("SELECT * FROM material_taxonomy WHERE item_id = ?", (item_id,)).fetchone()
             before = dict(existing) if existing else None
+            before_category = None
+            if before:
+                before_category = connection.execute(
+                    "SELECT * FROM material_taxonomy WHERE item_id = ? AND kind = 'category'",
+                    (before.get("parent_id") or "",),
+                ).fetchone()
+            image_path = str(payload.get("image_path") or "").strip()
+            primary_image_url = normalize_material_image_url(
+                payload.get("thumbnail_url") or payload.get("image_url") or ""
+            )
+            image_urls = clean_image_urls(
+                payload.get("image_urls") or payload.get("image_pool") or payload.get("image_urls_json"),
+                primary_image_url,
+                image_path,
+            )
+            if not primary_image_url and image_urls:
+                primary_image_url = image_urls[0]
+            material_code = str(payload.get("material_code") or (before or {}).get("material_code") or "").strip()
+            if not material_code:
+                material_code = material_code_from_payload(
+                    {
+                        **payload,
+                        "top": top,
+                        "category": category["name"],
+                        "series": name,
+                        "name": name,
+                        "image_url": primary_image_url,
+                    }
+                )
+            color = str(payload.get("color") or payload.get("color_hex") or (before or {}).get("color") or "#dfe3e5").strip()
+            shine = str(payload.get("shine") or payload.get("shine_hex") or (before or {}).get("shine") or "#ffffff").strip()
             if existing:
                 connection.execute(
                     """
                     UPDATE material_taxonomy
-                    SET parent_id=?, top=?, name=?, sort_order=?, enabled=?, updated_at=?
+                    SET parent_id=?, top=?, name=?, material_code=?, color=?, shine=?, image_path=?, image_url=?,
+                        image_urls_json=?, sort_order=?, enabled=?, updated_at=?
                     WHERE item_id=?
                     """,
-                    (category_id, top, name, sort_order, enabled, timestamp, item_id),
+                    (
+                        category_id, top, name, material_code, color, shine, image_path, primary_image_url,
+                        json_text(image_urls), sort_order, enabled, timestamp, item_id,
+                    ),
                 )
             else:
                 connection.execute(
                     """
                     INSERT INTO material_taxonomy
-                    (item_id, parent_id, kind, top, name, sort_order, enabled, created_at, updated_at)
-                    VALUES (?, ?, 'series', ?, ?, ?, ?, ?, ?)
+                    (item_id, parent_id, kind, top, name, material_code, color, shine, image_path, image_url,
+                     image_urls_json, sort_order, enabled, created_at, updated_at)
+                    VALUES (?, ?, 'series', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
-                    (item_id, category_id, top, name, sort_order, enabled, timestamp, timestamp),
+                    (
+                        item_id, category_id, top, name, material_code, color, shine, image_path, primary_image_url,
+                        json_text(image_urls), sort_order, enabled, timestamp, timestamp,
+                    ),
                 )
+            knowledge_payload = {
+                **payload,
+                "material_code": material_code,
+                "code": material_code,
+                "top": top,
+                "category": category["name"],
+                "series": name,
+                "name": name,
+                "thumbnail_url": primary_image_url,
+                "image_url": primary_image_url,
+                "image_urls": image_urls,
+                "color": color,
+                "shine": shine,
+            }
+            knowledge = upsert_material_knowledge(
+                knowledge_payload,
+                {"top": top, "category": category["name"], "series": name, "name": name, "material_code": material_code},
+                connection=connection,
+                force_update=has_explicit_knowledge(knowledge_payload),
+            )
+            primary_element = knowledge.get("primary_element") or normalize_element_key(payload.get("primary_element")) or ""
+            effects = knowledge.get("effects") or payload.get("effects") or []
+            effect_text = str((effects[0] if effects else payload.get("effect") or "") or "")
+            old_category = (dict(before_category).get("name") if before_category else category["name"]) if before else category["name"]
+            old_series = (before or {}).get("name") or name
+            old_top = (before or {}).get("top") or top
+            connection.execute(
+                """
+                UPDATE managed_materials
+                SET top=?, category=?, series=?, material_code=?,
+                    name=CASE WHEN COALESCE(name, '') = '' OR name = ? THEN ? ELSE name END,
+                    element=CASE WHEN ? <> '' THEN ? ELSE element END,
+                    effect=CASE WHEN ? <> '' THEN ? ELSE effect END,
+                    color=CASE WHEN ? <> '' THEN ? ELSE color END,
+                    shine=CASE WHEN ? <> '' THEN ? ELSE shine END,
+                    updated_at=?
+                WHERE top=? AND category=? AND COALESCE(NULLIF(series, ''), name, '')=?
+                """,
+                (
+                    top, category["name"], name, material_code,
+                    old_series, name,
+                    primary_element, primary_element,
+                    effect_text, effect_text,
+                    color, color,
+                    shine, shine,
+                    timestamp,
+                    old_top, old_category, old_series,
+                ),
+            )
             after = {
                 "item_id": item_id,
                 "parent_id": category_id,
                 "kind": "series",
                 "top": top,
                 "name": name,
+                "material_code": material_code,
+                "color": color,
+                "shine": shine,
+                "image_path": image_path,
+                "image_url": primary_image_url,
+                "image_urls_json": json_text(image_urls),
                 "sort_order": sort_order,
                 "enabled": enabled,
             }
@@ -1128,6 +1388,11 @@ class AdminService:
             "category_id": category_id,
             "top": top,
             "name": name,
+            "material_code": material_code,
+            "color": color,
+            "shine": shine,
+            "image_url": primary_image_url,
+            "image_urls": image_urls,
             "sort_order": sort_order,
             "enabled": bool(enabled),
         }
@@ -3400,9 +3665,7 @@ class AdminService:
             "energy": latest_energy,
             "assets": {
                 "points": 0,
-                "coupon_count": 0,
-                "coupon_balance": 0,
-                "note": "积分和优惠券账户表尚未接入，当前为占位看板。",
+                "note": "积分账户表尚未接入，当前为占位看板。",
             },
             "stats": {
                 "order_count": len(orders),
@@ -3659,19 +3922,32 @@ class AdminService:
         }
 
     def public_material(self, row: dict[str, Any], connection: Any | None = None) -> dict[str, Any]:
-        image_path = row.get("image_path") or ""
-        image_url = normalize_material_image_url(row.get("image_url")) or material_url_from_path(image_path)
-        image_urls = clean_image_urls(row.get("image_urls_json") or row.get("image_urls"), image_url, image_path)
+        series_row = None
+        if connection is not None:
+            series_row = self.get_series_taxonomy(
+                connection,
+                top=row.get("top") or "bead",
+                category=row.get("category") or "",
+                series=row.get("series") or row.get("name") or "",
+            )
+        series_visual = self.public_taxonomy_visual(series_row or {}) if series_row else {}
+        image_path = series_visual.get("image_path") or row.get("image_path") or ""
+        image_url = series_visual.get("image_url") or normalize_material_image_url(row.get("image_url")) or material_url_from_path(image_path)
+        image_urls = series_visual.get("image_urls") or clean_image_urls(row.get("image_urls_json") or row.get("image_urls"), image_url, image_path)
         if not image_url and image_urls:
             image_url = image_urls[0]
+        material_code = row.get("material_code") or series_visual.get("material_code") or material_code_from_payload(row)
         stock = int(float(row.get("stock") or 0))
         safety_stock = int(float(row.get("safety_stock") or 0))
         stock_status = "out" if stock <= 0 else "low" if safety_stock > 0 and stock <= safety_stock else "normal"
         material = {
             **row,
+            "material_code": material_code,
             "enabled": bool(row.get("enabled", 1)),
             "series": row.get("series") or row.get("name") or "",
             "grade": row.get("grade") or "",
+            "color": series_visual.get("color") or row.get("color") or "",
+            "shine": series_visual.get("shine") or row.get("shine") or "",
             "image_url": image_url,
             "image_urls": image_urls,
             "image_pool": image_urls,
@@ -4584,7 +4860,6 @@ class AdminService:
         item_id = material_id or payload.get("id") or self.generate_material_id(payload)
         with self.connect() as connection:
             self._ensure_material_taxonomy_schema(connection)
-            self._sync_material_taxonomy_from_materials(connection)
             payload = self.canonicalize_material_payload_taxonomy({**payload, "id": item_id}, connection)
             payload = self.canonicalize_material_payload_options(payload, connection)
             item = self.normalize_material(payload)
@@ -4709,12 +4984,17 @@ class AdminService:
         if isinstance(effects, str):
             effects = [item.strip() for item in re.split(r"[,，、\n\r]+", effects) if item.strip()]
         effects = effects if isinstance(effects, list) else []
-        primary_element = normalize_element_key(payload.get("primary_element") or payload.get("element"))
+        knowledge = normalize_knowledge_payload(payload, payload)
+        primary_element = normalize_element_key(
+            payload.get("primary_element") or payload.get("element") or knowledge.get("primary_element")
+        )
+        if not effects:
+            effects = knowledge.get("effects") or []
         effect_text = str(payload.get("effect") or (effects[0] if effects else "")).strip()
         if not primary_element:
-            raise ValueError("请选择主五行")
+            raise ValueError("请先在品种维护里设置主五行")
         if not effect_text:
-            raise ValueError("effects 不能为空")
+            raise ValueError("请先在品种维护里设置核心功效")
         image_path = str(payload.get("image_path") or "").strip()
         primary_image_url = normalize_material_image_url(
             payload.get("thumbnail_url") or payload.get("image_url") or ""

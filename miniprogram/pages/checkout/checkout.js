@@ -23,6 +23,15 @@ const MATERIALS = {
 };
 
 const ADDRESS_KEY = 'checkoutReceiver';
+const TRAY_THEME_STORAGE_KEY = 'workspaceTrayThemeV1';
+const CHECKOUT_PREVIEW_STAGE_SIZE = 560;
+const CHECKOUT_PREVIEW_CENTER = CHECKOUT_PREVIEW_STAGE_SIZE / 2;
+const CHECKOUT_WORKSPACE_CENTER = 288;
+const CHECKOUT_TRAY_IMAGES = {
+  white: '/assets/workspace/tray-yustream-white-transparent-user-20260701.webp',
+  warm: '/assets/workspace/tray-yustream-transparent-user-20260701-v6.webp',
+  black: '/assets/workspace/tray-yustream-black-transparent-user-20260701.webp'
+};
 
 function firstImageUrl(entry = {}) {
   const urls = (entry.image_urls || entry.image_pool || [])
@@ -75,9 +84,10 @@ Page({
     sequence: [],
     bom: [],
     designPreviewImage: '',
+    trayPreviewImage: CHECKOUT_TRAY_IMAGES.warm,
+    trayPreviewImageFailed: false,
     previewBeads: [],
     amountText: '0.00',
-    couponDiscountText: '-¥0.00',
     receiver: {
       name: '',
       phone: '',
@@ -94,8 +104,17 @@ Page({
   },
 
   onLoad() {
+    this.loadTrayPreviewImage();
     this.loadDesign();
     this.loadReceiver();
+  },
+
+  loadTrayPreviewImage() {
+    const storedTheme = wx.getStorageSync(TRAY_THEME_STORAGE_KEY);
+    this.setData({
+      trayPreviewImage: CHECKOUT_TRAY_IMAGES[storedTheme] || CHECKOUT_TRAY_IMAGES.warm,
+      trayPreviewImageFailed: false
+    });
   },
 
   loadReceiver() {
@@ -190,6 +209,10 @@ Page({
 
   onPreviewImageError() {
     this.setData({ designPreviewImage: '' });
+  },
+
+  onTrayPreviewImageError() {
+    this.setData({ trayPreviewImageFailed: true });
   },
 
   async refreshDesignPrices() {
@@ -292,21 +315,119 @@ Page({
   },
 
   buildPreviewBeads(sequence, placements = [], design = {}) {
-    const beads = (sequence || []).slice(0, 18);
+    const beads = (sequence || []).slice(0, 40);
     const count = Math.max(beads.length, 1);
-    const wristSize = Number(design.wristSize || design.wrist_size || (design.summary && design.summary.wristSize) || 16);
-    const safeWrist = Number.isFinite(wristSize) ? Math.max(10, Math.min(25, wristSize)) : 16;
-    const radius = Math.round(116 + ((safeWrist - 10) / 15) * 44);
-    const size = count >= 17 ? 42 : count >= 15 ? 44 : count >= 12 ? 46 : 50;
+    const sourceCenter = this.inferPreviewSourceCenter(placements);
+    const placementScale = CHECKOUT_PREVIEW_CENTER / sourceCenter;
+    const useSavedPlacements = placements.some(item => (
+      Number.isFinite(Number(item && (item.looseX !== undefined ? item.looseX : item.x)))
+        && Number.isFinite(Number(item && (item.looseY !== undefined ? item.looseY : item.y)))
+    ));
+    const initialBeadSizes = beads.map((item, index) => (
+      this.resolvePreviewBeadSize(item, placements[index] || item.placement || {}, count)
+    ));
+    const ring = this.buildPreviewRingGeometry(beads, design, initialBeadSizes);
+
     return beads.map((item, index) => {
       const placement = placements[index] || item.placement || {};
-      const angle = (360 / count) * index;
+      const savedBaseX = placement.looseX !== undefined ? placement.looseX : placement.x;
+      const savedBaseY = placement.looseY !== undefined ? placement.looseY : placement.y;
+      const savedX = Number(savedBaseX) + Number(placement.dx || 0);
+      const savedY = Number(savedBaseY) + Number(placement.dy || 0);
+      const beadSize = ring.beadSizes[index] || initialBeadSizes[index] || 52;
+      const hasSavedPosition = useSavedPlacements && Number.isFinite(savedX) && Number.isFinite(savedY);
+      const ringPoint = ring.points[index] || {
+        x: CHECKOUT_PREVIEW_CENTER,
+        y: CHECKOUT_PREVIEW_CENTER,
+        angle: 0
+      };
+      const x = hasSavedPosition
+        ? CHECKOUT_PREVIEW_CENTER + (savedX - sourceCenter) * placementScale
+        : ringPoint.x;
+      const y = hasSavedPosition
+        ? CHECKOUT_PREVIEW_CENTER + (savedY - sourceCenter) * placementScale
+        : ringPoint.y;
+      const rotation = hasSavedPosition ? Number(placement.rotation || 0) : ringPoint.angle;
       return {
         ...item,
         image_url: placement.image_url || item.image_url || firstImageUrl(item),
-        style: `width:${size}rpx;height:${size}rpx;margin-left:-${size / 2}rpx;margin-top:-${size / 2}rpx;background:${this.buildPreviewBeadBackground(item)};transform:rotate(${angle}deg) translateY(-${radius}rpx) rotate(${-angle}deg);`
+        style: `width:${beadSize}rpx;height:${beadSize}rpx;background:${this.buildPreviewBeadBackground(item)};transform:translate3d(${(x - beadSize / 2).toFixed(1)}rpx,${(y - beadSize / 2).toFixed(1)}rpx,0) rotate(${rotation.toFixed(1)}deg);`
       };
     });
+  },
+
+  inferPreviewSourceCenter(placements = []) {
+    const values = [];
+    placements.forEach(item => {
+      const x = Number(item && (item.looseX !== undefined ? item.looseX : item.x));
+      const y = Number(item && (item.looseY !== undefined ? item.looseY : item.y));
+      if (Number.isFinite(x)) values.push(x);
+      if (Number.isFinite(y)) values.push(y);
+    });
+    if (!values.length) return CHECKOUT_WORKSPACE_CENTER;
+    const max = Math.max(...values);
+    if (max > 620) return 310;
+    if (max > 560) return 288;
+    return CHECKOUT_WORKSPACE_CENTER;
+  },
+
+  resolvePreviewBeadSize(item = {}, placement = {}, count = 0) {
+    const placementSize = Number(placement.beadSize || placement.diameter);
+    const sizeMm = Number(item.size || item.diameter || 0);
+    const rawSize = Number.isFinite(placementSize) && placementSize > 0
+      ? placementSize
+      : (sizeMm ? sizeMm * 5.4 : 52);
+    const maxSize = count >= 28 ? 46 : count >= 22 ? 50 : 58;
+    return Math.max(34, Math.min(maxSize, rawSize));
+  },
+
+  buildPreviewRingGeometry(beads = [], design = {}, beadSizes = []) {
+    const count = Math.max(beads.length, 1);
+    const wristSize = Number(design.wristSize || design.wrist_size || (design.summary && design.summary.wristSize) || 16);
+    const safeWrist = Number.isFinite(wristSize) ? Math.max(10, Math.min(25, wristSize)) : 16;
+    const wristRadius = Math.round(166 + ((safeWrist - 10) / 15) * 28);
+    let sizes = beadSizes.length ? beadSizes.slice() : beads.map(() => 52);
+    let radius = count >= 3
+      ? Math.max(wristRadius, this.solvePreviewTangentRingRadius(sizes))
+      : wristRadius;
+    const largestRadius = Math.max(...sizes, 1) / 2;
+    const maxOuterRadius = CHECKOUT_PREVIEW_CENTER - 30;
+    if (radius + largestRadius > maxOuterRadius) {
+      const scale = maxOuterRadius / (radius + largestRadius);
+      sizes = sizes.map(size => Math.max(30, size * scale));
+      radius = count >= 3
+        ? Math.min(maxOuterRadius - Math.max(...sizes) / 2, this.solvePreviewTangentRingRadius(sizes))
+        : Math.min(wristRadius, maxOuterRadius - Math.max(...sizes) / 2);
+    }
+    const points = beads.map((item, index) => {
+      const angle = -90 + (360 / count) * index;
+      const rad = angle * Math.PI / 180;
+      return {
+        x: CHECKOUT_PREVIEW_CENTER + Math.cos(rad) * radius,
+        y: CHECKOUT_PREVIEW_CENTER + Math.sin(rad) * radius,
+        angle
+      };
+    });
+    return { points, beadSizes: sizes };
+  },
+
+  solvePreviewTangentRingRadius(beadSizes = []) {
+    if (beadSizes.length < 3) return 156;
+    const centerDistances = beadSizes.map((size, index) => {
+      const nextSize = beadSizes[(index + 1) % beadSizes.length];
+      return (size + nextSize) / 2 + 0.5;
+    });
+    let low = Math.max(...centerDistances) / 2 + 0.01;
+    let high = Math.max(480, beadSizes.reduce((sum, size) => sum + size, 0));
+    for (let iteration = 0; iteration < 40; iteration += 1) {
+      const radius = (low + high) / 2;
+      const angleSum = centerDistances.reduce((sum, distance) => {
+        return sum + 2 * Math.asin(Math.min(1, distance / (2 * radius)));
+      }, 0);
+      if (angleSum > Math.PI * 2) low = radius;
+      else high = radius;
+    }
+    return (low + high) / 2;
   },
 
   buildPreviewBeadBackground(item = {}) {

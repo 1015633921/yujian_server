@@ -609,10 +609,6 @@ Page({
     wx.showToast({ title: '收货地址会在下单时填写', icon: 'none' });
   },
 
-  viewCoupons() {
-    wx.showToast({ title: '优惠券功能准备中', icon: 'none' });
-  },
-
   openSettings() {
     this.openPrivacyContract();
   },

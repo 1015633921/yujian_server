@@ -367,7 +367,6 @@ Page({
     return [
       { label: '商品金额', value: `¥${this.formatAmount(totalAmount)}` },
       { label: '定制服务费', value: '¥0.00' },
-      { label: '优惠券', value: '- ¥0.00', danger: true },
       { label: '运费', value: '¥0.00' }
     ];
   },

@@ -135,13 +135,20 @@
     </view>
 
     <view wx:if="{{selectedBeadInfo}}" class="order-panel bead-info-panel">
+      <view class="bead-info-close" catchtap="closeSelectedBeadInfo" aria-role="button" aria-label="关闭">×</view>
       <view class="bead-info-copy">
         <view class="order-title">第 {{selectedBeadInfo.position}} 颗</view>
-        <view class="bead-info-name"><text class="bead-info-label">品名</text>{{selectedBeadInfo.name}}</view>
-        <view class="bead-info-meta"><text class="bead-info-label">珠径</text>{{selectedBeadInfo.diameterText}}</view>
-      </view>
-      <view class="order-actions">
-        <button class="danger" data-index="{{selectedBeadInfo.index}}" bindtap="removeItem">删除</button>
+        <view class="bead-info-name">{{selectedBeadInfo.name}}</view>
+        <view class="bead-info-details">
+          <view class="bead-info-row">
+            <text class="bead-info-label">珠径</text>
+            <text class="bead-info-value">{{selectedBeadInfo.diameterText}}</text>
+          </view>
+          <view class="bead-info-row">
+            <text class="bead-info-label">价格</text>
+            <text class="bead-info-value">{{selectedBeadInfo.priceText}}</text>
+          </view>
+        </view>
       </view>
     </view>
   </view>
