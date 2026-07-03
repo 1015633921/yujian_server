@@ -19,8 +19,9 @@
     <view class="cart-list">
       <view wx:for="{{items}}" wx:key="key" class="cart-item yu-card" data-key="{{item.key}}">
         <view class="item-preview tone-{{item.tone}}">
-          <image wx:if="{{item.imageUrl}}" class="item-image" src="{{item.imageUrl}}" mode="aspectFill" lazy-load="{{true}}" />
-          <view wx:else class="mini-ring">
+          <image class="item-tray-image" src="/assets/workspace/tray-yustream-transparent-user-20260701-v6.webp" mode="aspectFit" />
+          <image wx:if="{{item.imageUrl && !item.miniBeads.length}}" class="item-image" src="{{item.imageUrl}}" mode="aspectFit" lazy-load="{{true}}" />
+          <view class="mini-ring">
             <image wx:for="{{item.miniBeads}}" wx:key="index" class="mini-bead" src="{{item.src}}" mode="aspectFill" style="{{item.style}}" />
           </view>
         </view>

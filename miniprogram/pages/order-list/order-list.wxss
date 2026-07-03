@@ -124,41 +124,65 @@
 
 .order-ring-preview {
   position: relative;
-  flex: 0 0 142rpx;
-  width: 142rpx;
-  height: 130rpx;
+  flex: 0 0 166rpx;
+  width: 166rpx;
+  height: 154rpx;
   overflow: hidden;
-  border-radius: 50%;
-  background:
-    radial-gradient(circle at 48% 36%, rgba(255,255,255,.96) 0 18%, rgba(255,255,255,.58) 36%, rgba(255,255,255,0) 62%),
-    radial-gradient(circle at 50% 52%, #f1eee7 0 58%, #e4ded2 100%);
+  border-radius: 24rpx;
+  background: rgba(249, 247, 242, .78);
   box-shadow:
-    inset 0 -10rpx 24rpx rgba(111, 105, 91, .12),
-    0 10rpx 24rpx rgba(46, 45, 40, .08);
+    inset 0 -8rpx 20rpx rgba(111, 105, 91, .08),
+    0 10rpx 24rpx rgba(46, 45, 40, .06);
+}
+
+.order-tray-image {
+  position: absolute;
+  left: -22rpx;
+  top: -28rpx;
+  z-index: 0;
+  width: 210rpx;
+  height: 210rpx;
+  opacity: 1;
+}
+
+.tray-image-failed .order-tray-image {
+  display: none;
+}
+
+.tray-image-failed {
+  background:
+    radial-gradient(circle at 48% 36%, rgba(255,255,255,.98) 0 20%, rgba(255,255,255,.62) 38%, rgba(255,255,255,0) 62%),
+    radial-gradient(circle at 50% 52%, #f1eee7 0 58%, #e4ded2 100%);
 }
 
 .order-ring-plate {
   position: absolute;
-  left: 16rpx;
-  top: 12rpx;
-  right: 16rpx;
-  bottom: 12rpx;
-  border: 1rpx solid rgba(104, 101, 91, .12);
+  left: 45rpx;
+  top: 39rpx;
+  right: 45rpx;
+  bottom: 35rpx;
+  z-index: 1;
+  border: 1rpx dashed rgba(142, 125, 86, .12);
   border-radius: 50%;
 }
 
 .order-preview-image {
+  position: relative;
+  z-index: 2;
   display: block;
   width: 100%;
   height: 100%;
+  border-radius: 18rpx;
+  opacity: .92;
 }
 
 .order-ring-track {
   position: absolute;
   left: 50%;
   top: 50%;
-  width: 92rpx;
-  height: 92rpx;
+  z-index: 2;
+  width: 104rpx;
+  height: 104rpx;
   border: 2rpx solid rgba(83, 82, 76, .14);
   border-radius: 50%;
   transform: translate(-50%, -50%);
@@ -168,6 +192,7 @@
   position: absolute;
   left: 50%;
   top: 50%;
+  z-index: 3;
   margin-left: -12rpx;
   margin-top: -12rpx;
   overflow: hidden;

@@ -308,6 +308,11 @@ def slim_material(item: dict) -> dict:
         or item.get("image_url")
         or ""
     )
+    image_urls = clean_image_urls(
+        visual.get("image_urls") or item.get("image_urls") or item.get("image_pool"),
+        image_url,
+        item.get("image_path") or "",
+    )
     effects = energy.get("effects") or item.get("effects") or []
     if isinstance(effects, str):
         effects = [effects]
@@ -338,6 +343,7 @@ def slim_material(item: dict) -> dict:
         "color": visual.get("color_hex") or item.get("color") or "",
         "shine": visual.get("shine_hex") or item.get("shine") or "",
         "image_url": image_url,
+        "image_urls": image_urls,
         "thumbnail_url": image_url,
     }
 
@@ -535,10 +541,26 @@ def material_catalog_version() -> dict:
                 FROM managed_materials
                 """
             ).fetchone()
+            taxonomy = connection.execute(
+                """
+                SELECT COALESCE(MAX(updated_at), '') AS updated_at
+                FROM material_taxonomy
+                """
+            ).fetchone()
+            knowledge = connection.execute(
+                """
+                SELECT COALESCE(MAX(updated_at), '') AS updated_at
+                FROM material_knowledge
+                """
+            ).fetchone()
     except Exception:
         return {"version": f"static-v1:{MATERIAL_SORT_POLICY_VERSION}", "updated_at": ""}
     total = int(row["total"] or 0)
-    updated_at = str(row["updated_at"] or "")
+    updated_at = max(
+        str(row["updated_at"] or ""),
+        str(taxonomy["updated_at"] if taxonomy else ""),
+        str(knowledge["updated_at"] if knowledge else ""),
+    )
     return {"version": f"{total}:{updated_at}:{MATERIAL_SORT_POLICY_VERSION}", "updated_at": updated_at}
 
 
@@ -628,10 +650,12 @@ def list_db_materials_page(
                 """,
                 [*params, size, offset],
             ).fetchall()
+            row_dicts = [dict(row) for row in rows]
+            series_assets = fetch_db_series_assets(connection, row_dicts)
     except Exception:
         return None
     total = int(total_row["total"] or 0)
-    return [normalize_db_material(dict(row)) for row in rows], {
+    return [normalize_db_material(row, series_assets) for row in row_dicts], {
         "page": current_page,
         "page_size": size,
         "total": total,
@@ -659,9 +683,11 @@ def list_db_materials(
         with connect_database() as connection:
             sql = f"SELECT * FROM managed_materials WHERE {' AND '.join(clauses)} ORDER BY sort_order ASC, updated_at DESC"
             rows = connection.execute(sql, params).fetchall()
+            row_dicts = [dict(row) for row in rows]
+            series_assets = fetch_db_series_assets(connection, row_dicts)
     except Exception:
         return None
-    materials = [normalize_db_material(dict(row)) for row in rows]
+    materials = [normalize_db_material(row, series_assets) for row in row_dicts]
     if enrich:
         materials = enrich_materials_with_knowledge(sort_materials_for_customer(materials))
     if limit:
@@ -669,16 +695,67 @@ def list_db_materials(
     return materials
 
 
-def normalize_db_material(row: dict) -> dict:
+def series_asset_key(row: dict) -> tuple[str, str, str]:
+    return (
+        str(row.get("top") or "bead"),
+        str(row.get("category") or ""),
+        str(row.get("series") or row.get("name") or ""),
+    )
+
+
+def fetch_db_series_assets(connection, rows: list[dict]) -> dict[tuple[str, str, str], dict]:
+    if not rows:
+        return {}
+    tops = sorted({series_asset_key(row)[0] for row in rows if series_asset_key(row)[0]})
+    if not tops:
+        return {}
+    placeholders = ", ".join(["?"] * len(tops))
+    try:
+        taxonomy_rows = connection.execute(
+            f"""
+            SELECT s.*, c.name AS category_name
+            FROM material_taxonomy s, material_taxonomy c
+            WHERE s.kind='series'
+              AND c.kind='category'
+              AND s.parent_id=c.item_id
+              AND s.enabled=1
+              AND c.enabled=1
+              AND s.top IN ({placeholders})
+            """,
+            tops,
+        ).fetchall()
+    except Exception:
+        return {}
+    result: dict[tuple[str, str, str], dict] = {}
+    for raw in taxonomy_rows:
+        row = dict(raw)
+        image_path = row.get("image_path") or ""
+        image_url = normalize_material_image_url(row.get("image_url") or "") or material_url_from_path(image_path)
+        image_urls = clean_image_urls(row.get("image_urls_json") or row.get("image_urls"), image_url, image_path)
+        if not image_url and image_urls:
+            image_url = image_urls[0]
+        result[(row.get("top") or "bead", row.get("category_name") or "", row.get("name") or "")] = {
+            "material_code": row.get("material_code") or "",
+            "color": row.get("color") or "",
+            "shine": row.get("shine") or "",
+            "image_path": image_path,
+            "image_url": image_url,
+            "image_urls": image_urls,
+        }
+    return result
+
+
+def normalize_db_material(row: dict, series_assets: dict[tuple[str, str, str], dict] | None = None) -> dict:
     public_row = {key: value for key, value in row.items() if key not in INTERNAL_MATERIAL_FIELDS}
-    image_url = normalize_material_image_url(row.get("image_url") or "")
-    image_path = row.get("image_path") or ""
+    series_asset = (series_assets or {}).get(series_asset_key(row), {})
+    image_url = series_asset.get("image_url") or normalize_material_image_url(row.get("image_url") or "")
+    image_path = series_asset.get("image_path") or row.get("image_path") or ""
     if image_path:
         normalized_path = normalize_material_image_path(image_path)
         old_suffix = f"/materials/{normalized_path}"
         if not image_url or "cdn.yustream.cn/materials/" in image_url or image_url.endswith(old_suffix):
             image_url = material_url_from_path(image_path)
-    image_urls = clean_image_urls(
+    image_urls = series_asset.get("image_urls") or clean_image_urls(
         row.get("image_urls_json") or row.get("image_urls"),
         image_url,
         image_path,
@@ -687,10 +764,12 @@ def normalize_db_material(row: dict) -> dict:
         image_url = image_urls[0]
     return {
         **public_row,
-        "material_code": row.get("material_code") or material_code_from_payload(row),
+        "material_code": row.get("material_code") or series_asset.get("material_code") or material_code_from_payload(row),
         "enabled": bool(row.get("enabled", 1)),
         "series": row.get("series") or row.get("name") or "",
         "grade": row.get("grade") or "",
+        "color": series_asset.get("color") or row.get("color") or "",
+        "shine": series_asset.get("shine") or row.get("shine") or "",
         "image_url": image_url,
         "image_urls": image_urls,
         "image_pool": image_urls,

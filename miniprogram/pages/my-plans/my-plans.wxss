@@ -90,25 +90,39 @@ page {
   height: 132rpx;
   overflow: hidden;
   border-radius: 20rpx;
-  background: linear-gradient(145deg, #f4f1ea, #dfd8cc);
+  background: rgba(249, 247, 242, .78);
+  box-shadow:
+    inset 0 -8rpx 18rpx rgba(111, 105, 91, .07),
+    0 8rpx 18rpx rgba(46, 45, 40, .05);
 }
 
 .plan-preview.saved {
-  background: linear-gradient(145deg, #f4f1ea, #dbe2d8);
+  background: rgba(249, 247, 242, .8);
 }
 
 .plan-preview.ordered {
-  background: linear-gradient(145deg, #e9eef6, #cad6e8);
+  background: rgba(246, 248, 247, .8);
 }
 
 .plan-preview.completed {
-  background: linear-gradient(145deg, #efe5c9, #dac28b);
+  background: rgba(249, 247, 242, .8);
+}
+
+.plan-tray-image {
+  position: absolute;
+  left: -21rpx;
+  top: -38rpx;
+  z-index: 0;
+  width: 214rpx;
+  height: 214rpx;
+  opacity: 1;
 }
 
 .preview-ring {
   position: absolute;
   left: 50%;
   top: 50%;
+  z-index: 2;
   width: 116rpx;
   height: 96rpx;
   transform: translate(-50%, -50%) rotate(-7deg);

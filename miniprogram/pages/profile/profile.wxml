@@ -98,17 +98,6 @@
       </view>
       <view class="menu-arrow">></view>
     </view>
-    <view class="menu-divider"></view>
-    <view class="menu-row" bindtap="viewCoupons">
-      <view class="menu-left">
-        <view class="menu-icon coupon">券</view>
-        <view>
-          <view class="menu-title">优惠券</view>
-          <view class="menu-desc">活动优惠与专属权益</view>
-        </view>
-      </view>
-      <view class="menu-arrow">></view>
-    </view>
   </view>
 
   <view class="menu-card yu-card">

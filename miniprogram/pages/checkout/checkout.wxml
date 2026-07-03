@@ -6,18 +6,17 @@
   </view>
 
   <view wx:if="{{design}}" class="checkout-content">
-    <view class="plan-card yu-card yu-card-lg">
+    <view class="plan-preview-card yu-card yu-card-lg">
       <view class="plan-preview">
-        <view class="plan-preview-stage">
+        <view class="plan-preview-stage {{trayPreviewImageFailed ? 'tray-preview-failed' : ''}}">
           <image
-            wx:if="{{designPreviewImage}}"
-            class="plan-preview-image"
-            src="{{designPreviewImage}}"
+            wx:if="{{trayPreviewImage}}"
+            class="plan-tray-image"
+            src="{{trayPreviewImage}}"
             mode="aspectFit"
-            lazy-load="{{true}}"
-            binderror="onPreviewImageError"
+            binderror="onTrayPreviewImageError"
           ></image>
-          <view wx:else class="bracelet-mini">
+          <view class="bracelet-mini">
             <view class="bracelet-mini-ring"></view>
             <view
               wx:for="{{previewBeads}}"
@@ -31,9 +30,27 @@
           </view>
         </view>
       </view>
+    </view>
+
+    <view class="plan-info-card yu-card">
       <view class="plan-info">
+        <view class="plan-info-label">手串信息</view>
         <view class="plan-title">温柔守护 · 和谐平衡款</view>
         <view class="plan-meta">手围：{{design.wristSize || '--'}}cm　配珠：{{design.summary.count}}颗</view>
+        <view class="plan-settle-strip">
+          <view class="plan-settle-item strong">
+            <text>方案价</text>
+            <view>¥{{amountText}}</view>
+          </view>
+          <view class="plan-settle-item">
+            <text>颗数</text>
+            <view>{{design.summary.count}}颗</view>
+          </view>
+          <view class="plan-settle-item">
+            <text>串长</text>
+            <view>{{design.summary.length}}cm</view>
+          </view>
+        </view>
         <view class="plan-tags">
           <text>平衡五行</text>
           <text>手作定制</text>
@@ -60,14 +77,6 @@
         </view>
         <view class="material-total">共 {{design.summary.count}} 颗材料</view>
       </view>
-    </view>
-
-    <view class="coupon-row yu-card">
-      <view>
-        <view class="coupon-title">优惠券</view>
-        <view class="coupon-desc">当前暂无可用优惠</view>
-      </view>
-      <view class="coupon-amount">{{couponDiscountText}}</view>
     </view>
 
     <view class="section-block" id="addressForm">
@@ -154,7 +163,7 @@
 
   <view wx:if="{{design}}" class="submit-bar">
     <view class="pay-total">
-      <text>合计：</text>
+      <text>应付</text>
       <view>¥{{amountText}}</view>
     </view>
     <button class="submit-button" loading="{{submitting}}" disabled="{{submitting}}" bindtap="submitOrder">
