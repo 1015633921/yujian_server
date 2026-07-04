@@ -180,17 +180,6 @@
     <view class="drawer-body">
       <scroll-view class="category-rail" scroll-y scroll-into-view="{{activeCategoryAnchor}}" scroll-with-animation="{{true}}">
         <view wx:for="{{categories}}" wx:key="value" id="{{item.anchorId}}" class="category-item {{item.className}}" data-category="{{item.value}}" bindtap="selectCategory">{{item.label}}</view>
-        <view wx:if="{{categoryRailSeries.length}}" class="category-series-panel">
-          <view class="category-series-title">品种</view>
-          <view
-            wx:for="{{categoryRailSeries}}"
-            wx:key="value"
-            id="{{item.anchorId}}"
-            class="category-series-item {{item.className}}"
-            data-series="{{item.value}}"
-            bindtap="selectSeries"
-          >{{item.label}}</view>
-        </view>
       </scroll-view>
 
       <view class="material-content">

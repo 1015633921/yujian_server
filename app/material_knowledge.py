@@ -234,16 +234,20 @@ def normalize_knowledge_payload(payload: dict[str, Any], material: dict[str, Any
     source = {**nested, **payload}
     code = material_code_from_payload({**material, **source})
     taxonomy = taxonomy_for(code)
+    top = str(material.get("top") or source.get("top") or "bead")
+    has_energy = top != "pendant"
     taxonomy_elements = normalize_element_list(taxonomy.get("elements"))
-    primary_element = normalize_element_key(
+    primary_element = "" if not has_energy else normalize_element_key(
         source.get("primary_element")
         or source.get("element")
         or material.get("primary_element")
         or material.get("element")
         or (taxonomy_elements[0] if taxonomy_elements else "")
     )
-    secondary_elements = normalize_element_list(list_from_payload(source, "secondary_elements", "secondary_element"))
-    if not secondary_elements:
+    secondary_elements = [] if not has_energy else normalize_element_list(
+        list_from_payload(source, "secondary_elements", "secondary_element")
+    )
+    if has_energy and not secondary_elements:
         secondary_elements = [item for item in taxonomy_elements if item != primary_element]
     effects = list_from_payload(source, "effects", "effect_tags")
     if not effects and source.get("effect") and source.get("_legacy_effect_is_structured", True):
@@ -268,7 +272,6 @@ def normalize_knowledge_payload(payload: dict[str, Any], material: dict[str, Any
     if not allowed_roles:
         allowed_roles = normalize_role_list(taxonomy.get("allowed_roles") or taxonomy.get("roles"))
     if not allowed_roles:
-        top = str(material.get("top") or source.get("top") or "bead")
         allowed_roles = ["spacer", "accent"] if top in {"accessory", "pendant"} else ["primary", "support", "accent"]
     match_rules = normalize_match_rule_list(list_from_payload(source, "match_rules", "rule_tags", "rules_tags"))
     if not match_rules:
@@ -518,9 +521,13 @@ def enrich_materials_with_knowledge(
         thumbnail_url = item.get("image_url") or asset.get("thumbnail_url") or ""
         material_params = clean_dict(knowledge.get("material_params"))
         sizes = size_map.get(code) or unique_list([item.get("size")])
+        top = str(item.get("top") or "")
+        has_energy = top != "pendant"
         energy = {
-            "primary_element": normalize_element_key(knowledge.get("primary_element") or item.get("element")) or "",
-            "secondary_elements": normalize_element_list(knowledge.get("secondary_elements")),
+            "primary_element": "" if not has_energy else normalize_element_key(
+                knowledge.get("primary_element") or item.get("element")
+            ) or "",
+            "secondary_elements": [] if not has_energy else normalize_element_list(knowledge.get("secondary_elements")),
             "chakras": normalize_chakra_list(knowledge.get("chakras")),
             "chakra_weights": clean_dict(knowledge.get("chakra_weights")),
             "effects": unique_list(knowledge.get("effects")) or unique_list(item.get("effect")),

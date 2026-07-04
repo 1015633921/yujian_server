@@ -64,14 +64,12 @@ const DEFAULT_MATERIALS = [
   { id: 'hematite8', skuId: 'hematite', top: 'bead', category: '赤铁矿', name: '赤铁矿', effect: '边界与决断', element: '金', price: 12, size: 8, weight: 1.7, color: '#5a5b60', shine: '#d5d6d8' },
   { id: 'roseQuartz8', skuId: 'roseQuartz', top: 'bead', category: '粉水晶', name: '马达加斯加粉晶', effect: '人缘与亲密', element: '木', price: 11, size: 8, weight: 1.3, color: '#e0a3a8', shine: '#fff1f3' },
   { id: 'silverSpacer', skuId: 'silverSpacer', top: 'accessory', category: '隔片', name: '925 银隔片', effect: '结构与光泽', element: '金', price: 18, size: 3, weight: 0.4, color: '#b9bdc2', shine: '#ffffff' },
-  { id: 'goldSpacer', skuId: 'goldSpacer', top: 'accessory', category: '隔片', name: '鎏金隔片', effect: '礼物感', element: '土', price: 16, size: 3, weight: 0.4, color: '#c99d4d', shine: '#fff0b7' },
-  { id: 'foxPendant', skuId: 'foxPendant', top: 'pendant', category: '吊坠', name: '粉晶狐狸吊坠', effect: '桃花与礼物', element: '木', price: 88, size: 12, weight: 2.2, color: '#d88b91', shine: '#fff1f3' }
+  { id: 'goldSpacer', skuId: 'goldSpacer', top: 'accessory', category: '隔片', name: '鎏金隔片', effect: '礼物感', element: '土', price: 16, size: 3, weight: 0.4, color: '#c99d4d', shine: '#fff0b7' }
 ];
 
 const TOP_TABS = [
   { key: 'bead', label: '珠珠' },
-  { key: 'accessory', label: '配饰' },
-  { key: 'pendant', label: '花托' }
+  { key: 'accessory', label: '配饰' }
 ];
 
 const LEGACY_ID_MAP = {
@@ -202,7 +200,6 @@ const MATERIAL_ELEMENT_KEY = {
   hematite: 'metal',
   silverSpacer: 'metal',
   goldSpacer: 'earth',
-  foxPendant: 'wood',
   calmIncense: 'earth',
   roseIncense: 'wood',
   lotusCap: 'metal'
@@ -221,6 +218,19 @@ const ELEMENT_NAME_ALIASES = {
   shui: '水',
   huo: '火',
   tu: '土'
+};
+const ELEMENT_KEY_ALIASES = {
+  ...ELEMENT_CN_TO_EN,
+  metal: 'metal',
+  wood: 'wood',
+  water: 'water',
+  fire: 'fire',
+  earth: 'earth',
+  jin: 'metal',
+  mu: 'wood',
+  shui: 'water',
+  huo: 'fire',
+  tu: 'earth'
 };
 
 function logWorkspaceWarning(...args) {
@@ -251,6 +261,71 @@ function normalizeElementCnName(value) {
   return ELEMENT_NAME_ALIASES[text.toLowerCase()] || '';
 }
 
+function normalizeElementKey(value) {
+  const text = String(value || '').trim();
+  if (!text) return '';
+  const repaired = repairMojibakeElementText(text);
+  return ELEMENT_KEY_ALIASES[text]
+    || ELEMENT_KEY_ALIASES[text.toLowerCase()]
+    || ELEMENT_KEY_ALIASES[repaired]
+    || ELEMENT_KEY_ALIASES[repaired.toLowerCase()]
+    || '';
+}
+
+function materialTop(material = {}) {
+  return String((material.sku && material.sku.top) || material.top || '').trim().toLowerCase();
+}
+
+function materialIsPendant(material = {}) {
+  return materialTop(material) === 'pendant';
+}
+
+function materialIsWorkspaceSupported(material = {}) {
+  return !materialIsPendant(material);
+}
+
+function materialIdentifiers(material = {}) {
+  return [
+    material.id,
+    material.skuId,
+    material.sku_id,
+    material.material_code,
+    material.sku
+  ].map(value => String(value || '').trim()).filter(Boolean);
+}
+
+function unsupportedWorkspaceMaterialIds(materials = []) {
+  const ids = {};
+  (materials || []).filter(item => item && !materialIsWorkspaceSupported(item)).forEach(item => {
+    materialIdentifiers(item).forEach(id => {
+      ids[id] = true;
+    });
+  });
+  return ids;
+}
+
+function filterWorkspaceMaterials(materials = []) {
+  return (materials || []).filter(materialIsWorkspaceSupported);
+}
+
+function filterWorkspaceTopTabs(list = []) {
+  return (list || []).filter(item => item && item.key !== 'incense' && item.key !== 'pendant');
+}
+
+function sequenceItemIsPendant(item = {}) {
+  return String(item.top || item.item_type || item.type || '').trim().toLowerCase() === 'pendant';
+}
+
+function materialContributesEnergy(material = {}) {
+  return !materialIsPendant(material);
+}
+
+function repairMaybeMojibakeText(value) {
+  const text = String(value || '').trim();
+  if (!text || /[�]/.test(text)) return '';
+  const repaired = repairMojibakeElementText(text);
+  return repaired && !/[�]/.test(repaired) ? repaired : text;
+}
 
 const TRAY_THEMES = [
   { value: 'white', label: 'white', dotClass: 'white', imageUrl: `${assetUrl('workspace/tray-yustream-white-transparent-user-20260701.webp')}?v=20260701-user` },
@@ -309,7 +384,6 @@ Page({
     materialSkeletons: [1, 2, 3, 4],
     materialSearchKeyword: '',
     categories: [],
-    categoryRailSeries: [],
     seriesOptions: ['全部'],
     filterSummary: '全部 · 全部 · 0 款',
     topTabs: TOP_TABS,
@@ -329,7 +403,9 @@ Page({
     wearStyle: 'single',
     selected: [],
     placements: [],
+    attachedPendants: [],
     selectedItems: [],
+    attachedPendantItems: [],
     useCanvasRenderer: true,
     workspaceCanvasVisible: true,
     trayImageUrl: TRAY_THEMES[0].imageUrl,
@@ -507,6 +583,7 @@ Page({
       : (Array.isArray(design.sequence) ? design.sequence : []);
     const selectedFromDesign = Array.isArray(design.selected) ? design.selected : [];
     const selectedFromSequence = sequence
+      .filter(item => !sequenceItemIsPendant(item || {}))
       .map(item => item && (item.id || item.material_id || item.materialId || item.sku || item.skuId || item.sku_id))
       .filter(Boolean);
     const selected = (selectedFromDesign.length ? selectedFromDesign : selectedFromSequence)
@@ -516,6 +593,7 @@ Page({
     const placements = Array.isArray(design.placements) && design.placements.length
       ? design.placements
       : sequencePlacements;
+    const attachedPendants = [];
     const summary = design.summary || {};
     const sourceContext = design.sourceContext || design.source_context || {
       source: 'shared_design',
@@ -531,6 +609,7 @@ Page({
       user_id: sharedDesign.user_id || design.user_id || design.userId || '',
       selected,
       placements,
+      attachedPendants,
       wristSize: Number(design.wristSize || design.wrist_size || summary.wristSize || 16) || 16,
       wearStyle: 'single',
       isLooseMode: design.isLooseMode === true,
@@ -564,6 +643,7 @@ Page({
     const draft = {
       ...normalized,
       selected,
+      attachedPendants: [],
       sourceContext,
       isSharedDesign: true
     };
@@ -576,6 +656,7 @@ Page({
     this.setData({
       selected,
       placements: this.normalizePlacements(selected, normalized.placements),
+      attachedPendants: [],
       wristSize: normalized.wristSize,
       wearStyle: 'single',
       isLooseMode: normalized.isLooseMode,
@@ -621,13 +702,15 @@ Page({
     const bottomInset = safeArea.bottom ? Math.max(0, screenHeight - safeArea.bottom) : 0;
     const rpxRatio = 750 / windowWidth;
     const viewportRpx = Math.round(windowHeight * rpxRatio);
+    const screenRpx = Math.round(screenHeight * rpxRatio);
     const bottomInsetRpx = Math.round(bottomInset * rpxRatio);
     const aspectRatio = windowHeight / windowWidth;
+    const screenAspectRatio = screenHeight / windowWidth;
     const classes = ['device-regular'];
     if (windowWidth <= 340) classes.push('device-narrow');
     if (windowHeight <= 720) classes.push('device-short');
     if (windowHeight <= 780) classes.push('device-compact');
-    if (aspectRatio >= 2.05) classes.push('device-tall');
+    if (aspectRatio >= 2.05 || screenAspectRatio >= 2.05) classes.push('device-tall');
     if (windowWidth >= 414) classes.push('device-wide');
     if (bottomInset > 0) classes.push('device-safe-bottom');
     if (statusBarHeight >= 40) classes.push('device-deep-status');
@@ -643,9 +726,12 @@ Page({
     const workspaceLayout = this.buildResponsiveWorkspaceLayout({
       windowWidth,
       windowHeight,
+      screenHeight,
       viewportRpx,
+      screenRpx,
       bottomInsetRpx,
-      aspectRatio
+      aspectRatio,
+      screenAspectRatio
     });
     this.stageLayout = workspaceLayout.stageLayout;
     this.setData({
@@ -654,8 +740,11 @@ Page({
         windowWidth,
         windowHeight,
         screenHeight,
+        screenRpx,
         statusBarHeight,
         bottomInset,
+        aspectRatio,
+        screenAspectRatio,
         benchmarkLevel: benchmarkLevel || 0,
         isRealDevice,
         isLowPerformanceDevice
@@ -800,12 +889,15 @@ Page({
     };
   },
 
-  buildResponsiveWorkspaceLayout({ windowWidth, windowHeight, viewportRpx, bottomInsetRpx, aspectRatio }) {
+  buildResponsiveWorkspaceLayout({ windowWidth, windowHeight, screenHeight, viewportRpx, screenRpx, bottomInsetRpx, aspectRatio, screenAspectRatio }) {
     const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
     const isNarrow = windowWidth <= 340;
     const isShort = windowHeight <= 720 || viewportRpx <= 1420;
     const isCompact = windowHeight <= 780 || viewportRpx <= 1500;
     const isRoomy = viewportRpx >= 1600;
+    const physicalAspectRatio = Number(screenAspectRatio) || (Number(screenHeight) ? Number(screenHeight) / windowWidth : aspectRatio);
+    const physicalViewportRpx = Number(screenRpx) || viewportRpx;
+    const isTallWorkspace = isRoomy || aspectRatio >= 2.05 || physicalAspectRatio >= 2.05 || physicalViewportRpx >= 1680;
     const topChrome = 122;
     const summaryHeight = isShort || isNarrow ? 72 : 78;
     const colorTop = summaryHeight + (isShort ? 8 : 14);
@@ -839,11 +931,16 @@ Page({
     const randomButtonWidth = isShort || isNarrow ? 172 : 188;
     const randomButtonHeight = isShort || isNarrow ? 58 : 64;
     const randomDrawerGap = isShort ? 10 : 12;
+    const actionDrawerGap = isTallWorkspace ? 8 : randomDrawerGap;
+    const randomButtonTrayOverlap = 0.72;
     const themeWidth = wristButtonWidth;
     const themeHeight = wristButtonHeight;
-    const preferredRandomButtonTop = Math.round(trayVisualTop + trayVisualSize - randomButtonHeight * 0.72);
-    const idealDrawerHeight = viewportRpx - topChrome - preferredRandomButtonTop - randomButtonHeight - randomDrawerGap;
-    const adaptiveDrawerMax = isRoomy ? Math.max(drawerMax, Math.round(viewportRpx * 0.52)) : drawerMax;
+    const preferredRandomButtonTop = Math.round(trayVisualTop + trayVisualSize - randomButtonHeight * randomButtonTrayOverlap);
+    const preferredDrawerTop = preferredRandomButtonTop + randomButtonHeight + actionDrawerGap;
+    const idealDrawerHeight = viewportRpx - topChrome - preferredDrawerTop;
+    const adaptiveDrawerMax = isTallWorkspace
+      ? Math.max(drawerMax, Math.round(viewportRpx * 0.62), idealDrawerHeight)
+      : drawerMax;
     const drawerHeight = Math.round(clamp(idealDrawerHeight, drawerMin, adaptiveDrawerMax));
     const drawerTopInCanvas = Math.max(360, viewportRpx - topChrome - drawerHeight);
     const railWidth = 90;
@@ -917,7 +1014,7 @@ Page({
     const rightTwoTop = leftTwoTop;
     const rightThreeTop = themeTop;
     const randomButtonLeft = Math.round((750 - randomButtonWidth) / 2);
-    const randomButtonTop = Math.round(drawerTopInCanvas - randomButtonHeight - randomDrawerGap);
+    const randomButtonTop = Math.round(drawerTopInCanvas - randomButtonHeight - actionDrawerGap);
     const toolHeight = toolItemHeight;
     const toolGap = railGap;
     const stageToolGap = drawerGap;
@@ -1185,21 +1282,27 @@ Page({
     const asset = visual.asset || item.asset || {};
     const imageUrls = visual.image_urls || item.image_urls || item.image_pool || [];
     const effects = energy.effects || item.effects || [];
-    const primaryElement = energy.primary_element || item.primary_element || item.element || '';
+    const top = sku.top || item.top;
+    const contributesEnergy = materialContributesEnergy({ ...item, sku, top });
+    const primaryElement = contributesEnergy ? (energy.primary_element || item.primary_element || item.element || '') : '';
+    const elementKey = contributesEnergy ? normalizeElementKey(primaryElement) : '';
+    const normalizedEnergy = contributesEnergy
+      ? energy
+      : { ...energy, primary_element: '', secondary_elements: [] };
     return {
       ...item,
       sku,
-      energy,
+      energy: normalizedEnergy,
       visual,
       rules,
       id: sku.id || item.id,
       skuId: sku.sku_id || item.skuId || item.sku_id,
       material_code: sku.material_code || item.material_code,
-      top: sku.top || item.top,
-      category: sku.category || item.category,
-      series: sku.series || item.series,
-      grade: sku.grade || item.grade,
-      name: sku.name || item.name,
+      top,
+      category: repairMaybeMojibakeText(sku.category || item.category),
+      series: repairMaybeMojibakeText(sku.series || item.series),
+      grade: repairMaybeMojibakeText(sku.grade || item.grade),
+      name: repairMaybeMojibakeText(sku.name || item.name),
       price: Number(sku.price_per_bead ?? item.price ?? 0),
       size: Number(sku.size_mm ?? item.size ?? 8),
       weight: Number(sku.weight_g ?? item.weight ?? 1),
@@ -1208,7 +1311,8 @@ Page({
       sort_order: Number(sku.sort_order ?? item.sort_order ?? item.sortOrder ?? 0),
       element: primaryElement,
       primary_element: primaryElement,
-      secondary_elements: energy.secondary_elements || item.secondary_elements || [],
+      element_key: elementKey,
+      secondary_elements: contributesEnergy ? (energy.secondary_elements || item.secondary_elements || []) : [],
       effects,
       effect: effects.join(' / '),
       chakras: energy.chakras || item.chakras || [],
@@ -1234,8 +1338,10 @@ Page({
 
   applyMaterialPayload(data, options = {}) {
     const previousCatalog = this.materialCatalog || DEFAULT_MATERIALS;
-    const nextCatalog = data.materials && data.materials.length ? data.materials : DEFAULT_MATERIALS;
-    const topTabs = (data.top_tabs || TOP_TABS).filter(item => item.key !== 'incense');
+    const rawCatalog = data.materials && data.materials.length ? data.materials : DEFAULT_MATERIALS;
+    const unsupportedIds = unsupportedWorkspaceMaterialIds(rawCatalog);
+    const nextCatalog = filterWorkspaceMaterials(rawCatalog);
+    const topTabs = filterWorkspaceTopTabs(data.top_tabs || TOP_TABS);
     const activeTop = topTabs.some(item => item.key === this.data.activeTop) ? this.data.activeTop : 'bead';
     const selected = this.data.selected.map(id => {
       if (nextCatalog.some(item => item.id === id)) return id;
@@ -1252,6 +1358,10 @@ Page({
           ? item
           : best
       )).id;
+    }).filter(id => {
+      if (unsupportedIds[id]) return false;
+      const material = nextCatalog.find(item => item.id === id) || this.findMaterialById(id);
+      return !material || materialIsWorkspaceSupported(material);
     });
     this.materialCatalog = nextCatalog;
     this.materialPayloadReady = true;
@@ -1284,21 +1394,21 @@ Page({
 
   mergeMaterialCatalog(materials = []) {
     const byId = {};
-    (this.materialCatalog || DEFAULT_MATERIALS).forEach(item => {
+    filterWorkspaceMaterials(this.materialCatalog || DEFAULT_MATERIALS).forEach(item => {
       if (item && item.id) byId[item.id] = item;
     });
-    (materials || []).forEach(item => {
+    filterWorkspaceMaterials(materials || []).forEach(item => {
       if (item && item.id) byId[item.id] = item;
     });
     this.materialCatalog = Object.keys(byId).map(id => byId[id]);
   },
 
   applyPagedMaterialPayload(data, options = {}) {
-    const materials = data.materials && data.materials.length ? data.materials : [];
+    const materials = filterWorkspaceMaterials(data.materials && data.materials.length ? data.materials : []);
     const pagination = data.pagination || {};
     this.mergeMaterialCatalog(materials);
     this.materialPayloadReady = true;
-    const topTabs = (data.top_tabs || this.data.topTabs || TOP_TABS).filter(item => item.key !== 'incense');
+    const topTabs = filterWorkspaceTopTabs(data.top_tabs || this.data.topTabs || TOP_TABS);
     const activeTop = topTabs.some(item => item.key === this.data.activeTop) ? this.data.activeTop : 'bead';
     this.categoriesByTop = data.categories_by_top || this.categoriesByTop || {};
     this.seriesByCategory = data.series_by_category || this.seriesByCategory || {};
@@ -1326,7 +1436,6 @@ Page({
       : (seriesOptions.includes(this.data.activeSeries) ? this.data.activeSeries : ALL_OPTION_LABEL);
     const decoratedCategories = this.decorateOptionList(categoryNames, activeCategory, '', 'category-filter');
     const decoratedSeriesOptions = this.decorateOptionList(seriesOptions, activeSeries, '', 'series-filter');
-    const categoryRailSeries = this.buildCategoryRailSeries(seriesOptions, activeCategory, activeSeries);
     const activeCategoryAnchor = this.getActiveOptionAnchor(decoratedCategories);
     const activeSeriesAnchor = this.getActiveOptionAnchor(decoratedSeriesOptions);
     const currentMaterials = options.append ? (this.data.visibleMaterials || []) : [];
@@ -1346,7 +1455,6 @@ Page({
       categories: decoratedCategories,
       activeCategory,
       activeCategoryAnchor,
-      categoryRailSeries,
       seriesOptions: decoratedSeriesOptions,
       activeSeries,
       activeSeriesAnchor,
@@ -1444,6 +1552,7 @@ Page({
     try {
       const data = await getMaterials({ ids: missing, slim: true, silent: true, timeout: 8000 });
       const optimized = this.optimizeMaterialPayload(data);
+      this.dropUnsupportedSelectedMaterials(optimized.materials || []);
       this.mergeMaterialCatalog(optimized.materials || []);
     } catch (error) {
       logWorkspaceWarning('load selected material details fallback:', error.message || error);
@@ -1452,8 +1561,37 @@ Page({
     }
   },
 
+  dropUnsupportedSelectedMaterials(materials = []) {
+    const unsupportedIds = unsupportedWorkspaceMaterialIds(materials);
+    if (!Object.keys(unsupportedIds).length) return;
+    const selected = [];
+    const placements = [];
+    (this.data.selected || []).forEach((id, index) => {
+      if (unsupportedIds[id]) return;
+      selected.push(id);
+      if (this.data.placements && this.data.placements[index]) {
+        placements.push(this.data.placements[index]);
+      }
+    });
+    if (selected.length === (this.data.selected || []).length) return;
+    this.setData({
+      selected,
+      placements: this.normalizePlacements(selected, placements),
+      attachedPendants: [],
+      attachedPendantItems: [],
+      selectedBeadIndex: -1,
+      selectedBeadInfo: null
+    });
+  },
+
   findMaterialById(id) {
-    return (this.materialCatalog || DEFAULT_MATERIALS).find(material => material.id === id);
+    const target = String(id || '').trim();
+    if (!target) return null;
+    return (this.materialCatalog || DEFAULT_MATERIALS).find(material => (
+      [material.id, material.skuId, material.sku_id, material.material_code, material.sku]
+        .map(value => String(value || '').trim())
+        .includes(target)
+    ));
   },
 
   pickMaterialImageUrl(material = {}) {
@@ -1521,7 +1659,7 @@ Page({
   sharedDesignMaterialCandidates(sharedDesign = {}) {
     const normalized = this.normalizeSharedDesignPayload(sharedDesign);
     const ids = [...(normalized.selected || [])];
-    (normalized.sequence || []).forEach(item => {
+    (normalized.sequence || []).filter(item => !sequenceItemIsPendant(item || {})).forEach(item => {
       this.sharedSequenceMaterialIdentifiers(item).forEach(id => ids.push(id));
     });
     return Array.from(new Set(ids.map(id => String(id || '').trim()).filter(Boolean)));
@@ -1541,7 +1679,8 @@ Page({
       const resolvedId = candidates
         .map(id => this.resolveMaterialId(LEGACY_ID_MAP[id] || id))
         .find(id => this.hasMaterial(id));
-      if (resolvedId) selected.push(resolvedId);
+      const material = resolvedId ? this.findMaterialById(resolvedId) : null;
+      if (resolvedId && (!material || materialIsWorkspaceSupported(material))) selected.push(resolvedId);
     }
     return selected;
   },
@@ -1582,9 +1721,10 @@ Page({
   },
 
   materialElementKey(material = {}) {
-    const elementKey = ELEMENT_CN_TO_EN[material.primary_element || material.element];
+    if (!materialContributesEnergy(material)) return '';
+    const elementKey = normalizeElementKey(material.element_key || material.primary_element || material.element);
     if (elementKey) return elementKey;
-    const skuKey = MATERIAL_ELEMENT_KEY[material.skuId];
+    const skuKey = MATERIAL_ELEMENT_KEY[material.skuId] || MATERIAL_ELEMENT_KEY[material.material_code];
     if (skuKey) return skuKey;
     const text = this.materialSearchText(material);
     if (/金|银|白|钛|发晶|铁|曜|耀/.test(text)) return 'metal';
@@ -1697,7 +1837,11 @@ Page({
           sizeByCode[item.crystal_code] || Number(item.bead_size_mm) || Number(plan.bead_size_mm) || Number(payload.bead_size_mm) || 8
         );
       })
-      .filter(Boolean);
+      .filter(id => {
+        if (!id) return false;
+        const material = this.findMaterialById(id);
+        return !material || materialIsWorkspaceSupported(material);
+      });
   },
 
   onShow() {
@@ -1797,6 +1941,7 @@ Page({
       this.setData({
         selected: draft.selected.map(id => LEGACY_ID_MAP[id] || id),
         placements: this.normalizePlacements(draft.selected, draft.placements),
+        attachedPendants: [],
         isLooseMode: draft.isLooseMode === true,
         wristSize: this.normalizeWristValue(draft.wristSize || this.data.wristSize || 16),
         wearStyle: 'single',
@@ -1814,7 +1959,9 @@ Page({
       this.resetInteractionData({
         selected: [],
         placements: [],
+        attachedPendants: [],
         selectedItems: [],
+        attachedPendantItems: [],
         selectedBeadIndex: -1,
         isLooseMode: true
       }, () => this.recalculate());
@@ -1835,18 +1982,18 @@ Page({
       roseQuartz: 'roseQuartz8',
       obsidian: 'obsidian10',
       silverSpacer: 'silverSpacer',
-      goldSpacer: 'goldSpacer',
-      foxPendant: 'foxPendant'
+      goldSpacer: 'goldSpacer'
     };
     const materialIds = (recipe.length ? recipe : ['aquamarine', 'amethyst', 'clearQuartz', 'moonstone'])
       .map(id => this.resolveMaterialId(idMap[id] || id))
       .filter(id => this.hasMaterial(id));
+    const beadMaterialIds = materialIds.filter(id => materialIsWorkspaceSupported(this.findMaterialById(id) || {}));
     const selected = [];
     const targetLengthMm = wristSize * 10 + 8;
     let currentLengthMm = 0;
     let cursor = 0;
-    while (materialIds.length && currentLengthMm < targetLengthMm && selected.length < 40) {
-      const materialId = materialIds[cursor % materialIds.length];
+    while (beadMaterialIds.length && currentLengthMm < targetLengthMm && selected.length < 40) {
+      const materialId = beadMaterialIds[cursor % beadMaterialIds.length];
       const material = this.findMaterialById(materialId);
       selected.push(materialId);
       currentLengthMm += material ? material.size : 8;
@@ -1866,6 +2013,7 @@ Page({
       wristSize,
       selected,
       placements: this.normalizePlacements(selected),
+      attachedPendants: [],
       isLooseMode: false,
       selectedBeadIndex: -1,
       canvasFlightActive: false,
@@ -3393,6 +3541,7 @@ Page({
     history.push({
       selected: [...this.data.selected],
       placements: this.data.placements.map(item => ({ ...item })),
+      attachedPendants: [],
       wristSize: this.data.wristSize,
       wearStyle: 'single',
       isLooseMode: this.data.isLooseMode
@@ -3407,6 +3556,7 @@ Page({
     return {
       selected: [...this.data.selected],
       placements: this.data.placements.map(item => ({ ...item })),
+      attachedPendants: [],
       wristSize: this.data.wristSize,
       wearStyle: 'single',
       isLooseMode: this.data.isLooseMode
@@ -3419,6 +3569,7 @@ Page({
     this.setData({
       selected: snapshot.selected || [],
       placements: snapshot.placements || [],
+      attachedPendants: [],
       wristSize: snapshot.wristSize || 16,
       wearStyle: 'single',
       isLooseMode: snapshot.isLooseMode === true,
@@ -3500,7 +3651,6 @@ Page({
       : (seriesOptions.includes(this.data.activeSeries) ? this.data.activeSeries : ALL_OPTION_LABEL);
     const decoratedCategories = this.decorateOptionList(categoryNames, activeCategory, '', 'category-filter');
     const decoratedSeriesOptions = this.decorateOptionList(seriesOptions, activeSeries, '', 'series-filter');
-    const categoryRailSeries = this.buildCategoryRailSeries(seriesOptions, activeCategory, activeSeries);
     const activeCategoryAnchor = this.getActiveOptionAnchor(decoratedCategories);
     const activeSeriesAnchor = this.getActiveOptionAnchor(decoratedSeriesOptions);
     const filteredMaterials = keyword ? searchPool : categoryPool.filter(item => {
@@ -3517,7 +3667,6 @@ Page({
       categories: decoratedCategories,
       activeCategory,
       activeCategoryAnchor,
-      categoryRailSeries,
       seriesOptions: decoratedSeriesOptions,
       activeSeries,
       activeSeriesAnchor,
@@ -3549,11 +3698,6 @@ Page({
     }, () => {
       this.scheduleMaterialPreload(visibleMaterials);
     });
-  },
-
-  buildCategoryRailSeries(seriesOptions = [], activeCategory = ALL_OPTION_LABEL, activeSeries = ALL_OPTION_LABEL) {
-    if (this.isAllFilterValue(activeCategory)) return [];
-    return this.decorateOptionList(seriesOptions, activeSeries, '', 'category-series');
   },
 
   decorateOptionList(list, activeValue, key = '', anchorPrefix = '') {
@@ -3876,7 +4020,7 @@ Page({
 
   buildCurrentSequence() {
     const timestamp = new Date().toISOString();
-    return (this.data.selected || []).map((id, index) => {
+    const beadSequence = (this.data.selected || []).map((id, index) => {
       const material = this.findMaterialById(id) || {};
       const placement = (this.data.placements || [])[index] || {};
       const imageUrls = (material.image_urls || material.image_pool || [])
@@ -3884,17 +4028,25 @@ Page({
         .filter(Boolean);
       const size = material.size || material.diameter || placement.diameter || '';
       const price = Number(material.price ?? material.priceText ?? material.amount ?? material.sale_price ?? 0);
+      const contributesEnergy = materialContributesEnergy(material);
+      const primaryElement = contributesEnergy ? (material.primary_element || material.element || '') : '';
+      const elementKey = contributesEnergy ? this.materialElementKey(material) : '';
       return {
         index: index + 1,
         id,
         material_id: material.id || id,
         sku: material.skuId || material.sku || id,
-        name: material.name || material.series || material.category || id,
-        category: material.category || '',
-        series: material.series || '',
-        grade: material.grade || '',
+        top: material.top || 'bead',
+        item_type: material.top || 'bead',
+        name: this.displayMaterialName(material, id),
+        category: repairMaybeMojibakeText(material.category) || '',
+        series: repairMaybeMojibakeText(material.series) || '',
+        grade: repairMaybeMojibakeText(material.grade) || '',
         effect: material.effect || '',
-        element: material.element || '',
+        element: primaryElement,
+        primary_element: primaryElement,
+        element_key: elementKey,
+        secondary_elements: contributesEnergy ? (material.secondary_elements || []) : [],
         color: material.color || '',
         size,
         diameter: size,
@@ -3912,6 +4064,7 @@ Page({
         snapshot_at: timestamp
       };
     });
+    return beadSequence;
   },
 
   validateStringedDesignForCart() {
@@ -3949,7 +4102,7 @@ Page({
     const price = Number.isFinite(summaryPrice) ? summaryPrice : fallbackPrice;
     const summary = {
       ...(this.data.summary || {}),
-      count: sequence.length,
+      count: this.data.selected.length,
       price,
       priceText: price.toFixed(2)
     };
@@ -3969,6 +4122,7 @@ Page({
       selected: [...this.data.selected],
       materialIds: sequence.map(item => item.id || item.sku).filter(Boolean),
       placements: this.data.placements.map(item => ({ ...item })),
+      attachedPendants: [],
       wristSize: this.data.wristSize,
       wearStyle: 'single',
       isLooseMode: this.data.isLooseMode,
@@ -4125,6 +4279,10 @@ Page({
     const material = this.findMaterialById(id);
     if (!material) {
       this.showMaterialQueueToast(this.data.materialsLoading ? '珠材加载中，请稍候' : '材料暂不可用');
+      return;
+    }
+    if (materialIsPendant(material)) {
+      this.showMaterialQueueToast('吊坠功能暂未开放');
       return;
     }
     const pendingCount = this.data.selected.length + this.flightQueue.length;
@@ -4579,7 +4737,9 @@ Page({
     this.resetInteractionData({
       selected: [],
       placements: [],
+      attachedPendants: [],
       selectedItems: [],
+      attachedPendantItems: [],
       selectedBeadIndex: -1,
       selectedBeadInfo: null,
       isLooseMode: true
@@ -4962,7 +5122,8 @@ Page({
         image_url: placement.image_url || material.image_url || ''
       };
     }).filter(Boolean);
-    const price = items.reduce((sum, item) => sum + item.price, 0);
+    const attachedPendants = [];
+    const price = items.reduce((sum, item) => sum + Number(item.price || 0), 0);
     const length = items.reduce((sum, item) => sum + item.size, 0) / 10;
     const weight = items.reduce((sum, item) => sum + item.weight, 0);
     const targetLength = this.data.wristSize + 0.8;
@@ -4977,13 +5138,16 @@ Page({
     const selectedItems = this.layoutSelectedItems(items, placements, braceletGeometry);
     const stringStyle = this.buildStringStyle(braceletGeometry);
     const counts = {};
+    let energyItemCount = 0;
     items.forEach(item => {
-      const key = MATERIAL_ELEMENT_KEY[item.skuId] || ELEMENT_CN_TO_EN[item.element] || 'metal';
+      const key = this.materialElementKey(item);
+      if (!key) return;
+      energyItemCount += 1;
       counts[key] = (counts[key] || 0) + 1;
     });
     const energy = ELEMENTS.map(element => ({
       ...element,
-      value: items.length ? Math.round(((counts[element.key] || 0) / items.length) * 100) : 0
+      value: energyItemCount ? Math.round(((counts[element.key] || 0) / energyItemCount) * 100) : 0
     }));
 
     const currentWrist = items.length
@@ -5013,6 +5177,7 @@ Page({
       summary,
       stringStyle,
       placements,
+      attachedPendants,
       scaleTicks,
       countOverClass: items.length > 18 ? 'over' : '',
       braceletStringClass: items.length ? 'has-beads' : 'empty',
@@ -5027,8 +5192,10 @@ Page({
     if (this.data.useCanvasRenderer) {
       this.livePlacements = placements;
       updates.selectedItems = [];
+      updates.attachedPendantItems = [];
     } else {
       updates.selectedItems = selectedItems;
+      updates.attachedPendantItems = [];
     }
     this.setData(updates, () => {
       if (this.data.useCanvasRenderer) this.scheduleCanvasRender();
@@ -5043,12 +5210,26 @@ Page({
     return `${text}mm`;
   },
 
+  displayMaterialName(material = {}, fallback = '') {
+    const candidates = [
+      material.name,
+      material.series,
+      material.category,
+      fallback
+    ];
+    for (let index = 0; index < candidates.length; index += 1) {
+      const text = repairMaybeMojibakeText(candidates[index]);
+      if (text && !/^mat[_-]?\d+/i.test(text)) return text;
+    }
+    return '未命名材料';
+  },
+
   buildSelectedBeadInfo(index, selected = this.data.selected) {
     const beadIndex = Number(index);
     if (!Number.isInteger(beadIndex) || beadIndex < 0 || beadIndex >= (selected || []).length) return null;
     const id = selected[beadIndex];
     const material = this.findMaterialById(id) || {};
-    const name = material.name || material.series || material.category || id || '未命名珠子';
+    const name = this.displayMaterialName(material, id);
     const diameter = material.size || material.size_mm || (material.sku && material.sku.size_mm) || '';
     const price = Number(material.price || 0);
     const priceText = Number.isFinite(price) && price > 0 ? `¥${price.toFixed(2).replace(/\.00$/, '')}` : '--';
@@ -5074,6 +5255,7 @@ Page({
           userId: existingDesign.userId || '',
           selected: this.data.selected,
           placements: this.data.placements,
+          attachedPendants: [],
           wristSize: this.data.wristSize,
           wearStyle: 'single',
           isLooseMode: this.data.isLooseMode,
@@ -5331,7 +5513,8 @@ Page({
     if (!state || !state.ctx || !state.canvas) return false;
     const ctx = state.ctx;
     this.drawDesignPreviewBackdrop(ctx, state);
-    this.getCanvasBeadSprites().forEach(sprite => this.drawCanvasBead(ctx, {
+    const beadSprites = this.getCanvasBeadSprites();
+    beadSprites.forEach(sprite => this.drawCanvasBead(ctx, {
       ...sprite,
       active: false,
       dragging: false,
@@ -5412,6 +5595,7 @@ Page({
       userId: user.user_id,
       selected: this.data.selected,
       placements: this.data.placements,
+      attachedPendants: [],
       wristSize: this.data.wristSize,
       wearStyle: 'single',
       isLooseMode: this.data.isLooseMode,

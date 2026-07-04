@@ -918,7 +918,8 @@ class AdminService:
     def canonicalize_material_payload_options(self, payload: dict[str, Any], connection) -> dict[str, Any]:
         lookup = self.material_option_lookup(connection)
         clean = dict(payload)
-        clean["primary_element"] = self.canonical_material_option_value(
+        has_energy = str(clean.get("top") or "").strip() != "pendant"
+        clean["primary_element"] = "" if not has_energy else self.canonical_material_option_value(
             clean.get("primary_element") or clean.get("element"),
             "elements",
             lookup,
@@ -926,7 +927,7 @@ class AdminService:
             required=True,
         )
         if "secondary_elements" in clean or "secondary_element" in clean:
-            clean["secondary_elements"] = self.canonical_material_option_list(
+            clean["secondary_elements"] = [] if not has_energy else self.canonical_material_option_list(
                 clean.get("secondary_elements") or clean.get("secondary_element"),
                 "elements",
                 lookup,
@@ -1329,7 +1330,9 @@ class AdminService:
                 connection=connection,
                 force_update=has_explicit_knowledge(knowledge_payload),
             )
-            primary_element = knowledge.get("primary_element") or normalize_element_key(payload.get("primary_element")) or ""
+            primary_element = "" if top == "pendant" else (
+                knowledge.get("primary_element") or normalize_element_key(payload.get("primary_element")) or ""
+            )
             effects = knowledge.get("effects") or payload.get("effects") or []
             effect_text = str((effects[0] if effects else payload.get("effect") or "") or "")
             old_category = (dict(before_category).get("name") if before_category else category["name"]) if before else category["name"]
@@ -1337,11 +1340,11 @@ class AdminService:
             old_top = (before or {}).get("top") or top
             connection.execute(
                 """
-                UPDATE managed_materials
-                SET top=?, category=?, series=?, material_code=?,
-                    name=CASE WHEN COALESCE(name, '') = '' OR name = ? THEN ? ELSE name END,
-                    element=CASE WHEN ? <> '' THEN ? ELSE element END,
-                    effect=CASE WHEN ? <> '' THEN ? ELSE effect END,
+                    UPDATE managed_materials
+                    SET top=?, category=?, series=?, material_code=?,
+                        name=CASE WHEN COALESCE(name, '') = '' OR name = ? THEN ? ELSE name END,
+                        element=CASE WHEN ? = 'pendant' THEN '' WHEN ? <> '' THEN ? ELSE element END,
+                        effect=CASE WHEN ? <> '' THEN ? ELSE effect END,
                     color=CASE WHEN ? <> '' THEN ? ELSE color END,
                     shine=CASE WHEN ? <> '' THEN ? ELSE shine END,
                     updated_at=?
@@ -1350,6 +1353,7 @@ class AdminService:
                 (
                     top, category["name"], name, material_code,
                     old_series, name,
+                    top,
                     primary_element, primary_element,
                     effect_text, effect_text,
                     color, color,
@@ -3998,7 +4002,7 @@ class AdminService:
             add("weight_missing", "缺少重量", "warning", "base")
         if not visual.get("thumbnail_url") and not visual.get("image_url") and not visual.get("image_urls"):
             add("image_missing", "缺少图片", "critical", "visual")
-        if not energy.get("primary_element"):
+        if (sku.get("top") or material.get("top")) != "pendant" and not energy.get("primary_element"):
             add("primary_element_missing", "缺少主五行", "critical", "energy")
         if not energy.get("effects"):
             add("effects_missing", "缺少功效标签", "critical", "energy")
@@ -4980,18 +4984,20 @@ class AdminService:
         for key in required:
             if not str(payload.get(key, "")).strip():
                 raise ValueError(f"{key} 不能为空")
+        top = str(payload["top"]).strip()
+        has_energy = top != "pendant"
         effects = payload.get("effects")
         if isinstance(effects, str):
             effects = [item.strip() for item in re.split(r"[,，、\n\r]+", effects) if item.strip()]
         effects = effects if isinstance(effects, list) else []
         knowledge = normalize_knowledge_payload(payload, payload)
-        primary_element = normalize_element_key(
+        primary_element = "" if not has_energy else normalize_element_key(
             payload.get("primary_element") or payload.get("element") or knowledge.get("primary_element")
         )
         if not effects:
             effects = knowledge.get("effects") or []
         effect_text = str(payload.get("effect") or (effects[0] if effects else "")).strip()
-        if not primary_element:
+        if has_energy and not primary_element:
             raise ValueError("请先在品种维护里设置主五行")
         if not effect_text:
             raise ValueError("请先在品种维护里设置核心功效")
@@ -5013,7 +5019,7 @@ class AdminService:
         return {
             "id": str(payload["id"]).strip(),
             "skuId": sku_id,
-            "top": str(payload["top"]).strip(),
+            "top": top,
             "category": str(payload["category"]).strip(),
             "series": str(payload.get("series") or payload.get("name") or "").strip(),
             "material_code": material_code_from_payload(payload),

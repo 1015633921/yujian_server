@@ -316,7 +316,10 @@ def slim_material(item: dict) -> dict:
     effects = energy.get("effects") or item.get("effects") or []
     if isinstance(effects, str):
         effects = [effects]
-    primary_element = energy.get("primary_element") or item.get("primary_element") or item.get("element") or ""
+    top = sku.get("top") or item.get("top") or ""
+    primary_element = "" if top == "pendant" else (
+        energy.get("primary_element") or item.get("primary_element") or item.get("element") or ""
+    )
     price = sku.get("price_per_bead") if sku else None
     size = sku.get("size_mm") if sku else None
     weight = sku.get("weight_g") if sku else None
@@ -325,7 +328,7 @@ def slim_material(item: dict) -> dict:
         "skuId": sku.get("sku_id") or item.get("skuId") or item.get("sku_id") or "",
         "sku_id": sku.get("sku_id") or item.get("sku_id") or item.get("skuId") or "",
         "material_code": sku.get("material_code") or item.get("material_code") or "",
-        "top": sku.get("top") or item.get("top") or "",
+        "top": top,
         "category": sku.get("category") or item.get("category") or "",
         "series": sku.get("series") or item.get("series") or item.get("name") or "",
         "grade": sku.get("grade") or item.get("grade") or "",
@@ -345,6 +348,7 @@ def slim_material(item: dict) -> dict:
         "image_url": image_url,
         "image_urls": image_urls,
         "thumbnail_url": image_url,
+        "material_params": visual.get("material_params") or item.get("material_params") or {},
     }
 
 

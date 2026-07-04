@@ -1229,6 +1229,16 @@ async function openMaterialTaxonomy(){
 function taxonomyCategoryOptionHtml(selected=''){
   return taxonomyCategories(true).map(x=>`<option value="${esc(x.id)}" ${x.id===selected?'selected':''}>${esc(topLabel(x.top||'bead'))} / ${esc(x.name)}${x.enabled===false?'（已停用）':''}</option>`).join('');
 }
+function selectedTaxSeriesCategory(){
+  const categoryId=formValue('tax_series_category');
+  return categoryId?findTaxonomyItem(categoryId):null;
+}
+function selectedTaxSeriesTop(){
+  return selectedTaxSeriesCategory()?.top||'bead';
+}
+function selectedTaxSeriesNeedsEnergy(){
+  return selectedTaxSeriesTop()!=='pendant';
+}
 function renderMaterialTaxonomy(options={}){
   const categories=taxonomyCategories(true);
   const rows=categories.map(cat=>`
@@ -1261,7 +1271,7 @@ function renderMaterialTaxonomy(options={}){
       ${materialMultiImageField('tax_series_images','')}
     </div></section>
     <section class="material-form-section"><h3>品种能量知识</h3><div class="form-grid">
-      <label>${fieldLabel('主五行',true)}<select id="tax_series_primary_element">${selectOptions(optionList('elements'),'','请选择主五行')}</select></label>
+      <label>${fieldLabel('主五行（花托可不填）',false)}<select id="tax_series_primary_element">${selectOptions(optionList('elements'),'','请选择主五行')}</select></label>
       ${checkboxGroup('tax_series_secondary_elements','副五行',optionList('elements'),[],false)}
       ${checkboxGroup('tax_series_effects','核心功效标签',optionList('effects'),[],true)}
       ${checkboxGroup('tax_series_chakras','对应脉轮',optionList('chakras'),[],false)}
@@ -1275,7 +1285,6 @@ function renderMaterialTaxonomy(options={}){
       ${checkboxGroup('tax_series_allowed_roles','允许角色',optionList('roles'),['primary','support','accent'],false)}
       ${checkboxGroup('tax_series_match_rules','搭配规则',optionList('match_rules'),['no_limit'],false)}
       ${checkboxGroup('tax_series_care_tags','佩戴养护',optionList('care_tags'),[],false)}
-      ${multiSelectField('tax_series_conflict_codes','互斥材料',conflictMaterialOptions(''),[])}
     </div><div class="form-actions inline-actions"><button class="btn secondary compact" onclick="clearMaterialSeriesForm()">清空</button><button class="btn primary compact" onclick="saveMaterialSeries()">保存品种</button></div></section>
     <section class="material-form-section"><h3>现有分类与品种</h3><div class="taxonomy-list">${rows||'<div class="empty-inline">暂无分类</div>'}</div></section>
   `);
@@ -1305,7 +1314,7 @@ function clearMaterialSeriesForm(){
   if($('tax_series_shine'))$('tax_series_shine').value='#ffffff';syncColorPicker('tax_series_shine');
   updateImagePreview('tax_series_image');setMaterialImageList('tax_series_images',[]);
   ['tax_series_secondary_elements','tax_series_effects','tax_series_chakras','tax_series_wish_pools','tax_series_mood_tags','tax_series_visual_tags','tax_series_allowed_roles','tax_series_match_rules','tax_series_care_tags'].forEach(name=>setCheckboxValues(name,[]));
-  setCheckboxValues('tax_series_allowed_roles',['primary','support','accent']);setCheckboxValues('tax_series_match_rules',['no_limit']);setSelectMultipleValues('tax_series_conflict_codes',[]);
+  setCheckboxValues('tax_series_allowed_roles',['primary','support','accent']);setCheckboxValues('tax_series_match_rules',['no_limit']);
 }
 function findTaxonomyItem(id){
   for(const cat of taxonomyCategories(true)){
@@ -1322,12 +1331,13 @@ function fillMaterialCategoryForm(id){
 function fillMaterialSeriesForm(id,categoryId){
   const item=findTaxonomyItem(id);if(!item)return;
   const energy=item.energy||{},rules=item.rules||{};
+  const isPendantSeries=(item.top||'bead')==='pendant';
   $('tax_series_id').value=item.id;$('tax_series_category').value=categoryId||item.parent_id||'';$('tax_series_name').value=item.name||'';$('tax_series_material_code').value=item.material_code||'';$('tax_series_sort').value=item.sort_order||0;$('tax_series_enabled').value=String(item.enabled!==false);
   $('tax_series_color').value=normalizeHexColor(item.color||'#dfe3e5');syncColorPicker('tax_series_color');
   $('tax_series_shine').value=normalizeHexColor(item.shine||'#ffffff','#ffffff');syncColorPicker('tax_series_shine');
   $('tax_series_image').value=item.image_url||'';updateImagePreview('tax_series_image');setMaterialImageList('tax_series_images',item.image_urls||item.image_pool||[]);
-  $('tax_series_primary_element').value=energy.primary_element||'';
-  setCheckboxValues('tax_series_secondary_elements',energy.secondary_elements||[]);
+  $('tax_series_primary_element').value=isPendantSeries?'':(energy.primary_element||'');
+  setCheckboxValues('tax_series_secondary_elements',isPendantSeries?[]:(energy.secondary_elements||[]));
   setCheckboxValues('tax_series_effects',energy.effects||[]);
   setCheckboxValues('tax_series_chakras',energy.chakras||[]);
   setCheckboxValues('tax_series_wish_pools',energy.wish_pools||[]);
@@ -1338,7 +1348,6 @@ function fillMaterialSeriesForm(id,categoryId){
   setCheckboxValues('tax_series_allowed_roles',rules.allowed_roles||['primary','support','accent']);
   setCheckboxValues('tax_series_match_rules',rules.match_rules||['no_limit']);
   setCheckboxValues('tax_series_care_tags',rules.care_tags||[]);
-  setSelectMultipleValues('tax_series_conflict_codes',rules.conflict_codes||[]);
 }
 async function saveMaterialCategory(){
   const name=formValue('tax_category_name');if(!name){toast('请填写分类名称');return}
@@ -1350,19 +1359,21 @@ async function saveMaterialSeries(){
   const enabled=formValue('tax_series_enabled')==='true';
   const imageUrls=splitList(formValue('tax_series_images'));
   const image_url=formValue('tax_series_image')||imageUrls[0]||'';
-  const primary_element=formValue('tax_series_primary_element');
+  const needsEnergy=selectedTaxSeriesNeedsEnergy();
+  const rawPrimaryElement=formValue('tax_series_primary_element');
+  const primary_element=needsEnergy?rawPrimaryElement:'';
   const effects=checkboxValues('tax_series_effects');
   if(enabled&&!image_url){toast('请给启用品种设置主图');return}
-  if(enabled&&!primary_element){toast('请给启用品种设置主五行');return}
+  if(enabled&&needsEnergy&&!primary_element){toast('请给启用品种设置主五行');return}
   if(enabled&&!effects.length){toast('请给启用品种设置核心功效');return}
   const saved=await api('/api/v1/admin/material-taxonomy/series',{method:'POST',body:JSON.stringify({
     id:formValue('tax_series_id'),category_id,name,material_code:formValue('tax_series_material_code'),
     color:normalizeHexColor(formValue('tax_series_color')),shine:normalizeHexColor(formValue('tax_series_shine'),'#ffffff'),
-    image_url,image_urls:imageUrls,primary_element,secondary_elements:checkboxValues('tax_series_secondary_elements').filter(x=>x!==primary_element),
+    image_url,image_urls:imageUrls,primary_element,secondary_elements:needsEnergy?checkboxValues('tax_series_secondary_elements').filter(x=>x!==primary_element):[],
     effects,chakras:checkboxValues('tax_series_chakras'),wish_pools:checkboxValues('tax_series_wish_pools'),
     color_family:formValue('tax_series_color_family'),mood_tags:checkboxValues('tax_series_mood_tags'),visual_tags:checkboxValues('tax_series_visual_tags'),
     story:formValue('tax_series_story'),allowed_roles:checkboxValues('tax_series_allowed_roles'),match_rules:checkboxValues('tax_series_match_rules'),
-    care_tags:checkboxValues('tax_series_care_tags'),conflict_codes:multiSelectValues('tax_series_conflict_codes'),
+    care_tags:checkboxValues('tax_series_care_tags'),conflict_codes:[],
     sort_order:num(formValue('tax_series_sort')),enabled
   })});
   await refreshMaterialOptions();renderMaterialTaxonomy({focusSeriesId:saved.id,focusCategoryId:saved.category_id,focusTop:saved.top});toast('品种已保存');

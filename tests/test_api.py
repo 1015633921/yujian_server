@@ -45,7 +45,8 @@ def test_compact_material_search_omits_catalog_metadata_and_honors_limit():
         item = data["materials"][0]
         assert {"sku", "energy", "visual", "rules"}.issubset(item)
         assert item["sku"]["size_mm"]
-        assert item["energy"]["primary_element"]
+        if item["sku"].get("top") != "pendant":
+            assert item["energy"]["primary_element"]
         assert isinstance(item["visual"]["image_urls"], list)
         assert isinstance(item["rules"]["allowed_roles"], list)
 
@@ -205,6 +206,47 @@ def test_admin_material_requires_taxonomy_before_sku_save(tmp_path):
 
     assert saved["sku"]["category"] == "unlisted-category"
     assert saved["sku"]["series"] == "Unlisted Series"
+
+
+def test_pendant_material_allows_blank_primary_element(tmp_path):
+    from app.admin_service import AdminService
+
+    service = AdminService(tmp_path / "pendant-no-energy.db")
+    category = service.save_material_category({"top": "pendant", "name": "花托"})
+    series = service.save_material_series(
+        {
+            "category_id": category["id"],
+            "name": "银色花托",
+            "image_url": "https://cdn-test.yustream.cn/materials/findings/silver-cap.png",
+            "effects": ["focus"],
+            "enabled": True,
+        }
+    )
+    taxonomy = service.list_material_taxonomy(top="pendant", include_disabled=True)
+    saved_series = next(item for item in taxonomy[0]["series"] if item["id"] == series["id"])
+    assert saved_series["energy"]["primary_element"] == ""
+    assert saved_series["energy"]["secondary_elements"] == []
+
+    saved = service.save_material(
+        {
+            "id": "silverCap8",
+            "skuId": "silverCap8",
+            "material_code": "silver_cap",
+            "top": "pendant",
+            "category": "花托",
+            "series": "银色花托",
+            "name": "银色花托",
+            "effects": ["focus"],
+            "price_per_bead": 0.01,
+            "size_mm": 8,
+            "weight_g": 1,
+            "stock": 5,
+            "thumbnail_url": "https://cdn-test.yustream.cn/materials/findings/silver-cap.png",
+        }
+    )
+    assert saved["sku"]["top"] == "pendant"
+    assert saved["energy"]["primary_element"] == ""
+    assert saved["energy"]["secondary_elements"] == []
 
 
 def test_admin_material_spu_reports_size_coverage_and_missing_specs(tmp_path):
