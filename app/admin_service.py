@@ -4610,7 +4610,8 @@ class AdminService:
             else 1
         )
         return {
-            "key": material_code or spu_key,
+            "key": spu_key,
+            "legacy_key": material_code,
             "group_key": spu_key,
             "spu": {
                 "material_code": material_code,

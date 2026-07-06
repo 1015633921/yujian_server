@@ -535,6 +535,7 @@ def enrich_materials_with_knowledge(
             "color_family": normalize_color_family(knowledge.get("color_family")) or "",
             "mood_tags": normalize_mood_tag_list(knowledge.get("mood_tags")),
             "visual_tags": normalize_visual_tag_list(knowledge.get("visual_tags")),
+            "story": knowledge.get("story") or "",
         }
         visual = {
             "color_hex": item.get("color") or "",

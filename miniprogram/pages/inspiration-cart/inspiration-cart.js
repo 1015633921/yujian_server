@@ -46,6 +46,12 @@ const MATERIAL_ASSETS = {
   obsidian10: assetUrl('home/amethyst.webp')
 };
 
+const MINI_PREVIEW_STAGE_SIZE = 360;
+const MINI_PREVIEW_CENTER = MINI_PREVIEW_STAGE_SIZE / 2;
+const WORKSPACE_PREVIEW_CENTER = 288;
+const DEFAULT_CART_PLAN_NAME = 'Yustream DIY 手串方案';
+const DESIGN_NAME_MODAL_HINT_KEYWORD = '给这条手串起个名字';
+
 const MATERIAL_CODE_LABELS = [
   { pattern: /colorful[_-]?phantom/, label: '彩幽灵' },
   { pattern: /green[_-]?phantom/, label: '绿幽灵' },
@@ -75,11 +81,128 @@ function clampQty(value) {
   return Math.min(99, Math.max(1, qty));
 }
 
+function cleanPlanName(value = '') {
+  const text = String(value || '').trim();
+  if (!text || text.includes(DESIGN_NAME_MODAL_HINT_KEYWORD)) return '';
+  return text;
+}
+
+function formatCreatedTime(value) {
+  if (!value) return '';
+  let date = null;
+  const numeric = Number(value);
+  if (Number.isFinite(numeric) && numeric > 0) {
+    const timestamp = numeric < 100000000000 ? numeric * 1000 : numeric;
+    date = new Date(timestamp);
+  } else {
+    date = new Date(String(value));
+  }
+  if (!date || Number.isNaN(date.getTime())) return '';
+  const month = `${date.getMonth() + 1}`.padStart(2, '0');
+  const day = `${date.getDate()}`.padStart(2, '0');
+  const hour = `${date.getHours()}`.padStart(2, '0');
+  const minute = `${date.getMinutes()}`.padStart(2, '0');
+  return `${month}-${day} ${hour}:${minute}`;
+}
+
 function firstImageUrl(entry = {}) {
   const urls = (entry.image_urls || entry.image_pool || [])
     .concat(entry.image_url || [])
     .filter(Boolean);
   return urls[0] || '';
+}
+
+function savedPlacementPoint(placement = {}) {
+  const x = Number(placement.looseX !== undefined ? placement.looseX : placement.x);
+  const y = Number(placement.looseY !== undefined ? placement.looseY : placement.y);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+  return {
+    x: x + Number(placement.dx || 0),
+    y: y + Number(placement.dy || 0)
+  };
+}
+
+function solve3x3(matrix, vector) {
+  const a = matrix.map(row => row.slice());
+  const b = vector.slice();
+  for (let col = 0; col < 3; col += 1) {
+    let pivot = col;
+    for (let row = col + 1; row < 3; row += 1) {
+      if (Math.abs(a[row][col]) > Math.abs(a[pivot][col])) pivot = row;
+    }
+    if (Math.abs(a[pivot][col]) < 1e-6) return null;
+    if (pivot !== col) {
+      [a[pivot], a[col]] = [a[col], a[pivot]];
+      [b[pivot], b[col]] = [b[col], b[pivot]];
+    }
+    const divisor = a[col][col];
+    for (let item = col; item < 3; item += 1) a[col][item] /= divisor;
+    b[col] /= divisor;
+    for (let row = 0; row < 3; row += 1) {
+      if (row === col) continue;
+      const factor = a[row][col];
+      for (let item = col; item < 3; item += 1) a[row][item] -= factor * a[col][item];
+      b[row] -= factor * b[col];
+    }
+  }
+  return b;
+}
+
+function fitPlacementCircle(points = []) {
+  if (points.length < 3) return null;
+  const sums = points.reduce((acc, point) => {
+    const x = point.x;
+    const y = point.y;
+    const z = x * x + y * y;
+    acc.x += x;
+    acc.y += y;
+    acc.xx += x * x;
+    acc.yy += y * y;
+    acc.xy += x * y;
+    acc.z += z;
+    acc.xz += x * z;
+    acc.yz += y * z;
+    return acc;
+  }, { x: 0, y: 0, xx: 0, yy: 0, xy: 0, z: 0, xz: 0, yz: 0 });
+  const solution = solve3x3([
+    [sums.xx, sums.xy, sums.x],
+    [sums.xy, sums.yy, sums.y],
+    [sums.x, sums.y, points.length]
+  ], [-sums.xz, -sums.yz, -sums.z]);
+  if (!solution) return null;
+  const centerX = -solution[0] / 2;
+  const centerY = -solution[1] / 2;
+  const radius = points.reduce((sum, point) => (
+    sum + Math.sqrt((point.x - centerX) ** 2 + (point.y - centerY) ** 2)
+  ), 0) / points.length;
+  if (!Number.isFinite(centerX) || !Number.isFinite(centerY) || !Number.isFinite(radius)) return null;
+  if (centerX < 180 || centerX > 480 || centerY < 180 || centerY > 480 || radius < 24 || radius > 320) return null;
+  return { x: centerX, y: centerY, scaleBase: (centerX + centerY) / 2 };
+}
+
+function inferPlacementSourceOrigin(placements = [], source = {}) {
+  const points = placements.map(savedPlacementPoint).filter(Boolean);
+  const fitted = fitPlacementCircle(points);
+  if (fitted) return fitted;
+  if (points.length) {
+    const x = points.reduce((sum, point) => sum + point.x, 0) / points.length;
+    const y = points.reduce((sum, point) => sum + point.y, 0) / points.length;
+    const scaleBase = (x + y) / 2;
+    if (Number.isFinite(scaleBase) && scaleBase >= 180 && scaleBase <= 480) {
+      return { x, y, scaleBase };
+    }
+  }
+  const storedCenter = Number(source.workspaceStageCenter || source.previewSourceCenter || source.preview_source_center);
+  if (Number.isFinite(storedCenter) && storedCenter >= 180 && storedCenter <= 480) {
+    return { x: storedCenter, y: storedCenter, scaleBase: storedCenter };
+  }
+  return { x: WORKSPACE_PREVIEW_CENTER, y: WORKSPACE_PREVIEW_CENTER, scaleBase: WORKSPACE_PREVIEW_CENTER };
+}
+
+function hasSavedPlacement(placement = {}) {
+  const x = Number(placement.looseX !== undefined ? placement.looseX : placement.x);
+  const y = Number(placement.looseY !== undefined ? placement.looseY : placement.y);
+  return Number.isFinite(x) && Number.isFinite(y);
 }
 
 function hasChinese(value = '') {
@@ -161,17 +284,41 @@ function buildSequence(item = {}) {
   }));
 }
 
-function createMiniBeads(sequence = [], count = 12, radius = 38, size = 24, placements = []) {
+function createMiniBeads(sequence = [], count = 12, radius = 38, size = 24, placements = [], source = {}) {
   const safeSequence = sequence.length ? sequence : [{ id: 'clearQuartz8' }];
-  const displayCount = Math.max(1, Math.min(count, safeSequence.length || count, 18));
+  const displayCount = Math.max(1, Math.min(count, safeSequence.length || count, 24));
+  const center = MINI_PREVIEW_CENTER;
+  const hasPlacementLayout = placements.some(hasSavedPlacement);
+  const sourceOrigin = inferPlacementSourceOrigin(placements, source);
+  const placementScale = center / sourceOrigin.scaleBase;
   return Array.from({ length: displayCount }, (_, index) => {
-    const angle = (360 / displayCount) * index;
     const bead = safeSequence[index % safeSequence.length] || {};
     const placement = placements[index] || {};
+    const beadMm = Number(bead.size || bead.diameter || 0);
+    const placementSize = Number(placement.beadSize || placement.diameter || placement.size);
+    const beadSize = hasPlacementLayout
+      ? Math.max(18, Math.min(48, (Number.isFinite(placementSize) && placementSize > 0 ? placementSize : (beadMm ? beadMm * 5.4 : size)) * placementScale))
+      : Math.max(22, Math.min(40, Number(placement.beadSize) || (beadMm ? beadMm * 3.25 : size)));
+    let x;
+    let y;
+    let angle;
+    if (hasPlacementLayout && hasSavedPlacement(placement)) {
+      const savedX = Number(placement.looseX !== undefined ? placement.looseX : placement.x) + Number(placement.dx || 0);
+      const savedY = Number(placement.looseY !== undefined ? placement.looseY : placement.y) + Number(placement.dy || 0);
+      x = center + (savedX - sourceOrigin.x) * placementScale;
+      y = center + (savedY - sourceOrigin.y) * placementScale;
+      angle = Number(placement.rotation || 0);
+    } else {
+      const ringRadius = Math.max(62, Math.min(118, radius + displayCount * 2.2));
+      angle = -90 + (360 / displayCount) * index;
+      const rad = angle * Math.PI / 180;
+      x = center + Math.cos(rad) * ringRadius;
+      y = center + Math.sin(rad) * ringRadius;
+    }
     const code = bead.id || bead.sku || 'clearQuartz8';
     return {
       src: placement.image_url || bead.image_url || firstImageUrl(bead) || MATERIAL_ASSETS[code] || MATERIAL_ASSETS.clearQuartz8,
-      style: `width:${size}rpx;height:${size}rpx;transform:rotate(${angle}deg) translateY(-${radius}rpx) rotate(${-angle}deg);`
+      style: `left:${(x - beadSize / 2).toFixed(1)}rpx;top:${(y - beadSize / 2).toFixed(1)}rpx;width:${beadSize.toFixed(1)}rpx;height:${beadSize.toFixed(1)}rpx;transform:rotate(${angle.toFixed(1)}deg);`
     };
   });
 }
@@ -213,13 +360,20 @@ function normalizeCartItem(item = {}, index = 0) {
   const wristSize = item.wristSize || item.wrist_size || item.wrist || 16;
   const wearStyle = item.wearStyle === 'double' ? '双圈' : '单圈';
   const previewImage = resolvePreviewImage(item);
+  const createdAt = item.createdAt || item.created_at || item.createdAtMs || item.created_at_ms || '';
+  const planName = cleanPlanName(item.name)
+    || cleanPlanName(item.title)
+    || cleanPlanName(item.summary && item.summary.name)
+    || `${DEFAULT_CART_PLAN_NAME} ${index + 1}`;
 
   return {
     ...item,
     key,
     id: item.id || key,
     materialIds: item.materialIds || item.selected || sequence.map(entry => entry.id || entry.sku),
-    name: item.name || `DIY 手串方案 ${index + 1}`,
+    name: planName,
+    title: item.title || planName,
+    planName,
     desc: item.desc || `${count} 颗 · ${wearStyle}`,
     wristSize,
     wearStyle: item.wearStyle || 'single',
@@ -227,9 +381,12 @@ function normalizeCartItem(item = {}, index = 0) {
     imageUrl: previewImage,
     preview_image: previewImage,
     previewImage,
+    createdAt,
+    created_at: item.created_at || createdAt,
+    createdTime: formatCreatedTime(createdAt),
     sequence,
     recipeText: item.recipeText || buildRecipeText(sequence),
-    miniBeads: createMiniBeads(sequence, Math.max(8, Math.min(sequence.length || 12, 18)), 40, 24, item.placements || []),
+    miniBeads: createMiniBeads(sequence, Math.max(1, Math.min(sequence.length || 12, 24)), 40, 24, item.placements || [], item),
     price,
     priceText: toMoney(price),
     qty,
@@ -241,10 +398,15 @@ function normalizeCartItem(item = {}, index = 0) {
 Page({
   data: {
     items: [],
-    manageMode: false
+    manageMode: false,
+    checkoutLoadingKey: '',
+    checkoutActionText: '\u53bb\u7ed3\u7b97',
+    checkoutLoadingText: '\u6b63\u5728\u8fdb\u5165\u786e\u8ba4\u8ba2\u5355'
   },
 
   onShow() {
+    wx.hideLoading();
+    if (this.data.checkoutLoadingKey) this.setData({ checkoutLoadingKey: '' });
     this.loadCart();
   },
 
@@ -261,7 +423,9 @@ Page({
           key: row.cart_item_id,
           cart_item_id: row.cart_item_id,
           quantity: row.quantity,
-          qty: row.quantity
+          qty: row.quantity,
+          created_at: row.created_at,
+          updated_at: row.updated_at
         }));
       wx.setStorageSync(CART_KEY, cart);
     } catch (error) {
@@ -290,6 +454,7 @@ Page({
         lineTotalText,
         imageUrl,
         previewImage,
+        createdTime,
         materialIds,
         ...rest
       } = item;
@@ -351,6 +516,8 @@ Page({
     return {
       designId: item.designId || item.design_id || '',
       design_id: item.designId || item.design_id || '',
+      name: item.name || item.planName || item.title || '',
+      title: item.title || item.planName || item.name || '',
       userId: item.userId || '',
       selected: item.materialIds || item.sequence.map(entry => entry.id || entry.sku),
       placements: item.placements || [],
@@ -391,7 +558,16 @@ Page({
     const item = this.findItemByEvent(e);
     if (!item) return;
     wx.setStorageSync('currentDesign', this.buildDesignPayload(item));
-    wx.navigateTo({ url: '/pages/checkout/checkout' });
+    this.setData({ checkoutLoadingKey: item.key });
+    wx.showLoading({ title: '\u6b63\u5728\u8fdb\u5165\u786e\u8ba4\u8ba2\u5355', mask: true });
+    wx.navigateTo({
+      url: '/pages/checkout/checkout',
+      fail: () => {
+        wx.hideLoading();
+        this.setData({ checkoutLoadingKey: '' });
+        wx.showToast({ title: '\u6253\u5f00\u786e\u8ba4\u8ba2\u5355\u5931\u8d25', icon: 'none' });
+      }
+    });
   },
 
   continueDiy() {

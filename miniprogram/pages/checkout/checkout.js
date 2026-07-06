@@ -32,12 +32,111 @@ const CHECKOUT_TRAY_IMAGES = {
   warm: '/assets/workspace/tray-yustream-transparent-user-20260701-v6.webp',
   black: '/assets/workspace/tray-yustream-black-transparent-user-20260701.webp'
 };
+const DEFAULT_CHECKOUT_DESIGN_TITLE = '\u6e29\u67d4\u5b88\u62a4 \u00b7 \u548c\u8c10\u5e73\u8861\u6b3e';
+const DESIGN_NAME_MODAL_HINT_KEYWORD = '\u7ed9\u8fd9\u6761\u624b\u4e32\u8d77\u4e2a\u540d\u5b57';
 
 function firstImageUrl(entry = {}) {
   const urls = (entry.image_urls || entry.image_pool || [])
     .concat(entry.image_url || [])
     .filter(Boolean);
   return urls[0] || '';
+}
+
+function hasSavedPlacement(placement = {}) {
+  const x = Number(placement.looseX !== undefined ? placement.looseX : placement.x);
+  const y = Number(placement.looseY !== undefined ? placement.looseY : placement.y);
+  return Number.isFinite(x) && Number.isFinite(y);
+}
+
+function savedPlacementPoint(placement = {}) {
+  const x = Number(placement.looseX !== undefined ? placement.looseX : placement.x);
+  const y = Number(placement.looseY !== undefined ? placement.looseY : placement.y);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+  return {
+    x: x + Number(placement.dx || 0),
+    y: y + Number(placement.dy || 0)
+  };
+}
+
+function solve3x3(matrix, vector) {
+  const a = matrix.map(row => row.slice());
+  const b = vector.slice();
+  for (let col = 0; col < 3; col += 1) {
+    let pivot = col;
+    for (let row = col + 1; row < 3; row += 1) {
+      if (Math.abs(a[row][col]) > Math.abs(a[pivot][col])) pivot = row;
+    }
+    if (Math.abs(a[pivot][col]) < 1e-6) return null;
+    if (pivot !== col) {
+      [a[pivot], a[col]] = [a[col], a[pivot]];
+      [b[pivot], b[col]] = [b[col], b[pivot]];
+    }
+    const divisor = a[col][col];
+    for (let item = col; item < 3; item += 1) a[col][item] /= divisor;
+    b[col] /= divisor;
+    for (let row = 0; row < 3; row += 1) {
+      if (row === col) continue;
+      const factor = a[row][col];
+      for (let item = col; item < 3; item += 1) a[row][item] -= factor * a[col][item];
+      b[row] -= factor * b[col];
+    }
+  }
+  return b;
+}
+
+function fitPlacementCircle(points = []) {
+  if (points.length < 3) return null;
+  const sums = points.reduce((acc, point) => {
+    const x = point.x;
+    const y = point.y;
+    const z = x * x + y * y;
+    acc.x += x;
+    acc.y += y;
+    acc.xx += x * x;
+    acc.yy += y * y;
+    acc.xy += x * y;
+    acc.z += z;
+    acc.xz += x * z;
+    acc.yz += y * z;
+    return acc;
+  }, { x: 0, y: 0, xx: 0, yy: 0, xy: 0, z: 0, xz: 0, yz: 0 });
+  const solution = solve3x3([
+    [sums.xx, sums.xy, sums.x],
+    [sums.xy, sums.yy, sums.y],
+    [sums.x, sums.y, points.length]
+  ], [-sums.xz, -sums.yz, -sums.z]);
+  if (!solution) return null;
+  const centerX = -solution[0] / 2;
+  const centerY = -solution[1] / 2;
+  const radius = points.reduce((sum, point) => (
+    sum + Math.sqrt((point.x - centerX) ** 2 + (point.y - centerY) ** 2)
+  ), 0) / points.length;
+  if (!Number.isFinite(centerX) || !Number.isFinite(centerY) || !Number.isFinite(radius)) return null;
+  if (centerX < 180 || centerX > 480 || centerY < 180 || centerY > 480 || radius < 24 || radius > 320) return null;
+  return { x: centerX, y: centerY, scaleBase: (centerX + centerY) / 2 };
+}
+
+function inferPreviewSourceOrigin(placements = [], design = {}) {
+  const points = placements.map(savedPlacementPoint).filter(Boolean);
+  const fitted = fitPlacementCircle(points);
+  if (fitted) return fitted;
+  if (points.length) {
+    const x = points.reduce((sum, point) => sum + point.x, 0) / points.length;
+    const y = points.reduce((sum, point) => sum + point.y, 0) / points.length;
+    const scaleBase = (x + y) / 2;
+    if (Number.isFinite(scaleBase) && scaleBase >= 180 && scaleBase <= 480) {
+      return { x, y, scaleBase };
+    }
+  }
+  const storedCenter = Number(design.workspaceStageCenter || design.previewSourceCenter || design.preview_source_center);
+  if (Number.isFinite(storedCenter) && storedCenter >= 180 && storedCenter <= 480) {
+    return { x: storedCenter, y: storedCenter, scaleBase: storedCenter };
+  }
+  return {
+    x: CHECKOUT_WORKSPACE_CENTER,
+    y: CHECKOUT_WORKSPACE_CENTER,
+    scaleBase: CHECKOUT_WORKSPACE_CENTER
+  };
 }
 
 function moneyValue(...values) {
@@ -49,6 +148,56 @@ function moneyValue(...values) {
   return 0;
 }
 
+function cleanDesignTitle(value = '') {
+  const text = String(value || '').trim();
+  if (!text || text.includes(DESIGN_NAME_MODAL_HINT_KEYWORD)) return '';
+  return text;
+}
+
+function isInternalMaterialId(value) {
+  const text = String(value || '').trim();
+  return /^(mat|real)[_-]/i.test(text) || /^\d{10,}$/.test(text);
+}
+
+function cleanMaterialLabel(value) {
+  const text = String(value || '').trim();
+  if (!text || text === '-' || text === 'NaN') return '';
+  if (isInternalMaterialId(text)) return '';
+  if (/\u672a\u547d\u540d/.test(text)) return '';
+  return text;
+}
+
+function fallbackMaterialLabel(entry = {}) {
+  const typeText = [
+    entry.top,
+    entry.item_type,
+    entry.type,
+    entry.category,
+    entry.series
+  ].map(value => String(value || '')).join(' ');
+  if (/accessory|spacer|pendant|charm|fitting|flower|托|配饰|吊坠|隔片/.test(typeText)) {
+    return '\u5b9a\u5236\u914d\u9970';
+  }
+  return '\u5b9a\u5236\u73e0\u6750';
+}
+
+function sequenceDisplayName(entry = {}, key = '', fallbackName = '') {
+  const candidates = [
+    entry.name,
+    entry.material_name,
+    entry.materialName,
+    entry.series,
+    entry.category,
+    fallbackName,
+    key
+  ];
+  for (let index = 0; index < candidates.length; index += 1) {
+    const name = cleanMaterialLabel(candidates[index]);
+    if (name) return name;
+  }
+  return fallbackMaterialLabel(entry);
+}
+
 function normalizeSequenceItem(entry = {}, index = 0) {
   const key = entry.id || entry.sku || entry.material_id || '';
   const fallback = MATERIALS[key] || {};
@@ -56,7 +205,7 @@ function normalizeSequenceItem(entry = {}, index = 0) {
     .concat(entry.image_url || [])
     .filter(Boolean);
   const size = entry.size || entry.diameter || '';
-  const name = entry.name || entry.series || entry.category || fallback.name || key || '定制珠材';
+  const name = sequenceDisplayName(entry, key, fallback.name);
   const category = entry.category || entry.series || '';
   return {
     ...entry,
@@ -100,13 +249,18 @@ Page({
     hasAddress: false,
     addressError: '',
     remark: '',
-    submitting: false
+    submitting: false,
+    pageLoading: true
   },
 
   onLoad() {
     this.loadTrayPreviewImage();
     this.loadDesign();
     this.loadReceiver();
+  },
+
+  onReady() {
+    wx.hideLoading();
   },
 
   loadTrayPreviewImage() {
@@ -135,7 +289,10 @@ Page({
     const design = wx.getStorageSync('currentDesign');
     const hasSelected = Array.isArray(design && design.selected) && design.selected.length;
     const hasSequence = Array.isArray(design && design.sequence) && design.sequence.length;
-    if (!design || (!hasSelected && !hasSequence)) return;
+    if (!design || (!hasSelected && !hasSequence)) {
+      this.setData({ pageLoading: false });
+      return;
+    }
     const rawSequence = hasSequence ? design.sequence : design.selected.map((id, index) => ({
       index: index + 1,
       id,
@@ -184,14 +341,16 @@ Page({
       price: amount,
       priceText: this.formatAmount(amount)
     };
-    const designForView = { ...design, summary };
+    const displayTitle = cleanDesignTitle(design.name) || cleanDesignTitle(design.title) || DEFAULT_CHECKOUT_DESIGN_TITLE;
+    const designForView = { ...design, summary, displayTitle };
     this.setData({
       design: designForView,
       designPreviewImage: this.resolveDesignPreviewImage(designForView),
       sequence,
       bom,
       previewBeads: this.buildPreviewBeads(sequence, design.placements || [], designForView),
-      amountText: this.formatAmount(amount)
+      amountText: this.formatAmount(amount),
+      pageLoading: false
     });
   },
 
@@ -317,12 +476,9 @@ Page({
   buildPreviewBeads(sequence, placements = [], design = {}) {
     const beads = (sequence || []).slice(0, 40);
     const count = Math.max(beads.length, 1);
-    const sourceCenter = this.inferPreviewSourceCenter(placements);
-    const placementScale = CHECKOUT_PREVIEW_CENTER / sourceCenter;
-    const useSavedPlacements = placements.some(item => (
-      Number.isFinite(Number(item && (item.looseX !== undefined ? item.looseX : item.x)))
-        && Number.isFinite(Number(item && (item.looseY !== undefined ? item.looseY : item.y)))
-    ));
+    const sourceOrigin = inferPreviewSourceOrigin(placements, design);
+    const placementScale = CHECKOUT_PREVIEW_CENTER / sourceOrigin.scaleBase;
+    const useSavedPlacements = placements.some(hasSavedPlacement);
     const initialBeadSizes = beads.map((item, index) => (
       this.resolvePreviewBeadSize(item, placements[index] || item.placement || {}, count)
     ));
@@ -334,18 +490,20 @@ Page({
       const savedBaseY = placement.looseY !== undefined ? placement.looseY : placement.y;
       const savedX = Number(savedBaseX) + Number(placement.dx || 0);
       const savedY = Number(savedBaseY) + Number(placement.dy || 0);
-      const beadSize = ring.beadSizes[index] || initialBeadSizes[index] || 52;
       const hasSavedPosition = useSavedPlacements && Number.isFinite(savedX) && Number.isFinite(savedY);
+      const beadSize = hasSavedPosition
+        ? Math.max(30, Math.min(62, (initialBeadSizes[index] || 52) * placementScale))
+        : (ring.beadSizes[index] || initialBeadSizes[index] || 52);
       const ringPoint = ring.points[index] || {
         x: CHECKOUT_PREVIEW_CENTER,
         y: CHECKOUT_PREVIEW_CENTER,
         angle: 0
       };
       const x = hasSavedPosition
-        ? CHECKOUT_PREVIEW_CENTER + (savedX - sourceCenter) * placementScale
+        ? CHECKOUT_PREVIEW_CENTER + (savedX - sourceOrigin.x) * placementScale
         : ringPoint.x;
       const y = hasSavedPosition
-        ? CHECKOUT_PREVIEW_CENTER + (savedY - sourceCenter) * placementScale
+        ? CHECKOUT_PREVIEW_CENTER + (savedY - sourceOrigin.y) * placementScale
         : ringPoint.y;
       const rotation = hasSavedPosition ? Number(placement.rotation || 0) : ringPoint.angle;
       return {
@@ -356,21 +514,6 @@ Page({
     });
   },
 
-  inferPreviewSourceCenter(placements = []) {
-    const values = [];
-    placements.forEach(item => {
-      const x = Number(item && (item.looseX !== undefined ? item.looseX : item.x));
-      const y = Number(item && (item.looseY !== undefined ? item.looseY : item.y));
-      if (Number.isFinite(x)) values.push(x);
-      if (Number.isFinite(y)) values.push(y);
-    });
-    if (!values.length) return CHECKOUT_WORKSPACE_CENTER;
-    const max = Math.max(...values);
-    if (max > 620) return 310;
-    if (max > 560) return 288;
-    return CHECKOUT_WORKSPACE_CENTER;
-  },
-
   resolvePreviewBeadSize(item = {}, placement = {}, count = 0) {
     const placementSize = Number(placement.beadSize || placement.diameter);
     const sizeMm = Number(item.size || item.diameter || 0);
@@ -378,7 +521,7 @@ Page({
       ? placementSize
       : (sizeMm ? sizeMm * 5.4 : 52);
     const maxSize = count >= 28 ? 46 : count >= 22 ? 50 : 58;
-    return Math.max(34, Math.min(maxSize, rawSize));
+    return Math.max(30, Math.min(maxSize, rawSize));
   },
 
   buildPreviewRingGeometry(beads = [], design = {}, beadSizes = []) {

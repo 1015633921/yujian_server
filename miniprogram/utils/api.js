@@ -1,8 +1,20 @@
 const env = require('../config/env');
 
+function getPlatform() {
+  if (wx.getDeviceInfo) {
+    const deviceInfo = wx.getDeviceInfo();
+    if (deviceInfo && deviceInfo.platform) return deviceInfo.platform;
+  }
+  if (wx.getSystemInfoSync) {
+    const info = wx.getSystemInfoSync();
+    return info && info.platform;
+  }
+  return '';
+}
+
 function getBaseUrl() {
-  const info = wx.getSystemInfoSync ? wx.getSystemInfoSync() : {};
-  if (info.platform && info.platform !== 'devtools' && env.deviceBaseUrl) {
+  const platform = getPlatform();
+  if (platform && platform !== 'devtools' && env.deviceBaseUrl) {
     return env.deviceBaseUrl;
   }
   return env.fallbackBaseUrl;

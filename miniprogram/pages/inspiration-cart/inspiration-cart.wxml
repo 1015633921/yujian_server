@@ -4,7 +4,6 @@
       <view class="nav-title">购物车</view>
       <view class="nav-subtitle">共 {{items.length}} 个定制方案</view>
     </view>
-    <button wx:if="{{items.length}}" class="manage-button" bindtap="toggleManageMode">{{manageMode ? '完成' : '管理'}}</button>
   </view>
 
   <block wx:if="{{items.length}}">
@@ -17,32 +16,26 @@
     </view>
 
     <view class="cart-list">
-      <view wx:for="{{items}}" wx:key="key" class="cart-item yu-card" data-key="{{item.key}}">
+      <view wx:for="{{items}}" wx:key="key" class="cart-item yu-card yu-card-pressable {{checkoutLoadingKey == item.key ? 'checkout-loading' : ''}}" data-key="{{item.key}}" bindtap="checkoutDesign">
+        <view class="cart-workbench-btn" data-key="{{item.key}}" catchtap="editDesign">工作台</view>
+        <view class="cart-delete-btn" data-key="{{item.key}}" catchtap="removeItem">删除</view>
         <view class="item-preview tone-{{item.tone}}">
+          <view class="cart-tray-fallback"></view>
           <image class="item-tray-image" src="/assets/workspace/tray-yustream-transparent-user-20260701-v6.webp" mode="aspectFit" />
-          <image wx:if="{{item.imageUrl && !item.miniBeads.length}}" class="item-image" src="{{item.imageUrl}}" mode="aspectFit" lazy-load="{{true}}" />
+          <view class="cart-plan-name">{{item.planName}}</view>
           <view class="mini-ring">
-            <image wx:for="{{item.miniBeads}}" wx:key="index" class="mini-bead" src="{{item.src}}" mode="aspectFill" style="{{item.style}}" />
-          </view>
-        </view>
-
-        <view class="item-main">
-          <view class="item-title">{{item.name}}</view>
-          <view class="item-spec">手围：{{item.wristSize}}cm · {{item.desc}}</view>
-          <view class="item-recipe">{{item.recipeText}}</view>
-          <view class="item-bottom">
-            <view>
-              <view class="item-price">¥{{item.priceText}}</view>
-              <view class="cart-label">方案价</view>
-            </view>
-            <view class="item-actions">
-              <button class="item-action action-secondary" data-key="{{item.key}}" catchtap="editDesign">修改</button>
-              <button class="item-action action-primary" data-key="{{item.key}}" catchtap="checkoutDesign">去结算</button>
+            <view wx:for="{{item.miniBeads}}" wx:key="index" class="mini-bead" style="{{item.style}}">
+              <image wx:if="{{item.src}}" class="mini-bead-image" src="{{item.src}}" mode="aspectFill" />
+              <view wx:else class="mini-bead-dot"></view>
             </view>
           </view>
         </view>
 
-        <view wx:if="{{manageMode}}" class="item-delete" data-key="{{item.key}}" catchtap="removeItem">删除</view>
+        <view wx:if="{{item.createdTime}}" class="cart-created-time">{{item.createdTime}}</view>
+        <view class="item-price cart-row-price">
+          <text class="cart-row-amount">¥{{item.priceText}}</text>
+          <text class="cart-row-action">{{checkoutActionText}}</text>
+        </view>
       </view>
     </view>
   </block>
@@ -56,5 +49,12 @@
     <view class="empty-desc">只有在 DIY 工作台点击“加入购物车”的手串方案，才会出现在这里。</view>
     <button class="yu-button yu-button-primary empty-primary" bindtap="continueDiy">去 DIY 工作台</button>
     <button class="yu-button yu-button-secondary empty-secondary" bindtap="goHome">返回首页</button>
+  </view>
+
+  <view wx:if="{{checkoutLoadingKey}}" class="cart-checkout-mask">
+    <view class="cart-checkout-loading">
+      <view class="cart-checkout-spinner"></view>
+      <view>{{checkoutLoadingText}}</view>
+    </view>
   </view>
 </view>

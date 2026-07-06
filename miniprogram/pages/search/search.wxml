@@ -1,7 +1,15 @@
 <view class="page search-page">
   <view class="search-box">
-    <text class="search-icon">⌕</text>
-    <input class="search-input" placeholder="搜索水晶、颜色、功效或灵感" value="{{keyword}}" focus bindconfirm="submitSearch" bindinput="onKeywordInput" />
+    <text class="search-icon">搜</text>
+    <input
+      class="search-input"
+      placeholder="搜索珠子名称 / 品种 / 功效"
+      value="{{keyword}}"
+      focus
+      confirm-type="search"
+      bindconfirm="submitSearch"
+      bindinput="onKeywordInput"
+    />
     <button wx:if="{{keyword}}" class="clear-btn" bindtap="clearKeyword">×</button>
   </view>
 
@@ -26,7 +34,7 @@
           <view class="inspiration-copy">
             <view class="inspiration-title">{{item.title}}</view>
             <view class="inspiration-meta">{{item.meta}}</view>
-            <view class="inspiration-link">查看搭配思路 →</view>
+            <view class="inspiration-link">查看搭配思路</view>
           </view>
         </view>
       </view>
@@ -42,26 +50,53 @@
       <text>{{resultCount}} 条</text>
     </view>
 
-    <view class="section result-section">
-      <view class="section-head">
-        <view>
-          <view class="section-title">相关方案与灵感</view>
-          <view class="section-subtitle">查看设计原因、搭配逻辑与适用场景</view>
+    <view wx:if="{{loading}}" class="state-card">正在搜索...</view>
+
+    <block wx:else>
+      <view class="section result-section">
+        <view class="section-head">
+          <view>
+            <view class="section-title">相关珠材</view>
+            <view class="section-subtitle">可直接带入工作台继续调整</view>
+          </view>
+          <view class="section-link">{{materialResults.length}} 款</view>
         </view>
-        <view class="section-link">{{inspirationResults.length}} 篇</view>
-      </view>
-      <view wx:if="{{!inspirationResults.length}}" class="state-card">暂时没有找到相关灵感。</view>
-      <view wx:else class="inspiration-result-list">
-        <view wx:for="{{inspirationResults}}" wx:key="id" class="inspiration-result-card" data-id="{{item.id}}" data-type="{{item.type}}" bindtap="openInspiration">
-          <view class="result-inspiration-image {{item.tone}}"></view>
-          <view class="result-inspiration-copy">
-            <view class="inspiration-type">{{item.type === 'plan' ? '推荐方案' : '社区作品'}}</view>
-            <view class="inspiration-title">{{item.title}}</view>
-            <view class="inspiration-desc">{{item.desc}}</view>
-            <view class="inspiration-link">查看详情 →</view>
+        <view wx:if="{{!materialResults.length}}" class="state-card">暂时没有找到相关珠材。</view>
+        <view wx:else class="material-result-grid">
+          <view wx:for="{{materialResults}}" wx:key="id" class="material-result-card">
+            <image wx:if="{{item.image_url}}" class="material-result-image" src="{{item.image_url}}" mode="aspectFill" lazy-load="{{true}}" data-id="{{item.id}}" binderror="onImageError"></image>
+            <view wx:else class="material-result-image fallback {{item.tone}}"></view>
+            <view class="material-result-copy">
+              <view class="material-result-title">{{item.name}}</view>
+              <view class="material-result-meta">¥{{item.priceText}} · {{item.sizeText}}</view>
+              <view class="material-result-desc">{{item.effect}}</view>
+              <button class="material-result-action" data-id="{{item.id}}" bindtap="startDiy">用它 DIY</button>
+            </view>
           </view>
         </view>
       </view>
-    </view>
+
+      <view class="section result-section">
+        <view class="section-head">
+          <view>
+            <view class="section-title">相关方案与灵感</view>
+            <view class="section-subtitle">查看设计原因、搭配逻辑与适用场景</view>
+          </view>
+          <view class="section-link">{{inspirationResults.length}} 篇</view>
+        </view>
+        <view wx:if="{{!inspirationResults.length}}" class="state-card">暂时没有找到相关灵感。</view>
+        <view wx:else class="inspiration-result-list">
+          <view wx:for="{{inspirationResults}}" wx:key="id" class="inspiration-result-card" data-id="{{item.id}}" data-type="{{item.type}}" bindtap="openInspiration">
+            <view class="result-inspiration-image {{item.tone}}"></view>
+            <view class="result-inspiration-copy">
+              <view class="inspiration-type">{{item.type === 'plan' ? '推荐方案' : '社区作品'}}</view>
+              <view class="inspiration-title">{{item.title}}</view>
+              <view class="inspiration-desc">{{item.desc}}</view>
+              <view class="inspiration-link">查看详情</view>
+            </view>
+          </view>
+        </view>
+      </view>
+    </block>
   </block>
 </view>

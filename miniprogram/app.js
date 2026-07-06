@@ -23,9 +23,17 @@ App({
       });
     }
 
-    // 先让首页完成首屏绘制，再刷新登录态，避免新用户首次进入时
-    // 登录请求和图片、页面脚本同时争用网络与主线程。
+    // Let the first screen render before refreshing an existing login session.
+    // New users log in only when they tap a feature that needs identity.
     setTimeout(() => {
+      const storedUser = auth.getStoredUser && auth.getStoredUser();
+      if (
+        !storedUser
+        || !storedUser.user_id
+        || !storedUser.openid
+        || String(storedUser.user_id).startsWith('dev_')
+        || String(storedUser.openid).startsWith('dev_')
+      ) return;
       auth.silentLogin().catch((error) => {
         console.warn('silent login skipped:', error.message || error);
       });

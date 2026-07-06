@@ -318,6 +318,14 @@ Page({
     const refreshedDate = wx.getStorageSync(DAILY_REFRESH_DATE_KEY);
     const shouldRefresh = refreshedDate !== todayKey() || !isFreshDailyPayload(cached);
     if (!shouldRefresh || this.dailyAutoRefreshing) return;
+    const storedUser = auth.getStoredUser && auth.getStoredUser();
+    if (
+      !storedUser
+      || !storedUser.user_id
+      || !storedUser.openid
+      || String(storedUser.user_id).startsWith('dev_')
+      || String(storedUser.openid).startsWith('dev_')
+    ) return;
     this.dailyAutoRefreshing = true;
     try {
       const user = await auth.silentLogin();
@@ -420,8 +428,7 @@ Page({
     }
   },
 
-  goToPage(e) {
-    const url = e.currentTarget.dataset.url;
+  navigateHomeUrl(url) {
     if (!url) return;
     if (url === '/pages/assessment/assessment') {
       wx.setStorageSync('customMode', {
@@ -430,11 +437,20 @@ Page({
         selectedAt: Date.now()
       });
     }
-    if (TAB_BAR_PAGES.includes(url)) {
-      wx.switchTab({ url });
-      return;
-    }
-    wx.navigateTo({ url });
+    const navigate = TAB_BAR_PAGES.includes(url) ? wx.switchTab : wx.navigateTo;
+    navigate({
+      url,
+      fail: () => {
+        if (!TAB_BAR_PAGES.includes(url)) {
+          wx.redirectTo({ url, fail: () => {} });
+        }
+      }
+    });
+  },
+
+  goToPage(e) {
+    const url = e.currentTarget.dataset.url;
+    this.navigateHomeUrl(url);
   },
 
   onBannerChange(e) {
@@ -444,13 +460,8 @@ Page({
   openHomeBanner(e) {
     const index = Number(e.currentTarget.dataset.index) || 0;
     const banner = this.data.homeBanners[index];
-    const url = banner && banner.actionUrl;
-    if (!url) return;
-    if (TAB_BAR_PAGES.includes(url)) {
-      wx.switchTab({ url });
-      return;
-    }
-    wx.navigateTo({ url });
+    const url = e.currentTarget.dataset.url || (banner && banner.actionUrl);
+    this.navigateHomeUrl(url);
   },
 
   openInspiration(e) {

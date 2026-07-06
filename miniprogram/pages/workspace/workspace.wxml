@@ -83,6 +83,7 @@
           catchtouchend="onBeadTouchEnd"
           catchtouchcancel="onBeadTouchEnd"
         >
+          <view class="circle-bead-hit"></view>
           <image wx:if="{{item.image_url}}" class="circle-bead-image" src="{{item.image_url}}" mode="aspectFit" data-id="{{item.id}}" binderror="onMaterialImageError"></image>
           <view wx:else class="bead-glow"></view>
         </view>
@@ -100,38 +101,19 @@
       <view class="plate-tool-icon plate-icon-share"></view>
     </view>
 
-    <view class="plate-tool plate-tool-right-one" catchtap="saveDraft" hover-class="plate-tool-press" aria-role="button" aria-label="保存方案">
+    <view class="plate-tool plate-tool-right-one plate-tool-save" catchtap="saveDraft" hover-class="plate-tool-press" aria-role="button" aria-label="保存方案">
       <view class="plate-tool-icon plate-icon-save"></view>
     </view>
     <view class="plate-tool plate-tool-right-two {{showEnergyPanel ? 'active' : ''}}" catchtap="toggleEnergyPanel" hover-class="plate-tool-press" aria-role="button" aria-label="五行图">
-      <view class="plate-tool-icon plate-icon-energy"></view>
+      <image class="plate-tool-icon plate-tool-icon-image plate-tool-icon-image-energy" src="/images/workspace-icons/workspace-energy-five-elements.png" mode="aspectFit"></image>
     </view>
     <view class="plate-tool plate-tool-right-three danger" catchtap="confirmClearDesign" hover-class="plate-tool-press" aria-role="button" aria-label="清空">
-      <view class="plate-tool-icon plate-icon-clear"></view>
+      <image class="plate-tool-icon plate-tool-icon-image plate-tool-icon-image-clear" src="/images/workspace-icons/workspace-clear-pastel.png" mode="aspectFit"></image>
     </view>
 
     <view class="plate-random-btn {{shuffleButtonClass}}" catchtap="toggleStringMode" hover-class="plate-random-press" aria-role="button" aria-label="随机成串">
       <view class="plate-random-icon"></view>
       <view class="plate-random-text">{{randomTitle}}</view>
-    </view>
-
-    <view wx:if="{{showEnergyPanel}}" class="energy-floating-card">
-      <view class="energy-floating-head" bindtap="openEnergyModal">
-        <view>
-          <text class="energy-floating-title">五行占比</text>
-          <text class="energy-floating-sub">当前方案</text>
-        </view>
-        <view class="energy-floating-action">详情</view>
-      </view>
-      <view class="energy-mini-bars">
-        <view wx:for="{{summary.energy}}" wx:key="key" class="energy-mini-row">
-          <text class="energy-mini-name">{{item.name}}</text>
-          <view class="energy-mini-track">
-            <view class="energy-mini-fill" style="width:{{item.value}}%;background:{{item.color}};"></view>
-          </view>
-          <text class="energy-mini-value">{{item.value}}%</text>
-        </view>
-      </view>
     </view>
 
     <view wx:if="{{selectedBeadInfo}}" class="order-panel bead-info-panel">
@@ -166,6 +148,25 @@
     <view wx:else class="flight-bead-fallback" style="background: radial-gradient(circle at 32% 26%, {{flightBead.shine}} 0 10%, {{flightBead.color}} 12% 58%, rgba(0,0,0,.22) 100%);"></view>
   </view>
 
+  <cover-view wx:if="{{showEnergyPanel}}" class="energy-floating-card">
+    <cover-view class="energy-floating-head" bindtap="openEnergyModal">
+      <cover-view>
+        <cover-view class="energy-floating-title">五行占比</cover-view>
+        <cover-view class="energy-floating-sub">当前方案</cover-view>
+      </cover-view>
+      <cover-view class="energy-floating-action">详情</cover-view>
+    </cover-view>
+    <cover-view class="energy-mini-bars">
+      <cover-view wx:for="{{summary.energy}}" wx:for-index="energyIndex" wx:key="key" class="energy-mini-row {{energyIndex ? 'spaced' : ''}}">
+        <cover-view class="energy-mini-name">{{item.name}}</cover-view>
+        <cover-view class="energy-mini-track">
+          <cover-view class="energy-mini-fill" style="width:{{item.value}}%;background:{{item.color}};"></cover-view>
+        </cover-view>
+        <cover-view class="energy-mini-value">{{item.value}}%</cover-view>
+      </cover-view>
+    </cover-view>
+  </cover-view>
+
   <view class="material-drawer">
     <view class="top-tabs">
       <view wx:for="{{topTabs}}" wx:for-index="tabIndex" wx:key="key" class="top-tab {{item.className}} {{tabIndex === topTabs.length - 1 ? 'last' : ''}}" data-top="{{item.value}}" bindtap="selectTop">{{item.label}}</view>
@@ -197,7 +198,7 @@
             />
             <view wx:if="{{materialSearchKeyword}}" class="material-search-clear" catchtap="clearMaterialSearch">×</view>
           </view>
-          <view class="material-search-cart" catchtap="addDesignToCart" aria-role="button" aria-label="加入购物车">加入购物车</view>
+          <view class="material-search-cart" catchtap="addDesignToCart" aria-role="button" aria-label="{{cartActionText}}">{{cartActionText}}</view>
         </view>
         <view wx:if="{{showWorkspaceGuide}}" class="workspace-guide-card">
           <view class="workspace-guide-head">

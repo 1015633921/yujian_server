@@ -32,7 +32,7 @@
           <view class="hero-eyebrow">{{item.eyebrow}}</view>
           <view class="hero-title">{{item.title}}</view>
           <view class="hero-subtitle">{{item.subtitle}}</view>
-          <button class="hero-cta yu-pressable" catchtap="openHomeBanner" data-index="{{index}}">{{item.actionText}}</button>
+          <view class="hero-cta yu-pressable" catchtap="openHomeBanner" data-index="{{index}}" data-url="{{item.actionUrl}}" aria-role="button">{{item.actionText}}</view>
         </view>
       </view>
     </swiper-item>

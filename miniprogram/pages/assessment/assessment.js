@@ -268,6 +268,7 @@ Page({
     const report = wx.getStorageSync(ENERGY_REPORT_KEY);
     if (!this.hasValidReport(report)) return;
     this.autoReportNavigating = true;
+    wx.setStorageSync(ASSESSMENT_SUPPRESS_AUTO_REPORT_ONCE_KEY, true);
     wx.navigateTo({
       url: '/pages/report/report?from=assessment',
       complete: () => {
@@ -716,7 +717,15 @@ Page({
   goBack() {
     const pages = getCurrentPages();
     if (pages.length > 1) {
-      wx.navigateBack();
+      const current = pages[pages.length - 1] || {};
+      const previous = pages[pages.length - 2] || {};
+      const currentRoute = current.route || current.__route__ || '';
+      const previousRoute = previous.route || previous.__route__ || '';
+      if (previousRoute && previousRoute !== currentRoute && previousRoute !== 'pages/report/report') {
+        wx.navigateBack();
+        return;
+      }
+      wx.switchTab({ url: '/pages/home/home' });
       return;
     }
     wx.switchTab({ url: '/pages/home/home' });

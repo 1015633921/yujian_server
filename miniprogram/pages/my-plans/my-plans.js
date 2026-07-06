@@ -47,6 +47,56 @@ function moneyText(value) {
   return Number.isFinite(amount) ? amount.toFixed(2) : '0.00';
 }
 
+function isInternalMaterialId(value) {
+  const text = String(value || '').trim();
+  return /^(mat|real)[_-]/i.test(text) || /^\d{10,}$/.test(text);
+}
+
+function cleanMaterialLabel(value) {
+  const text = String(value || '').trim();
+  if (!text || text === '-' || text === 'NaN') return '';
+  if (isInternalMaterialId(text)) return '';
+  return text;
+}
+
+function materialLabelFromEntry(entry = {}) {
+  if (!entry || typeof entry !== 'object') {
+    return cleanMaterialLabel(MATERIAL_NAMES[entry] || entry);
+  }
+  const id = entry.id || entry.sku || entry.material_id || entry.materialId || entry.sku_id || entry.skuId || '';
+  const candidates = [
+    entry.name,
+    entry.material_name,
+    entry.materialName,
+    entry.series,
+    entry.category,
+    MATERIAL_NAMES[id],
+    id
+  ];
+  for (let index = 0; index < candidates.length; index += 1) {
+    const label = cleanMaterialLabel(candidates[index]);
+    if (label) return label;
+  }
+  return '';
+}
+
+function buildRecipeText(design = {}, selected = []) {
+  const source = Array.isArray(design.sequence) && design.sequence.length
+    ? design.sequence
+    : selected;
+  const counts = {};
+  source.forEach(item => {
+    const label = materialLabelFromEntry(item);
+    if (!label) return;
+    counts[label] = (counts[label] || 0) + 1;
+  });
+  const labels = Object.keys(counts).map(label => (
+    counts[label] > 1 ? `${label} ×${counts[label]}` : label
+  ));
+  if (labels.length) return labels.slice(0, 4).join(' · ');
+  return selected.length ? `${selected.length} 颗定制珠材` : '待继续编辑';
+}
+
 function beadIdsFromDesign(design = {}) {
   if (Array.isArray(design.selected) && design.selected.length) return design.selected;
   if (Array.isArray(design.sequence) && design.sequence.length) return design.sequence.map(item => item.id || item.sku).filter(Boolean);
@@ -85,7 +135,7 @@ function normalizeSavedPlan(item = {}, index = 0, source = 'draft') {
     dateText: `保存于 ${formatDate(createdAt)}`,
     priceText: moneyText(summary.priceText || summary.price || item.price),
     beadCount: selected.length,
-    recipeText: selected.slice(0, 4).map(id => MATERIAL_NAMES[id] || id).join(' · ') || '待继续编辑',
+    recipeText: buildRecipeText(item, selected),
     previewBeads: createPreviewBeads(selected),
     snapshot: {
       ...item,
@@ -119,7 +169,7 @@ function normalizeOrderPlan(order = {}, index = 0) {
     dateText: `${isCompleted ? '完成于' : '下单于'} ${formatDate(order.createdAt || order.created_at)}`,
     priceText: moneyText(order.totalAmount || order.total_amount || (design.summary && design.summary.price)),
     beadCount: selected.length || (order.bom || []).reduce((sum, item) => sum + Number(item.qty || 0), 0),
-    recipeText: selected.slice(0, 4).map(id => MATERIAL_NAMES[id] || id).join(' · ') || '查看订单材料',
+    recipeText: buildRecipeText({ ...design, sequence: order.sequence || design.sequence }, selected) || '查看订单材料',
     previewBeads: createPreviewBeads(selected),
     order
   };

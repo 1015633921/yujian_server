@@ -52,11 +52,6 @@
     ]
   },
   "style": "v2",
-  "permission": {
-    "scope.writePhotosAlbum": {
-      "desc": "用于保存五行测算报告海报到你的相册"
-    }
-  },
   "__usePrivacyCheck__": true,
   "requiredPrivateInfos": [
     "chooseAddress"

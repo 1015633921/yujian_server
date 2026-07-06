@@ -3,7 +3,8 @@ from __future__ import annotations
 import base64
 import binascii
 import json
-from datetime import date
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import JSONResponse
@@ -45,10 +46,15 @@ auth_service = WechatAuthService()
 avatar_storage = AvatarStorage()
 admin_content_service = AdminService()
 order_service = OrderService()
+BEIJING_TZ = ZoneInfo("Asia/Shanghai")
 
 
 def success(data, message: str = "ok") -> dict:
     return {"code": 0, "message": message, "data": data}
+
+
+def beijing_today() -> date:
+    return datetime.now(BEIJING_TZ).date()
 
 
 class AvatarBase64Payload(BaseModel):
@@ -637,7 +643,7 @@ def today_daily_energy(
 ):
     result, cache_hit = daily_service.get_or_calculate(
         user_id=user_id,
-        target_date=date.today(),
+        target_date=beijing_today(),
         initial_wish=initial_wish,
         status_tags=parse_key_list(status_tags),
         scene_key=scene_key,
@@ -652,7 +658,7 @@ def daily_energy_check_in(
     payload: DailyCheckInRequest,
     checkin_date: date | None = Query(default=None),
 ):
-    return success(daily_service.check_in(payload, checkin_date or date.today()), "签到成功")
+    return success(daily_service.check_in(payload, checkin_date or beijing_today()), "签到成功")
 
 
 @router.get("/daily-energy/{energy_date}", summary="获取指定日期能量内容")

@@ -1,6 +1,14 @@
+.checkout-page,
+page {
+  background: #fbfaf7;
+}
+
 .checkout-page {
+  position: relative;
+  z-index: 1;
+  box-sizing: border-box;
   min-height: 100vh;
-  padding-bottom: calc(168rpx + env(safe-area-inset-bottom));
+  padding-bottom: calc(260rpx + env(safe-area-inset-bottom));
 }
 
 .checkout-nav {
@@ -34,6 +42,58 @@
 
 .checkout-content {
   margin-top: 18rpx;
+  padding-bottom: calc(220rpx + env(safe-area-inset-bottom));
+}
+
+.checkout-loading {
+  margin: 18rpx 16rpx 0;
+  padding: 24rpx;
+  border: 1rpx solid rgba(32, 32, 31, .06);
+  border-radius: 28rpx;
+  background: rgba(255, 255, 255, .88);
+  box-shadow: 0 16rpx 42rpx rgba(45, 43, 37, .06);
+}
+
+.checkout-loading-stage,
+.checkout-loading-line {
+  position: relative;
+  overflow: hidden;
+  background: rgba(237, 233, 224, .72);
+}
+
+.checkout-loading-stage::after,
+.checkout-loading-line::after {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -40%;
+  width: 38%;
+  content: "";
+  background: linear-gradient(90deg, rgba(255,255,255,0), rgba(255,255,255,.74), rgba(255,255,255,0));
+  animation: checkout-shimmer 1100ms ease-in-out infinite;
+}
+
+.checkout-loading-stage {
+  height: 440rpx;
+  border-radius: 24rpx;
+}
+
+.checkout-loading-line {
+  width: 56%;
+  height: 28rpx;
+  margin-top: 24rpx;
+  border-radius: 999rpx;
+}
+
+.checkout-loading-line.strong {
+  width: 72%;
+  height: 36rpx;
+}
+
+@keyframes checkout-shimmer {
+  to {
+    left: 110%;
+  }
 }
 
 .plan-preview-card {

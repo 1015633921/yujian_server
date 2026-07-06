@@ -17,11 +17,18 @@ const TRAY_THEME_STORAGE_KEY = 'workspaceTrayThemeV1';
 const WORKSPACE_WRIST_SIZE_STORAGE_KEY = 'workspaceWristSizeV1';
 const WORKSPACE_GUIDE_STORAGE_KEY = 'workspaceFirstGuideDismissedV1';
 const MAX_WORKSPACE_BEADS = 40;
+const MAX_RECOMMENDED_RECIPE_BEADS = 18;
 const MIN_STRING_BEAD_COUNT = 8;
 const MAX_MATERIAL_FLIGHT_QUEUE = 6;
 const MATERIAL_TAP_GUARD_MS = 80;
 const MATERIAL_QUEUE_TOAST_GUARD_MS = 1200;
 const STRINGED_BEAD_GAP_RPX = 0.5;
+const MAX_BEAD_ANGULAR_VELOCITY = 0.16;
+const COLLISION_SPIN_FACTOR = 0.018;
+const ROLLING_SPIN_FACTOR = 0.10;
+const DRAG_ROLLING_SPIN_FACTOR = 0.82;
+const DEFAULT_DESIGN_NAME = 'Yustream DIY 手串方案';
+const DESIGN_NAME_MODAL_HINT = '给这条手串起个名字，方便后续在购物车和方案里识别。';
 const WORKSPACE_DEBUG_LOGS = false;
 const WORKSPACE_SOUND_URLS = {
   collisionSoft: assetUrl('sounds/bead-duang-soft-quick.wav'),
@@ -41,6 +48,28 @@ const WRIST_RULER_STEP = 0.1;
 const WRIST_RULER_TICK_RPX = 22;
 let materialCache = {};
 let materialCacheAt = {};
+
+function getWorkspaceSystemInfo() {
+  const windowInfo = wx.getWindowInfo ? wx.getWindowInfo() : {};
+  const deviceInfo = wx.getDeviceInfo ? wx.getDeviceInfo() : {};
+  const appInfo = wx.getAppBaseInfo ? wx.getAppBaseInfo() : {};
+  if (windowInfo && windowInfo.windowWidth) {
+    return {
+      ...windowInfo,
+      ...deviceInfo,
+      ...appInfo,
+      pixelRatio: windowInfo.pixelRatio || deviceInfo.pixelRatio
+    };
+  }
+  return wx.getSystemInfoSync ? wx.getSystemInfoSync() : {};
+}
+
+function cleanDesignName(value = '') {
+  const text = String(value || '').trim();
+  if (!text) return '';
+  if (text === DESIGN_NAME_MODAL_HINT || text.includes('给这条手串起个名字')) return '';
+  return text;
+}
 
 const DEFAULT_MATERIALS = [
   { id: 'clearQuartz8', skuId: 'clearQuartz', top: 'bead', category: '白水晶', name: '喜马拉雅白水晶', effect: '净化与放大', element: '金', price: 5, size: 8, weight: 1.2, color: '#dfe3e5', shine: '#ffffff' },
@@ -312,6 +341,12 @@ function filterWorkspaceTopTabs(list = []) {
   return (list || []).filter(item => item && item.key !== 'incense' && item.key !== 'pendant');
 }
 
+function firstWorkspaceImageUrl(entry = {}) {
+  const urls = entry.image_urls || entry.image_pool || [];
+  const list = Array.isArray(urls) ? urls : [urls];
+  return list.concat(entry.image_url || []).filter(Boolean)[0] || '';
+}
+
 function sequenceItemIsPendant(item = {}) {
   return String(item.top || item.item_type || item.type || '').trim().toLowerCase() === 'pendant';
 }
@@ -325,6 +360,17 @@ function repairMaybeMojibakeText(value) {
   if (!text || /[�]/.test(text)) return '';
   const repaired = repairMojibakeElementText(text);
   return repaired && !/[�]/.test(repaired) ? repaired : text;
+}
+
+function isMaterialGradeText(value) {
+  const text = repairMaybeMojibakeText(value);
+  if (!text) return true;
+  const normalized = text.trim().toLowerCase();
+  if (!normalized) return true;
+  if (/^(entry|grade|level|a\+?|aa\+?|aaa\+?|3a|4a|5a)$/.test(normalized)) return true;
+  if (/(等级|级别|品级|品质|品相)/.test(text)) return true;
+  if (/^(天然|普通|精选|精品|收藏|高货|优选|优化|通货).{0,4}级$/.test(text)) return true;
+  return false;
 }
 
 const TRAY_THEMES = [
@@ -422,6 +468,7 @@ Page({
     randomIconText: '串',
     randomTitle: '随机成串',
     randomSubtitle: '随机排列珠面',
+    cartActionText: '\u53bb\u5b9a\u5236',
     flightBead: null,
     launchingMaterialId: '',
     isShuffling: false,
@@ -538,7 +585,6 @@ Page({
     clearTimeout(this.nonCriticalTaskTimer);
     this.nonCriticalTaskTimer = setTimeout(() => {
       this.loadProfileEnergy();
-      this.ensureAudioPlayers();
     }, this.isLowPerformanceDevice ? 520 : 260);
   },
 
@@ -688,7 +734,7 @@ Page({
   },
 
   initDeviceLayout(options = {}) {
-    const info = wx.getSystemInfoSync ? wx.getSystemInfoSync() : {};
+    const info = getWorkspaceSystemInfo();
     const windowWidth = Number(info.windowWidth) || 375;
     const windowHeight = Number(info.windowHeight) || 667;
     const benchmarkLevel = Number(info.benchmarkLevel);
@@ -734,6 +780,7 @@ Page({
       screenAspectRatio
     });
     this.stageLayout = workspaceLayout.stageLayout;
+    this.energyPanelRect = workspaceLayout.energyPanelRect;
     this.setData({
       deviceClass: classes.join(' '),
       deviceInfo: {
@@ -1027,6 +1074,12 @@ Page({
         radius: stageRadius,
         size: stageSize,
         top: stageTop
+      },
+      energyPanelRect: {
+        top: topChrome + colorTop - 18,
+        left: railSide + railWidth + 18,
+        width: 750 - (railSide + railWidth + 18) - 170,
+        height: 66
       },
       style: [
         `--workspace-canvas-height:${canvasHeight}rpx`,
@@ -1500,7 +1553,7 @@ Page({
     }
     if (this.pendingRecommendedRecipe) {
       const recipe = wx.getStorageSync('recommendedRecipe') || [];
-      recipe.forEach(id => ids.push(LEGACY_ID_MAP[id] || id));
+      this.normalizedRecommendedRecipe(recipe).forEach(id => ids.push(LEGACY_ID_MAP[id] || id));
     }
     return Array.from(new Set(ids.map(id => String(id || '').trim()).filter(Boolean)));
   },
@@ -1594,12 +1647,156 @@ Page({
     ));
   },
 
-  pickMaterialImageUrl(material = {}) {
-    const pool = (material.image_urls || material.image_pool || [])
+  materialImageGroupKey(material = {}) {
+    const sku = material.sku || {};
+    const top = materialTop(material) || 'bead';
+    const textValue = value => repairMaybeMojibakeText(value).trim();
+    const explicitVarietyKey = [
+      sku.variety_id,
+      material.variety_id,
+      material.varietyId,
+      sku.series_id,
+      material.series_id,
+      material.seriesId,
+      sku.species_id,
+      material.species_id,
+      material.speciesId,
+      sku.variety_code,
+      material.variety_code,
+      material.varietyCode,
+      sku.series_code,
+      material.series_code,
+      material.seriesCode,
+      sku.species_code,
+      material.species_code,
+      material.speciesCode
+    ].map(value => String(value || '').trim()).find(Boolean);
+    if (explicitVarietyKey) return `${top}::variety::${explicitVarietyKey}`;
+    const varietyName = [
+      sku.variety_name,
+      material.variety_name,
+      material.varietyName,
+      sku.series_name,
+      material.series_name,
+      material.seriesName,
+      sku.species_name,
+      material.species_name,
+      material.speciesName,
+      sku.series,
+      material.series,
+      sku.name,
+      material.name
+    ].map(textValue).find(Boolean);
+    if (varietyName) return `${top}::variety-name::${varietyName}`;
+    const skuId = String(sku.sku_id || material.skuId || material.sku_id || '').trim();
+    if (skuId) return `${top}::sku::${skuId}`;
+    return `${top}::id::${material.id || ''}`;
+  },
+
+  materialOwnImageUrls(material = {}) {
+    const urls = material.image_urls || material.image_pool || [];
+    const list = Array.isArray(urls) ? urls : [urls];
+    return list
       .concat(material.image_url || [])
       .filter(Boolean);
+  },
+
+  materialImageCandidates(material = {}) {
+    const pool = [];
+    const seen = {};
+    const addUrls = item => {
+      this.materialOwnImageUrls(item).forEach(url => {
+        const key = this.normalizeImageUrlIdentity(url);
+        if (!key || seen[key]) return;
+        seen[key] = true;
+        pool.push(url);
+      });
+    };
+    addUrls(material);
+    if (materialTop(material) !== 'bead') return pool;
+    const groupKey = this.materialImageGroupKey(material);
+    (this.materialCatalog || DEFAULT_MATERIALS).forEach(item => {
+      if (!item || item === material || materialTop(item) !== 'bead') return;
+      if (this.materialImageGroupKey(item) !== groupKey) return;
+      addUrls(item);
+    });
+    return pool;
+  },
+
+  mergeMaterialImagePool(material = {}) {
+    const payload = this.optimizeMaterialPayload({ materials: [material] });
+    const hydrated = payload.materials && payload.materials[0];
+    if (!hydrated || this.materialOwnImageUrls(hydrated).length <= 1) {
+      return this.findMaterialById(material.id || material.skuId || material.sku_id) || material;
+    }
+    const groupKey = this.materialImageGroupKey(hydrated);
+    const imageUrls = this.materialOwnImageUrls(hydrated);
+    const mergeItem = item => {
+      if (!item) return item;
+      const sameGroup = this.materialImageGroupKey(item) === groupKey;
+      const sameSku = [item.id, item.skuId, item.sku_id]
+        .map(value => String(value || '').trim())
+        .includes(String(hydrated.id || hydrated.skuId || hydrated.sku_id || '').trim());
+      if (!sameGroup && !sameSku) return item;
+      return {
+        ...item,
+        image_url: item.image_url || hydrated.image_url || imageUrls[0] || '',
+        image_urls: imageUrls,
+        image_pool: imageUrls
+      };
+    };
+    this.materialCatalog = (this.materialCatalog || DEFAULT_MATERIALS).map(mergeItem);
+    this.setData({
+      visibleMaterials: (this.data.visibleMaterials || []).map(mergeItem)
+    });
+    return this.findMaterialById(hydrated.id || hydrated.skuId || hydrated.sku_id) || hydrated;
+  },
+
+  async ensureMaterialImagePool(material = {}) {
+    if (this.materialOwnImageUrls(material).length > 1) return material;
+    const groupKey = this.materialImageGroupKey(material);
+    this.materialImagePoolHydrated = this.materialImagePoolHydrated || {};
+    this.materialImagePoolHydrating = this.materialImagePoolHydrating || {};
+    if (this.materialImagePoolHydrated[groupKey]) return this.findMaterialById(material.id) || material;
+    if (this.materialImagePoolHydrating[groupKey]) return this.materialImagePoolHydrating[groupKey];
+    const ids = [material.id, material.skuId, material.sku_id]
+      .map(value => String(value || '').trim())
+      .filter(Boolean);
+    if (!ids.length) return material;
+    const request = getMaterials({
+      ids: ids.slice(0, 1),
+      page: 1,
+      pageSize: 1,
+      silent: true,
+      timeout: 5000
+    }).then(data => {
+      const hydrated = data && data.materials && data.materials[0];
+      if (!hydrated) return this.findMaterialById(material.id) || material;
+      const merged = this.mergeMaterialImagePool(hydrated);
+      this.materialImagePoolHydrated[groupKey] = true;
+      return merged;
+    }).catch(error => {
+      logWorkspaceWarning('hydrate material image pool failed:', error && (error.message || error));
+      return this.findMaterialById(material.id) || material;
+    }).finally(() => {
+      delete this.materialImagePoolHydrating[groupKey];
+    });
+    this.materialImagePoolHydrating[groupKey] = request;
+    return request;
+  },
+
+  pickMaterialImageUrl(material = {}) {
+    const pool = this.materialImageCandidates(material);
     if (!pool.length) return '';
-    return pool[Math.floor(Math.random() * pool.length)];
+    const groupKey = this.materialImageGroupKey(material);
+    const lastPicked = this.lastPickedMaterialImages && this.lastPickedMaterialImages[groupKey];
+    const candidates = pool.length > 1 && lastPicked
+      ? pool.filter(url => this.normalizeImageUrlIdentity(url) !== lastPicked)
+      : pool;
+    const picked = candidates[Math.floor(Math.random() * candidates.length)] || pool[Math.floor(Math.random() * pool.length)] || '';
+    this.lastPickedMaterialImages = this.lastPickedMaterialImages || {};
+    this.lastPickedMaterialImages[groupKey] = this.normalizeImageUrlIdentity(picked);
+    return picked;
   },
 
   normalizeImageUrlIdentity(url = '') {
@@ -1610,9 +1807,7 @@ Page({
     if (!imageUrl) return '';
     const material = this.findMaterialById(id) || {};
     const target = this.normalizeImageUrlIdentity(imageUrl);
-    return (material.image_urls || material.image_pool || [])
-      .concat(material.image_url || [])
-      .filter(Boolean)
+    return this.materialImageCandidates(material)
       .find(url => this.normalizeImageUrlIdentity(url) === target) || '';
   },
 
@@ -1627,6 +1822,32 @@ Page({
   hasResolvableMaterialIdentifier(id) {
     const resolvedId = this.resolveMaterialId(LEGACY_ID_MAP[id] || id);
     return !!resolvedId && this.hasMaterial(resolvedId);
+  },
+
+  normalizeRecommendedRecipeToken(item) {
+    if (!item || typeof item !== 'object') return String(item || '').trim();
+    return String(
+      item.material_id
+      || item.source_material_id
+      || item.materialId
+      || item.sourceMaterialId
+      || item.sku_id
+      || item.skuId
+      || item.sku
+      || item.material_code
+      || item.materialCode
+      || item.crystal_code
+      || item.code
+      || item.id
+      || item.name
+      || ''
+    ).trim();
+  },
+
+  normalizedRecommendedRecipe(recipe = []) {
+    return (Array.isArray(recipe) ? recipe : [recipe])
+      .map(item => this.normalizeRecommendedRecipeToken(item))
+      .filter(Boolean);
   },
 
   resolveMaterialId(id) {
@@ -1846,6 +2067,9 @@ Page({
 
   onShow() {
     wx.hideTabBar({ animation: false });
+    if (this.data.workspaceCanvasVisible === false) {
+      this.restoreWorkspaceCanvasAfterOverlay();
+    }
     if (this.deferFirstShowProfileEnergy) {
       this.deferFirstShowProfileEnergy = false;
     } else {
@@ -1940,7 +2164,7 @@ Page({
     if (draft && draft.selected && draft.selected.length) {
       this.setData({
         selected: draft.selected.map(id => LEGACY_ID_MAP[id] || id),
-        placements: this.normalizePlacements(draft.selected, draft.placements),
+        placements: this.normalizePlacements(draft.selected, draft.placements, draft.sequence),
         attachedPendants: [],
         isLooseMode: draft.isLooseMode === true,
         wristSize: this.normalizeWristValue(draft.wristSize || this.data.wristSize || 16),
@@ -1970,7 +2194,8 @@ Page({
 
   applyRecommendedRecipe(options = {}) {
     if (!this.materialPayloadReady) return false;
-    const recipe = wx.getStorageSync('recommendedRecipe') || ['aquamarine', 'amethyst', 'clearQuartz', 'moonstone'];
+    const rawRecipe = wx.getStorageSync('recommendedRecipe') || ['aquamarine', 'amethyst', 'clearQuartz', 'moonstone'];
+    const recipe = this.normalizedRecommendedRecipe(rawRecipe);
     const wristSize = Number(wx.getStorageSync('recommendedWristSize')) || this.data.wristSize || 16;
     const idMap = {
       aquamarine: 'aquamarine8',
@@ -1987,13 +2212,23 @@ Page({
     const materialIds = (recipe.length ? recipe : ['aquamarine', 'amethyst', 'clearQuartz', 'moonstone'])
       .map(id => this.resolveMaterialId(idMap[id] || id))
       .filter(id => this.hasMaterial(id));
-    const beadMaterialIds = materialIds.filter(id => materialIsWorkspaceSupported(this.findMaterialById(id) || {}));
+    const beadMaterialIds = materialIds.filter(id => {
+      const material = this.findMaterialById(id) || {};
+      return materialTop(material) === 'bead' && materialIsWorkspaceSupported(material);
+    });
+    const recipeMaterialIds = beadMaterialIds.length
+      ? beadMaterialIds
+      : materialIds.filter(id => materialIsWorkspaceSupported(this.findMaterialById(id) || {}));
     const selected = [];
     const targetLengthMm = wristSize * 10 + 8;
     let currentLengthMm = 0;
     let cursor = 0;
-    while (beadMaterialIds.length && currentLengthMm < targetLengthMm && selected.length < 40) {
-      const materialId = beadMaterialIds[cursor % beadMaterialIds.length];
+    while (
+      recipeMaterialIds.length
+      && (currentLengthMm < targetLengthMm || selected.length < MIN_STRING_BEAD_COUNT)
+      && selected.length < MAX_RECOMMENDED_RECIPE_BEADS
+    ) {
+      const materialId = recipeMaterialIds[cursor % recipeMaterialIds.length];
       const material = this.findMaterialById(materialId);
       selected.push(materialId);
       currentLengthMm += material ? material.size : 8;
@@ -2080,17 +2315,45 @@ Page({
     return true;
   },
 
-  normalizePlacements(selected, placements) {
+  normalizePlacements(selected, placements, snapshots = []) {
     const normalized = [];
     selected.forEach((id, index) => {
       const previous = placements && placements[index];
+      const snapshot = snapshots && snapshots[index] || {};
       const loose = previous && Number.isFinite(previous.looseX) && Number.isFinite(previous.looseY)
         ? previous
         : this.createLoosePlacement(index, id, normalized);
+      const material = this.findMaterialById(id) || {};
+      const size = previous && (previous.size || previous.diameter || previous.size_mm)
+        || snapshot.size
+        || snapshot.diameter
+        || snapshot.size_mm
+        || material.size
+        || material.size_mm
+        || '';
+      const price = previous && (previous.price || previous.priceText || previous.amount)
+        || snapshot.price
+        || snapshot.priceText
+        || snapshot.amount
+        || material.price
+        || '';
       normalized.push({
         id,
         image_url: this.findCurrentMaterialImageUrl(id, previous && previous.image_url)
-          || this.pickMaterialImageUrl(this.findMaterialById(id) || {}),
+          || snapshot.image_url
+          || firstWorkspaceImageUrl(snapshot)
+          || this.pickMaterialImageUrl(material),
+        name: previous && (previous.name || previous.material_name || previous.materialName)
+          || snapshot.name
+          || snapshot.material_name
+          || snapshot.materialName
+          || material.name
+          || '',
+        category: previous && previous.category || snapshot.category || material.category || '',
+        series: previous && previous.series || snapshot.series || material.series || '',
+        size,
+        diameter: size,
+        price,
         dx: Number(loose.dx) || 0,
         dy: Number(loose.dy) || 0,
         looseX: loose.looseX,
@@ -2289,9 +2552,11 @@ Page({
       const pairs = event && event.pairs ? event.pairs : [];
       if (!pairs.length) return;
       this.handleFrozenImpactCollision(pairs);
+      if (this.suppressStringingSounds || this.data.isShuffling || this.data.isStringingFinishing) return;
       let maxRelSpeed = 0;
       let impactVector = null;
       pairs.forEach(pair => {
+        this.applyCollisionSpin(pair);
         const bodyA = pair.bodyA;
         const bodyB = pair.bodyB;
         if (!bodyA || !bodyB) return;
@@ -2323,6 +2588,70 @@ Page({
         : (maxRelSpeed > 1.45 ? 'collision' : 'collisionSoft');
       if (this.soundEnabled) this.playSoundEffect(soundName, 40);
     });
+  },
+
+  isWorkspaceBeadBody(body) {
+    const plugin = (body && body.plugin) || {};
+    return !!plugin.materialId && plugin.designIndex != null;
+  },
+
+  clampAngularVelocity(value, limit = MAX_BEAD_ANGULAR_VELOCITY) {
+    const raw = Number(value) || 0;
+    return Math.max(-limit, Math.min(limit, raw));
+  },
+
+  addBodySpin(body, delta, options = {}) {
+    if (!Body || !body || body.isStatic) return;
+    const maxDelta = Number(options.maxDelta || 0);
+    const limitedDelta = maxDelta > 0
+      ? Math.max(-maxDelta, Math.min(maxDelta, Number(delta) || 0))
+      : (Number(delta) || 0);
+    if (Math.abs(limitedDelta) < 0.0004) return;
+    const limit = Number(options.limit || MAX_BEAD_ANGULAR_VELOCITY);
+    Body.setAngularVelocity(body, this.clampAngularVelocity((Number(body.angularVelocity) || 0) + limitedDelta, limit));
+    body.isSleeping = false;
+    body.sleepCounter = 0;
+  },
+
+  getCollisionNormal(pair, bodyA, bodyB) {
+    const normal = pair && pair.collision && pair.collision.normal;
+    if (normal && Number.isFinite(normal.x) && Number.isFinite(normal.y)) {
+      const length = Math.sqrt(normal.x * normal.x + normal.y * normal.y) || 1;
+      return { x: normal.x / length, y: normal.y / length };
+    }
+    const dx = ((bodyB && bodyB.position && bodyB.position.x) || 0) - ((bodyA && bodyA.position && bodyA.position.x) || 0);
+    const dy = ((bodyB && bodyB.position && bodyB.position.y) || 0) - ((bodyA && bodyA.position && bodyA.position.y) || 0);
+    const distance = Math.sqrt(dx * dx + dy * dy) || 1;
+    return { x: dx / distance, y: dy / distance };
+  },
+
+  applyCollisionSpin(pair) {
+    if (!Body || !pair) return;
+    const bodyA = pair.bodyA;
+    const bodyB = pair.bodyB;
+    if (!bodyA || !bodyB) return;
+    const beadA = this.isWorkspaceBeadBody(bodyA);
+    const beadB = this.isWorkspaceBeadBody(bodyB);
+    if (!beadA && !beadB) return;
+    const relX = ((bodyA.velocity && bodyA.velocity.x) || 0) - ((bodyB.velocity && bodyB.velocity.x) || 0);
+    const relY = ((bodyA.velocity && bodyA.velocity.y) || 0) - ((bodyB.velocity && bodyB.velocity.y) || 0);
+    const relSpeed = Math.sqrt(relX * relX + relY * relY);
+    if (relSpeed < 0.16) return;
+    const normal = this.getCollisionNormal(pair, bodyA, bodyB);
+    const tangentX = -normal.y;
+    const tangentY = normal.x;
+    const tangentSpeed = relX * tangentX + relY * tangentY;
+    const normalSpeed = Math.abs(relX * normal.x + relY * normal.y);
+    const cross = (((bodyA.position && bodyA.position.x) || 0) - ((bodyB.position && bodyB.position.x) || 0)) * relY
+      - (((bodyA.position && bodyA.position.y) || 0) - ((bodyB.position && bodyB.position.y) || 0)) * relX;
+    const signSeed = Math.abs(tangentSpeed) > 0.01 ? tangentSpeed : cross;
+    const sign = signSeed >= 0 ? 1 : -1;
+    const spin = this.clampAngularVelocity(
+      tangentSpeed * COLLISION_SPIN_FACTOR + sign * Math.min(0.055, normalSpeed * 0.007),
+      0.09
+    );
+    if (beadA) this.addBodySpin(bodyA, -spin);
+    if (beadB) this.addBodySpin(bodyB, spin);
   },
 
   handleFrozenImpactCollision(pairs = []) {
@@ -2566,6 +2895,7 @@ Page({
       deleteReady: false,
       screenSpace: true
     });
+    this.clearEnergyPanelCanvasOverlap(ctx, state);
   },
 
   renderBraceletCanvas() {
@@ -2585,6 +2915,25 @@ Page({
     });
     normal.concat(floating).forEach(sprite => this.drawCanvasBead(ctx, sprite));
     ctx.restore();
+    this.clearEnergyPanelCanvasOverlap(ctx, state);
+  },
+
+  clearEnergyPanelCanvasOverlap(ctx, state) {
+    if (!this.data.showEnergyPanel || !ctx || !state || !state.rect || !this.energyPanelRect) return;
+    const deviceInfo = this.data.deviceInfo || {};
+    const rpxToPx = (Number(deviceInfo.windowWidth) || 375) / 750;
+    const paddingRpx = 10;
+    const panel = this.energyPanelRect;
+    const left = (panel.left - paddingRpx) * rpxToPx - Number(state.rect.left || 0);
+    const top = (panel.top - paddingRpx) * rpxToPx - Number(state.rect.top || 0);
+    const width = (panel.width + paddingRpx * 2) * rpxToPx;
+    const height = (panel.height + paddingRpx * 2) * rpxToPx;
+    const x = Math.max(0, left);
+    const y = Math.max(0, top);
+    const right = Math.min(Number(state.width || 0), left + width);
+    const bottom = Math.min(Number(state.height || 0), top + height);
+    if (right <= x || bottom <= y) return;
+    ctx.clearRect(x, y, right - x, bottom - y);
   },
 
   getCanvasImpactOffset() {
@@ -3065,6 +3414,9 @@ Page({
         this.physicsLastTime = now;
         if (this.physicsTargets) this.applyStringingForces();
         Engine.update(this.physicsEngine, this.physicsStepMs || 1000 / 30);
+        if (!this.physicsTargets && !this.data.isShuffling && !this.data.isStringingFinishing) {
+          this.applyRollingSpinFromVelocity();
+        }
         if (!this.physicsTargets) this.applyBilliardDamping();
         this.resolveBeadOverlaps();
         this.clampBodiesInsideTray();
@@ -3088,7 +3440,8 @@ Page({
           return;
         }
         const allSleeping = this.physicsBodies.length > 0
-          && this.physicsBodies.every(body => body.isSleeping);
+          && this.physicsBodies.every(body => body.isSleeping
+            || (body.speed < 0.045 && Math.abs(Number(body.angularVelocity) || 0) < 0.004));
         if (!this.physicsTargets) {
           this.physicsStillFrames = allSleeping ? this.physicsStillFrames + 1 : 0;
         }
@@ -3143,12 +3496,14 @@ Page({
               y: bodyB.position.y + normalY * correction
             });
             Body.setVelocity(bodyB, { x: bodyB.velocity.x * 0.84, y: bodyB.velocity.y * 0.84 });
+            this.applyOverlapSeparationSpin(bodyA, bodyB, normalX, normalY, correction);
           } else if (bodyB.isStatic) {
             Body.setPosition(bodyA, {
               x: bodyA.position.x - normalX * correction,
               y: bodyA.position.y - normalY * correction
             });
             Body.setVelocity(bodyA, { x: bodyA.velocity.x * 0.84, y: bodyA.velocity.y * 0.84 });
+            this.applyOverlapSeparationSpin(bodyA, bodyB, normalX, normalY, correction);
           } else {
             const half = correction * 0.5;
             Body.setPosition(bodyA, {
@@ -3159,10 +3514,48 @@ Page({
               x: bodyB.position.x + normalX * half,
               y: bodyB.position.y + normalY * half
             });
+            this.applyOverlapSeparationSpin(bodyA, bodyB, normalX, normalY, correction);
           }
         }
       }
     }
+  },
+
+  applyOverlapSeparationSpin(bodyA, bodyB, normalX, normalY, correction) {
+    if (!Body) return;
+    const beadA = this.isWorkspaceBeadBody(bodyA);
+    const beadB = this.isWorkspaceBeadBody(bodyB);
+    if (!beadA && !beadB) return;
+    const relX = ((bodyA.velocity && bodyA.velocity.x) || 0) - ((bodyB.velocity && bodyB.velocity.x) || 0);
+    const relY = ((bodyA.velocity && bodyA.velocity.y) || 0) - ((bodyB.velocity && bodyB.velocity.y) || 0);
+    const tangentSpeed = relX * -normalY + relY * normalX;
+    const sign = Math.abs(tangentSpeed) > 0.01 ? (tangentSpeed >= 0 ? 1 : -1) : ((bodyA.plugin && bodyA.plugin.designIndex || 0) % 2 ? 1 : -1);
+    const pressureSpin = Math.min(0.026, Math.max(0, correction) * 0.0016) * sign;
+    const spin = this.clampAngularVelocity(tangentSpeed * 0.008 + pressureSpin, 0.045);
+    if (beadA) this.addBodySpin(bodyA, -spin, { maxDelta: 0.035 });
+    if (beadB) this.addBodySpin(bodyB, spin, { maxDelta: 0.035 });
+  },
+
+  applyRollingSpinFromVelocity() {
+    const bodies = this.physicsBodies || [];
+    if (!bodies.length || !Body) return;
+    const layout = this.getStageLayout();
+    const center = layout.center;
+    bodies.forEach(body => {
+      if (!this.isWorkspaceBeadBody(body) || body.isStatic || !body.position) return;
+      const speed = Number(body.speed) || 0;
+      if (speed < 0.09) return;
+      const radius = Number(body.plugin && (body.plugin.bodyRadius || body.plugin.beadSize * 0.5)) || 24;
+      const dx = body.position.x - center;
+      const dy = body.position.y - center;
+      const distance = Math.sqrt(dx * dx + dy * dy) || 1;
+      const tangentX = -dy / distance;
+      const tangentY = dx / distance;
+      const tangentSpeed = ((body.velocity && body.velocity.x) || 0) * tangentX
+        + ((body.velocity && body.velocity.y) || 0) * tangentY;
+      const travelSpin = tangentSpeed / Math.max(14, radius) * ROLLING_SPIN_FACTOR;
+      this.addBodySpin(body, travelSpin, { maxDelta: 0.010, limit: 0.11 });
+    });
   },
 
   applyBilliardDamping() {
@@ -3175,7 +3568,14 @@ Page({
       const mu = Number(plugin.billiardDamping || defaultMu);
       if (body.speed < 0.045) {
         Body.setVelocity(body, { x: 0, y: 0 });
-        Body.setAngularVelocity(body, 0);
+        const angularVelocity = Number(body.angularVelocity) || 0;
+        if (Math.abs(angularVelocity) < 0.004) {
+          Body.setAngularVelocity(body, 0);
+        } else {
+          Body.setAngularVelocity(body, angularVelocity * 0.82);
+          body.isSleeping = false;
+          body.sleepCounter = 0;
+        }
         return;
       }
       Body.setVelocity(body, {
@@ -3211,6 +3611,7 @@ Page({
         y: center + normalY * maxDistance
       });
       const outwardSpeed = body.velocity.x * normalX + body.velocity.y * normalY;
+      this.applyTrayWallSpin(body, normalX, normalY, outwardSpeed);
       if (outwardSpeed > 0) {
         Body.setVelocity(body, {
           x: body.velocity.x - normalX * outwardSpeed * 1.28,
@@ -3218,6 +3619,16 @@ Page({
         });
       }
     });
+  },
+
+  applyTrayWallSpin(body, normalX, normalY, outwardSpeed = 0) {
+    if (!this.isWorkspaceBeadBody(body) || body.isStatic) return;
+    const radius = Number(body.plugin && (body.plugin.bodyRadius || body.plugin.beadSize * 0.5)) || 24;
+    const tangentSpeed = ((body.velocity && body.velocity.x) || 0) * -normalY
+      + ((body.velocity && body.velocity.y) || 0) * normalX;
+    const sign = Math.abs(tangentSpeed) > 0.01 ? (tangentSpeed >= 0 ? 1 : -1) : (outwardSpeed >= 0 ? 1 : -1);
+    const spin = tangentSpeed / Math.max(14, radius) * 0.42 + sign * Math.min(0.035, Math.abs(outwardSpeed) * 0.006);
+    this.addBodySpin(body, spin, { maxDelta: 0.065, limit: 0.13 });
   },
 
   syncPhysicsFrame(onSynced) {
@@ -3395,6 +3806,7 @@ Page({
 
   completeStringing() {
     this.physicsTargets = null;
+    this.suppressStringingSounds = false;
     this.setData({
       isLooseMode: false,
       isShuffling: false,
@@ -3433,6 +3845,7 @@ Page({
     this.pendingFrozenImpact = false;
     this.pendingFrozenImpactAt = 0;
     this.physicsFramePending = false;
+    this.suppressStringingSounds = false;
     this.livePlacements = null;
   },
 
@@ -3722,15 +4135,22 @@ Page({
   },
 
   decorateVisibleMaterials(materials) {
-    return (materials || []).map((item, index) => ({
-      ...item,
-      cardClass: `material-card-${index}${this.data.launchingMaterialId === item.id ? ' launching' : ''}`,
-      effectText: [
-        item.series && item.series !== item.name ? item.series : '',
-        item.grade || '',
-        (item.effects || []).slice(0, 2).join(' / ')
-      ].filter(Boolean).join(' · ')
-    }));
+    return (materials || []).map((item, index) => {
+      const seriesText = repairMaybeMojibakeText(item.series);
+      const effectsText = (item.effects || [])
+        .map(effect => repairMaybeMojibakeText(effect))
+        .filter(effect => effect && !isMaterialGradeText(effect))
+        .slice(0, 2)
+        .join(' / ');
+      return {
+        ...item,
+        cardClass: `material-card-${index}${this.data.launchingMaterialId === item.id ? ' launching' : ''}`,
+        effectText: [
+          seriesText && seriesText !== item.name && !isMaterialGradeText(seriesText) ? seriesText : '',
+          effectsText
+        ].filter(Boolean).join(' / ')
+      };
+    });
   },
 
   selectTop(e) {
@@ -4096,6 +4516,8 @@ Page({
       return;
     }
     wx.showLoading({ title: '生成预览...', mask: true });
+    const current = wx.getStorageSync('currentDesign') || {};
+    const planName = cleanDesignName(current.name) || cleanDesignName(current.title) || DEFAULT_DESIGN_NAME;
     const sequence = this.buildCurrentSequence();
     const fallbackPrice = sequence.reduce((sum, item) => sum + Number(item.price || 0), 0);
     const summaryPrice = Number((this.data.summary && (this.data.summary.priceText || this.data.summary.price)) || fallbackPrice || 0);
@@ -4106,7 +4528,14 @@ Page({
       price,
       priceText: price.toFixed(2)
     };
-    const previewResult = await this.prepareCurrentDesignPreview(user.user_id, {});
+    let previewResult = {};
+    try {
+      previewResult = await this.prepareCurrentDesignPreview(user.user_id, {});
+    } catch (error) {
+      wx.hideLoading();
+      wx.showToast({ title: '预览图生成失败，请重试', icon: 'none' });
+      return;
+    }
     const previewImage = previewResult.previewImage || previewResult.localPreviewImage || '';
     wx.hideLoading();
     if (!previewImage) {
@@ -4114,10 +4543,12 @@ Page({
       return;
     }
     const localId = `diy-${Date.now()}`;
+    const stageLayout = this.getStageLayout();
     const cartPayload = {
       id: localId,
       createdAt: Date.now(),
-      name: 'DIY 手串方案',
+      name: planName,
+      title: planName,
       userId: user.user_id,
       selected: [...this.data.selected],
       materialIds: sequence.map(item => item.id || item.sku).filter(Boolean),
@@ -4126,6 +4557,9 @@ Page({
       wristSize: this.data.wristSize,
       wearStyle: 'single',
       isLooseMode: this.data.isLooseMode,
+      workspaceStageCenter: stageLayout.center,
+      previewSourceCenter: stageLayout.center,
+      preview_source_center: stageLayout.center,
       sourceContext: this.data.sourceContext || this.sourceContext || null,
       preview_image: previewImage,
       previewImage,
@@ -4134,58 +4568,67 @@ Page({
       summary,
       sequence
     };
-    try {
-      const saved = await saveCartItem({
-        user_id: user.user_id,
-        cart_item_id: localId,
-        item_type: 'diy_design',
-        item_id: localId,
-        item: cartPayload,
-        quantity: 1
-      });
-      const cart = wx.getStorageSync('diyDesignCart') || [];
-      const storedItem = {
+    const localStoredItem = {
+      ...cartPayload,
+      key: localId,
+      cart_item_id: localId,
+      quantity: 1,
+      qty: 1
+    };
+    const localCart = wx.getStorageSync('diyDesignCart') || [];
+    const localNextCart = [
+      localStoredItem,
+      ...localCart.filter(item => (item.cart_item_id || item.id) !== localId)
+    ].slice(0, 20);
+    wx.setStorageSync('diyDesignCart', localNextCart);
+    wx.setStorageSync('currentDesign', localStoredItem);
+    this.syncCartItemToServer(user.user_id, localId, cartPayload);
+    this.hideWorkspaceCanvasForOverlay();
+    wx.showLoading({ title: '正在进入确认订单', mask: true });
+    wx.navigateTo({
+      url: '/pages/checkout/checkout',
+      fail: () => {
+        wx.hideLoading();
+        this.restoreWorkspaceCanvasAfterOverlay();
+        wx.showToast({ title: '打开确认订单失败', icon: 'none' });
+      }
+    });
+    return;
+  },
+
+  syncCartItemToServer(userId, localId, cartPayload) {
+    saveCartItem({
+      user_id: userId,
+      cart_item_id: localId,
+      item_type: 'diy_design',
+      item_id: localId,
+      item: cartPayload,
+      quantity: 1
+    }).then(saved => {
+      const savedItem = {
         ...cartPayload,
         ...(saved.item || {}),
+        name: (saved.item && (saved.item.name || saved.item.title)) || cartPayload.name,
+        title: (saved.item && (saved.item.title || saved.item.name)) || cartPayload.title,
         id: saved.cart_item_id || localId,
         key: saved.cart_item_id || localId,
         cart_item_id: saved.cart_item_id || localId,
         quantity: saved.quantity || 1,
         qty: saved.quantity || 1
       };
-      wx.setStorage({
-        key: 'diyDesignCart',
-        data: [storedItem, ...cart.filter(item => (item.cart_item_id || item.id) !== storedItem.cart_item_id)].slice(0, 20),
-        success: () => wx.showToast({ title: '已加入购物车', icon: 'success' })
-      });
-    } catch (error) {
-      wx.showToast({ title: error.message || '购物车保存失败，请重试', icon: 'none' });
-    }
-    return;
-    const cart = wx.getStorageSync('diyDesignCart') || [];
-    cart.push({
-      id: `diy-${Date.now()}`,
-      createdAt: Date.now(),
-      name: 'DIY 手串方案',
-      userId: user.user_id,
-      selected: [...this.data.selected],
-      materialIds: sequence.map(item => item.id || item.sku).filter(Boolean),
-      placements: this.data.placements.map(item => ({ ...item })),
-      wristSize: this.data.wristSize,
-      wearStyle: 'single',
-      isLooseMode: this.data.isLooseMode,
-      sourceContext: this.data.sourceContext || this.sourceContext || null,
-      preview_image: previewImage,
-      previewImage,
-      image_url: previewImage,
-      local_preview_image: previewResult.localPreviewImage || '',
-      summary,
-      sequence
-    });
-    wx.setStorage({
-      key: 'diyDesignCart',
-      data: cart.slice(-20),
-      success: () => wx.showToast({ title: '已加入购物车', icon: 'success' })
+      const cart = wx.getStorageSync('diyDesignCart') || [];
+      const nextCart = [savedItem, ...cart.filter(item => {
+        const key = item.cart_item_id || item.id;
+        return key !== localId && key !== savedItem.cart_item_id;
+      })].slice(0, 20);
+      wx.setStorageSync('diyDesignCart', nextCart);
+      const current = wx.getStorageSync('currentDesign') || {};
+      const currentKey = current.cart_item_id || current.id;
+      if (currentKey === localId || currentKey === savedItem.cart_item_id) {
+        wx.setStorageSync('currentDesign', { ...current, ...savedItem });
+      }
+    }).catch(error => {
+      logWorkspaceWarning('sync cart item failed:', error && (error.message || error));
     });
   },
 
@@ -4265,7 +4708,7 @@ Page({
     return null;
   },
 
-  addMaterial(e) {
+  async addMaterial(e) {
     if (this.data.isShuffling) {
       this.showMaterialQueueToast('正在成串，请稍候');
       return;
@@ -4285,6 +4728,7 @@ Page({
       this.showMaterialQueueToast('吊坠功能暂未开放');
       return;
     }
+    const currentMaterial = await this.ensureMaterialImagePool(material);
     const pendingCount = this.data.selected.length + this.flightQueue.length;
     if (pendingCount >= MAX_WORKSPACE_BEADS) {
       this.showMaterialQueueToast('珠子已经很多了，先整理一下');
@@ -4301,11 +4745,13 @@ Page({
       id,
       [...this.data.placements, ...queuedPlacements]
     );
+    const imageUrl = placement.image_url || this.pickMaterialImageUrl(currentMaterial) || currentMaterial.image_url || '';
+    placement.image_url = imageUrl;
     this.flightQueue.push({
       id,
       cardIndex,
       placement,
-      image_url: placement.image_url || '',
+      image_url: imageUrl,
       tapPoint: this.getTapPoint(e)
     });
     this.processFlightQueue();
@@ -4656,53 +5102,97 @@ Page({
   startStringingPhysics() {
     try {
       this.stopPhysics();
-      if (!this.data.selected.length) {
+      const selected = this.data.selected || [];
+      if (!selected.length) {
         this.recoverStringingRuntime();
         return;
       }
-      this.createPhysicsEngine();
-      this.playSoundEffect('shuffle', 0);
-      this.physicsEngine.enableSleeping = false;
-      this.physicsEngine.gravity.scale = 0;
-      const placements = this.normalizePlacements(this.data.selected, this.data.placements);
-      this.data.selected.forEach((id, index) => {
-        const body = this.createPhysicsBody(id, placements[index], index);
-        body.collisionFilter.group = 0;
-        body.collisionFilter.mask = 0xFFFFFFFF;
+      const placements = this.normalizePlacements(selected, this.data.placements);
+      const items = selected.map((id, index) => {
+        const material = this.findMaterialById(id) || {};
+        const placement = placements[index] || {};
+        const size = Number(material.size || placement.size || placement.diameter || 8);
+        return {
+          ...placement,
+          ...material,
+          id,
+          size: Number.isFinite(size) && size > 0 ? size : 8,
+          image_url: placement.image_url || material.image_url || ''
+        };
       });
-      const items = this.data.selected.map(id => this.findMaterialById(id)).filter(Boolean);
       const geometry = this.calculateBraceletGeometry(items);
-      this.physicsTargets = geometry.angles.map(angle => ({
+      const targets = geometry.angles.map((angle, index) => ({
         x: geometry.center + Math.cos(angle) * geometry.radius,
-        y: geometry.center + Math.sin(angle) * geometry.radius
+        y: geometry.center + Math.sin(angle) * geometry.radius,
+        rotation: angle * 180 / Math.PI,
+        beadSize: geometry.beadSizes[index] || this.getMaterialDisplaySize(selected[index])
       }));
-      if (!this.physicsBodies.length || this.physicsTargets.length !== this.physicsBodies.length) {
+      if (!targets.length || targets.length !== selected.length) {
         this.completeStringing();
         return;
       }
-      this.physicsBodies.forEach((body, index) => {
-        const target = this.physicsTargets[index];
-        const tangentX = -(target.y - geometry.center);
-        const tangentY = target.x - geometry.center;
-        const tangentLength = Math.max(1, Math.sqrt(tangentX ** 2 + tangentY ** 2));
-        const pullX = target.x - body.position.x;
-        const pullY = target.y - body.position.y;
-        const pullLength = Math.max(1, Math.sqrt(pullX ** 2 + pullY ** 2));
-        const swirlSpeed = this.isLowPerformanceDevice ? 2.1 : (this.isRealDevice ? 3.0 : 3.2);
-        const pullSpeed = Math.min(7.2, Math.max(2.3, pullLength * 0.026));
-        Body.setVelocity(body, {
-          x: tangentX / tangentLength * swirlSpeed + pullX / pullLength * pullSpeed,
-          y: tangentY / tangentLength * swirlSpeed + pullY / pullLength * pullSpeed
-        });
-        Body.setAngularVelocity(body, (index % 2 ? 1 : -1) * 0.038);
-      });
       this.stringingStartedAt = Date.now();
+      this.suppressStringingSounds = true;
+      const starts = placements.map((placement, index) => ({
+        x: Number(placement.looseX || geometry.center),
+        y: Number(placement.looseY || geometry.center),
+        rotation: Number(placement.rotation || 0),
+        beadSize: Number(placement.beadSize || targets[index].beadSize)
+      }));
+      const totalFrames = this.isLowPerformanceDevice ? 9 : (this.isRealDevice ? 12 : 10);
+      let frame = 0;
       clearTimeout(this.stringingGuardTimer);
-      this.stringingGuardTimer = setTimeout(() => {
-        if (this.data.isShuffling) this.finishStringing();
-      }, 1600);
-      this.runPhysics();
+      this.stringingGuardTimer = null;
+      clearInterval(this.stringingFinishTimer);
+      this.setData({ isStringingFinishing: true });
+      this.stringingFinishTimer = setInterval(() => {
+        frame += 1;
+        const progress = Math.min(1, frame / totalFrames);
+        const eased = 1 - (1 - progress) ** 3;
+        const nextPlacements = placements.map((placement, index) => {
+          const start = starts[index] || {};
+          const target = targets[index] || {};
+          return {
+            ...placement,
+            looseX: start.x + (target.x - start.x) * eased,
+            looseY: start.y + (target.y - start.y) * eased,
+            rotation: start.rotation + (target.rotation - start.rotation) * eased,
+            beadSize: start.beadSize + (target.beadSize - start.beadSize) * eased
+          };
+        });
+        this.livePlacements = nextPlacements;
+        const updates = { placements: nextPlacements };
+        if (!this.data.useCanvasRenderer) {
+          updates.selectedItems = this.layoutSelectedItems(items, nextPlacements, geometry);
+        }
+        this.setData(updates, () => {
+          if (this.data.useCanvasRenderer) this.scheduleCanvasRender(true);
+          if (progress < 1) return;
+          clearInterval(this.stringingFinishTimer);
+          this.stringingFinishTimer = null;
+          const finalPlacements = placements.map((placement, index) => ({
+            ...placement,
+            looseX: targets[index].x,
+            looseY: targets[index].y,
+            rotation: targets[index].rotation,
+            beadSize: targets[index].beadSize
+          }));
+          this.setData({
+            placements: finalPlacements,
+            isLooseMode: false,
+            isShuffling: false,
+            isStringingFinishing: false,
+            selectedBeadIndex: -1,
+            draggingBeadIndex: -1,
+            dragDeleteArmed: false
+          }, () => {
+            this.suppressStringingSounds = false;
+            this.recalculate();
+          });
+        });
+      }, this.isLowPerformanceDevice ? 24 : 18);
     } catch (error) {
+      this.suppressStringingSounds = false;
       this.recoverStringingRuntime();
     }
   },
@@ -4883,6 +5373,7 @@ Page({
         lastPoint: point,
         lastAt: Date.now(),
         velocity: { x: 0, y: 0 },
+        angularVelocity: 0,
         moved: false
       };
       this.setData({
@@ -4913,10 +5404,18 @@ Page({
     const point = this.touchToTrayPoint(touch, state.rect, state.scale);
     const now = Date.now();
     const elapsed = Math.max(8, now - state.lastAt);
+    const deltaX = point.x - state.lastPoint.x;
+    const deltaY = point.y - state.lastPoint.y;
     state.velocity = {
-      x: Math.max(-5, Math.min(5, (point.x - state.lastPoint.x) / elapsed * 15)),
-      y: Math.max(-5, Math.min(5, (point.y - state.lastPoint.y) / elapsed * 15))
+      x: Math.max(-5, Math.min(5, deltaX / elapsed * 15)),
+      y: Math.max(-5, Math.min(5, deltaY / elapsed * 15))
     };
+    const bodyRadius = Number(state.body.plugin && (state.body.plugin.bodyRadius || state.body.plugin.beadSize * 0.5)) || 24;
+    const dragSpin = (deltaX - deltaY * 0.28) / Math.max(14, bodyRadius) * DRAG_ROLLING_SPIN_FACTOR;
+    if (Math.abs(dragSpin) > 0.0008) {
+      Body.setAngle(state.body, state.body.angle + dragSpin);
+      state.angularVelocity = this.clampAngularVelocity(dragSpin * Math.min(2.2, 18 / elapsed), 0.13);
+    }
     state.lastPoint = point;
     state.lastAt = now;
     state.moved = true;
@@ -5052,6 +5551,7 @@ Page({
     }
     Body.setStatic(state.body, false);
     Body.setVelocity(state.body, state.velocity);
+    Body.setAngularVelocity(state.body, this.clampAngularVelocity(state.angularVelocity || state.body.angularVelocity || 0, 0.13));
     this.setData({ draggingBeadIndex: -1, dragDeleteArmed: false });
     this.scheduleDraftPersistence();
     this.runPhysics();
@@ -5115,11 +5615,17 @@ Page({
       : -1;
     const items = this.data.selected.map((id, index) => {
       const material = this.findMaterialById(id);
-      if (!material) return null;
       const placement = placements[index] || {};
+      if (!material && !(placement.name || placement.image_url || placement.size || placement.diameter)) return null;
+      const size = Number((material && material.size) || placement.size || placement.diameter || placement.size_mm || 8);
       return {
-        ...material,
-        image_url: placement.image_url || material.image_url || ''
+        ...(material || {}),
+        ...placement,
+        id,
+        size: Number.isFinite(size) && size > 0 ? size : 8,
+        price: Number((material && material.price) || placement.price || placement.priceText || 0),
+        weight: Number((material && material.weight) || placement.weight || 0),
+        image_url: placement.image_url || (material && material.image_url) || ''
       };
     }).filter(Boolean);
     const attachedPendants = [];
@@ -5212,6 +5718,10 @@ Page({
 
   displayMaterialName(material = {}, fallback = '') {
     const candidates = [
+      material.display_name,
+      material.material_name,
+      material.materialName,
+      material.sku && material.sku.name,
       material.name,
       material.series,
       material.category,
@@ -5219,19 +5729,26 @@ Page({
     ];
     for (let index = 0; index < candidates.length; index += 1) {
       const text = repairMaybeMojibakeText(candidates[index]);
-      if (text && !/^mat[_-]?\d+/i.test(text)) return text;
+      if (text && !/^mat[_-]?\d+/i.test(text) && !/^\d{10,}$/.test(text) && !/\u672a\u547d\u540d/.test(text)) return text;
     }
-    return '未命名材料';
+    return '\u5b9a\u5236\u73e0\u6750';
   },
 
-  buildSelectedBeadInfo(index, selected = this.data.selected) {
+  buildSelectedBeadInfo(index, selected = this.data.selected, placements = this.data.placements) {
     const beadIndex = Number(index);
     if (!Number.isInteger(beadIndex) || beadIndex < 0 || beadIndex >= (selected || []).length) return null;
     const id = selected[beadIndex];
     const material = this.findMaterialById(id) || {};
-    const name = this.displayMaterialName(material, id);
-    const diameter = material.size || material.size_mm || (material.sku && material.sku.size_mm) || '';
-    const price = Number(material.price || 0);
+    const placement = (placements || [])[beadIndex] || {};
+    const selectedItem = (this.data.selectedItems || [])[beadIndex] || {};
+    const source = {
+      ...placement,
+      ...selectedItem,
+      ...material
+    };
+    const name = this.displayMaterialName(source, id);
+    const diameter = source.size || source.size_mm || source.diameter || (source.sku && source.sku.size_mm) || '';
+    const price = Number(source.price || 0);
     const priceText = Number.isFinite(price) && price > 0 ? `¥${price.toFixed(2).replace(/\.00$/, '')}` : '--';
     return {
       index: beadIndex,
@@ -5252,6 +5769,8 @@ Page({
         data: {
           designId: existingDesign.designId || existingDesign.design_id || '',
           design_id: existingDesign.designId || existingDesign.design_id || '',
+          name: existingDesign.name || existingDesign.title || '',
+          title: existingDesign.title || existingDesign.name || '',
           userId: existingDesign.userId || '',
           selected: this.data.selected,
           placements: this.data.placements,
@@ -5574,6 +6093,28 @@ Page({
     return result.previewImage || result.localPreviewImage || '';
   },
 
+  promptDesignName(defaultName = '') {
+    const fallbackName = cleanDesignName(defaultName) || DEFAULT_DESIGN_NAME;
+    return new Promise(resolve => {
+      wx.showModal({
+        title: '\u4fdd\u5b58\u65b9\u6848',
+        editable: true,
+        placeholderText: fallbackName,
+        confirmText: '\u4fdd\u5b58',
+        cancelText: '\u53d6\u6d88',
+        success: res => {
+          if (!res.confirm) {
+            resolve('');
+            return;
+          }
+          const name = cleanDesignName(res.content) || fallbackName;
+          resolve(name.slice(0, 24));
+        },
+        fail: () => resolve('')
+      });
+    });
+  },
+
   async saveDraft(options = {}) {
     let user;
     try {
@@ -5582,6 +6123,12 @@ Page({
       return false;
     }
     const current = wx.getStorageSync('currentDesign') || {};
+    let designName = cleanDesignName(options.designName) || cleanDesignName(current.name) || cleanDesignName(current.title);
+    if (options.promptName !== false) {
+      designName = await this.promptDesignName(designName);
+      if (!designName) return false;
+    }
+    if (!designName) designName = DEFAULT_DESIGN_NAME;
     const previewResult = await this.prepareCurrentDesignPreview(user.user_id, current);
     const previewImage = previewResult.previewImage || '';
     const displayPreviewImage = previewImage || previewResult.localPreviewImage || current.local_preview_image || '';
@@ -5589,9 +6136,12 @@ Page({
     const reusableDesignId = currentDesignUserId === String(user.user_id || '')
       ? (current.designId || current.design_id || '')
       : '';
+    const stageLayout = this.getStageLayout();
     const design = {
       designId: reusableDesignId,
       design_id: reusableDesignId,
+      name: designName,
+      title: designName,
       userId: user.user_id,
       selected: this.data.selected,
       placements: this.data.placements,
@@ -5599,6 +6149,9 @@ Page({
       wristSize: this.data.wristSize,
       wearStyle: 'single',
       isLooseMode: this.data.isLooseMode,
+      workspaceStageCenter: stageLayout.center,
+      previewSourceCenter: stageLayout.center,
+      preview_source_center: stageLayout.center,
       sourceContext: this.data.sourceContext || this.sourceContext || current.sourceContext || null,
       preview_image: previewImage,
       previewImage,
@@ -5627,13 +6180,15 @@ Page({
     }
     wx.setStorageSync('currentDesign', {
       ...design,
+      name: designName,
+      title: designName,
       preview_image: previewImage,
       previewImage: previewImage,
       image_url: previewImage || current.image_url || '',
       local_preview_image: displayPreviewImage && displayPreviewImage !== previewImage ? displayPreviewImage : (design.local_preview_image || '')
     });
     if (options.showToast !== false) {
-      wx.showToast({ title: options.toastTitle || '已保存', icon: 'success' });
+      wx.showToast({ title: options.toastTitle || '\u5df2\u4fdd\u5b58', icon: 'success' });
     }
     return true;
   },
@@ -5665,7 +6220,7 @@ Page({
     this.setData({ sharingDesign: true });
     wx.showLoading({ title: '生成分享...', mask: true });
     try {
-      const saved = await this.saveDraft({ showToast: false });
+      const saved = await this.saveDraft({ showToast: false, promptName: false });
       if (!saved) return;
       const current = wx.getStorageSync('currentDesign') || {};
       const designId = current.designId || current.design_id || '';
@@ -5750,7 +6305,9 @@ Page({
   },
 
   toggleEnergyPanel() {
-    this.setData({ showEnergyPanel: !this.data.showEnergyPanel });
+    this.setData({ showEnergyPanel: !this.data.showEnergyPanel }, () => {
+      if (this.data.useCanvasRenderer) this.scheduleCanvasRender();
+    });
   },
 
   closeEnergyModal() {

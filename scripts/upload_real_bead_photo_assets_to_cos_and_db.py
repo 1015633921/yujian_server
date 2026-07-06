@@ -82,9 +82,9 @@ CODE_OVERRIDES: tuple[tuple[str, str], ...] = (
 CODE_META: dict[str, dict[str, object]] = {
     "clear_quartz": {"category": "白色晶石", "effect": "clarity", "element": "metal", "color": "#dfe3e5", "shine": "#ffffff", "sort_order": 80},
     "milky_quartz": {"category": "白色晶石", "effect": "calm", "element": "metal", "color": "#eef0e8", "shine": "#ffffff", "sort_order": 90},
-    "rose_quartz": {"category": "粉红晶石", "effect": "love", "element": "wood", "color": "#e8a8b8", "shine": "#fff0f5", "sort_order": 100},
-    "strawberry_quartz": {"category": "粉红晶石", "effect": "love", "element": "fire", "color": "#d9878b", "shine": "#fff0f2", "sort_order": 110},
-    "rhodochrosite": {"category": "粉红晶石", "effect": "emotion", "element": "fire", "color": "#c36a76", "shine": "#ffe8ee", "sort_order": 120},
+    "rose_quartz": {"category": "粉水晶", "effect": "love", "element": "wood", "color": "#e8a8b8", "shine": "#fff0f5", "sort_order": 100},
+    "strawberry_quartz": {"category": "粉水晶", "effect": "love", "element": "fire", "color": "#d9878b", "shine": "#fff0f2", "sort_order": 110},
+    "rhodochrosite": {"category": "粉水晶", "effect": "emotion", "element": "fire", "color": "#c36a76", "shine": "#ffe8ee", "sort_order": 120},
     "south_red_agate": {"category": "玛瑙", "effect": "vitality", "element": "fire", "color": "#b94a3d", "shine": "#ffe1df", "sort_order": 160},
     "red_agate": {"category": "玛瑙", "effect": "vitality", "element": "fire", "color": "#b94a3d", "shine": "#ffe1df", "sort_order": 170},
     "salt_source_agate": {"category": "玛瑙", "effect": "emotion", "element": "fire", "color": "#d98d96", "shine": "#fff0f2", "sort_order": 175},

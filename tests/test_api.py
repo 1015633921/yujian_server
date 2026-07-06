@@ -291,11 +291,49 @@ def test_admin_material_spu_reports_size_coverage_and_missing_specs(tmp_path):
     assert partial["missingSizes"] == [9, 11, 12, 13, 14, 15]
     assert partial["specCoverage"] == pytest.approx(0.25)
     assert [group["key"] for group in service.list_material_spus(keyword="Coverage Quartz", spec_state="complete")] == [
-        "coverage_quartz"
+        "bead::quartz::Coverage Quartz::coverage_quartz"
     ]
     assert [group["key"] for group in service.list_material_spus(keyword="Partial Quartz", spec_state="incomplete")] == [
-        "partial_quartz"
+        "bead::quartz::Partial Quartz::partial_quartz"
     ]
+
+
+def test_admin_material_spu_key_includes_series_when_material_code_is_shared(tmp_path):
+    from app.admin_service import AdminService
+
+    service = AdminService(tmp_path / "material-shared-code-spu.db")
+    ensure_material_taxonomy(service, "phantom", "Four Seasons Phantom")
+    ensure_material_taxonomy(service, "phantom", "Four Seasons Half Basin")
+
+    for series in ("Four Seasons Phantom", "Four Seasons Half Basin"):
+        service.save_material(
+            {
+                "id": f"{series.lower().replace(' ', '_')}_8",
+                "skuId": f"{series.lower().replace(' ', '_')}_8",
+                "material_code": "four_seasons_phantom",
+                "top": "bead",
+                "category": "phantom",
+                "series": series,
+                "name": series,
+                "primary_element": "wood",
+                "effects": ["focus"],
+                "price_per_bead": 1,
+                "size_mm": 8,
+                "weight_g": 1,
+                "stock": 3,
+                "thumbnail_url": f"https://cdn-test.yustream.cn/materials/beads/{series}.png",
+            }
+        )
+
+    groups = service.list_material_spus(keyword="Four Seasons")
+    keys = {group["key"] for group in groups}
+
+    assert len(groups) == 2
+    assert keys == {
+        "bead::phantom::Four Seasons Phantom::four_seasons_phantom",
+        "bead::phantom::Four Seasons Half Basin::four_seasons_phantom",
+    }
+    assert {group["legacy_key"] for group in groups} == {"four_seasons_phantom"}
 
 
 def test_admin_material_spu_pagination_keeps_legacy_list_response(tmp_path):
@@ -745,7 +783,7 @@ def test_admin_material_autogenerates_id_sku_and_disables_zero_stock(tmp_path):
 def test_material_code_infers_crystal_family_from_chinese_series():
     from app.material_knowledge import material_code_from_payload, normalize_knowledge_payload
 
-    payload = {"top": "bead", "category": "粉红晶石", "series": "莫桑比亚粉水晶", "name": "莫桑比亚粉水晶"}
+    payload = {"top": "bead", "category": "粉水晶", "series": "莫桑比亚粉水晶", "name": "莫桑比亚粉水晶"}
     assert material_code_from_payload(payload) == "rose_quartz"
 
     knowledge = normalize_knowledge_payload(payload, payload)

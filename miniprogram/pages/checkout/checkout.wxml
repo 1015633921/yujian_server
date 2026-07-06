@@ -5,7 +5,13 @@
     <view class="nav-placeholder"></view>
   </view>
 
-  <view wx:if="{{design}}" class="checkout-content">
+  <view wx:if="{{pageLoading}}" class="checkout-loading">
+    <view class="checkout-loading-stage"></view>
+    <view class="checkout-loading-line strong"></view>
+    <view class="checkout-loading-line"></view>
+  </view>
+
+  <view wx:elif="{{design}}" class="checkout-content">
     <view class="plan-preview-card yu-card yu-card-lg">
       <view class="plan-preview">
         <view class="plan-preview-stage {{trayPreviewImageFailed ? 'tray-preview-failed' : ''}}">
@@ -35,7 +41,7 @@
     <view class="plan-info-card yu-card">
       <view class="plan-info">
         <view class="plan-info-label">手串信息</view>
-        <view class="plan-title">温柔守护 · 和谐平衡款</view>
+        <view class="plan-title">{{design.displayTitle}}</view>
         <view class="plan-meta">手围：{{design.wristSize || '--'}}cm　配珠：{{design.summary.count}}颗</view>
         <view class="plan-settle-strip">
           <view class="plan-settle-item strong">
