@@ -60,7 +60,7 @@ function decorateRecommendations(source) {
       sceneLabel: '睡眠浅、情绪敏感',
       actionLabel: '一键套用',
       shortName: '月光石轻眠',
-      shortDesc: '舒缓助眠 · 温柔守护'
+      shortDesc: '睡前放松 · 温柔陪伴'
     },
     {
       id: 'citrine-action',
@@ -68,8 +68,8 @@ function decorateRecommendations(source) {
       sequence: ['citrine', 'clearQuartz', 'citrine'],
       sceneLabel: '事业、考试、面试',
       actionLabel: '查看搭配',
-      shortName: '黄水晶能量',
-      shortDesc: '自信能量 · 积极行动'
+      shortName: '黄水晶行动感',
+      shortDesc: '目标清晰 · 积极行动'
     },
     {
       id: 'amethyst-focus',
@@ -192,7 +192,7 @@ function todayKey() {
 function isFreshDailyPayload(daily) {
   return !!(
     daily
-    && Number(daily.content_version) >= 2
+    && Number(daily.content_version) >= 6
     && daily.season_hint
     && daily.season_hint.summary
   );
@@ -208,14 +208,14 @@ Page({
       stone: '海蓝宝',
       keyword: '稳定流动的一天',
       keywords: ['稳定', '表达', '清透'],
-      summary: '登录后获取你的今日能量，并生成适合今天佩戴的手串。',
+      summary: '登录后获取你的今日状态建议，并生成适合今天佩戴的手串。',
       actionTip: '先让节奏慢下来',
       recommendedCrystals: [],
       recommendedNames: '海蓝宝 · 白水晶 · 月光石',
       commerceEntry: {},
       workbenchPayload: null,
       loaded: false,
-      loginHint: '登录后获取你的今日能量',
+      loginHint: '登录后获取你的今日状态建议',
       raw: null
     },
     homeBanners: decorateHomeBanners(),
@@ -382,7 +382,7 @@ Page({
         commerceEntry: daily.commerce_entry || {},
         workbenchPayload: daily.workbench_payload || null,
         loaded: true,
-        loginHint: daily.title || daily.theme || daily.summary || '今日能量已更新',
+        loginHint: daily.title || daily.theme || daily.summary || '今日状态建议已更新',
         raw: daily
       }
     });
@@ -408,7 +408,7 @@ Page({
 
   async ensureDailyEnergy(options = {}) {
     if (this.data.daily.loaded) return this.data.daily;
-    const user = await auth.requireLogin('登录后才能查看你的每日能量补给。');
+    const user = await auth.requireLogin('登录后才能查看你的每日搭配建议。');
     return this.loadDailyEnergy(user.user_id, options);
   },
 
@@ -497,21 +497,21 @@ Page({
     const stone = daily.stone || primaryCrystal.name || '海蓝宝';
     const detailMap = {
       海蓝宝: { name: '海蓝宝', tone: 'blue', image: ASSETS.aquamarine, desc: '适合沟通、平静和情绪整理。今天先把表达放慢一点。', recipe: ['aquamarine', 'clearQuartz', 'moonstone'] },
-      紫水晶: { name: '紫水晶', tone: 'violet', image: ASSETS.amethyst, desc: '适合灵感、专注和睡眠前的放松。', recipe: ['amethyst', 'clearQuartz', 'moonstone'] },
-      黄水晶: { name: '黄水晶', tone: 'gold', image: ASSETS.citrine, desc: '适合行动力、目标感和财富议题。', recipe: ['citrine', 'tigerEye', 'clearQuartz'] }
+      紫水晶: { name: '紫水晶', tone: 'violet', image: ASSETS.amethyst, desc: '适合灵感、专注和睡前放松。', recipe: ['amethyst', 'clearQuartz', 'moonstone'] },
+      黄水晶: { name: '黄水晶', tone: 'gold', image: ASSETS.citrine, desc: '适合行动力、目标感和工作推进。', recipe: ['citrine', 'tigerEye', 'clearQuartz'] }
     };
     const backendDetail = primaryCrystal.name ? {
       name: primaryCrystal.name,
       tone: 'blue',
       image: ASSETS.aquamarine,
-      desc: `${primaryCrystal.reason || daily.summary || '适合今天的能量状态'}｜${daily.actionTip || ''}`,
+      desc: `${primaryCrystal.reason || daily.summary || '适合今天的状态方向'}｜${daily.actionTip || ''}`,
       recipe: (daily.workbenchPayload && daily.workbenchPayload.bracelet_plan && daily.workbenchPayload.bracelet_plan.layout || [])
         .map(item => item.crystal_code),
       workbenchPayload: daily.workbenchPayload,
       crystals
     } : null;
     this.setData({
-      dailyStoneDetail: backendDetail || detailMap[stone] || { name: stone, tone: 'blue', image: ASSETS.aquamarine, desc: '适合今天的能量状态，可作为主石或点缀珠。', recipe: ['aquamarine', 'clearQuartz'] },
+      dailyStoneDetail: backendDetail || detailMap[stone] || { name: stone, tone: 'blue', image: ASSETS.aquamarine, desc: '适合今天的状态方向，可作为主石或点缀珠。', recipe: ['aquamarine', 'clearQuartz'] },
       showStoneSheet: true
     });
   },
@@ -545,8 +545,8 @@ Page({
         item: {
           id: favoriteId,
           favorite_type: 'daily_energy',
-          title: `${detail.name}今日能量`,
-          name: `${detail.name}今日能量`,
+          title: `${detail.name}今日搭配`,
+          name: `${detail.name}今日搭配`,
           desc: detail.desc,
           tone: detail.tone,
           recipe: detail.recipe,
@@ -564,7 +564,7 @@ Page({
     return;
     const cart = wx.getStorageSync('inspirationCart') || [];
     const item = {
-      name: `${detail.name}今日能量`,
+      name: `${detail.name}今日搭配`,
       desc: detail.desc,
       price: 0,
       tone: detail.tone,

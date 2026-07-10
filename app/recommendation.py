@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from .copy_safety import safe_display_text, safe_wish_label
 from .energy import ELEMENTS, WISH_MAPPING
 from .material_knowledge import (
     build_primary_pools,
@@ -12,22 +13,25 @@ from .material_knowledge import (
 )
 from .schemas import AssessmentRequest
 
+STRINGED_COMFORT_ALLOWANCE_MM = 8
+STRINGED_LOSS_COEFFICIENT = 1.0
+
 CRYSTAL_CATALOG = {
     "titanium_quartz": {
         "name": "钛晶", "element": "金", "secondary_elements": ["土"], "color": "#C99A2E",
-        "effects": ["聚财", "行动力", "事业突破"],
+        "effects": ["目标感", "行动力", "稳步推进"],
     },
     "citrine": {
         "name": "黄水晶", "element": "土", "secondary_elements": ["金"], "color": "#E4B83F",
-        "effects": ["财富流动", "自信", "目标感"],
+        "effects": ["目标推进", "自信", "目标感"],
     },
     "gold_rutilated_quartz": {
         "name": "金发晶", "element": "金", "secondary_elements": ["火"], "color": "#D4A62A",
-        "effects": ["决断", "贵人运", "事业能量"],
+        "effects": ["决断", "协作感", "事业专注"],
     },
     "rhodochrosite": {
         "name": "红纹石", "element": "火", "secondary_elements": ["木"], "color": "#D85A72",
-        "effects": ["正缘", "自我接纳", "情感流动"],
+        "effects": ["亲和", "自我接纳", "情感流动"],
     },
     "strawberry_quartz": {
         "name": "草莓晶", "element": "火", "secondary_elements": ["木"], "color": "#E77C8E",
@@ -35,7 +39,7 @@ CRYSTAL_CATALOG = {
     },
     "rose_quartz": {
         "name": "粉晶", "element": "木", "secondary_elements": ["火"], "color": "#ECA8B7",
-        "effects": ["桃花", "关系修复", "柔和"],
+        "effects": ["亲和", "关系柔和", "柔和"],
     },
     "blue_rutilated_quartz": {
         "name": "蓝发晶", "element": "水", "secondary_elements": ["金"], "color": "#4F789B",
@@ -43,23 +47,23 @@ CRYSTAL_CATALOG = {
     },
     "obsidian": {
         "name": "黑曜石", "element": "水", "secondary_elements": ["金"], "color": "#23252A",
-        "effects": ["辟邪", "防护", "稳定"],
+        "effects": ["安定", "边界", "稳定"],
     },
     "black_rutilated_quartz": {
         "name": "黑发晶", "element": "金", "secondary_elements": ["水"], "color": "#34343A",
-        "effects": ["防小人", "清理杂念", "坚定"],
+        "effects": ["边界感", "清理杂念", "坚定"],
     },
     "green_phantom": {
         "name": "绿幽灵", "element": "木", "secondary_elements": ["土"], "color": "#4A825F",
-        "effects": ["健康", "生长", "专注"],
+        "effects": ["日常平衡", "生长", "专注"],
     },
     "clear_quartz": {
         "name": "白水晶", "element": "金", "secondary_elements": ["土"], "color": "#E8EDF0",
-        "effects": ["净化", "专注", "能量放大"],
+        "effects": ["清爽", "专注", "干净感"],
     },
     "aquamarine": {
         "name": "海蓝宝", "element": "水", "secondary_elements": [], "color": "#75B8D1",
-        "effects": ["平静", "表达", "舒缓焦虑"],
+        "effects": ["平静", "表达", "舒缓压力"],
     },
     "turquoise": {
         "name": "绿松石", "element": "木", "secondary_elements": [], "color": "#56A6A2",
@@ -83,15 +87,15 @@ CRYSTAL_CATALOG = {
     },
     "tiger_eye": {
         "name": "虎眼石", "element": "土", "secondary_elements": ["金"], "color": "#B9833C",
-        "effects": ["决断", "稳定", "事业守护"],
+        "effects": ["决断", "稳定", "目标稳定"],
     },
     "rhodonite": {
         "name": "蔷薇辉石", "element": "火", "secondary_elements": ["木", "土"], "color": "#C86A78",
-        "effects": ["关系修复", "边界", "温柔坚定"],
+        "effects": ["关系柔和", "边界", "温柔坚定"],
     },
     "prehnite": {
         "name": "葡萄石", "element": "木", "secondary_elements": ["水"], "color": "#B6D89B",
-        "effects": ["疗愈", "松弛", "心轮滋养"],
+        "effects": ["舒缓", "松弛", "温柔感"],
     },
     "green_aventurine": {
         "name": "绿东陵", "element": "木", "secondary_elements": ["土"], "color": "#6FA56B",
@@ -99,7 +103,7 @@ CRYSTAL_CATALOG = {
     },
     "malachite": {
         "name": "孔雀石", "element": "木", "secondary_elements": ["土"], "color": "#1F7B4A",
-        "effects": ["保护", "修复", "边界"],
+        "effects": ["安定", "放松", "边界"],
     },
     "red_phantom": {
         "name": "红幽灵", "element": "火", "secondary_elements": ["土"], "color": "#A74C3E",
@@ -131,19 +135,19 @@ CRYSTAL_CATALOG = {
     },
     "amethyst": {
         "name": "紫水晶", "element": "水", "secondary_elements": ["火"], "color": "#7C63A7",
-        "effects": ["灵感", "安静", "净化"],
+        "effects": ["灵感", "安静", "清爽"],
     },
     "moonstone": {
         "name": "月光石", "element": "水", "secondary_elements": ["金"], "color": "#E5E5D9",
-        "effects": ["修复", "柔软", "安静"],
+        "effects": ["放松", "柔软", "安静"],
     },
     "labradorite": {
         "name": "拉长石", "element": "水", "secondary_elements": ["金"], "color": "#596B74",
-        "effects": ["直觉", "保护", "洞察"],
+        "effects": ["直觉", "安定", "洞察"],
     },
     "lepidolite": {
         "name": "锂云母", "element": "水", "secondary_elements": ["金"], "color": "#B99AC7",
-        "effects": ["安静", "修复", "松弛"],
+        "effects": ["安静", "放松", "松弛"],
     },
 }
 
@@ -210,7 +214,7 @@ class RecommendationEngine:
             primary_pools,
             available_codes,
         )
-        bead_count = max(12, min(28, round(request.wrist_size_cm * 10 / request.bead_size_mm)))
+        bead_count = self.estimate_stringed_bead_count(request.wrist_size_cm, request.bead_size_mm)
         primary_quantity = 1
         accent_quantity = 2
         support_quantity = bead_count - primary_quantity - accent_quantity
@@ -220,7 +224,7 @@ class RecommendationEngine:
             role="主石",
             quantity=primary_quantity,
             bead_size_mm=request.bead_size_mm,
-            reason=f"你的首要愿望是“{primary_wish}”，主石优先承接这份当下诉求。",
+            reason=f"你的首要佩戴目标是“{safe_wish_label(primary_wish)}”，主石优先承接这份当下诉求。",
             catalog=catalog,
         )
         supporting = [
@@ -229,7 +233,7 @@ class RecommendationEngine:
                 role="调和配珠",
                 quantity=support_quantity,
                 bead_size_mm=request.bead_size_mm,
-                reason=f"结合日主喜用与当前状态，本次配珠优先照看{support_element}，用于{ELEMENT_LANGUAGE[support_element]}。",
+                reason=f"结合元素参考与当前状态，本次配珠优先照看{support_element}，用于{ELEMENT_LANGUAGE[support_element]}。",
                 catalog=catalog,
             ),
             self.build_item(
@@ -255,6 +259,13 @@ class RecommendationEngine:
             },
             "copy": self.build_copy(request, energy, primary, supporting[0], support_element),
         }
+
+    @staticmethod
+    def estimate_stringed_bead_count(wrist_size_cm: float, bead_size_mm: int) -> int:
+        bead_size = max(float(bead_size_mm or 8), 1)
+        target_mm = max(float(wrist_size_cm or 0) * 10 + STRINGED_COMFORT_ALLOWANCE_MM, 0)
+        count = round(target_mm / bead_size + STRINGED_LOSS_COEFFICIENT)
+        return max(12, min(28, count))
 
     @staticmethod
     def recommendation_context(request: AssessmentRequest, energy: dict) -> dict:
@@ -501,8 +512,8 @@ class RecommendationEngine:
             "color_families": taxonomy.get("color_families", []),
             "mood_tags": taxonomy.get("mood_tags", [])[:5],
             "color": crystal["color"],
-            "effects": unique_list(crystal.get("effects")),
-            "reason": reason,
+            "effects": [safe_display_text(effect) for effect in unique_list(crystal.get("effects"))],
+            "reason": safe_display_text(reason),
             "quantity": quantity,
             "bead_size_mm": bead_size_mm,
             "preferred_bead_size_mm": bead_size_mm,
@@ -674,7 +685,7 @@ class RecommendationEngine:
         support_element: str,
     ) -> str:
         strongest = energy["strongest"]
-        strategy = energy.get("recommendation_strategy") or "以五行平衡为基础做温柔调和。"
+        strategy = safe_display_text(energy.get("recommendation_strategy") or "以元素比例为基础做温柔调和。")
         chakra = energy.get("chakra_analysis") or {}
         mood = energy.get("mood_analysis") or {}
         live_state = "".join(
@@ -686,11 +697,11 @@ class RecommendationEngine:
             if item
         )
         return (
-            f"{request.name}，你的五行画像中{strongest}能量最为鲜明，{strategy}"
+            f"{request.name}，你的五行画像中{strongest}元素倾向最为鲜明，{strategy}"
             f"以{primary['name']}作为手串主石，"
-            f"承接“{'、'.join(request.core_wishes)}”的核心愿望；再用{supporting['name']}调和{support_element}能量，"
+            f"承接“{'、'.join(safe_wish_label(wish) for wish in request.core_wishes)}”的佩戴目标；再用{supporting['name']}调和{support_element}元素，"
             f"让你原本的优势不被削弱，也为当下需要生长的部分留出空间。"
-            f"{live_state}"
+            f"{safe_display_text(live_state)}"
         )
 
 
@@ -698,8 +709,8 @@ def interpretation(final: dict[str, float], strongest: str, weakest: str) -> dic
     average = sum(final.values()) / len(final)
     balance = round(max(0, 100 - (max(final.values()) - min(final.values())) * 3), 1)
     return {
-        "headline": f"{strongest}能量主导，{weakest}能量需要温柔补足",
-        "strongest": f"{strongest}代表你当前最自然、最容易调用的力量。",
+        "headline": f"{strongest}元素倾向鲜明，{weakest}元素适合温柔调和",
+        "strongest": f"{strongest}代表你当前较自然、较容易调用的风格力量。",
         "weakest": f"{weakest}并非缺点，而是适合通过配珠与日常习惯慢慢调和的方向。",
         "balance_index": balance,
         "average_score": round(average, 2),

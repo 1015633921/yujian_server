@@ -24,6 +24,7 @@ const ASSETS = {
   roseQuartz: assetUrl('home/moonstone.webp'),
   obsidian: assetUrl('home/amethyst.webp')
 };
+const PLAN_TRAY_IMAGE_URL = assetUrl('workspace/tray-yustream-transparent-user-20260701-v6.webp');
 
 const TABS = [
   { key: 'all', label: '全部', count: 0 },
@@ -179,6 +180,7 @@ Page({
   data: {
     tabs: TABS,
     activeTab: 'all',
+    trayImageUrl: PLAN_TRAY_IMAGE_URL,
     plans: [],
     visiblePlans: [],
     counts: { all: 0, saved: 0, ordered: 0, completed: 0 }

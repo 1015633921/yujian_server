@@ -71,6 +71,119 @@ button::after {
   --workspace-safe-bottom: 0rpx;
 }
 
+.workspace-boot-mask {
+  position: fixed;
+  left: 0;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  z-index: 260;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.94);
+  opacity: 1;
+  transition: opacity 220ms ease;
+}
+
+.workspace-boot-mask.leaving {
+  opacity: 0;
+}
+
+.workspace-boot-card {
+  width: 360rpx;
+  min-height: 380rpx;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border: 1rpx solid rgba(33, 29, 23, 0.06);
+  border-radius: 32rpx;
+  background: rgba(255, 255, 255, 0.74);
+  box-shadow: 0 28rpx 80rpx rgba(43, 37, 28, 0.1);
+}
+
+.workspace-boot-plate {
+  position: relative;
+  width: 178rpx;
+  height: 178rpx;
+  border: 1rpx solid rgba(176, 150, 103, 0.18);
+  border-radius: 50%;
+  background: radial-gradient(circle at 50% 50%, #fffefa 0 48%, #f6f0e5 70%, #f9f7f2 100%);
+  box-shadow: inset 0 0 0 12rpx rgba(214, 198, 166, 0.18), 0 16rpx 42rpx rgba(66, 55, 38, 0.08);
+}
+
+.workspace-boot-ring {
+  position: absolute;
+  left: 38rpx;
+  top: 38rpx;
+  width: 102rpx;
+  height: 102rpx;
+  border: 2rpx dashed rgba(177, 144, 90, 0.34);
+  border-radius: 50%;
+}
+
+.workspace-boot-orbit {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 178rpx;
+  height: 178rpx;
+  animation: workspaceBootSpin 1150ms linear infinite;
+}
+
+.workspace-boot-bead {
+  position: absolute;
+  width: 24rpx;
+  height: 24rpx;
+  border-radius: 50%;
+  box-shadow: inset -4rpx -5rpx 8rpx rgba(0, 0, 0, 0.14), inset 5rpx 5rpx 8rpx rgba(255, 255, 255, 0.75), 0 4rpx 12rpx rgba(46, 39, 31, 0.12);
+}
+
+.workspace-boot-bead.bead-one {
+  left: 77rpx;
+  top: 12rpx;
+  background: #d99aa6;
+}
+
+.workspace-boot-bead.bead-two {
+  right: 20rpx;
+  top: 84rpx;
+  background: #b7acc3;
+}
+
+.workspace-boot-bead.bead-three {
+  left: 28rpx;
+  bottom: 34rpx;
+  background: #d8c9ad;
+}
+
+.workspace-boot-title {
+  margin-top: 28rpx;
+  color: #151515;
+  font-size: 30rpx;
+  font-weight: 820;
+  line-height: 1;
+}
+
+.workspace-boot-subtitle {
+  margin-top: 14rpx;
+  color: rgba(24, 24, 24, 0.52);
+  font-size: 22rpx;
+  line-height: 1;
+}
+
+@keyframes workspaceBootSpin {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .studio-top {
   position: relative;
   z-index: 80;
@@ -241,6 +354,11 @@ button::after {
   font-weight: 850;
   line-height: 1.05;
   color: #121212;
+}
+
+.studio-metric-value.over-length,
+.studio-metric-value.over-length .studio-metric-sub {
+  color: #c4473d;
 }
 
 .studio-metric-sub {

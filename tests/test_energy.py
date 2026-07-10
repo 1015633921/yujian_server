@@ -122,6 +122,11 @@ def test_recommendation_uses_preferred_bead_size_in_items_and_layout():
     assert all(item["material_id"] for item in plan["items"])
 
 
+def test_stringed_bead_count_accounts_for_closed_bracelet_loss():
+    assert RecommendationEngine.estimate_stringed_bead_count(15.5, 8) == 21
+    assert RecommendationEngine.estimate_stringed_bead_count(16, 10) == 18
+
+
 def test_recommendation_respects_material_role_rules_for_primary():
     request = make_request(core_wish="招财进宝/事业腾飞")
     energy = EnergyCalculator().calculate(request)

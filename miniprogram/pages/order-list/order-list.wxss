@@ -241,7 +241,7 @@
   line-height: 58rpx;
 }
 
-/* 星灵自然疗愈主题 */
+/* 星灵自然舒缓主题 */
 .list-title {
   color: #303230;
   font-family: "STKaiti", "KaiTi", serif;

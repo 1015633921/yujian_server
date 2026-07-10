@@ -1,7 +1,7 @@
 <view class="result-page yu-page" wx:if="{{report}}">
   <view class="result-nav">
     <view class="nav-back yu-pressable" bindtap="goBack">‹</view>
-    <view class="nav-title">五行测算</view>
+    <view class="nav-title">五行风格分析</view>
     <view class="nav-share yu-pressable" bindtap="shareReport">↗</view>
   </view>
 
@@ -17,8 +17,8 @@
   </view>
 
   <view class="result-head">
-    <view class="result-title">你的五行能量分布</view>
-    <view class="result-subtitle">根据出生信息与当前愿望计算</view>
+    <view class="result-title">你的元素比例参考</view>
+    <view class="result-subtitle">根据出生信息与当前佩戴目标生成</view>
   </view>
 
   <view class="energy-stage">
@@ -34,7 +34,7 @@
     <view class="energy-ring-wrap">
       <view class="energy-ring" style="background: {{viewReport.ringGradient}};">
         <view class="energy-ring-inner">
-          <view class="energy-label">整体能量</view>
+          <view class="energy-label">整体比例</view>
           <view class="energy-score">{{viewReport.score}}</view>
           <view class="energy-status">{{viewReport.statusText}}</view>
         </view>
@@ -45,8 +45,8 @@
   <view class="summary-card yu-card yu-card-lg">
     <view class="summary-head">
       <view>
-        <view class="summary-title">能量解读</view>
-        <view class="summary-meta">偏强 {{viewReport.strongest}} · 待补 {{viewReport.weakest}}</view>
+        <view class="summary-title">搭配解读</view>
+        <view class="summary-meta">偏强 {{viewReport.strongest}} · 可调和 {{viewReport.weakest}}</view>
       </view>
       <view class="balance-badge">平衡 {{viewReport.score}}</view>
     </view>
@@ -54,19 +54,19 @@
   </view>
 
   <view class="bazi-card yu-card">
-    <view class="card-title">命盘底色</view>
-    <view class="bazi-pillars">{{viewReport.bazi.pillarsText || '已按真太阳时排盘'}}</view>
+    <view class="card-title">风格底色</view>
+    <view class="bazi-pillars">{{viewReport.bazi.pillarsText || '已按出生地时间校准'}}</view>
     <view class="bazi-grid">
       <view>
-        <text>日主</text>
+        <text>基础点</text>
         <view>{{viewReport.bazi.dayMaster || '已生成'}}</view>
       </view>
       <view>
-        <text>强弱</text>
+        <text>状态</text>
         <view>{{viewReport.bazi.strength || '中和'}}</view>
       </view>
       <view>
-        <text>喜用</text>
+        <text>参考</text>
         <view>{{viewReport.bazi.usefulText || '调和'}}</view>
       </view>
     </view>
@@ -74,9 +74,9 @@
   </view>
 
   <view class="live-card yu-card">
-    <view class="card-title">当下能量</view>
+    <view class="card-title">当下状态</view>
     <view class="live-block">
-      <view class="live-label">七脉轮</view>
+      <view class="live-label">状态线索</view>
       <view class="live-title">{{viewReport.chakra.name}}</view>
       <view class="live-copy">{{viewReport.chakra.summary}}</view>
       <view class="live-colors" wx:if="{{viewReport.chakra.colors.length}}">
@@ -96,7 +96,7 @@
   <view class="zodiac-card yu-card" wx:if="{{viewReport.zodiac.name}}">
     <view class="zodiac-head">
       <view>
-        <view class="card-title">星座气质解析</view>
+        <view class="card-title">星座气质参考</view>
         <view class="zodiac-meta">{{viewReport.zodiac.dateRange}} · {{viewReport.zodiac.element}} · {{viewReport.zodiac.modality}}</view>
       </view>
       <view class="zodiac-mark">{{viewReport.zodiac.name}}</view>
@@ -106,7 +106,7 @@
       <view wx:for="{{viewReport.zodiac.keywords}}" wx:key="*this" class="zodiac-tag">{{item}}</view>
     </view>
     <view class="zodiac-line">
-      <text>五行参照</text>
+      <text>元素参照</text>
       <view>{{viewReport.zodiac.wuxingHint}}</view>
     </view>
     <view class="zodiac-line">
@@ -116,7 +116,7 @@
   </view>
 
   <view class="keyword-card yu-card">
-    <view class="card-title">能量关键词</view>
+    <view class="card-title">搭配关键词</view>
     <view class="keyword-desc">提炼属于你的禅意 / 国风气质标签</view>
     <view class="keyword-list">
       <view wx:for="{{viewReport.keywords}}" wx:key="label" class="keyword-tag">
@@ -129,14 +129,14 @@
   <view class="season-card yu-card">
     <view class="season-head">
       <view>
-        <view class="card-title">近期能量运势提示</view>
-        <view class="season-meta">{{viewReport.seasonal.period}} · {{viewReport.seasonal.seasonal_element}}气当令</view>
+        <view class="card-title">近期状态提示</view>
+        <view class="season-meta">{{viewReport.seasonal.period}} · {{viewReport.seasonal.seasonal_element}}元素参考</view>
       </view>
       <view class="season-mark">{{viewReport.seasonal.seasonal_element}}</view>
     </view>
     <view class="season-copy">{{viewReport.seasonal.seasonal_copy}}</view>
     <view class="season-line">
-      <text>流失点</text>
+      <text>留意点</text>
       <view>{{viewReport.seasonal.drain_point}}</view>
     </view>
     <view class="season-line">
@@ -146,7 +146,7 @@
   </view>
 
   <view class="element-card yu-card">
-    <view class="card-title">五行占比</view>
+    <view class="card-title">元素占比</view>
     <view wx:for="{{viewReport.elements}}" wx:key="key" class="element-row">
       <view class="element-pill" style="background: {{item.softColor}}; color: {{item.color}};">{{item.name}}</view>
       <view class="element-track">
@@ -158,7 +158,7 @@
 
   <view class="why-recommend-card yu-card">
     <view class="card-title">后续方案如何匹配</view>
-    <view class="why-recommend-desc">系统会把命盘底色、愿望场景和当下状态折算成材料筛选权重，用于下一步生成可编辑的 DIY 手串方案。</view>
+    <view class="why-recommend-desc">系统会把风格底色、佩戴目标和当下状态折算成材料筛选权重，用于下一步生成可编辑的 DIY 手串方案。</view>
     <view class="why-recommend-list">
       <view wx:for="{{viewReport.recommendationReasons}}" wx:key="index" class="why-recommend-row">
         <view class="why-recommend-index">{{item.index}}</view>
@@ -175,7 +175,7 @@
     <view>
       <view class="poster-kicker">REPORT POSTER</view>
       <view class="poster-title">生成专属报告海报</view>
-      <view class="poster-copy">把你的五行比例、关键词和调和建议做成宇涧专属海报，方便保存和分享。</view>
+      <view class="poster-copy">把你的元素比例、关键词和搭配建议做成宇涧专属海报，方便保存和分享。</view>
     </view>
     <view class="poster-icon">{{posterGenerating ? '…' : '海报'}}</view>
   </view>
@@ -183,14 +183,14 @@
   <view class="recommend-entry yu-card yu-pressable" bindtap="openWristModal">
     <view>
       <view class="recommend-title">下一步生成手串方案</view>
-      <view class="recommend-copy">输入手腕围度后，系统会结合五行比例、核心愿望和珠径偏好生成可继续编辑的 DIY 方案。</view>
+      <view class="recommend-copy">输入手腕围度后，系统会结合元素比例、佩戴目标和珠径偏好生成可继续编辑的 DIY 方案。</view>
     </view>
     <view class="recommend-icon">→</view>
   </view>
 
   <view class="result-bottom">
     <view class="result-actions">
-      <button class="result-secondary" bindtap="restartAssessment">重新测算</button>
+      <button class="result-secondary" bindtap="restartAssessment">重新分析</button>
       <button class="yu-button yu-button-primary result-submit" bindtap="openWristModal">查看推荐方案</button>
     </view>
   </view>
@@ -198,9 +198,9 @@
 
 <view class="empty-page yu-page" wx:else>
   <view class="empty-card yu-card">
-    <view class="empty-title">还没有测算报告</view>
-    <view class="empty-desc">先完成基础信息填写，再查看五行能量分布。</view>
-    <button class="yu-button yu-button-primary empty-button" bindtap="goBack">返回测算</button>
+    <view class="empty-title">还没有分析报告</view>
+    <view class="empty-desc">先完成基础信息填写，再查看元素比例参考。</view>
+    <button class="yu-button yu-button-primary empty-button" bindtap="goBack">返回分析</button>
   </view>
 </view>
 

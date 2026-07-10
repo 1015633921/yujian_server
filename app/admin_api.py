@@ -509,7 +509,7 @@ def user_detail(user_id: str, authorization: str | None = Header(default=None)):
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-@admin_router.get("/assessments", summary="测算记录列表")
+@admin_router.get("/assessments", summary="分析记录列表")
 def assessments(
     keyword: str = Query(default="", max_length=80),
     core_wish: str = Query(default="", max_length=80),
@@ -521,7 +521,7 @@ def assessments(
     return success(admin_service.list_assessments(keyword=keyword, core_wish=core_wish, hide_tests=hide_tests, limit=limit))
 
 
-@admin_router.get("/daily-energies", summary="每日能量记录列表")
+@admin_router.get("/daily-energies", summary="每日搭配记录列表")
 def daily_energies(
     keyword: str = Query(default="", max_length=80),
     limit: int = Query(default=100, ge=1, le=500),
@@ -531,20 +531,20 @@ def daily_energies(
     return success(admin_service.list_daily_energies(keyword=keyword, limit=limit))
 
 
-@admin_router.get("/daily-energy-rules", summary="每日能量规则配置")
+@admin_router.get("/daily-energy-rules", summary="每日搭配规则配置")
 def daily_energy_rules(authorization: str | None = Header(default=None)):
     require_admin(authorization)
     return success(admin_service.daily_energy_rules())
 
 
-@admin_router.put("/daily-energy-rules", summary="保存每日能量规则配置")
+@admin_router.put("/daily-energy-rules", summary="保存每日搭配规则配置")
 def save_daily_energy_rules(
     payload: DailyEnergyRulesPayload,
     authorization: str | None = Header(default=None),
 ):
     actor = require_admin(authorization)
     try:
-        return success(admin_service.save_daily_energy_rules(payload.model_dump(), actor), "每日能量规则已保存")
+        return success(admin_service.save_daily_energy_rules(payload.model_dump(), actor), "每日搭配规则已保存")
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     except ValueError as exc:

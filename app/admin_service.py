@@ -1849,7 +1849,7 @@ class AdminService:
                 INSERT INTO managed_materials
                 (id, skuId, top, category, series, material_code, grade, name, effect, element, price, size, weight, color, shine,
                  image_path, image_url, enabled, sort_order, created_at, updated_at)
-                VALUES (?, ?, 'bead', ?, ?, ?, ?, ?, '净化与放大', '金', ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
+                VALUES (?, ?, 'bead', ?, ?, ?, ?, ?, '清爽与干净感', '金', ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
                 """,
                 (
                     item_id,
@@ -1876,7 +1876,7 @@ class AdminService:
                     "material_code": material_code_from_payload({"skuId": sku_id, "id": item_id}),
                     "name": series,
                     "element": "金",
-                    "effect": "净化与放大",
+                    "effect": "清爽与干净感",
                     "top": "bead",
                 },
                 connection=connection,
@@ -1886,8 +1886,8 @@ class AdminService:
     def _seed_blocks(self, connection) -> None:
         timestamp = now_iso()
         defaults = [
-            ("home_hero", "home", "宇涧水晶", "用五行、星盘与 MBTI 找到你的专属能量配方", "首页头部品牌文案"),
-            ("daily_energy", "daily", "每日能量补给站", "今天适合温柔启动，先做一件小事。", "每日留存模块文案"),
+            ("home_hero", "home", "宇涧水晶", "用五行、星座与 MBTI 找到你的专属搭配灵感", "首页头部品牌文案"),
+            ("daily_energy", "daily", "每日搭配建议", "今天适合温柔启动，先做一件小事。", "每日留存模块文案"),
             ("hot_recommend", "home", "热门推荐", "面向转化的推荐商品区", "首页商品推荐板块"),
             ("community_inspiration", "community", "社区灵感", "用户搭配与 DIY 案例展示", "灵感社区板块"),
         ]
@@ -3877,7 +3877,7 @@ class AdminService:
 
     def save_daily_energy_rules(self, payload: dict[str, Any], actor: dict[str, Any]) -> dict[str, Any]:
         if (actor or {}).get("role") == "viewer":
-            raise PermissionError("只读账号不能修改每日能量规则")
+            raise PermissionError("只读账号不能修改每日搭配规则")
         rules_payload = payload.get("rules") if isinstance(payload, dict) and "rules" in payload else payload
         if not isinstance(rules_payload, dict):
             raise ValueError("规则配置必须是 JSON 对象")

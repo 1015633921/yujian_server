@@ -43,7 +43,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="宇涧水晶 DIY API",
-    description="专属水晶测算、五行能量画像与手串定制推荐服务",
+    description="专属水晶分析、五行元素画像与手串定制推荐服务",
     version="2.0.0",
     docs_url="/docs",
     redoc_url="/redoc",

@@ -1,7 +1,7 @@
 <view class="assessment-page yu-page">
   <view class="assessment-nav">
     <view class="nav-back yu-pressable" bindtap="goBack">‹</view>
-    <view class="nav-title">{{currentStepKey === 'review' ? '确认测算信息' : modeCopy.navTitle}}</view>
+    <view class="nav-title">{{currentStepKey === 'review' ? '确认分析信息' : modeCopy.navTitle}}</view>
     <view class="nav-more yu-pressable" bindtap="openGuide">?</view>
   </view>
 
@@ -24,7 +24,7 @@
     <view class="hero-kicker">{{modeCopy.kicker}}</view>
     <view class="hero-title">{{modeCopy.title}}</view>
     <view class="hero-desc">{{modeCopy.desc}}</view>
-    <view class="hero-guide-link" bindtap="openGuide">30 秒了解测算依据</view>
+    <view class="hero-guide-link" bindtap="openGuide">30 秒了解推荐依据</view>
   </view>
 
   <view wx:if="{{currentStepKey !== 'review'}}" class="flow-intro">
@@ -43,15 +43,15 @@
         <view class="review-progress-inner"></view>
       </view>
     </view>
-    <view class="review-hero-title">确认测算信息</view>
-    <view class="review-hero-desc">确认无误后，将生成你的五行能量报告和专属手串推荐。</view>
+    <view class="review-hero-title">确认分析信息</view>
+    <view class="review-hero-desc">确认无误后，将生成你的元素搭配报告和专属手串推荐。</view>
   </view>
 
   <view wx:if="{{currentStepKey === 'basic'}}" class="form-panel yu-card yu-card-lg">
     <view class="panel-head">
       <view>
         <view class="panel-title">请填写你的出生信息</view>
-        <view class="panel-desc">用于计算你的五行能量分布</view>
+        <view class="panel-desc">用于生成你的元素比例参考</view>
       </view>
       <view class="panel-badge">基础信息</view>
     </view>
@@ -144,7 +144,7 @@
   <view wx:if="{{currentStepKey === 'wish'}}" class="option-section">
     <view class="option-head">
       <view>
-        <view class="option-title">当前核心愿望</view>
+        <view class="option-title">当前佩戴目标</view>
         <view class="option-desc">最多选择 3 项，帮助推荐更贴近你的手作方案。</view>
       </view>
       <view class="option-action">最多 3 项</view>
@@ -166,7 +166,7 @@
     <view class="option-head">
       <view>
         <view class="option-title">当下状态</view>
-        <view class="option-desc">选出最近最有共鸣的感受，用于七脉轮动态调节。</view>
+        <view class="option-desc">选出最近最有共鸣的感受，用于近期状态参考。</view>
       </view>
       <view class="option-action">最多 5 项</view>
     </view>
@@ -218,7 +218,7 @@
   <view wx:if="{{currentStepKey === 'review'}}" class="review-panel yu-card yu-card-lg">
     <view class="panel-head">
       <view>
-        <view class="panel-title">测算档案</view>
+        <view class="panel-title">分析档案</view>
         <view class="panel-desc">点击任一项可以返回对应步骤修改。</view>
       </view>
       <view class="panel-badge">已完成</view>
@@ -239,12 +239,12 @@
   </view>
 
   <view wx:if="{{currentStepKey === 'review'}}" class="review-notice">
-    出生时辰未知时，系统会按中午 12:00 估算；结果用于文化体验与个性化推荐参考。
+    出生时辰未知时，系统会按中午 12:00 估算；结果仅用于文化体验、审美搭配与个性化推荐参考。
   </view>
 
   <view class="privacy-note">
     <view class="note-dot"></view>
-    <view>信息仅用于本次能量测算与方案推荐，不会展示给其他用户。</view>
+    <view>信息仅用于本次元素分析与方案推荐，不会展示给其他用户。</view>
   </view>
 
   <view class="assessment-bottom">

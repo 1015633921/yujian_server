@@ -198,7 +198,7 @@ def calculate_zodiac_analysis(
     element = sign["element"]
     traits = list(sign["traits"])
     strongest = strongest_element or "优势"
-    weakest = weakest_element or "待补"
+    weakest = weakest_element or "可调和"
     return {
         "key": sign["key"],
         "name": sign["name"],
@@ -209,7 +209,7 @@ def calculate_zodiac_analysis(
         "traits": traits,
         "keywords": traits,
         "summary": f"{sign['name']}带有{element}的{sign['modality']}气质，关键词是{'、'.join(traits)}。",
-        "wuxing_hint": ELEMENT_TO_WUXING.get(element, "星座气质会作为五行报告外的性格侧写参考。"),
-        "integration": f"结合你的五行画像，当前偏强的{strongest}适合被看见，{weakest}则适合用更温和的节奏补足。",
+        "wuxing_hint": ELEMENT_TO_WUXING.get(element, "星座气质会作为元素报告外的性格侧写参考。"),
+        "integration": f"结合你的五行画像，当前偏强的{strongest}适合被看见，{weakest}则适合用更温和的节奏调和。",
         "suggestion": sign["focus"],
     }

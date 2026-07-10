@@ -907,15 +907,14 @@ page {
   gap: 6rpx;
   padding: 6rpx;
   overflow: hidden;
-  border: 1rpx solid rgba(255, 255, 255, .62);
+  border: 1rpx solid rgba(255, 255, 255, .14);
   border-radius: 30rpx;
-  background: rgba(255, 252, 246, .48);
+  background: rgba(28, 27, 24, .94);
   box-shadow:
-    0 14rpx 30rpx rgba(45, 39, 28, .10),
-    inset 0 1rpx 0 rgba(255, 255, 255, .72),
-    inset 0 -1rpx 0 rgba(255, 255, 255, .22);
-  -webkit-backdrop-filter: blur(30rpx) saturate(150%);
-  backdrop-filter: blur(30rpx) saturate(150%);
+    0 14rpx 30rpx rgba(18, 17, 15, .18),
+    inset 0 1rpx 0 rgba(255, 255, 255, .16);
+  -webkit-backdrop-filter: blur(26rpx) saturate(130%);
+  backdrop-filter: blur(26rpx) saturate(130%);
   opacity: 1;
   transform: translateY(0) scale(1);
   transform-origin: center bottom;
@@ -937,26 +936,27 @@ page {
   justify-content: center;
   height: 78rpx;
   border-radius: 24rpx;
-  color: rgba(32, 32, 31, .56);
+  color: rgba(255, 255, 255, .78);
   font-size: 19rpx;
-  font-weight: 760;
+  font-weight: 850;
 }
 
 .lab-tab.active {
-  color: #181818;
-  background: rgba(255, 255, 255, .58);
+  color: #ffffff;
+  font-weight: 950;
+  background: rgba(255, 255, 255, .16);
   box-shadow:
-    0 8rpx 18rpx rgba(42, 36, 26, .06),
-    inset 0 1rpx 0 rgba(255, 255, 255, .70);
+    0 8rpx 18rpx rgba(0, 0, 0, .16),
+    inset 0 1rpx 0 rgba(255, 255, 255, .20);
 }
 
 .lab-tab.center {
-  color: #7b6138;
-  background: rgba(242, 232, 212, .46);
+  color: rgba(255, 255, 255, .92);
+  background: rgba(255, 255, 255, .10);
 }
 
 .lab-tab.active.center {
-  background: rgba(255, 255, 255, .60);
+  background: rgba(255, 255, 255, .18);
 }
 
 .tab-icon {

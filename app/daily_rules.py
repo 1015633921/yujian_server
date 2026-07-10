@@ -5,6 +5,7 @@ import hashlib
 import json
 from typing import Any
 
+from .copy_safety import safe_display_text, safe_wish_label
 from .energy import ELEMENTS
 
 DAILY_RULES_SETTING_KEY = "daily_energy_rules"
@@ -32,7 +33,7 @@ DEFAULT_DAILY_ENERGY_RULES: dict[str, Any] = {
         {"key": "emotion", "label": "情绪"},
         {"key": "energy", "label": "精力"},
         {"key": "social", "label": "人际"},
-        {"key": "fortune", "label": "运势"},
+        {"key": "fortune", "label": "目标"},
     ],
     "status_tags": [
         {"key": "pressure", "label": "压力山大", "emoji": "🤯", "group": "emotion", "desc": "脑子太满，需要降噪", "support_elements": ["水", "土"], "dimension_delta": {"softness": 8, "stability": 6}, "score_delta": -5, "crystal_codes": ["aquamarine", "smoky_quartz"], "keywords": ["降噪", "稳住"]},
@@ -40,8 +41,8 @@ DEFAULT_DAILY_ENERGY_RULES: dict[str, Any] = {
         {"key": "calm", "label": "平静", "emoji": "🫧", "group": "emotion", "desc": "状态稳定，可以轻推进", "support_elements": ["金", "土"], "dimension_delta": {"stability": 8}, "score_delta": 5, "crystal_codes": ["clear_quartz", "smoky_quartz"], "keywords": ["清透", "稳定"]},
         {"key": "angry", "label": "暴躁", "emoji": "🔥", "group": "emotion", "desc": "火气偏强，需要柔化", "support_elements": ["水", "金"], "dimension_delta": {"softness": 9, "expression": -2}, "score_delta": -3, "crystal_codes": ["aquamarine", "clear_quartz"], "keywords": ["降火", "少硬刚"]},
         {"key": "lost", "label": "迷茫", "emoji": "🌫️", "group": "emotion", "desc": "方向感弱，先整理优先级", "support_elements": ["金", "土"], "dimension_delta": {"stability": 5, "intuition": 3}, "score_delta": -2, "crystal_codes": ["clear_quartz", "hematite"], "keywords": ["清晰", "边界"]},
-        {"key": "hug", "label": "抱抱自己", "emoji": "🕊️", "group": "emotion", "desc": "需要温柔修复", "support_elements": ["木", "水"], "dimension_delta": {"softness": 8}, "score_delta": 1, "crystal_codes": ["rose_quartz", "aquamarine"], "keywords": ["修复", "陪伴"]},
-        {"key": "battery_low", "label": "电量告急", "emoji": "🔋", "group": "energy", "desc": "能量偏低，先省电", "support_elements": ["土", "水"], "dimension_delta": {"stability": 6, "action": -4}, "score_delta": -6, "crystal_codes": ["smoky_quartz", "aquamarine"], "keywords": ["省电模式", "慢慢来"]},
+        {"key": "hug", "label": "抱抱自己", "emoji": "🕊️", "group": "emotion", "desc": "需要温柔放松", "support_elements": ["木", "水"], "dimension_delta": {"softness": 8}, "score_delta": 1, "crystal_codes": ["rose_quartz", "aquamarine"], "keywords": ["放松", "陪伴"]},
+        {"key": "battery_low", "label": "精力偏低", "emoji": "🔋", "group": "energy", "desc": "精力偏低，先放慢节奏", "support_elements": ["土", "水"], "dimension_delta": {"stability": 6, "action": -4}, "score_delta": -6, "crystal_codes": ["smoky_quartz", "aquamarine"], "keywords": ["省电模式", "慢慢来"]},
         {"key": "internal_loss", "label": "严重内耗", "emoji": "🥱", "group": "energy", "desc": "想太多，行动太少", "support_elements": ["金", "土"], "dimension_delta": {"stability": 8, "action": 3}, "score_delta": -4, "crystal_codes": ["hematite", "clear_quartz"], "keywords": ["少纠结", "先落地"]},
         {"key": "procrastinate", "label": "拖延晚期", "emoji": "⏳", "group": "energy", "desc": "需要一点推进力", "support_elements": ["火", "土"], "dimension_delta": {"action": 9, "stability": 3}, "score_delta": -1, "crystal_codes": ["garnet", "citrine"], "keywords": ["启动", "交付"]},
         {"key": "need_focus", "label": "需要专注", "emoji": "🎯", "group": "energy", "desc": "适合减少干扰", "support_elements": ["金", "水"], "dimension_delta": {"stability": 6, "intuition": 3}, "score_delta": 2, "crystal_codes": ["clear_quartz", "obsidian"], "keywords": ["专注", "屏蔽噪音"]},
@@ -49,20 +50,20 @@ DEFAULT_DAILY_ENERGY_RULES: dict[str, Any] = {
         {"key": "full_power", "label": "满血复活", "emoji": "🚀", "group": "energy", "desc": "适合推进关键动作", "support_elements": ["火", "木"], "dimension_delta": {"action": 10, "expression": 4}, "score_delta": 8, "crystal_codes": ["garnet", "green_phantom"], "keywords": ["冲刺", "生长"]},
         {"key": "social_anxiety", "label": "社恐发作", "emoji": "🙈", "group": "social", "desc": "保持边界，低压社交", "support_elements": ["水", "金"], "dimension_delta": {"softness": 6, "expression": -3}, "score_delta": -3, "crystal_codes": ["aquamarine", "hematite"], "keywords": ["低压社交", "边界"]},
         {"key": "charm", "label": "散发魅力", "emoji": "🧲", "group": "social", "desc": "适合展示与见面", "support_elements": ["火", "木"], "dimension_delta": {"expression": 9, "softness": 3}, "score_delta": 6, "crystal_codes": ["strawberry_quartz", "rose_quartz"], "keywords": ["好人缘", "发光"]},
-        {"key": "protect", "label": "自动退散", "emoji": "🛡️", "group": "social", "desc": "不想被打扰，需要防护感", "support_elements": ["水", "金"], "dimension_delta": {"stability": 5, "softness": 4}, "score_delta": 0, "crystal_codes": ["obsidian", "hematite"], "keywords": ["防护", "退退退"]},
-        {"key": "peach", "label": "桃花绝缘体", "emoji": "🌸", "group": "social", "desc": "想让关系更柔和", "support_elements": ["木", "火"], "dimension_delta": {"softness": 6, "expression": 5}, "score_delta": 2, "crystal_codes": ["rose_quartz", "rhodochrosite"], "keywords": ["桃花", "柔和"]},
-        {"key": "noble", "label": "求贵人", "emoji": "🤝", "group": "social", "desc": "需要被看见与支持", "support_elements": ["木", "金"], "dimension_delta": {"expression": 5, "stability": 4}, "score_delta": 3, "crystal_codes": ["green_phantom", "clear_quartz"], "keywords": ["贵人", "协作"]},
-        {"key": "money", "label": "一心搞钱", "emoji": "💰", "group": "fortune", "desc": "目标明确，适合稳步变现", "support_elements": ["土", "金"], "dimension_delta": {"action": 6, "stability": 6}, "score_delta": 5, "crystal_codes": ["citrine", "gold_rutilated_quartz"], "keywords": ["搞钱", "落袋"]},
-        {"key": "career", "label": "搞事业", "emoji": "💼", "group": "fortune", "desc": "适合推进工作成果", "support_elements": ["火", "土"], "dimension_delta": {"action": 8, "stability": 4}, "score_delta": 4, "crystal_codes": ["garnet", "citrine"], "keywords": ["事业", "推进"]},
-        {"key": "lucky", "label": "锦鲤本鲤", "emoji": "🐟", "group": "fortune", "desc": "想要一点好运气", "support_elements": ["水", "木"], "dimension_delta": {"intuition": 5, "softness": 3}, "score_delta": 5, "crystal_codes": ["aquamarine", "green_phantom"], "keywords": ["好运", "顺流"]},
-        {"key": "exam", "label": "逢考必过", "emoji": "📚", "group": "fortune", "desc": "需要专注和稳定输出", "support_elements": ["金", "水"], "dimension_delta": {"stability": 8, "intuition": 4}, "score_delta": 3, "crystal_codes": ["clear_quartz", "blue_rutilated_quartz"], "keywords": ["考试", "清醒"]},
-        {"key": "anti_mercury", "label": "水逆退散", "emoji": "🧿", "group": "fortune", "desc": "减少沟通误会与突发干扰", "support_elements": ["水", "金"], "dimension_delta": {"softness": 6, "expression": 3}, "score_delta": 1, "crystal_codes": ["obsidian", "clear_quartz"], "keywords": ["顺一点", "少踩坑"]},
+        {"key": "protect", "label": "安定边界", "emoji": "🛡️", "group": "social", "desc": "不想被打扰，需要安定感", "support_elements": ["水", "金"], "dimension_delta": {"stability": 5, "softness": 4}, "score_delta": 0, "crystal_codes": ["obsidian", "hematite"], "keywords": ["边界", "低干扰"]},
+        {"key": "peach", "label": "关系柔和", "emoji": "🌸", "group": "social", "desc": "想让关系更柔和", "support_elements": ["木", "火"], "dimension_delta": {"softness": 6, "expression": 5}, "score_delta": 2, "crystal_codes": ["rose_quartz", "rhodochrosite"], "keywords": ["亲和", "柔和"]},
+        {"key": "noble", "label": "协作支持", "emoji": "🤝", "group": "social", "desc": "需要被看见与支持", "support_elements": ["木", "金"], "dimension_delta": {"expression": 5, "stability": 4}, "score_delta": 3, "crystal_codes": ["green_phantom", "clear_quartz"], "keywords": ["协作", "支持"]},
+        {"key": "money", "label": "目标推进", "emoji": "💰", "group": "fortune", "desc": "目标明确，适合稳步推进", "support_elements": ["土", "金"], "dimension_delta": {"action": 6, "stability": 6}, "score_delta": 5, "crystal_codes": ["citrine", "gold_rutilated_quartz"], "keywords": ["目标", "落地"]},
+        {"key": "career", "label": "工作推进", "emoji": "💼", "group": "fortune", "desc": "适合推进工作成果", "support_elements": ["火", "土"], "dimension_delta": {"action": 8, "stability": 4}, "score_delta": 4, "crystal_codes": ["garnet", "citrine"], "keywords": ["事业", "推进"]},
+        {"key": "lucky", "label": "积极期待", "emoji": "🐟", "group": "fortune", "desc": "想要一点积极感", "support_elements": ["水", "木"], "dimension_delta": {"intuition": 5, "softness": 3}, "score_delta": 5, "crystal_codes": ["aquamarine", "green_phantom"], "keywords": ["积极", "顺流"]},
+        {"key": "exam", "label": "考试专注", "emoji": "📚", "group": "fortune", "desc": "需要专注和稳定输出", "support_elements": ["金", "水"], "dimension_delta": {"stability": 8, "intuition": 4}, "score_delta": 3, "crystal_codes": ["clear_quartz", "blue_rutilated_quartz"], "keywords": ["考试", "清醒"]},
+        {"key": "anti_mercury", "label": "沟通顺畅", "emoji": "🧿", "group": "fortune", "desc": "减少沟通误会与突发干扰", "support_elements": ["水", "金"], "dimension_delta": {"softness": 6, "expression": 3}, "score_delta": 1, "crystal_codes": ["obsidian", "clear_quartz"], "keywords": ["顺一点", "少踩坑"]},
     ],
     "scenes": [
         {"key": "work_comm", "label": "上班沟通", "icon": "💼", "desc": "会议、客户、协作", "element_bias": {"水": 18, "金": 10}, "dimension_delta": {"expression": 8, "stability": 3}, "score_delta": 2, "crystal_codes": ["aquamarine", "clear_quartz"], "wearing_scenes": ["上班沟通", "见客户", "直播表达"]},
         {"key": "light_social", "label": "轻社交", "icon": "👥", "desc": "见朋友、轻松互动", "element_bias": {"木": 16, "火": 10}, "dimension_delta": {"softness": 5, "expression": 7}, "score_delta": 3, "crystal_codes": ["rose_quartz", "strawberry_quartz"], "wearing_scenes": ["轻社交", "约会见面"]},
         {"key": "study_focus", "label": "学习专注", "icon": "📖", "desc": "学习、复盘、整理", "element_bias": {"金": 18, "水": 8}, "dimension_delta": {"stability": 8, "intuition": 3}, "score_delta": 2, "crystal_codes": ["clear_quartz", "blue_rutilated_quartz"], "wearing_scenes": ["学习专注", "考试复习"]},
-        {"key": "rest_restore", "label": "休息修复", "icon": "🌿", "desc": "低压、补能、睡前", "element_bias": {"水": 16, "土": 12}, "dimension_delta": {"softness": 9, "stability": 4, "action": -3}, "score_delta": -1, "crystal_codes": ["aquamarine", "smoky_quartz"], "wearing_scenes": ["休息修复", "睡前整理"]},
+        {"key": "rest_restore", "label": "放松休息", "icon": "🌿", "desc": "低压、放松、睡前", "element_bias": {"水": 16, "土": 12}, "dimension_delta": {"softness": 9, "stability": 4, "action": -3}, "score_delta": -1, "crystal_codes": ["aquamarine", "smoky_quartz"], "wearing_scenes": ["放松休息", "睡前整理"]},
         {"key": "live_expression", "label": "直播表达", "icon": "🎙️", "desc": "输出、展示、表达", "element_bias": {"火": 18, "水": 10}, "dimension_delta": {"expression": 10, "action": 4}, "score_delta": 4, "crystal_codes": ["garnet", "aquamarine"], "wearing_scenes": ["直播表达", "公开展示"]},
         {"key": "important_meeting", "label": "重要会议", "icon": "🧭", "desc": "结论清晰，边界稳定", "element_bias": {"金": 18, "土": 12}, "dimension_delta": {"stability": 8, "expression": 4}, "score_delta": 3, "crystal_codes": ["hematite", "clear_quartz"], "wearing_scenes": ["重要会议", "谈判沟通"]},
         {"key": "deadline", "label": "赶工交付", "icon": "⚡", "desc": "别纠结，先交付", "element_bias": {"火": 16, "土": 12}, "dimension_delta": {"action": 9, "stability": 4}, "score_delta": 2, "crystal_codes": ["garnet", "smoky_quartz"], "wearing_scenes": ["赶工交付", "推进任务"]},
@@ -72,13 +73,13 @@ DEFAULT_DAILY_ENERGY_RULES: dict[str, Any] = {
         {"key": "stable_expression", "label": "稳定表达", "wish": "正缘桃花/人际和合", "target_elements": ["水", "火"], "dimension_delta": {"expression": 9, "softness": 4}, "score_delta": 3, "crystal_codes": ["aquamarine", "garnet"], "keywords": ["表达", "沟通"]},
         {"key": "less_overthinking", "label": "减少内耗", "wish": "健康护身/保持专注", "target_elements": ["金", "土"], "dimension_delta": {"stability": 8, "softness": 4}, "score_delta": 1, "crystal_codes": ["clear_quartz", "smoky_quartz"], "keywords": ["少内耗", "稳住"]},
         {"key": "move_task", "label": "推进任务", "wish": "招财进宝/事业腾飞", "target_elements": ["火", "土"], "dimension_delta": {"action": 10, "stability": 3}, "score_delta": 4, "crystal_codes": ["garnet", "citrine"], "keywords": ["推进", "交付"]},
-        {"key": "low_pressure_protect", "label": "低压防护", "wish": "辟邪防小人/消除焦虑", "target_elements": ["水", "金"], "dimension_delta": {"softness": 7, "stability": 5}, "score_delta": 0, "crystal_codes": ["obsidian", "hematite"], "keywords": ["防护", "低压"]},
-        {"key": "wealth", "label": "招正财", "wish": "招财进宝/事业腾飞", "target_elements": ["土", "金"], "dimension_delta": {"stability": 6, "action": 5}, "score_delta": 3, "crystal_codes": ["citrine", "gold_rutilated_quartz"], "keywords": ["正财", "稳进账"]},
-        {"key": "good_luck", "label": "求好运", "wish": "招财进宝/事业腾飞", "target_elements": ["水", "木"], "dimension_delta": {"intuition": 6, "softness": 3}, "score_delta": 4, "crystal_codes": ["aquamarine", "green_phantom"], "keywords": ["好运", "顺流"]},
+        {"key": "low_pressure_protect", "label": "低压边界", "wish": "辟邪防小人/消除焦虑", "target_elements": ["水", "金"], "dimension_delta": {"softness": 7, "stability": 5}, "score_delta": 0, "crystal_codes": ["obsidian", "hematite"], "keywords": ["边界", "低压"]},
+        {"key": "wealth", "label": "稳步推进", "wish": "招财进宝/事业腾飞", "target_elements": ["土", "金"], "dimension_delta": {"stability": 6, "action": 5}, "score_delta": 3, "crystal_codes": ["citrine", "gold_rutilated_quartz"], "keywords": ["目标", "稳进"]},
+        {"key": "good_luck", "label": "积极期待", "wish": "招财进宝/事业腾飞", "target_elements": ["水", "木"], "dimension_delta": {"intuition": 6, "softness": 3}, "score_delta": 4, "crystal_codes": ["aquamarine", "green_phantom"], "keywords": ["积极", "顺流"]},
         {"key": "relationship", "label": "提升人缘", "wish": "正缘桃花/人际和合", "target_elements": ["木", "火"], "dimension_delta": {"expression": 7, "softness": 5}, "score_delta": 3, "crystal_codes": ["rose_quartz", "strawberry_quartz"], "keywords": ["人缘", "亲和"]},
         {"key": "inspiration", "label": "提升灵感", "wish": "健康护身/保持专注", "target_elements": ["水", "木"], "dimension_delta": {"intuition": 10}, "score_delta": 2, "crystal_codes": ["blue_rutilated_quartz", "green_phantom"], "keywords": ["灵感", "创意"]},
-        {"key": "sleep_restore", "label": "修复睡眠", "wish": "健康护身/保持专注", "target_elements": ["水", "土"], "dimension_delta": {"softness": 8, "stability": 3}, "score_delta": -1, "crystal_codes": ["aquamarine", "smoky_quartz"], "keywords": ["睡眠", "修复"]},
-        {"key": "clear_boundary", "label": "清理边界", "wish": "辟邪防小人/消除焦虑", "target_elements": ["金", "水"], "dimension_delta": {"stability": 8, "expression": 2}, "score_delta": 2, "crystal_codes": ["hematite", "obsidian"], "keywords": ["边界", "清理"]},
+        {"key": "sleep_restore", "label": "放松休息", "wish": "健康护身/保持专注", "target_elements": ["水", "土"], "dimension_delta": {"softness": 8, "stability": 3}, "score_delta": -1, "crystal_codes": ["aquamarine", "smoky_quartz"], "keywords": ["睡前", "放松"]},
+        {"key": "clear_boundary", "label": "清理边界", "wish": "辟邪防小人/消除焦虑", "target_elements": ["金", "水"], "dimension_delta": {"stability": 8, "expression": 2}, "score_delta": 2, "crystal_codes": ["hematite", "obsidian"], "keywords": ["边界", "整理"]},
     ],
 }
 
@@ -87,8 +88,8 @@ DEFAULT_STATUS_SHORT_LABELS = {
     "calm": "平静",
     "pressure": "压力",
     "internal_loss": "内耗",
-    "battery_low": "低电量",
-    "money": "搞钱",
+    "battery_low": "低精力",
+    "money": "目标",
     "need_focus": "专注",
     "emo": "EMO",
     "lost": "迷茫",
@@ -99,13 +100,13 @@ DEFAULT_STATUS_SHORT_LABELS = {
     "hug": "抱抱",
     "social_anxiety": "社恐",
     "charm": "魅力",
-    "protect": "防护",
-    "peach": "桃花",
-    "noble": "贵人",
-    "career": "事业",
-    "lucky": "好运",
+    "protect": "边界",
+    "peach": "关系",
+    "noble": "协作",
+    "career": "工作",
+    "lucky": "积极",
     "exam": "考试",
-    "anti_mercury": "退散",
+    "anti_mercury": "沟通",
 }
 
 
@@ -277,11 +278,11 @@ def public_daily_rules_payload(rules: dict[str, Any]) -> dict[str, Any]:
         "status_tags": [
             {
                 "key": item.get("key"),
-                "label": item.get("label"),
-                "short_label": item.get("short_label") or item.get("label"),
+                "label": safe_display_text(item.get("label")),
+                "short_label": safe_display_text(item.get("short_label") or item.get("label")),
                 "emoji": item.get("emoji") or item.get("icon") or "",
                 "group": item.get("group") or "",
-                "desc": item.get("desc") or "",
+                "desc": safe_display_text(item.get("desc") or ""),
                 "priority": item.get("priority") or 999,
                 "featured": bool(item.get("featured")),
             }
@@ -290,16 +291,16 @@ def public_daily_rules_payload(rules: dict[str, Any]) -> dict[str, Any]:
         "scenes": [
             {
                 "key": item.get("key"),
-                "label": item.get("label"),
+                "label": safe_display_text(item.get("label")),
                 "icon": item.get("icon") or item.get("emoji") or "",
-                "desc": item.get("desc") or "",
+                "desc": safe_display_text(item.get("desc") or ""),
             }
             for item in rules.get("scenes", [])
         ],
         "goals": [
             {
                 "key": item.get("key"),
-                "label": item.get("label"),
+                "label": safe_display_text(item.get("label")),
                 "wish": item.get("wish") or "",
             }
             for item in rules.get("goals", [])

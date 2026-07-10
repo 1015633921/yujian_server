@@ -27,14 +27,14 @@ const TONE_BEADS = {
 const TYPE_LABELS = {
   community_post: '灵感搭配',
   recommendation_plan: '推荐方案',
-  daily_energy: '每日能量',
+  daily_energy: '今日搭配',
   material_inspiration: '材料灵感'
 };
 
 const TYPE_AUTHORS = {
   community_post: '宇涧灵感室',
   recommendation_plan: '宇涧测算工坊',
-  daily_energy: '今日能量',
+  daily_energy: '今日搭配',
   material_inspiration: '宇涧材料库'
 };
 
@@ -94,7 +94,7 @@ function tagsFor(base, favoriteType) {
   if (Array.isArray(base.materials) && base.materials.length) {
     return base.materials.map(item => cleanText(item && (item.name || item.title) || item)).filter(Boolean).slice(0, 3);
   }
-  if (favoriteType === 'daily_energy') return ['今日能量', '可带入 DIY'];
+  if (favoriteType === 'daily_energy') return ['今日搭配', '可带入 DIY'];
   if (favoriteType === 'material_inspiration') return ['材料灵感', '单珠收藏'];
   if (favoriteType === 'recommendation_plan') return ['测算推荐', '定制方案'];
   return ['灵感搭配'];

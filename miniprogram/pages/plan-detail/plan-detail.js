@@ -43,7 +43,7 @@ function normalizePlan(plan = {}, index = 0) {
     ...plan,
     id: plan.id || plan.plan_id || `plan-${index}`,
     name: plan.name || plan.title || '水晶定制方案',
-    subtitle: plan.subtitle || plan.short_desc || plan.summary || '根据场景与能量倾向推荐',
+    subtitle: plan.subtitle || plan.short_desc || plan.summary || '根据场景与风格倾向推荐',
     desc: plan.desc || plan.description || plan.recommendation_copy || '以真实珠材搭配为基础，适合继续进入 DIY 工作台细调。',
     price: Number(plan.price || plan.sale_price || 299).toFixed(0),
     tone: plan.tone || 'clear',

@@ -19,7 +19,7 @@ const TONE_CONFIG = {
     sequence: ['aquamarine', 'clearQuartz', 'moonstone', 'aquamarine']
   },
   clear: {
-    label: '清爽净化',
+    label: '清爽通透',
     color: '#7C8B92',
     soft: '#F1F4F3',
     sequence: ['clearQuartz', 'moonstone', 'aquamarine', 'clearQuartz']
@@ -37,7 +37,7 @@ const TONE_CONFIG = {
     sequence: ['moonstone', 'clearQuartz', 'amethyst', 'moonstone']
   },
   black: {
-    label: '边界守护',
+    label: '边界安定',
     color: '#30353A',
     soft: '#ECEEED',
     sequence: ['amethyst', 'clearQuartz', 'amethyst', 'moonstone']
@@ -167,7 +167,7 @@ function materialDesc(entry, index) {
     : index === 1
       ? '让搭配更稳定耐看'
       : index === 2
-        ? '补足清透与层次'
+        ? '增加清透与层次'
         : '增加细节与呼吸感';
 }
 

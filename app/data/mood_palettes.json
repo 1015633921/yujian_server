@@ -15,7 +15,7 @@
       "subtitle": "接纳、关系、柔软",
       "colors": ["#F0B7C3", "#DDEAD7", "#7EA27E"],
       "color_families": ["pink", "green"],
-      "mood_tags": ["接纳", "关系", "柔软", "修复"],
+      "mood_tags": ["接纳", "关系", "柔软", "放松"],
       "visual_tags": ["花园感", "柔和", "温柔"],
       "chakra": "heart",
       "element_weights": {"木": 1.7, "火": 1.0}
@@ -35,7 +35,7 @@
       "subtitle": "灵感、直觉、安静",
       "colors": ["#DDD7EF", "#F7F5F0", "#8177B4"],
       "color_families": ["purple", "white", "clear"],
-      "mood_tags": ["灵感", "直觉", "安静", "净化"],
+      "mood_tags": ["灵感", "直觉", "安静", "清爽"],
       "visual_tags": ["月光感", "通透", "微光"],
       "chakra": "third_eye",
       "element_weights": {"水": 1.3, "金": 1.0, "木": 0.8}

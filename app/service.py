@@ -11,6 +11,7 @@ from .energy import ELEMENTS, ENERGY_WEIGHTS, EnergyCalculator, MBTI_MAPPING, PL
 from .fortune.chakra import public_chakra_options
 from .fortune.mood_palette import public_mood_palettes
 from .fortune.zodiac import calculate_zodiac_analysis
+from .copy_safety import safe_display_text
 from .recommendation import RecommendationEngine, interpretation
 from .repository import AssessmentRepository
 from .schemas import AssessmentRequest, DIYRecommendationRequest
@@ -122,7 +123,7 @@ class AssessmentService:
                 "把手串作为愿望提醒工具，不替代医疗、心理或财务建议。",
                 "洗澡、运动和睡眠时建议取下，避免磕碰与化学清洁剂。",
             ],
-            "disclaimer": "本测算用于文化体验与个性化 DIY 推荐，不构成命理、医疗或投资建议。",
+            "disclaimer": "本分析仅用于传统文化体验、审美搭配与个性化 DIY 推荐，不构成命理判断、医疗健康建议或效果承诺。",
         }
         self.repository.save(result, fingerprint)
         return result, False
@@ -170,7 +171,7 @@ class AssessmentService:
                     "bead_size_mm": {"label": "偏好珠径", "unit": "mm", "options": [6, 8, 10, 12], "default": 8},
                 },
             },
-            "disclaimer": "本测算用于文化体验与个性化 DIY 推荐，不构成命理、医疗或投资建议。",
+            "disclaimer": "本分析仅用于传统文化体验、审美搭配与个性化 DIY 推荐，不构成命理判断、医疗健康建议或效果承诺。",
         }
         self.repository.save(result, fingerprint)
         return result, False
@@ -206,7 +207,7 @@ class AssessmentService:
         workbench_payload = {
             "source": "energy_assessment",
             "assessment_id": assessment_id,
-            "name": f"{request.name}的专属能量手串",
+            "name": f"{request.name}的专属搭配手串",
             "core_wish": request.primary_core_wish,
             "core_wishes": request.core_wishes,
             "wrist_size_cm": payload.wrist_size_cm,
@@ -321,18 +322,18 @@ class AssessmentService:
         wishes = core_wishes or []
         if wishes:
             if any("财" in wish or "事业" in wish for wish in wishes):
-                wish_text = "聚气生财"
+                wish_text = "目标成形"
             elif any("桃花" in wish or "人际" in wish or "正缘" in wish for wish in wishes):
-                wish_text = "和合生光"
+                wish_text = "关系柔和"
             elif any("焦虑" in wish or "辟邪" in wish or "守护" in wish for wish in wishes):
-                wish_text = "净界安神"
+                wish_text = "安定边界"
             elif any("健康" in wish or "专注" in wish for wish in wishes):
-                wish_text = "定心养元"
+                wish_text = "专注平衡"
         labels = [
-            {"label": strongest_words[0], "source": "主能量", "element": strongest},
+            {"label": strongest_words[0], "source": "主元素", "element": strongest},
             {"label": second_words[0], "source": "辅助气质", "element": second},
             {"label": weakest_word, "source": "调和方向", "element": weakest},
-            {"label": wish_text, "source": "当前愿望", "element": ""},
+            {"label": wish_text, "source": "当前目标", "element": ""},
         ]
         seen = set()
         unique = []
@@ -357,30 +358,30 @@ class AssessmentService:
         is_same_as_strongest = seasonal_element == strongest
         is_same_as_weakest = seasonal_element == weakest
         if is_same_as_strongest:
-            notice = f"当下{seasonal_element}气与本身偏强能量同频，容易把优势用过头。"
+            notice = f"当下{seasonal_element}元素与本身偏强方向同频，容易把优势用过头。"
             drain = ELEMENT_DRAIN_POINTS[seasonal_element]
             suggestion = ELEMENT_SEASON_ADVICE[seasonal_element]
         elif is_same_as_weakest:
-            notice = f"当下{seasonal_element}气正在补足你的待调和处，适合借势建立新习惯。"
-            drain = f"需要注意的是，{weakest}能量刚被带起时不宜用力过猛，先从稳定的小节奏开始。"
+            notice = f"当下{seasonal_element}元素正在呼应你的可调和方向，适合借势建立新习惯。"
+            drain = f"需要注意的是，{weakest}元素刚被带起时不宜用力过猛，先从稳定的小节奏开始。"
             suggestion = ELEMENT_SEASON_ADVICE[weakest]
         elif seasonal_value >= strongest_value * 0.88:
-            notice = f"当下{seasonal_element}气较旺，也会放大你盘面里相近的能量倾向。"
+            notice = f"当下{seasonal_element}元素较明显，也会增强你画像里相近的状态倾向。"
             drain = ELEMENT_DRAIN_POINTS[seasonal_element]
-            suggestion = f"{ELEMENT_SEASON_ADVICE[seasonal_element]}同时别忘了温柔补足{weakest}。"
+            suggestion = f"{ELEMENT_SEASON_ADVICE[seasonal_element]}同时别忘了温柔调和{weakest}。"
         else:
-            notice = f"外在时令偏{seasonal_element}，你的个人盘面则更需要照看{weakest}。"
+            notice = f"外在时令偏{seasonal_element}，你的个人画像则更适合照看{weakest}。"
             drain = ELEMENT_DRAIN_POINTS[weakest]
             suggestion = ELEMENT_SEASON_ADVICE[weakest]
         return {
-            "title": "近期能量运势提示",
+            "title": "近期状态提示",
             "period": season_name,
             "seasonal_element": seasonal_element,
-            "seasonal_copy": seasonal_copy,
-            "notice": notice,
-            "drain_point": drain,
-            "suggestion": suggestion,
-            "summary": f"{season_name}，{seasonal_copy}。{notice}{drain}{suggestion}",
+            "seasonal_copy": safe_display_text(seasonal_copy),
+            "notice": safe_display_text(notice),
+            "drain_point": safe_display_text(drain),
+            "suggestion": safe_display_text(suggestion),
+            "summary": safe_display_text(f"{season_name}，{seasonal_copy}。{notice}{drain}{suggestion}"),
         }
 
     @classmethod

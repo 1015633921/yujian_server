@@ -4,10 +4,11 @@ import hashlib
 from datetime import date
 from typing import Any
 
+from .copy_safety import safe_display_text
 from .daily_rules import daily_rules_version, normalize_daily_energy_rules
 from .energy import ELEMENTS, WISH_MAPPING, normalized_profile
 from .materials import list_materials
-from .recommendation import CRYSTAL_CATALOG, SUPPORTING_BY_ELEMENT
+from .recommendation import CRYSTAL_CATALOG, SUPPORTING_BY_ELEMENT, RecommendationEngine
 
 WORKBENCH_CRYSTAL_CODES = {
     "citrine",
@@ -24,7 +25,7 @@ WORKBENCH_CRYSTAL_CODES = {
     "hematite",
 }
 
-DAILY_ENERGY_CONTENT_VERSION = 4
+DAILY_ENERGY_CONTENT_VERSION = 6
 
 CRYSTAL_MATERIAL_SKUS = {
     "titanium_quartz": ["titaniumQuartz", "goldRutilatedQuartz", "citrine"],
@@ -223,6 +224,7 @@ class DailyEnergyCalculator:
             "mode": "starter",
             "personalized": False,
             "assessment_id": None,
+            "wrist_size_cm": 16,
             "score": score,
             "level": self.score_level(score),
             "theme": self.theme_for_context(context, content["theme"]),
@@ -238,9 +240,9 @@ class DailyEnergyCalculator:
             "state_context": context["public"],
             "date_basis": date_basis,
             "guide": {
-                "title": "解锁你的专属每日能量",
-                "description": "完成五行能量测算后，系统会结合你的个人画像、当天节律和实时选择生成建议。",
-                "button_text": "开始专属测算",
+                "title": "解锁你的专属每日搭配",
+                "description": "完成五行风格分析后，系统会结合你的个人画像、当天节律和实时选择生成建议。",
+                "button_text": "开始专属分析",
                 "route": "/pages/assessment/assessment",
             },
         }
@@ -283,6 +285,7 @@ class DailyEnergyCalculator:
             "mode": "personalized",
             "personalized": True,
             "assessment_id": assessment["assessment_id"],
+            "wrist_size_cm": self.assessment_wrist_size_cm(assessment),
             "score": score,
             "level": self.score_level(score),
             "theme": self.theme_for_context(context, content["theme"]),
@@ -323,7 +326,7 @@ class DailyEnergyCalculator:
         branch = EARTHLY_BRANCHES[offset % 12]
         seasonal_element = SEASON_ELEMENT[target_date.month]
         return {
-            "period": f"{target_date.month}月流月",
+            "period": f"{target_date.month}月参考",
             "seasonal_element": seasonal_element,
             "day_stem": stem,
             "day_branch": branch,
@@ -397,15 +400,15 @@ class DailyEnergyCalculator:
         public = {
             "source": "live_selection",
             "selected_status_tags": [
-                {"key": item.get("key"), "label": item.get("label"), "emoji": item.get("emoji") or ""}
+                {"key": item.get("key"), "label": safe_display_text(item.get("label")), "emoji": item.get("emoji") or ""}
                 for item in selected_tags
             ],
             "selected_scene": (
-                {"key": selected_scene.get("key"), "label": selected_scene.get("label"), "icon": selected_scene.get("icon") or ""}
+                {"key": selected_scene.get("key"), "label": safe_display_text(selected_scene.get("label")), "icon": selected_scene.get("icon") or ""}
                 if selected_scene else None
             ),
             "selected_goals": [
-                {"key": item.get("key"), "label": item.get("label")}
+                {"key": item.get("key"), "label": safe_display_text(item.get("label"))}
                 for item in selected_goals
             ],
             "score_delta": round(score_delta, 1),
@@ -642,15 +645,15 @@ class DailyEnergyCalculator:
             material = self.resolve_crystal_material(code, item, preferred_size=8)
             material_snapshot = self.material_snapshot(material)
             display_name = material_snapshot.get("material_name") or item["name"]
-            role = "今日主石" if index == 0 else ("平衡辅石" if index == 1 else "净化点缀")
+            role = "今日主珠" if index == 0 else ("平衡辅石" if index == 1 else "清爽点缀")
             if index == 0 and code in context_codes:
                 reason = "匹配你今天选择的状态与目标，适合作为主石随身佩戴"
             elif index == 0:
-                reason = f"补足{support_element}能量，适合今天随身佩戴"
+                reason = f"调和{support_element}元素，适合今天随身佩戴"
             elif index == 1:
                 reason = f"呼应{focus_element}主题，让搭配更稳定"
             else:
-                reason = "用于放大与净化整体能量"
+                reason = "用于增加整体清爽感"
             recommended_crystals.append({
                 "crystal_code": code,
                 "code": code,
@@ -658,19 +661,22 @@ class DailyEnergyCalculator:
                 "crystal_name": item["name"],
                 "element": item["element"],
                 "color": material_snapshot.get("color") or item["color"],
-                "effects": item["effects"],
+                "effects": [safe_display_text(effect) for effect in item["effects"]],
                 "role": role,
-                "reason": reason,
+                "reason": safe_display_text(reason),
                 **material_snapshot,
             })
 
         primary = recommended_crystals[0]
         secondary = recommended_crystals[1] if len(recommended_crystals) > 1 else primary
-        keyword = result.get("theme") or "今日能量"
+        wrist_size_cm = self.normalized_wrist_size_cm(result.get("wrist_size_cm"))
+        bead_size_mm = self.average_recommended_bead_size_mm(recommended_crystals)
+        bead_count = RecommendationEngine.estimate_stringed_bead_count(wrist_size_cm, bead_size_mm)
+        keyword = safe_display_text(result.get("theme") or "今日搭配")
         rules_version = daily_rules_version(rules)
         source_context = {
             "source": "daily_energy",
-            "source_label": "今日能量",
+            "source_label": "今日搭配",
             "date": target_date.isoformat(),
             "mode": result.get("mode"),
             "score": result.get("score"),
@@ -683,7 +689,7 @@ class DailyEnergyCalculator:
         }
         layout = []
         for crystal in recommended_crystals:
-            repeat = 8 if crystal["role"] == "今日主石" else 4
+            repeat = 8 if crystal["role"] == "今日主珠" else 4
             for _ in range(repeat):
                 layout.append({
                     **crystal,
@@ -694,10 +700,12 @@ class DailyEnergyCalculator:
                     "repeat_hint": repeat,
                 })
 
+        layout = self.build_workbench_layout(recommended_crystals, bead_count, bead_size_mm)
+
         return {
             "content_version": DAILY_ENERGY_CONTENT_VERSION,
             "rules_version": rules_version,
-            "title": result.get("theme"),
+            "title": safe_display_text(result.get("theme")),
             "daily_keyword": keyword,
             "keywords": self.build_keywords(result, focus_element, support_element, context),
             "today_status": self.today_status(result.get("score", 70)),
@@ -712,29 +720,30 @@ class DailyEnergyCalculator:
             "action_tip": (result.get("actions") or ["先完成一件小事"])[0],
             "action_advice": self.build_action_advice(result),
             "daily_plan": self.build_daily_plan(target_date, result, primary, secondary),
-            "calculation_note": "按当月五行节律、当日天干地支、用户能量画像与实时状态/场景/目标标签综合计算。",
+            "calculation_note": "按当月五行节律、传统历法参考、用户元素画像与实时状态/场景/目标标签综合计算。",
             "commerce_entry": {
                 "source": "daily_energy",
-                "title": "生成今日能量手串",
+                "title": "生成今日搭配手串",
                 "subtitle": f"{primary['name']}为主石 · {secondary['name']}平衡搭配",
                 "button_text": "一键生成今日手串",
                 "tracking": source_context,
             },
             "workbench_payload": {
                 "source": "daily_energy",
-                "source_label": "今日能量",
+                "source_label": "今日搭配",
                 "source_context": source_context,
                 "date": target_date.isoformat(),
                 "keyword": keyword,
-                "wrist_size_cm": 16,
+                "wrist_size_cm": wrist_size_cm,
                 "recommended_crystals": recommended_crystals,
                 "bracelet_plan": {
-                    "title": f"{target_date.strftime('%m.%d')} 今日能量手串",
+                    "title": f"{target_date.strftime('%m.%d')} 今日搭配手串",
                     "summary": f"{primary['name']} + {secondary['name']}，围绕「{keyword}」生成。",
-                    "bead_size_mm": 8,
+                    "wrist_size_cm": wrist_size_cm,
+                    "bead_size_mm": bead_size_mm,
                     "estimated_bead_count": len(layout),
-                    "pattern": "今日主石 + 平衡辅石 + 净化点缀",
-                    "items": self.build_workbench_items(recommended_crystals),
+                    "pattern": "今日主珠 + 平衡辅石 + 清爽点缀",
+                    "items": self.build_workbench_items(recommended_crystals, layout),
                     "layout": layout,
                 },
             },
@@ -800,14 +809,14 @@ class DailyEnergyCalculator:
         seasonal_element = basis.get("seasonal_element") or SEASON_ELEMENT[target_date.month]
         day_ganzhi = basis.get("day_ganzhi") or ""
         return {
-            "period": f"{target_date.month}月流月",
+            "period": f"{target_date.month}月参考",
             "seasonal_element": seasonal_element,
             "day_ganzhi": day_ganzhi,
             "summary": (
-                f"当前流月以{seasonal_element}气为主，今日{day_ganzhi}日会放大{focus_element}能量。"
-                f"建议用{support_element}向晶石做轻柔调和，减少状态流失。"
+                f"当前月份以{seasonal_element}元素为主，今日传统历法参考会增强{focus_element}元素感。"
+                f"建议用{support_element}向晶石做轻柔调和，减少状态波动。"
             ),
-            "drain_point": f"{support_element}能量不足时，容易出现注意力分散、节奏断档或表达过度解释。",
+            "drain_point": f"{support_element}元素状态偏弱时，容易出现注意力分散、节奏断档或表达过度解释。",
             "suggestion": "先完成一件确定的小事，再推进需要沟通、创意或临场判断的任务。",
         }
 
@@ -843,7 +852,7 @@ class DailyEnergyCalculator:
         return (
             f"{scene_copy}今天的{strongest['name']}相对更好，适合把事情做稳。"
             f"{weakest['name']}略弱，不建议一次塞入太多临场创意或高压对抗。"
-            f"{focus_element}能量当令时，保持清晰表达会比强行加速更有效。"
+            f"{focus_element}元素感较明显时，保持清晰表达会比强行加速更有效。"
         )
 
     @staticmethod
@@ -873,7 +882,7 @@ class DailyEnergyCalculator:
 
         return {
             "main": combo_item(main, "主石", "海蓝宝", "表达、沟通、舒缓紧张感"),
-            "support": combo_item(support, "辅石", "白水晶", "清透、放大整体能量、增强干净感"),
+            "support": combo_item(support, "辅石", "白水晶", "清透、增强干净感"),
             "balance": combo_item(balance, "平衡石", "月光石", "柔和情绪、增加稳定陪伴感"),
             "accent": {
                 "label": "点缀建议",
@@ -893,7 +902,7 @@ class DailyEnergyCalculator:
             "avoid": focus["avoid"],
             "scenes": scenes,
             "not_recommended": "高压谈判、强对抗场合，或情绪很满时立刻做重大决定。",
-            "primary_stone": primary.get("name", "今日主石"),
+            "primary_stone": primary.get("name", "今日主珠"),
         }
 
     @staticmethod
@@ -912,23 +921,115 @@ class DailyEnergyCalculator:
     ) -> dict[str, Any]:
         color = result.get("lucky_color") or primary.get("color") or "清透色系"
         return {
-            "title": f"{target_date.strftime('%m.%d')} 今日能量手串",
+            "title": f"{target_date.strftime('%m.%d')} 今日搭配手串",
             "style": "清透通勤款",
             "main_colors": [color, "透明", "奶白"],
             "bead_sizes": ["6mm", "8mm"],
             "wrist_hint": "将在 DIY 工作台选择手围后自动排布。",
             "budget_text": "第一版先按可用珠材自动生成，后续可加入预算区间。",
             "description": (
-                f"以{primary.get('name')}作为今日主石，搭配{secondary.get('name')}做平衡，"
-                f"围绕「{result.get('theme') or '今日能量'}」生成可继续编辑的方案。"
+                f"以{primary.get('name')}作为今日主珠，搭配{secondary.get('name')}做平衡，"
+                f"围绕「{safe_display_text(result.get('theme') or '今日搭配')}」生成可继续编辑的方案。"
             ),
         }
 
     @staticmethod
-    def build_workbench_items(recommended_crystals: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def normalized_wrist_size_cm(value: Any, default: float = 16) -> float:
+        try:
+            wrist = float(value)
+        except (TypeError, ValueError):
+            wrist = default
+        return round(max(10.0, min(30.0, wrist)), 1)
+
+    @staticmethod
+    def assessment_wrist_size_cm(assessment: dict[str, Any] | None) -> float:
+        if not isinstance(assessment, dict):
+            return 16
+        candidates = [
+            (assessment.get("input_summary") or {}).get("wrist_size_cm"),
+            assessment.get("wrist_size_cm"),
+            (assessment.get("workbench_payload") or {}).get("wrist_size_cm"),
+            (assessment.get("bracelet_plan") or {}).get("wrist_size_cm"),
+        ]
+        for value in candidates:
+            try:
+                wrist = float(value)
+            except (TypeError, ValueError):
+                continue
+            if 10 <= wrist <= 30:
+                return round(wrist, 1)
+        return 16
+
+    @staticmethod
+    def average_recommended_bead_size_mm(recommended_crystals: list[dict[str, Any]]) -> float:
+        sizes: list[float] = []
+        for crystal in recommended_crystals or []:
+            try:
+                size = float(crystal.get("size") or crystal.get("bead_size_mm") or 8)
+            except (TypeError, ValueError):
+                size = 8
+            if size > 0:
+                sizes.append(size)
+        if not sizes:
+            return 8
+        return round(sum(sizes) / len(sizes), 2)
+
+    @staticmethod
+    def daily_layout_quantities(total_count: int, material_count: int) -> list[int]:
+        count = max(1, int(total_count or 0))
+        material_count = max(1, int(material_count or 1))
+        if material_count == 1:
+            return [count]
+        if material_count == 2:
+            primary = max(1, round(count * 0.58))
+            return [primary, max(1, count - primary)]
+        primary = max(1, round(count * 0.50))
+        secondary = max(1, round(count * 0.30))
+        accent = max(1, count - primary - secondary)
+        while primary + secondary + accent > count:
+            if secondary > 1:
+                secondary -= 1
+            elif primary > 1:
+                primary -= 1
+            else:
+                accent -= 1
+        while primary + secondary + accent < count:
+            primary += 1
+        return [primary, secondary, accent]
+
+    @staticmethod
+    def build_workbench_layout(
+        recommended_crystals: list[dict[str, Any]],
+        bead_count: int,
+        bead_size_mm: float,
+    ) -> list[dict[str, Any]]:
+        layout = []
+        quantities = DailyEnergyCalculator.daily_layout_quantities(bead_count, len(recommended_crystals))
+        for crystal, repeat in zip(recommended_crystals, quantities):
+            for _ in range(repeat):
+                layout.append({
+                    **crystal,
+                    "id": crystal.get("material_id") or crystal.get("id") or crystal["crystal_code"],
+                    "position": len(layout) + 1,
+                    "crystal_name": crystal.get("crystal_name") or crystal["name"],
+                    "bead_size_mm": crystal.get("size") or bead_size_mm,
+                    "repeat_hint": repeat,
+                })
+        return layout
+
+    @staticmethod
+    def build_workbench_items(
+        recommended_crystals: list[dict[str, Any]],
+        layout: list[dict[str, Any]] | None = None,
+    ) -> list[dict[str, Any]]:
+        quantities_by_code: dict[str, int] = {}
+        for bead in layout or []:
+            code = bead.get("crystal_code") or bead.get("code")
+            if code:
+                quantities_by_code[code] = quantities_by_code.get(code, 0) + 1
         items = []
         for index, crystal in enumerate(recommended_crystals):
-            quantity = 8 if index == 0 else 4
+            quantity = quantities_by_code.get(crystal["crystal_code"], 8 if index == 0 else 4)
             items.append({
                 "code": crystal["crystal_code"],
                 "name": crystal["name"],
@@ -936,7 +1037,7 @@ class DailyEnergyCalculator:
                 "element": crystal["element"],
                 "effects": crystal["effects"],
                 "quantity": quantity,
-                "bead_size_mm": 8,
+                "bead_size_mm": crystal.get("size") or 8,
                 "reason": crystal["reason"],
                 "material_id": crystal.get("material_id") or "",
                 "sku": crystal.get("sku") or crystal.get("skuId") or "",
@@ -969,8 +1070,8 @@ class DailyEnergyCalculator:
         tag_text = "、".join(item["label"] for item in tags[:2])
         prefix = f"结合你今天选择的「{tag_text}」，" if tag_text else ""
         scene_text = f"在「{scene}」场景里，" if scene else ""
-        personal_text = "也会照顾你的个人五行短板。" if personalized else "先用轻量方案帮你找到今日节奏。"
-        return f"{prefix}{scene_text}今天适合用{support}能量托住状态，再顺着{focus}能量推进事情，{personal_text}"
+        personal_text = "也会照顾你的个人元素调和方向。" if personalized else "先用轻量方案帮你找到今日节奏。"
+        return safe_display_text(f"{prefix}{scene_text}今天适合用{support}元素托住状态，再顺着{focus}元素推进事情，{personal_text}")
 
     @staticmethod
     def actions_for_context(content: dict[str, Any], support: str, context: dict[str, Any]) -> list[str]:

@@ -1,5 +1,6 @@
 const auth = require('../../utils/auth');
 const { getOrders } = require('../../utils/api');
+const { assetUrl } = require('../../utils/assets');
 
 const STATUS_TITLE = {
   all: '全部订单',
@@ -10,7 +11,7 @@ const STATUS_TITLE = {
   done: '已完成'
 };
 const ORDER_RING_LIMIT = 18;
-const ORDER_TRAY_IMAGE = '/assets/workspace/tray-yustream-transparent-user-20260701-v6.webp';
+const ORDER_TRAY_IMAGE = assetUrl('workspace/tray-yustream-transparent-user-20260701-v6.webp');
 
 Page({
   data: {

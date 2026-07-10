@@ -1,5 +1,6 @@
 const auth = require('../../utils/auth');
 const env = require('../../config/env');
+const { assetUrl } = require('../../utils/assets');
 const {
   getOrders,
   getOrder,
@@ -22,6 +23,14 @@ const ORDER_TABS = [
   { key: 'after', icon: '售', label: '售后退款', count: 0 }
 ];
 const TAB_BAR_PAGES = ['/pages/home/home', '/pages/assessment/assessment', '/pages/workspace/workspace', '/pages/profile/profile'];
+const PROFILE_MENU_ICONS = {
+  favorite: assetUrl('profile/menu-favorite.png'),
+  cart: assetUrl('profile/menu-cart.png'),
+  address: assetUrl('profile/menu-address.png'),
+  help: assetUrl('profile/menu-help.png'),
+  settings: assetUrl('profile/menu-settings.png'),
+  logout: assetUrl('profile/menu-logout.png')
+};
 
 Page({
   data: {
@@ -45,7 +54,7 @@ Page({
     draftCount: 0,
     shoppingCartCount: 0,
     communityFavoriteCount: 0,
-    profileStats: [],
+    profileMenuIcons: PROFILE_MENU_ICONS,
     orders: [],
     filteredOrders: [],
     activeOrderStatus: 'all',
@@ -118,7 +127,6 @@ Page({
       wx.setStorageSync('communityFavorites', communityFavorites);
     }
     const localOrders = wx.getStorageSync('orders') || [];
-    const favoriteCount = communityFavorites.length;
     this.setData({
       user,
       isLoggedIn: !!(user && user.user_id),
@@ -135,12 +143,6 @@ Page({
       draftCount,
       shoppingCartCount: shoppingCart.length,
       communityFavoriteCount: communityFavorites.length,
-      profileStats: [
-        { key: 'plans', value: draftCount, label: '我的方案' },
-        { key: 'orders', value: localOrders.length, label: '我的订单' },
-        { key: 'cart', value: shoppingCart.length, label: '购物车' },
-        { key: 'energy', value: profile && Object.keys(profile).length ? Object.keys(profile).length : 0, label: '能量记录' }
-      ],
       orders: localOrders
     });
     this.refreshOrderView();
@@ -169,10 +171,7 @@ Page({
       wx.setStorageSync('communityFavorites', favoriteRows);
       this.setData({
         shoppingCartCount: shoppingCart.length,
-        communityFavoriteCount: favoriteRows.length,
-        profileStats: this.data.profileStats.map(item => (
-          item.key === 'cart' ? { ...item, value: shoppingCart.length } : item
-        ))
+        communityFavoriteCount: favoriteRows.length
       });
     } catch (error) {
       console.warn('refresh user assets fallback:', error.message || error);
@@ -250,10 +249,7 @@ Page({
     const filteredOrders = active === 'all' ? orders : orders.filter(order => order.statusKey === active);
     this.setData({
       filteredOrders,
-      orderStats: ORDER_TABS.map(item => ({ ...item, count: counts[item.key] || 0 })),
-      profileStats: (this.data.profileStats || []).map(item => (
-        item.key === 'orders' ? { ...item, value: orders.length } : item
-      ))
+      orderStats: ORDER_TABS.map(item => ({ ...item, count: counts[item.key] || 0 }))
     });
   },
 
@@ -584,17 +580,6 @@ Page({
         wx.showToast({ title: error.errMsg || '隐私指引暂不可用', icon: 'none' });
       }
     });
-  },
-
-  handleInspiration(e) {
-    const type = e.currentTarget.dataset.type;
-    if (type === 'draft') return this.viewMyPlans();
-    if (type === 'cart') return this.viewShoppingCart();
-    this.viewCommunityFavorites();
-  },
-
-  viewMyPlans() {
-    wx.navigateTo({ url: '/pages/my-plans/my-plans' });
   },
 
   viewShoppingCart() {

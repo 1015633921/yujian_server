@@ -27,17 +27,11 @@
     <button wx:if="{{!isLoggedIn}}" class="login-button" loading="{{authLoading}}" bindtap="loginWithWechat">微信快捷登录</button>
     <view wx:if="{{isLoggedIn && (!hasProfile || !hasPhone)}}" class="profile-nudge" bindtap="openProfileModal">资料还差一步，完善昵称、头像和手机号 ></view>
 
-    <view class="stat-grid">
-      <view wx:for="{{profileStats}}" wx:key="key" class="stat-item">
-        <view class="stat-value">{{item.value}}</view>
-        <view class="stat-label">{{item.label}}</view>
-      </view>
-    </view>
   </view>
 
   <view wx:if="{{!isLoggedIn}}" class="login-panel yu-card">
     <view class="login-title">登录后开启个性化服务</view>
-    <view class="login-desc">测算记录、DIY 草稿、我的方案和订单进度都会归档到你的账号。</view>
+    <view class="login-desc">测算记录、DIY 草稿、购物车和订单进度都会归档到你的账号。</view>
   </view>
 
   <view class="section">
@@ -47,7 +41,10 @@
     </view>
     <view class="order-status-card yu-card">
       <view wx:for="{{orderStats}}" wx:key="key" class="order-status-item" data-key="{{item.key}}" bindtap="handleOrderStatus">
-        <view class="order-icon">{{item.icon}}</view>
+        <view class="order-icon order-icon-{{item.key}}">
+          <view class="order-icon-core"></view>
+          <view class="order-icon-mark"></view>
+        </view>
         <view class="order-label">{{item.label}}</view>
         <view wx:if="{{item.showCount !== false && item.count}}" class="order-badge">{{item.count}}</view>
       </view>
@@ -55,20 +52,11 @@
   </view>
 
   <view class="menu-card yu-card">
-    <view class="menu-row" bindtap="viewMyPlans">
-      <view class="menu-left">
-        <view class="menu-icon plans">方</view>
-        <view>
-          <view class="menu-title">我的方案</view>
-          <view class="menu-desc">已保存、已下单和已完成的定制方案</view>
-        </view>
-      </view>
-      <view class="menu-right">{{draftCount}} 个 ></view>
-    </view>
-    <view class="menu-divider"></view>
     <view class="menu-row" bindtap="viewCommunityFavorites">
       <view class="menu-left">
-        <view class="menu-icon favorite">藏</view>
+        <view class="menu-icon favorite">
+          <image class="menu-icon-image" src="{{profileMenuIcons.favorite}}" mode="aspectFit" />
+        </view>
         <view>
           <view class="menu-title">我的收藏</view>
           <view class="menu-desc">收藏过的灵感搭配与推荐方案</view>
@@ -79,7 +67,9 @@
     <view class="menu-divider"></view>
     <view class="menu-row" bindtap="viewShoppingCart">
       <view class="menu-left">
-        <view class="menu-icon cart">车</view>
+        <view class="menu-icon cart">
+          <image class="menu-icon-image" src="{{profileMenuIcons.cart}}" mode="aspectFit" />
+        </view>
         <view>
           <view class="menu-title">购物车</view>
           <view class="menu-desc">从 DIY 工作台加入的待结算方案</view>
@@ -90,7 +80,9 @@
     <view class="menu-divider"></view>
     <view class="menu-row" bindtap="viewAddress">
       <view class="menu-left">
-        <view class="menu-icon address">地</view>
+        <view class="menu-icon address">
+          <image class="menu-icon-image" src="{{profileMenuIcons.address}}" mode="aspectFit" />
+        </view>
         <view>
           <view class="menu-title">收货地址</view>
           <view class="menu-desc">下单时填写或同步微信地址</view>
@@ -101,27 +93,32 @@
   </view>
 
   <view class="menu-card yu-card">
-    <button
-      class="menu-row menu-contact-button"
-      open-type="contact"
-      session-from="profile_help_customer"
-      show-message-card="{{true}}"
-      send-message-title="宇涧水晶帮助与客服"
-      send-message-path="/pages/profile/profile"
-    >
+    <view class="menu-row menu-contact-shell">
       <view class="menu-left">
-        <view class="menu-icon help">客</view>
+        <view class="menu-icon help">
+          <image class="menu-icon-image" src="{{profileMenuIcons.help}}" mode="aspectFit" />
+        </view>
         <view>
           <view class="menu-title">帮助与客服</view>
           <view class="menu-desc">订单、支付和定制问题协助</view>
         </view>
       </view>
       <view class="menu-arrow">></view>
-    </button>
+      <button
+        class="menu-contact-hit"
+        open-type="contact"
+        session-from="profile_help_customer"
+        show-message-card="{{true}}"
+        send-message-title="宇涧水晶帮助与客服"
+        send-message-path="/pages/profile/profile"
+      ></button>
+    </view>
     <view class="menu-divider"></view>
     <view class="menu-row" bindtap="openSettings">
       <view class="menu-left">
-        <view class="menu-icon settings">设</view>
+        <view class="menu-icon settings">
+          <image class="menu-icon-image" src="{{profileMenuIcons.settings}}" mode="aspectFit" />
+        </view>
         <view>
           <view class="menu-title">设置</view>
           <view class="menu-desc">隐私保护指引与账号设置</view>
@@ -132,7 +129,9 @@
     <view wx:if="{{isLoggedIn}}" class="menu-divider"></view>
     <view wx:if="{{isLoggedIn}}" class="menu-row logout-row" bindtap="confirmLogout">
       <view class="menu-left">
-        <view class="menu-icon logout">退</view>
+        <view class="menu-icon logout">
+          <image class="menu-icon-image" src="{{profileMenuIcons.logout}}" mode="aspectFit" />
+        </view>
         <view>
           <view class="menu-title">退出登录</view>
           <view class="menu-desc">清除当前设备上的账号登录状态</view>

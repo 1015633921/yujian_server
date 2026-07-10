@@ -7,6 +7,7 @@ let Bodies;
 let Composite;
 let Engine;
 let Events;
+let Sleeping;
 
 const MATERIAL_PAGE_SIZE = 24;
 const MATERIAL_CACHE_TTL = 30 * 60 * 1000;
@@ -22,11 +23,74 @@ const MIN_STRING_BEAD_COUNT = 8;
 const MAX_MATERIAL_FLIGHT_QUEUE = 6;
 const MATERIAL_TAP_GUARD_MS = 80;
 const MATERIAL_QUEUE_TOAST_GUARD_MS = 1200;
+const MATERIAL_SEARCH_DEBOUNCE_MS = 260;
+const MATERIAL_PRELOAD_BATCH_SIZE = 3;
+const MATERIAL_PRELOAD_BATCH_DELAY_MS = 72;
+const MATERIAL_PRELOAD_IDLE_RETRY_MS = 180;
+const MATERIAL_PRELOAD_MAX_DEFER_MS = 1800;
 const STRINGED_BEAD_GAP_RPX = 0.5;
+const STRINGED_COMFORT_ALLOWANCE_MM = 8;
+// Closed bracelets wear smaller than a straight row of beads because bead thickness eats into the inner curve.
+const STRINGED_LOSS_COEFFICIENT = 1;
+const RING_SLIDE_EDGE_RATIO = 0.38;
+const RING_REORDER_CENTER_DEAD_ZONE_RATIO = 0.35;
+const RING_SLIDE_MIN_MOVE_RAD = 0.018;
 const MAX_BEAD_ANGULAR_VELOCITY = 0.16;
 const COLLISION_SPIN_FACTOR = 0.018;
 const ROLLING_SPIN_FACTOR = 0.10;
 const DRAG_ROLLING_SPIN_FACTOR = 0.82;
+const BILLIARD_BEAD_RESTITUTION = 0.22;
+const BILLIARD_NEIGHBOR_REBOUND_DAMPING = 0.58;
+const BILLIARD_NEIGHBOR_REBOUND_MIN_SPEED = 0.35;
+const BILLIARD_NEIGHBOR_REBOUND_MAX_CORRECTION = 4.8;
+const BILLIARD_WALL_RESTITUTION = 0.50;
+const BILLIARD_FRICTION = 0.08;
+const BILLIARD_STATIC_FRICTION = 0.18;
+const BILLIARD_FRICTION_AIR = 0.004;
+const BILLIARD_LINEAR_DAMPING = 0.984;
+const BILLIARD_ANGULAR_DAMPING = 0.58;
+const BILLIARD_LAUNCH_MIN_SPEED = 58.0;
+const BILLIARD_LAUNCH_MAX_SPEED = 86.0;
+const BILLIARD_LAUNCH_RANDOM_X_RPX = 0;
+const BILLIARD_LAUNCH_AIM_RANDOM_X_RPX = 0;
+const TRAY_BOUNDARY_PADDING_RPX = 8;
+const TRAY_BOUNDARY_GUARD_RPX = 16;
+const TRAY_BOUNDARY_TOUCH_GUARD_RPX = 3;
+const TRAY_BOUNDARY_LOOKAHEAD_FRAMES = 2.4;
+const TRAY_BOUNDARY_MAX_LOOKAHEAD_FRAMES = 7.2;
+const TRAY_IMPACT_TOUCH_GUARD_RPX = 5;
+const TRAY_LAUNCH_ENTRY_PADDING_RPX = 6;
+const TRAY_LAUNCH_AIM_PADDING_RPX = 14;
+const TRAY_IMPACT_CONTAIN_PADDING_RPX = 8;
+const TRAY_IMPACT_CONTAIN_GUARD_RPX = 24;
+const TRAY_IMPACT_CONTAIN_MS = 1250;
+const TRAY_ESCAPE_RESET_GUARD_RPX = 120;
+const TRAY_IMPACT_ESCAPE_RESET_GUARD_RPX = 34;
+const TRAY_IMPACT_KEEPALIVE_SPEED_RPX = 2.8;
+const TRAY_IMPACT_REARM_SPEED_RPX = 4.2;
+const TRAY_IMPACT_KEEPALIVE_MS = 360;
+const CANVAS_IMAGE_CACHE_LIMIT = 72;
+const CANVAS_TEXTURE_CACHE_LIMIT = 96;
+const CANVAS_SHADOW_CACHE_LIMIT = 36;
+const CANVAS_TEXTURE_BUCKET_STEP = 8;
+const CANVAS_SHADOW_BUCKET_STEP = 8;
+const DECORATED_MATERIAL_CACHE_LIMIT = 360;
+const MATERIAL_ELEMENT_KEY_CACHE_LIMIT = 520;
+const MATERIAL_PRELOAD_RECORD_LIMIT = 360;
+const MATERIAL_FLIGHT_MIN_DURATION = 18;
+const MATERIAL_FLIGHT_SPEED_PX_PER_MS = 36;
+const MATERIAL_FLIGHT_REAL_DURATION = 42;
+const MATERIAL_FLIGHT_DEV_DURATION = 38;
+const MATERIAL_FLIGHT_LOW_PERF_DURATION = 58;
+const STRINGING_FLIGHT_DURATION = 150;
+const STRINGING_LOW_PERF_DURATION = 176;
+const STRINGING_STAGGER_MS = 5;
+const STRINGING_LOW_PERF_STAGGER_MS = 7;
+const RELEASE_STRING_FLIGHT_DURATION = 180;
+const RELEASE_STRING_LOW_PERF_DURATION = 220;
+const RELEASE_STRING_STAGGER_MS = 10;
+const RELEASE_STRING_LOW_PERF_STAGGER_MS = 12;
+const materialSearchTextCache = typeof WeakMap !== 'undefined' ? new WeakMap() : null;
 const DEFAULT_DESIGN_NAME = 'Yustream DIY 手串方案';
 const DESIGN_NAME_MODAL_HINT = '给这条手串起个名字，方便后续在购物车和方案里识别。';
 const WORKSPACE_DEBUG_LOGS = false;
@@ -72,17 +136,17 @@ function cleanDesignName(value = '') {
 }
 
 const DEFAULT_MATERIALS = [
-  { id: 'clearQuartz8', skuId: 'clearQuartz', top: 'bead', category: '白水晶', name: '喜马拉雅白水晶', effect: '净化与放大', element: '金', price: 5, size: 8, weight: 1.2, color: '#dfe3e5', shine: '#ffffff' },
-  { id: 'clearQuartz10', skuId: 'clearQuartz', top: 'bead', category: '白水晶', name: '喜马拉雅白水晶', effect: '净化与放大', element: '金', price: 10, size: 10, weight: 1.6, color: '#d6dbde', shine: '#ffffff' },
-  { id: 'clearQuartz12', skuId: 'clearQuartz', top: 'bead', category: '白水晶', name: '喜马拉雅白水晶', effect: '净化与放大', element: '金', price: 15, size: 12, weight: 2.1, color: '#cfd5d8', shine: '#ffffff' },
-  { id: 'clearQuartz14', skuId: 'clearQuartz', top: 'bead', category: '白水晶', name: '喜马拉雅白水晶', effect: '净化与放大', element: '金', price: 18, size: 14, weight: 2.8, color: '#c8ced1', shine: '#ffffff' },
-  { id: 'amethyst8', skuId: 'amethyst', top: 'bead', category: '紫水晶', name: '乌拉圭紫水晶', effect: '灵感与睡眠', element: '火', price: 12, size: 8, weight: 1.4, color: '#8b6aa5', shine: '#efe8ff' },
-  { id: 'amethyst10', skuId: 'amethyst', top: 'bead', category: '紫水晶', name: '乌拉圭紫水晶', effect: '灵感与睡眠', element: '火', price: 18, size: 10, weight: 1.8, color: '#76508f', shine: '#efe8ff' },
-  { id: 'citrine8', skuId: 'citrine', top: 'bead', category: '黄水晶', name: '巴西黄水晶', effect: '财富与行动', element: '土', price: 16, size: 8, weight: 1.5, color: '#d6ad50', shine: '#fff0b7' },
-  { id: 'citrine10', skuId: 'citrine', top: 'bead', category: '黄水晶', name: '巴西黄水晶', effect: '财富与行动', element: '土', price: 22, size: 10, weight: 1.9, color: '#c79838', shine: '#fff0b7' },
-  { id: 'obsidian10', skuId: 'obsidian', top: 'bead', category: '曜石', name: '冰种黑曜石', effect: '边界与守护', element: '金', price: 14, size: 10, weight: 1.8, color: '#262529', shine: '#aeb2b5' },
+  { id: 'clearQuartz8', skuId: 'clearQuartz', top: 'bead', category: '白水晶', name: '喜马拉雅白水晶', effect: '清爽与干净感', element: '金', price: 5, size: 8, weight: 1.2, color: '#dfe3e5', shine: '#ffffff' },
+  { id: 'clearQuartz10', skuId: 'clearQuartz', top: 'bead', category: '白水晶', name: '喜马拉雅白水晶', effect: '清爽与干净感', element: '金', price: 10, size: 10, weight: 1.6, color: '#d6dbde', shine: '#ffffff' },
+  { id: 'clearQuartz12', skuId: 'clearQuartz', top: 'bead', category: '白水晶', name: '喜马拉雅白水晶', effect: '清爽与干净感', element: '金', price: 15, size: 12, weight: 2.1, color: '#cfd5d8', shine: '#ffffff' },
+  { id: 'clearQuartz14', skuId: 'clearQuartz', top: 'bead', category: '白水晶', name: '喜马拉雅白水晶', effect: '清爽与干净感', element: '金', price: 18, size: 14, weight: 2.8, color: '#c8ced1', shine: '#ffffff' },
+  { id: 'amethyst8', skuId: 'amethyst', top: 'bead', category: '紫水晶', name: '乌拉圭紫水晶', effect: '灵感与放松', element: '火', price: 12, size: 8, weight: 1.4, color: '#8b6aa5', shine: '#efe8ff' },
+  { id: 'amethyst10', skuId: 'amethyst', top: 'bead', category: '紫水晶', name: '乌拉圭紫水晶', effect: '灵感与放松', element: '火', price: 18, size: 10, weight: 1.8, color: '#76508f', shine: '#efe8ff' },
+  { id: 'citrine8', skuId: 'citrine', top: 'bead', category: '黄水晶', name: '巴西黄水晶', effect: '目标与行动', element: '土', price: 16, size: 8, weight: 1.5, color: '#d6ad50', shine: '#fff0b7' },
+  { id: 'citrine10', skuId: 'citrine', top: 'bead', category: '黄水晶', name: '巴西黄水晶', effect: '目标与行动', element: '土', price: 22, size: 10, weight: 1.9, color: '#c79838', shine: '#fff0b7' },
+  { id: 'obsidian10', skuId: 'obsidian', top: 'bead', category: '曜石', name: '冰种黑曜石', effect: '边界与安定', element: '金', price: 14, size: 10, weight: 1.8, color: '#262529', shine: '#aeb2b5' },
   { id: 'tigerEye8', skuId: 'tigerEye', top: 'bead', category: '虎眼石', name: '南非虎眼石', effect: '执行与稳定', element: '土', price: 13, size: 8, weight: 1.5, color: '#9b6a2e', shine: '#f1c06b' },
-  { id: 'moonstone6', skuId: 'moonstone', top: 'bead', category: '月光石', name: '雪花幽灵', effect: '情绪修复', element: '水', price: 4, size: 6, weight: 0.9, color: '#c7cbca', shine: '#ffffff' },
+  { id: 'moonstone6', skuId: 'moonstone', top: 'bead', category: '月光石', name: '雪花幽灵', effect: '情绪放松', element: '水', price: 4, size: 6, weight: 0.9, color: '#c7cbca', shine: '#ffffff' },
   { id: 'moonstone8', skuId: 'moonstone', top: 'bead', category: '月光石', name: '雪花幽灵', effect: '情绪修复', element: '水', price: 8, size: 8, weight: 1.2, color: '#bdc2c1', shine: '#ffffff' },
   { id: 'aquamarine8', skuId: 'aquamarine', top: 'bead', category: '海蓝宝', name: '巴西海蓝宝', effect: '沟通与平静', element: '水', price: 25, size: 8, weight: 1.4, color: '#80b8c5', shine: '#e8fbff' },
   { id: 'blueRutilatedQuartz10', skuId: 'blueRutilatedQuartz', top: 'bead', category: '蓝发晶', name: '蓝发晶', effect: '冷静与洞察', element: '水', price: 38, size: 10, weight: 1.9, color: '#4f789b', shine: '#dcecf3' },
@@ -337,6 +401,31 @@ function filterWorkspaceMaterials(materials = []) {
   return (materials || []).filter(materialIsWorkspaceSupported);
 }
 
+function estimateStringedLengthMm(itemsOrSizes = []) {
+  const sizes = (itemsOrSizes || [])
+    .map(item => Number(typeof item === 'number' ? item : (item && (item.size || item.diameter || item.size_mm))))
+    .filter(size => Number.isFinite(size) && size > 0);
+  if (!sizes.length) return 0;
+  const total = sizes.reduce((sum, size) => sum + size, 0);
+  const average = total / sizes.length;
+  return Math.max(0, total - average * STRINGED_LOSS_COEFFICIENT);
+}
+
+function normalizeRotationDeg(value) {
+  let rotation = Number(value) || 0;
+  while (rotation > 180) rotation -= 360;
+  while (rotation <= -180) rotation += 360;
+  return rotation;
+}
+
+function stringedBeadRotationDeg(angleRad) {
+  return normalizeRotationDeg(angleRad * 180 / Math.PI);
+}
+
+function stringedBeadRotationFromPoint(x, y, center) {
+  return stringedBeadRotationDeg(Math.atan2(y - center, x - center));
+}
+
 function filterWorkspaceTopTabs(list = []) {
   return (list || []).filter(item => item && item.key !== 'incense' && item.key !== 'pendant');
 }
@@ -396,7 +485,7 @@ const WORKSPACE_USAGE_GUIDE = [
   { tag: '腕围', title: '调整手围', desc: '修改手围后，方案长度会同步重算。' },
   { tag: '分享', title: '分享当前方案', desc: '生成方案分享入口，好友点开后直接进入工作台查看。' },
   { tag: '保存', title: '保存方案草稿', desc: '把当前搭配暂存，稍后可以继续编辑。' },
-  { tag: '五行', title: '查看能量占比', desc: '打开当前方案的五行分布，方便对照测算结果。' },
+  { tag: '五行', title: '查看元素占比', desc: '打开当前方案的五行比例，方便对照分析结果。' },
   { tag: '清空', title: '清空盘面', desc: '移除当前盘面所有珠子，重新开始搭配。' },
   { tag: '成串', title: '随机成串/打散', desc: '在自由摆放和圆串整理之间切换，快速预览佩戴效果。' },
   { tag: '加购', title: '加入购物车', desc: '确认方案后，可先加入购物车继续下单。' }
@@ -407,7 +496,7 @@ const WORKSPACE_USAGE_GUIDE_WITH_ICONS = [
   { tag: '腕围', iconClass: 'plate-icon-wrist', title: '设置腕围', desc: '调整当前手围，系统会同步重算串长和适配。' },
   { tag: '分享', iconClass: 'plate-icon-share', title: '分享方案', desc: '生成当前方案分享入口，好友打开后可直接查看。' },
   { tag: '保存', iconClass: 'plate-icon-save', title: '保存方案', desc: '把当前搭配保存为草稿，之后可以继续编辑。' },
-  { tag: '五行', iconClass: 'plate-icon-energy', title: '五行图', desc: '查看当前方案的五行能量占比。' },
+  { tag: '五行', iconClass: 'plate-icon-energy', title: '五行图', desc: '查看当前方案的五行元素占比。' },
   { tag: '清空', iconClass: 'plate-icon-clear', title: '清空盘面', desc: '移除当前盘面所有珠子，重新开始搭配。' },
   { tag: '成串', iconClass: 'plate-random-icon', title: '随机成串 / 解除成串', desc: '在自由摆放和圆串整理之间切换，快速预览佩戴效果。' },
   { tag: '托盘', iconClass: 'workspace-icon-theme', title: '切换托盘颜色', desc: '顺序切换托盘底色，方便看清不同颜色的珠子。' },
@@ -427,6 +516,10 @@ Page({
     materialsLoading: true,
     materialsLoadingMore: false,
     materialsErrorText: '',
+    workspaceLoading: true,
+    workspaceLoadingClass: '',
+    workspaceLoadingText: '正在准备工作台',
+    workspaceLoadingSubtext: '同步盘面与珠材...',
     materialSkeletons: [1, 2, 3, 4],
     materialSearchKeyword: '',
     categories: [],
@@ -473,6 +566,7 @@ Page({
     launchingMaterialId: '',
     isShuffling: false,
     isStringingFinishing: false,
+    isReleasingString: false,
     isLooseMode: true,
     selectedBeadIndex: -1,
     selectedBeadInfo: null,
@@ -528,11 +622,16 @@ Page({
       maxLength: '16.8',
       warning: '',
       energy: []
-    }
+    },
+    lengthOverClass: ''
   },
 
   onLoad(query) {
+    this.workspaceBootStartedAt = Date.now();
+    this.workspaceReadyFlags = { layout: false, canvas: false, materials: false };
+    this.armWorkspaceLoadingFallback();
     this.materialCatalog = DEFAULT_MATERIALS;
+    this.rebuildMaterialLookup();
     this.filteredMaterialCatalog = [];
     this.flightQueue = [];
     this.flightActive = false;
@@ -579,6 +678,45 @@ Page({
     }
     this.loadMaterials();
     this.wristPromptTimer = setTimeout(() => this.promptInitialWristSize(), 420);
+  },
+
+  armWorkspaceLoadingFallback() {
+    clearTimeout(this.workspaceLoadingFallbackTimer);
+    this.workspaceLoadingFallbackTimer = setTimeout(() => {
+      this.finishWorkspaceLoading({ force: true });
+    }, this.isLowPerformanceDevice ? 2400 : 1900);
+  },
+
+  markWorkspaceReady(flag) {
+    if (!this.workspaceReadyFlags) {
+      this.workspaceReadyFlags = { layout: false, canvas: false, materials: false };
+    }
+    if (flag) this.workspaceReadyFlags[flag] = true;
+    this.finishWorkspaceLoading();
+  },
+
+  finishWorkspaceLoading(options = {}) {
+    if (!this.data.workspaceLoading) return;
+    const flags = this.workspaceReadyFlags || {};
+    const ready = !!(flags.layout && flags.canvas && flags.materials);
+    if (!options.force && !ready) return;
+    clearTimeout(this.workspaceLoadingFallbackTimer);
+    clearTimeout(this.workspaceLoadingDoneTimer);
+    clearTimeout(this.workspaceLoadingHideTimer);
+    const minDuration = this.isLowPerformanceDevice ? 820 : 620;
+    const elapsed = Date.now() - Number(this.workspaceBootStartedAt || Date.now());
+    const delay = Math.max(0, minDuration - elapsed);
+    this.workspaceLoadingDoneTimer = setTimeout(() => {
+      if (!this.data.workspaceLoading) return;
+      this.setData({
+        workspaceLoadingClass: 'leaving',
+        workspaceLoadingText: '工作台已就绪',
+        workspaceLoadingSubtext: '开始定制你的手串'
+      });
+      this.workspaceLoadingHideTimer = setTimeout(() => {
+        this.setData({ workspaceLoading: false, workspaceLoadingClass: '' });
+      }, 220);
+    }, delay);
   },
 
   deferNonCriticalWorkspaceTasks() {
@@ -714,6 +852,7 @@ Page({
       launchingMaterialId: '',
       isShuffling: false,
       isStringingFinishing: false,
+      isReleasingString: false,
       draggingBeadIndex: -1,
       dragDeleteArmed: false,
       sharedDesignLoading: false,
@@ -764,6 +903,7 @@ Page({
     if (isLowPerformanceDevice) classes.push('device-low-performance');
     this.isRealDevice = isRealDevice;
     this.isLowPerformanceDevice = isLowPerformanceDevice;
+    if (this.data.workspaceLoading) this.armWorkspaceLoadingFallback();
     this.physicsStepMs = isLowPerformanceDevice ? 34 : (isRealDevice ? 20 : 1000 / 60);
     this.physicsTimerInterval = isLowPerformanceDevice ? 34 : (isRealDevice ? 20 : 16);
     this.physicsRenderInterval = isLowPerformanceDevice ? 58 : (isRealDevice ? 34 : 24);
@@ -799,6 +939,8 @@ Page({
       workspaceLayoutStyle: workspaceLayout.style,
       canUndo: this.historyStack.length > 0,
       canRedo: options.preserveActionState ? this.data.canRedo : false
+    }, () => {
+      this.markWorkspaceReady('layout');
     });
   },
 
@@ -936,27 +1078,24 @@ Page({
     };
   },
 
-  buildResponsiveWorkspaceLayout({ windowWidth, windowHeight, screenHeight, viewportRpx, screenRpx, bottomInsetRpx, aspectRatio, screenAspectRatio }) {
+  buildResponsiveWorkspaceLayout({ windowWidth, windowHeight, viewportRpx, bottomInsetRpx }) {
     const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
-    const isNarrow = windowWidth <= 340;
-    const isShort = windowHeight <= 720 || viewportRpx <= 1420;
-    const isCompact = windowHeight <= 780 || viewportRpx <= 1500;
-    const isRoomy = viewportRpx >= 1600;
-    const physicalAspectRatio = Number(screenAspectRatio) || (Number(screenHeight) ? Number(screenHeight) / windowWidth : aspectRatio);
-    const physicalViewportRpx = Number(screenRpx) || viewportRpx;
-    const isTallWorkspace = isRoomy || aspectRatio >= 2.05 || physicalAspectRatio >= 2.05 || physicalViewportRpx >= 1680;
+    const lerp = (from, to, progress) => from + (to - from) * clamp(progress, 0, 1);
+    const widthRoom = clamp((windowWidth - 320) / 120, 0, 1);
+    const heightRoom = clamp((viewportRpx - 1320) / 360, 0, 1);
+    const layoutRoom = clamp(widthRoom * 0.45 + heightRoom * 0.55, 0, 1);
     const topChrome = 122;
-    const summaryHeight = isShort || isNarrow ? 72 : 78;
-    const colorTop = summaryHeight + (isShort ? 8 : 14);
+    const summaryHeight = Math.round(lerp(72, 78, layoutRoom));
+    const colorTop = summaryHeight + Math.round(lerp(8, 14, layoutRoom));
     const colorBlockHeight = 0;
-    const stageGapTop = isShort ? 8 : (isCompact ? 12 : 16);
+    const stageGapTop = Math.round(lerp(8, 16, heightRoom));
     const stageTop = colorTop + colorBlockHeight + stageGapTop;
     const visualScale = 1.18;
-    const drawerMin = isShort ? 400 : (isCompact ? 500 : 560);
-    const drawerMax = isRoomy ? 760 : (isCompact ? 700 : 724);
-    const drawerGap = isShort ? 14 : (isCompact ? 18 : 22);
-    const maxStageByWidth = isNarrow ? 650 : (isShort ? 676 : (isRoomy ? 706 : 694));
-    const minStage = isShort ? 550 : (isCompact ? 610 : 650);
+    const drawerMin = Math.round(lerp(400, 560, heightRoom));
+    const drawerPreferredMax = Math.round(lerp(650, 760, heightRoom));
+    const drawerGap = Math.round(lerp(14, 22, layoutRoom));
+    const maxStageByWidth = Math.round(lerp(650, 706, widthRoom));
+    const minStage = Math.round(lerp(520, 650, heightRoom));
     const maxStageByHeight = (viewportRpx - topChrome - drawerMin - stageTop - drawerGap) / visualScale;
     let stageSize = Math.round(clamp(maxStageByHeight, minStage, maxStageByWidth));
     if (maxStageByHeight < minStage) {
@@ -965,35 +1104,32 @@ Page({
     const trayVisualSize = stageSize * 1.26;
     const trayVisualLeft = (750 - stageSize) / 2 - stageSize * 0.13;
     const trayVisualTop = stageTop - stageSize * 0.13;
-    const plateToolWidth = isShort || isNarrow ? 58 : 62;
-    const plateToolHeight = isShort || isNarrow ? 58 : 62;
-    const plateToolGap = isShort ? 18 : 22;
+    const plateToolWidth = Math.round(lerp(58, 62, layoutRoom));
+    const plateToolHeight = plateToolWidth;
+    const plateToolGap = Math.round(lerp(18, 22, layoutRoom));
     const shareToolSize = plateToolWidth;
     const wristGuideWidth = shareToolSize;
     const wristGuideHeight = shareToolSize;
-    const undoButtonSize = isShort || isNarrow ? 58 : 62;
-    const wristButtonWidth = isShort || isNarrow ? 154 : 164;
-    const wristButtonHeight = isShort || isNarrow ? 58 : 62;
-    const leftStackGap = isShort ? 18 : 20;
-    const randomButtonWidth = isShort || isNarrow ? 172 : 188;
-    const randomButtonHeight = isShort || isNarrow ? 58 : 64;
-    const randomDrawerGap = isShort ? 10 : 12;
-    const actionDrawerGap = isTallWorkspace ? 8 : randomDrawerGap;
+    const undoButtonSize = plateToolWidth;
+    const wristButtonWidth = Math.round(lerp(154, 164, layoutRoom));
+    const wristButtonHeight = plateToolHeight;
+    const leftStackGap = Math.round(lerp(18, 20, layoutRoom));
+    const randomButtonWidth = Math.round(lerp(172, 188, layoutRoom));
+    const randomButtonHeight = Math.round(lerp(58, 64, layoutRoom));
+    const actionDrawerGap = Math.round(lerp(10, 12, layoutRoom));
     const randomButtonTrayOverlap = 0.72;
     const themeWidth = wristButtonWidth;
     const themeHeight = wristButtonHeight;
     const preferredRandomButtonTop = Math.round(trayVisualTop + trayVisualSize - randomButtonHeight * randomButtonTrayOverlap);
     const preferredDrawerTop = preferredRandomButtonTop + randomButtonHeight + actionDrawerGap;
     const idealDrawerHeight = viewportRpx - topChrome - preferredDrawerTop;
-    const adaptiveDrawerMax = isTallWorkspace
-      ? Math.max(drawerMax, Math.round(viewportRpx * 0.62), idealDrawerHeight)
-      : drawerMax;
+    const adaptiveDrawerMax = Math.max(drawerPreferredMax, idealDrawerHeight);
     const drawerHeight = Math.round(clamp(idealDrawerHeight, drawerMin, adaptiveDrawerMax));
     const drawerTopInCanvas = Math.max(360, viewportRpx - topChrome - drawerHeight);
     const railWidth = 90;
-    const railSide = isShort || isNarrow ? 10 : 14;
-    const railGap = isShort ? 14 : (isCompact ? 16 : 18);
-    const toolItemHeight = isShort || isNarrow ? 94 : 100;
+    const railSide = Math.round(lerp(10, 14, widthRoom));
+    const railGap = Math.round(lerp(14, 18, layoutRoom));
+    const toolItemHeight = Math.round(lerp(94, 100, layoutRoom));
     const leftRailHeight = Math.round(clamp(
       stageSize * 0.76,
       toolItemHeight * 2 + railGap,
@@ -1006,12 +1142,12 @@ Page({
     ));
     const minRailTop = colorTop + colorBlockHeight + 12;
     const leftRailTop = Math.round(clamp(
-      stageTop + stageSize * (isShort ? 0.14 : 0.15),
+      stageTop + stageSize * lerp(0.14, 0.15, layoutRoom),
       minRailTop,
       Math.max(minRailTop, drawerTopInCanvas - leftRailHeight - 16)
     ));
     const rightRailTop = Math.round(clamp(
-      stageTop + stageSize * (isShort ? 0.17 : 0.18),
+      stageTop + stageSize * lerp(0.17, 0.18, layoutRoom),
       minRailTop,
       Math.max(minRailTop, drawerTopInCanvas - rightRailHeight - 16)
     ));
@@ -1035,11 +1171,11 @@ Page({
     const themeTop = leftTwoTop + wristButtonHeight + leftStackGap;
     const trayVisualCenterX = trayVisualLeft + trayVisualSize / 2;
     const trayVisualCenterY = trayVisualTop + trayVisualSize / 2;
-    const shareToolRadius = trayVisualSize / 2 + (isShort ? 8 : 10);
+    const shareToolRadius = trayVisualSize / 2 + lerp(8, 10, layoutRoom);
     const shareToolLeft = Math.round(clamp(
       trayVisualCenterX + shareToolRadius * 0.70 - shareToolSize / 2,
       510,
-      750 - shareToolSize - (isShort || isNarrow ? 26 : 30)
+      750 - shareToolSize - Math.round(lerp(26, 30, layoutRoom))
     ));
     const shareToolTop = Math.round(clamp(
       trayVisualCenterY - shareToolRadius * 0.70 - shareToolSize / 2,
@@ -1048,12 +1184,12 @@ Page({
     ));
     const wristGuideLeft = Math.round(clamp(
       750 - shareToolLeft - wristGuideWidth,
-      isShort || isNarrow ? 18 : 24,
+      Math.round(lerp(18, 24, layoutRoom)),
       trayVisualCenterX - wristGuideWidth - 84
     ));
     const wristGuideTop = shareToolTop;
     const rightToolLeft = Math.round(clamp(
-      750 - plateToolWidth - (isShort || isNarrow ? 22 : 28),
+      750 - plateToolWidth - Math.round(lerp(22, 28, layoutRoom)),
       24,
       750 - plateToolWidth - 20
     ));
@@ -1067,7 +1203,7 @@ Page({
     const stageToolGap = drawerGap;
     const canvasHeight = Math.round(drawerTopInCanvas);
     const stageCenter = Math.round(stageSize / 2);
-    const stageRadius = Math.round(stageSize * 0.39);
+    const stageRadius = Math.round(stageSize * 0.57);
     return {
       stageLayout: {
         center: stageCenter,
@@ -1169,19 +1305,19 @@ Page({
       if (!cachedPayload || serverVersion !== cachedVersion) {
         this.applyMaterialPayload(optimized);
       } else {
-        this.setData({ materialsLoading: false, materialsErrorText: '' });
+        this.setData({ materialsLoading: false, materialsErrorText: '' }, () => this.markWorkspaceReady('materials'));
       }
     } catch (error) {
       logWorkspaceWarning('load materials fallback:', error.message || error);
       this.setData({
         materialsLoading: false,
         materialsErrorText: cachedPayload ? '已使用本地缓存，最新珠材稍后自动同步' : '珠材加载失败，请稍后重试'
-      });
+      }, () => this.markWorkspaceReady('materials'));
     }
   },
 
-  loadMaterials() {
-    return this.loadMaterialPage(1, { reset: true, useStorage: true });
+  loadMaterials(options = {}) {
+    return this.loadMaterialPage(1, { reset: true, useStorage: true, ...options });
   },
 
   isAllFilterValue(value) {
@@ -1190,11 +1326,10 @@ Page({
 
   materialRequestFilters() {
     const keyword = this.normalizeMaterialSearchKeyword(this.data.materialSearchKeyword);
-    const hasKeyword = !!keyword;
     return {
       top: this.data.activeTop || 'bead',
-      category: hasKeyword || this.isAllFilterValue(this.data.activeCategory) ? '' : this.data.activeCategory,
-      series: hasKeyword || this.isAllFilterValue(this.data.activeSeries) ? '' : this.data.activeSeries,
+      category: this.isAllFilterValue(this.data.activeCategory) ? '' : this.data.activeCategory,
+      series: this.isAllFilterValue(this.data.activeSeries) ? '' : this.data.activeSeries,
       keyword
     };
   },
@@ -1244,6 +1379,33 @@ Page({
     });
   },
 
+  materialPagePayloadSignature(payload = {}) {
+    const pagination = payload.pagination || {};
+    const materials = (payload.materials || []).map(item => [
+      item.id || '',
+      item.skuId || item.sku_id || '',
+      item.material_code || '',
+      item.name || '',
+      item.series || '',
+      item.category || '',
+      item.image_url || '',
+      item.size || '',
+      item.price || '',
+      item.grade || ''
+    ].join('~'));
+    return JSON.stringify({
+      version: payload.version || payload.updated_at || '',
+      page: pagination.page || '',
+      pageSize: pagination.page_size || '',
+      total: pagination.total || '',
+      hasMore: !!pagination.has_more,
+      materials,
+      topTabs: (payload.top_tabs || []).map(item => `${item.key || ''}:${item.label || ''}`),
+      categories: payload.categories_by_top || {},
+      series: payload.series_by_category || {}
+    });
+  },
+
   async loadMaterialPage(page = 1, options = {}) {
     const reset = options.reset !== false && page === 1;
     const cacheKey = this.materialRequestKey(page);
@@ -1270,16 +1432,31 @@ Page({
     }
 
     let cachedPayload = null;
+    let cachedPayloadSignature = '';
+    let cachedAppendBaseMaterials = null;
     if (materialCache[cacheKey] && Date.now() - Number(materialCacheAt[cacheKey] || 0) < MATERIAL_CACHE_TTL) {
       cachedPayload = materialCache[cacheKey];
-      this.applyPagedMaterialPayload(cachedPayload, { append: !reset, keepLoading: true, fromCache: true });
+      cachedPayloadSignature = this.materialPagePayloadSignature(cachedPayload);
+      if (!reset) cachedAppendBaseMaterials = (this.data.visibleMaterials || []).slice();
+      this.applyPagedMaterialPayload(cachedPayload, {
+        append: !reset,
+        keepLoading: true,
+        fromCache: true,
+        autoTargetSearch: options.autoTargetSearch
+      });
     } else if (options.useStorage && page === 1) {
       cachedPayload = await this.readStoredMaterialPage(cacheKey);
       if (cachedPayload) {
-        if (this.materialPageRequesting !== cacheKey || this.materialRequestKey(page) !== cacheKey) return;
+        if (this.materialPageRequesting !== cacheKey) return;
         materialCache[cacheKey] = cachedPayload;
         materialCacheAt[cacheKey] = Date.now();
-        this.applyPagedMaterialPayload(cachedPayload, { append: false, keepLoading: true, fromCache: true });
+        cachedPayloadSignature = this.materialPagePayloadSignature(cachedPayload);
+        this.applyPagedMaterialPayload(cachedPayload, {
+          append: false,
+          keepLoading: true,
+          fromCache: true,
+          autoTargetSearch: options.autoTargetSearch
+        });
       }
     }
 
@@ -1293,17 +1470,29 @@ Page({
         silent: true,
         timeout: reset ? 6500 : 8000
       });
-      if (this.materialPageRequesting !== cacheKey || this.materialRequestKey(page) !== cacheKey) return;
+      if (this.materialPageRequesting !== cacheKey) return;
       const optimized = this.optimizeMaterialPayload(data);
       this.storeMaterialPage(cacheKey, optimized);
-      this.applyPagedMaterialPayload(optimized, { append: !reset });
+      if (cachedPayload && cachedPayloadSignature === this.materialPagePayloadSignature(optimized)) {
+        this.setData({
+          materialsLoading: false,
+          materialsLoadingMore: false,
+          materialsErrorText: ''
+        }, () => this.markWorkspaceReady('materials'));
+        return;
+      }
+      this.applyPagedMaterialPayload(optimized, {
+        append: !reset,
+        appendBaseMaterials: cachedAppendBaseMaterials,
+        autoTargetSearch: options.autoTargetSearch
+      });
     } catch (error) {
       logWorkspaceWarning('load materials fallback:', error.message || error);
       this.setData({
         materialsLoading: false,
         materialsLoadingMore: false,
         materialsErrorText: cachedPayload ? '已使用本地缓存，最新珠材稍后自动同步' : '珠材加载失败，请稍后重试'
-      });
+      }, () => this.markWorkspaceReady('materials'));
     } finally {
       if (this.materialPageRequesting === cacheKey) this.materialPageRequesting = '';
     }
@@ -1417,6 +1606,7 @@ Page({
       return !material || materialIsWorkspaceSupported(material);
     });
     this.materialCatalog = nextCatalog;
+    this.rebuildMaterialLookup();
     this.materialPayloadReady = true;
     this.categoriesByTop = data.categories_by_top || {};
     this.seriesByCategory = data.series_by_category || {};
@@ -1436,7 +1626,7 @@ Page({
       placements,
       materialsLoading: !!options.keepLoading,
       materialsErrorText: ''
-    });
+    }, () => this.markWorkspaceReady('materials'));
     this.refreshFilters();
     if (this.pendingSharedDesign || this.pendingBackendRecommendation || this.pendingRecommendedRecipe) {
       this.ensurePendingMaterialDetails({ silent: true, keepPendingOnEmpty: true });
@@ -1445,7 +1635,7 @@ Page({
     this.recalculate();
   },
 
-  mergeMaterialCatalog(materials = []) {
+  mergeMaterialCatalog(materials = [], options = {}) {
     const byId = {};
     filterWorkspaceMaterials(this.materialCatalog || DEFAULT_MATERIALS).forEach(item => {
       if (item && item.id) byId[item.id] = item;
@@ -1454,19 +1644,67 @@ Page({
       if (item && item.id) byId[item.id] = item;
     });
     this.materialCatalog = Object.keys(byId).map(id => byId[id]);
+    this.rebuildMaterialLookup(this.materialCatalog, {
+      resetDesignCaches: options.resetDesignCaches !== false
+    });
+  },
+
+  selectedMaterialDependencySignature(selected = this.data.selected || []) {
+    const lookup = this.materialLookup
+      || this.rebuildMaterialLookup(this.materialCatalog || DEFAULT_MATERIALS, { resetDesignCaches: false });
+    return (selected || []).map(id => {
+      const material = lookup[String(id || '').trim()] || {};
+      const effects = Array.isArray(material.effects) ? material.effects.join('|') : String(material.effects || '');
+      const secondary = Array.isArray(material.secondary_elements)
+        ? material.secondary_elements.join('|')
+        : String(material.secondary_elements || '');
+      return [
+        id,
+        material.id,
+        material.skuId,
+        material.sku_id,
+        material.material_code,
+        material.top,
+        material.category,
+        material.series,
+        material.grade,
+        material.name,
+        material.size,
+        material.price,
+        material.weight,
+        material.image_url,
+        material.element,
+        material.primary_element,
+        material.element_key,
+        secondary,
+        effects
+      ].map(value => String(value || '').trim()).join('~');
+    }).join('||');
   },
 
   applyPagedMaterialPayload(data, options = {}) {
     const materials = filterWorkspaceMaterials(data.materials && data.materials.length ? data.materials : []);
     const pagination = data.pagination || {};
-    this.mergeMaterialCatalog(materials);
+    const selectedDependencyBefore = this.selectedMaterialDependencySignature();
+    this.mergeMaterialCatalog(materials, { resetDesignCaches: false });
+    const selectedDependencyChanged = selectedDependencyBefore !== this.selectedMaterialDependencySignature();
+    if (selectedDependencyChanged) {
+      this.invalidateDesignMaterialCaches();
+    }
     this.materialPayloadReady = true;
     const topTabs = filterWorkspaceTopTabs(data.top_tabs || this.data.topTabs || TOP_TABS);
     const activeTop = topTabs.some(item => item.key === this.data.activeTop) ? this.data.activeTop : 'bead';
     this.categoriesByTop = data.categories_by_top || this.categoriesByTop || {};
     this.seriesByCategory = data.series_by_category || this.seriesByCategory || {};
-    const searchTarget = !options.append ? this.resolveMaterialSearchTarget(materials) : null;
+    const keyword = this.normalizeMaterialSearchKeyword(this.data.materialSearchKeyword);
+    const searchTerms = this.materialSearchTerms(keyword);
+    const shouldAutoTargetSearch = !options.append && searchTerms.length && options.autoTargetSearch !== false;
+    const searchTarget = shouldAutoTargetSearch ? this.resolveMaterialSearchTarget(materials, searchTerms) : null;
     let categoryNames = (this.categoriesByTop || {})[activeTop] || [ALL_OPTION_LABEL];
+    const currentCategory = this.data.activeCategory;
+    if (!this.isAllFilterValue(currentCategory) && !categoryNames.includes(currentCategory)) {
+      categoryNames = [...categoryNames, currentCategory];
+    }
     if (searchTarget && searchTarget.category && !categoryNames.includes(searchTarget.category)) {
       categoryNames = [...categoryNames, searchTarget.category];
     }
@@ -1478,6 +1716,10 @@ Page({
     let seriesOptions = this.isAllFilterValue(activeCategory)
       ? [ALL_OPTION_LABEL]
       : ((this.seriesByCategory || {})[seriesKey] || [ALL_OPTION_LABEL]);
+    const currentSeries = this.data.activeSeries;
+    if (!this.isAllFilterValue(currentSeries) && !seriesOptions.includes(currentSeries)) {
+      seriesOptions = [...seriesOptions, currentSeries];
+    }
     const targetSeries = searchTarget && searchTarget.category === activeCategory
       ? (searchTarget.series || searchTarget.name || '')
       : '';
@@ -1491,9 +1733,20 @@ Page({
     const decoratedSeriesOptions = this.decorateOptionList(seriesOptions, activeSeries, '', 'series-filter');
     const activeCategoryAnchor = this.getActiveOptionAnchor(decoratedCategories);
     const activeSeriesAnchor = this.getActiveOptionAnchor(decoratedSeriesOptions);
-    const currentMaterials = options.append ? (this.data.visibleMaterials || []) : [];
-    const visibleMaterials = this.decorateVisibleMaterials([...currentMaterials, ...materials]);
-    const total = Number(pagination.total || visibleMaterials.length || materials.length || 0);
+    const currentMaterials = options.append
+      ? (options.appendBaseMaterials || this.data.visibleMaterials || [])
+      : [];
+    const scopedMaterials = materials.filter(item => {
+      const series = item.series || item.name || '';
+      const matchesCategory = this.isAllFilterValue(activeCategory) || item.category === activeCategory;
+      const matchesSeries = this.isAllFilterValue(activeSeries) || series === activeSeries;
+      return matchesCategory && matchesSeries && this.materialMatchesSearch(item, searchTerms);
+    });
+    const newVisibleMaterials = this.decorateVisibleMaterials(scopedMaterials, currentMaterials.length);
+    const visibleMaterials = options.append
+      ? [...currentMaterials, ...newVisibleMaterials]
+      : newVisibleMaterials;
+    const total = Number(pagination.total || visibleMaterials.length || scopedMaterials.length || 0);
     const filterSummary = `${activeCategory} · ${activeSeries} · ${total} 款`;
     this.materialPageState = {
       page: Number(pagination.page || 1),
@@ -1502,7 +1755,7 @@ Page({
       hasMore: !!pagination.has_more,
       key: this.materialRequestKey(1)
     };
-    this.setData({
+    const updates = {
       topTabs: this.decorateOptionList(topTabs, activeTop, 'key'),
       activeTop,
       categories: decoratedCategories,
@@ -1511,23 +1764,36 @@ Page({
       seriesOptions: decoratedSeriesOptions,
       activeSeries,
       activeSeriesAnchor,
-      visibleMaterials,
       hasMoreMaterials: !!pagination.has_more,
       materialsLoading: !!options.keepLoading,
       materialsLoadingMore: false,
       materialsErrorText: '',
       filterSummary
-    }, () => {
-      this.scheduleMaterialPreload(visibleMaterials);
+    };
+    if (options.append && options.appendBaseMaterials) {
+      updates.visibleMaterials = visibleMaterials;
+    } else if (options.append) {
+      Object.assign(updates, this.buildVisibleMaterialAppendUpdates(newVisibleMaterials, currentMaterials.length));
+    } else {
+      updates.visibleMaterials = visibleMaterials;
+    }
+    this.setData(updates, () => {
+      this.scheduleMaterialPreload(options.append ? newVisibleMaterials : visibleMaterials);
+      this.markWorkspaceReady('materials');
     });
 
     if (this.pendingSharedDesign || this.pendingBackendRecommendation || this.pendingRecommendedRecipe) {
       this.ensurePendingMaterialDetails({ silent: true, keepPendingOnEmpty: true });
       return;
     }
+    const selectedHasMissingMaterials = this.hasMissingSelectedMaterials();
+    if (!selectedDependencyChanged && !selectedHasMissingMaterials) {
+      return;
+    }
     this.ensurePendingMaterialDetails();
-    this.ensureMissingSelectedMaterials();
-    this.recalculate();
+    this.ensureMissingSelectedMaterials().then(handled => {
+      if (!handled && selectedDependencyChanged) this.recalculate();
+    });
   },
 
   pendingMaterialIds() {
@@ -1582,7 +1848,7 @@ Page({
 
   async ensureMissingSelectedMaterials() {
     const missing = (this.data.selected || []).filter(id => !this.hasMaterial(id));
-    if (!missing.length) return;
+    if (!missing.length) return false;
     await this.fetchMaterialsByIds(missing);
     const placements = this.data.placements.map((item, index) => {
       const id = this.data.selected[index] || item.id;
@@ -1594,6 +1860,11 @@ Page({
       };
     });
     this.setData({ placements }, () => this.recalculate());
+    return true;
+  },
+
+  hasMissingSelectedMaterials() {
+    return (this.data.selected || []).some(id => !this.hasMaterial(id));
   },
 
   async fetchMaterialsByIds(ids = []) {
@@ -1637,14 +1908,78 @@ Page({
     });
   },
 
+  materialLookupKeys(material = {}) {
+    const sku = material.sku && typeof material.sku === 'object' ? material.sku : {};
+    return [
+      material.id,
+      material.skuId,
+      material.sku_id,
+      material.material_code,
+      typeof material.sku === 'string' ? material.sku : '',
+      sku.id,
+      sku.sku_id,
+      sku.material_code
+    ].map(value => String(value || '').trim()).filter(Boolean);
+  },
+
+  invalidateDesignMaterialCaches() {
+    this.materialCatalogDesignVersion = Number(this.materialCatalogDesignVersion || 0) + 1;
+    this.selectedMaterialsCache = null;
+    this.canvasSelectedItemsCache = null;
+    this.canvasPlacementsCache = null;
+    this.canvasSpriteContextCache = null;
+    this.braceletGeometryCache = null;
+    this.workspaceSummaryCache = null;
+    this.selectedBeadInfoCache = null;
+    this.selectedItemStylePatchCache = null;
+    this.clearLivePlacements();
+  },
+
+  rebuildMaterialLookup(materials = this.materialCatalog || DEFAULT_MATERIALS, options = {}) {
+    const lookup = Object.create(null);
+    (materials || []).forEach(material => {
+      if (!material) return;
+      this.materialLookupKeys(material).forEach(key => {
+        if (!lookup[key]) lookup[key] = material;
+      });
+    });
+    this.materialLookup = lookup;
+    this.materialLookupSourceRef = materials;
+    this.materialLookupMissCache = Object.create(null);
+    this.materialImagePoolIndex = this.buildMaterialImagePoolIndex(materials);
+    this.materialCatalogVersion = Number(this.materialCatalogVersion || 0) + 1;
+    this.decoratedMaterialCache = null;
+    this.materialElementKeyCache = null;
+    if (options.resetDesignCaches !== false) this.invalidateDesignMaterialCaches();
+    return lookup;
+  },
+
   findMaterialById(id) {
     const target = String(id || '').trim();
     if (!target) return null;
-    return (this.materialCatalog || DEFAULT_MATERIALS).find(material => (
-      [material.id, material.skuId, material.sku_id, material.material_code, material.sku]
-        .map(value => String(value || '').trim())
-        .includes(target)
-    ));
+    const source = this.materialCatalog || DEFAULT_MATERIALS;
+    const lookupReady = this.materialLookup && this.materialLookupSourceRef === source;
+    const lookup = lookupReady ? this.materialLookup : this.rebuildMaterialLookup(source);
+    if (lookup[target]) return lookup[target];
+    const missCache = this.materialLookupMissCache || (this.materialLookupMissCache = Object.create(null));
+    if (missCache[target]) return null;
+    this.materialLookupMissCache[target] = true;
+    return null;
+  },
+
+  getCachedSelectedMaterials(selected = this.data.selected || []) {
+    const selectedKey = (selected || []).map(id => String(id || '').trim()).join('|');
+    const key = [
+      this.materialCatalogVersion || 0,
+      this.materialCatalogDesignVersion || 0,
+      selectedKey
+    ].join('::');
+    if (this.selectedMaterialsCache && this.selectedMaterialsCache.key === key) {
+      return this.selectedMaterialsCache.materials;
+    }
+    const materials = (selected || []).map(id => this.findMaterialById(id));
+    this.selectedMaterialsCache = { key, materials };
+    return materials;
   },
 
   materialImageGroupKey(material = {}) {
@@ -1701,6 +2036,25 @@ Page({
       .filter(Boolean);
   },
 
+  buildMaterialImagePoolIndex(materials = []) {
+    const index = Object.create(null);
+    const seenByGroup = Object.create(null);
+    (materials || []).forEach(material => {
+      if (!material || materialTop(material) !== 'bead') return;
+      const groupKey = this.materialImageGroupKey(material);
+      if (!groupKey) return;
+      const seen = seenByGroup[groupKey] || (seenByGroup[groupKey] = Object.create(null));
+      const group = index[groupKey] || (index[groupKey] = []);
+      this.materialOwnImageUrls(material).forEach(url => {
+        const key = this.normalizeImageUrlIdentity(url);
+        if (!key || seen[key]) return;
+        seen[key] = true;
+        group.push(url);
+      });
+    });
+    return index;
+  },
+
   materialImageCandidates(material = {}) {
     const pool = [];
     const seen = {};
@@ -1715,10 +2069,15 @@ Page({
     addUrls(material);
     if (materialTop(material) !== 'bead') return pool;
     const groupKey = this.materialImageGroupKey(material);
-    (this.materialCatalog || DEFAULT_MATERIALS).forEach(item => {
-      if (!item || item === material || materialTop(item) !== 'bead') return;
-      if (this.materialImageGroupKey(item) !== groupKey) return;
-      addUrls(item);
+    if (!this.materialImagePoolIndex) {
+      this.materialImagePoolIndex = this.buildMaterialImagePoolIndex(this.materialCatalog || DEFAULT_MATERIALS);
+    }
+    const groupUrls = this.materialImagePoolIndex && this.materialImagePoolIndex[groupKey];
+    (groupUrls || []).forEach(url => {
+      const key = this.normalizeImageUrlIdentity(url);
+      if (!key || seen[key]) return;
+      seen[key] = true;
+      pool.push(url);
     });
     return pool;
   },
@@ -1746,6 +2105,7 @@ Page({
       };
     };
     this.materialCatalog = (this.materialCatalog || DEFAULT_MATERIALS).map(mergeItem);
+    this.rebuildMaterialLookup();
     this.setData({
       visibleMaterials: (this.data.visibleMaterials || []).map(mergeItem)
     });
@@ -1783,6 +2143,29 @@ Page({
     });
     this.materialImagePoolHydrating[groupKey] = request;
     return request;
+  },
+
+  canUseHydratedMaterialImagePool(material = {}) {
+    if (this.materialOwnImageUrls(material).length > 1) return true;
+    const groupKey = this.materialImageGroupKey(material);
+    return !!(this.materialImagePoolHydrated && this.materialImagePoolHydrated[groupKey]);
+  },
+
+  warmMaterialImagePool(material = {}) {
+    const groupKey = this.materialImageGroupKey(material);
+    if (!groupKey || (this.materialImagePoolHydrated && this.materialImagePoolHydrated[groupKey])) return;
+    this.materialImagePoolWarmTimers = this.materialImagePoolWarmTimers || {};
+    clearTimeout(this.materialImagePoolWarmTimers[groupKey]);
+    const warmDelay = this.flightActive || (this.flightQueue && this.flightQueue.length) ? 720 : 420;
+    this.materialImagePoolWarmTimers[groupKey] = setTimeout(() => {
+      delete this.materialImagePoolWarmTimers[groupKey];
+      this.ensureMaterialImagePool(material).then(hydrated => {
+        const imageUrl = this.pickMaterialImageUrl(hydrated || material);
+        if (imageUrl && this.data.useCanvasRenderer && this.braceletCanvasState) {
+          this.getCanvasImage(imageUrl);
+        }
+      });
+    }, warmDelay);
   },
 
   pickMaterialImageUrl(material = {}) {
@@ -1907,7 +2290,10 @@ Page({
   },
 
   materialSearchText(material = {}) {
-    return [
+    if (materialSearchTextCache && material && typeof material === 'object' && materialSearchTextCache.has(material)) {
+      return materialSearchTextCache.get(material);
+    }
+    const text = [
       material.id,
       material.material_code,
       material.name,
@@ -1920,40 +2306,121 @@ Page({
       ...(material.chakras || []),
       ...(material.wish_pools || [])
     ].filter(Boolean).join(' ').toLowerCase();
+    if (materialSearchTextCache && material && typeof material === 'object') {
+      materialSearchTextCache.set(material, text);
+    }
+    return text;
   },
 
   normalizeMaterialSearchKeyword(value) {
     return String(value || '').trim().replace(/\s+/g, ' ');
   },
 
-  materialMatchesSearch(material = {}, keyword = this.data.materialSearchKeyword) {
-    const normalized = this.normalizeMaterialSearchKeyword(keyword).toLowerCase();
-    if (!normalized) return true;
-    const searchText = this.materialSearchText(material);
-    return normalized.split(' ').filter(Boolean).every(term => searchText.includes(term));
+  materialSearchTerms(keyword = this.data.materialSearchKeyword) {
+    return this.normalizeMaterialSearchKeyword(keyword).toLowerCase().split(' ').filter(Boolean);
   },
 
-  resolveMaterialSearchTarget(materials = []) {
-    const keyword = this.normalizeMaterialSearchKeyword(this.data.materialSearchKeyword);
-    if (!keyword) return null;
-    return (materials || []).find(item => this.materialMatchesSearch(item, keyword))
+  materialMatchesSearch(material = {}, keyword = this.data.materialSearchKeyword) {
+    const terms = Array.isArray(keyword) ? keyword : this.materialSearchTerms(keyword);
+    if (!terms.length) return true;
+    const searchText = this.materialSearchText(material);
+    return terms.every(term => searchText.includes(term));
+  },
+
+  materialFieldMatchesSearch(value, keyword = this.data.materialSearchKeyword) {
+    const terms = Array.isArray(keyword) ? keyword : this.materialSearchTerms(keyword);
+    if (!terms.length) return false;
+    const text = String(value || '').trim().toLowerCase();
+    if (!text) return false;
+    return terms.every(term => text.includes(term));
+  },
+
+  resolveMaterialSearchTarget(materials = [], keyword = this.data.materialSearchKeyword) {
+    const terms = Array.isArray(keyword) ? keyword : this.materialSearchTerms(keyword);
+    if (!terms.length) return null;
+    const matchedMaterials = (materials || []).filter(item => this.materialMatchesSearch(item, terms));
+    return matchedMaterials.find(item => this.materialFieldMatchesSearch(item.category, terms))
+      || matchedMaterials.find(item => this.materialFieldMatchesSearch(item.series, terms))
+      || matchedMaterials.find(item => this.materialFieldMatchesSearch(item.name, terms))
+      || matchedMaterials.find(item => this.materialFieldMatchesSearch(item.material_code || item.id || item.skuId, terms))
+      || matchedMaterials.find(Boolean)
       || (materials || []).find(Boolean)
       || null;
   },
 
+  materialElementCacheKey(material = {}) {
+    const sku = material.sku && typeof material.sku === 'object' ? material.sku : {};
+    return [
+      this.materialCatalogVersion || 0,
+      material.id,
+      material.skuId,
+      material.sku_id,
+      material.material_code,
+      typeof material.sku === 'string' ? material.sku : '',
+      sku.id,
+      sku.sku_id,
+      sku.material_code,
+      sku.top,
+      material.top,
+      material.item_type,
+      material.type,
+      material.element_key,
+      material.primary_element,
+      material.element,
+      material.name,
+      material.category,
+      material.series,
+      material.grade,
+      Array.isArray(material.effects) ? material.effects.join('|') : material.effects,
+      Array.isArray(material.secondary_elements) ? material.secondary_elements.join('|') : material.secondary_elements,
+      Array.isArray(material.chakras) ? material.chakras.join('|') : material.chakras,
+      Array.isArray(material.wish_pools) ? material.wish_pools.join('|') : material.wish_pools
+    ].map(value => String(value || '').trim()).join('::');
+  },
+
+  getMaterialElementKeyCache() {
+    if (!this.materialElementKeyCache) {
+      this.materialElementKeyCache = {
+        entries: Object.create(null),
+        keys: []
+      };
+    }
+    return this.materialElementKeyCache;
+  },
+
+  rememberMaterialElementKey(cacheKey, value) {
+    const cache = this.getMaterialElementKeyCache();
+    if (!Object.prototype.hasOwnProperty.call(cache.entries, cacheKey)) cache.keys.push(cacheKey);
+    cache.entries[cacheKey] = value;
+    if (cache.keys.length <= MATERIAL_ELEMENT_KEY_CACHE_LIMIT) return;
+    const deleteCount = cache.keys.length - MATERIAL_ELEMENT_KEY_CACHE_LIMIT;
+    cache.keys.splice(0, deleteCount).forEach(oldKey => {
+      delete cache.entries[oldKey];
+    });
+  },
+
   materialElementKey(material = {}) {
-    if (!materialContributesEnergy(material)) return '';
+    const cacheKey = this.materialElementCacheKey(material);
+    const cache = this.materialElementKeyCache;
+    if (cache && Object.prototype.hasOwnProperty.call(cache.entries, cacheKey)) {
+      return cache.entries[cacheKey];
+    }
+    const remember = value => {
+      this.rememberMaterialElementKey(cacheKey, value);
+      return value;
+    };
+    if (!materialContributesEnergy(material)) return remember('');
     const elementKey = normalizeElementKey(material.element_key || material.primary_element || material.element);
-    if (elementKey) return elementKey;
+    if (elementKey) return remember(elementKey);
     const skuKey = MATERIAL_ELEMENT_KEY[material.skuId] || MATERIAL_ELEMENT_KEY[material.material_code];
-    if (skuKey) return skuKey;
+    if (skuKey) return remember(skuKey);
     const text = this.materialSearchText(material);
-    if (/金|银|白|钛|发晶|铁|曜|耀/.test(text)) return 'metal';
-    if (/绿|木|松|幽灵|东陵/.test(text)) return 'wood';
-    if (/蓝|海|水|黑/.test(text)) return 'water';
-    if (/红|南红|玛瑙|石榴|火|粉|草莓/.test(text)) return 'fire';
-    if (/黄|茶|烟|土|虎眼/.test(text)) return 'earth';
-    return '';
+    if (/金|银|白|钛|发晶|铁|曜|耀/.test(text)) return remember('metal');
+    if (/绿|木|松|幽灵|东陵/.test(text)) return remember('wood');
+    if (/蓝|海|水|黑/.test(text)) return remember('water');
+    if (/红|南红|玛瑙|石榴|火|粉|草莓/.test(text)) return remember('fire');
+    if (/黄|茶|烟|土|虎眼/.test(text)) return remember('earth');
+    return remember('');
   },
 
   chooseClosestMaterial(candidates = [], preferredSize = 8) {
@@ -2069,6 +2536,8 @@ Page({
     wx.hideTabBar({ animation: false });
     if (this.data.workspaceCanvasVisible === false) {
       this.restoreWorkspaceCanvasAfterOverlay();
+    } else if (this.data.useCanvasRenderer && this.braceletCanvasState) {
+      this.scheduleMaterialPreload(this.data.visibleMaterials);
     }
     if (this.deferFirstShowProfileEnergy) {
       this.deferFirstShowProfileEnergy = false;
@@ -2130,11 +2599,23 @@ Page({
     clearTimeout(this.persistDraftTimer);
     clearTimeout(this.flightTimer);
     clearTimeout(this.flightSafetyTimer);
+    clearTimeout(this.flightAnimationTimer);
+    clearTimeout(this.canvasFlightRetryTimer);
     clearTimeout(this.shuffleTimer);
     clearTimeout(this.canvasResizeTimer);
+    clearTimeout(this.physicsFrameRetryTimer);
+    clearTimeout(this.dragPhysicsSyncTimer);
+    this.flightAnimationTimer = null;
+    this.canvasFlightRetryTimer = null;
+    this.physicsFrameRetryTimer = null;
+    this.dragPhysicsSyncTimer = null;
     clearTimeout(this.audioPrewarmTimer);
     clearTimeout(this.nonCriticalTaskTimer);
-    clearTimeout(this.materialPreloadTimer);
+    clearTimeout(this.workspaceLoadingFallbackTimer);
+    clearTimeout(this.workspaceLoadingDoneTimer);
+    clearTimeout(this.workspaceLoadingHideTimer);
+    clearTimeout(this.wristRulerSnapTimer);
+    this.pauseMaterialBackgroundPreload();
     this.stopCanvasRenderLoop();
     this.clearWorkspaceFlightCanvas();
     Object.values(this.audioPlayers || {}).forEach(pool => {
@@ -2153,6 +2634,16 @@ Page({
   },
 
   onHide() {
+    clearTimeout(this.wristRulerSnapTimer);
+    clearTimeout(this.physicsFrameRetryTimer);
+    clearTimeout(this.dragPhysicsSyncTimer);
+    clearTimeout(this.canvasFlightRetryTimer);
+    clearTimeout(this.flightAnimationTimer);
+    this.physicsFrameRetryTimer = null;
+    this.dragPhysicsSyncTimer = null;
+    this.canvasFlightRetryTimer = null;
+    this.flightAnimationTimer = null;
+    this.pauseMaterialBackgroundPreload();
     this.pausePhysics();
     this.stopCanvasRenderLoop();
     wx.showTabBar({ animation: false });
@@ -2174,6 +2665,7 @@ Page({
         launchingMaterialId: '',
         isShuffling: false,
         isStringingFinishing: false,
+        isReleasingString: false,
         selectedBeadIndex: -1,
         draggingBeadIndex: -1,
         dragDeleteArmed: false
@@ -2220,18 +2712,18 @@ Page({
       ? beadMaterialIds
       : materialIds.filter(id => materialIsWorkspaceSupported(this.findMaterialById(id) || {}));
     const selected = [];
-    const targetLengthMm = wristSize * 10 + 8;
-    let currentLengthMm = 0;
+    const targetLengthMm = wristSize * 10 + STRINGED_COMFORT_ALLOWANCE_MM;
+    const selectedSizes = [];
     let cursor = 0;
     while (
       recipeMaterialIds.length
-      && (currentLengthMm < targetLengthMm || selected.length < MIN_STRING_BEAD_COUNT)
+      && (estimateStringedLengthMm(selectedSizes) < targetLengthMm || selected.length < MIN_STRING_BEAD_COUNT)
       && selected.length < MAX_RECOMMENDED_RECIPE_BEADS
     ) {
       const materialId = recipeMaterialIds[cursor % recipeMaterialIds.length];
       const material = this.findMaterialById(materialId);
       selected.push(materialId);
-      currentLengthMm += material ? material.size : 8;
+      selectedSizes.push(material ? material.size : 8);
       cursor += 1;
     }
     if (!selected.length) {
@@ -2256,6 +2748,7 @@ Page({
       launchingMaterialId: '',
       isShuffling: false,
       isStringingFinishing: false,
+      isReleasingString: false,
       draggingBeadIndex: -1,
       dragDeleteArmed: false
     });
@@ -2306,6 +2799,7 @@ Page({
       launchingMaterialId: '',
       isShuffling: false,
       isStringingFinishing: false,
+      isReleasingString: false,
       draggingBeadIndex: -1,
       dragDeleteArmed: false,
       sourceContext
@@ -2418,10 +2912,16 @@ Page({
     engine.gravity.x = 0;
     engine.gravity.y = 0;
     engine.gravity.scale = 0;
+    if (engine.world && engine.world.gravity) {
+      engine.world.gravity.x = 0;
+      engine.world.gravity.y = 0;
+      engine.world.gravity.scale = 0;
+    }
 
-    const wallCount = this.isLowPerformanceDevice ? 32 : 40;
-    const wallRadius = layout.center - 8;
     const wallThickness = 28;
+    const wallCount = this.isLowPerformanceDevice ? 32 : 40;
+    const trayRadius = this.getTrayPhysicsRadius(layout);
+    const wallRadius = trayRadius - TRAY_BOUNDARY_PADDING_RPX + wallThickness * 0.5;
     const wallLength = (Math.PI * 2 * wallRadius) / wallCount + 12;
     const walls = [];
     for (let index = 0; index < wallCount; index += 1) {
@@ -2434,8 +2934,9 @@ Page({
         {
           isStatic: true,
           angle: angle + Math.PI / 2,
-          restitution: 0.72,
-          friction: 0.022,
+          restitution: BILLIARD_WALL_RESTITUTION,
+          friction: BILLIARD_FRICTION,
+          frictionStatic: BILLIARD_STATIC_FRICTION,
           label: 'tray-wall'
         }
       );
@@ -2450,7 +2951,7 @@ Page({
   ensurePhysicsRuntime() {
     if (Engine) return;
     const Matter = require('../../utils/vendor/matter.min');
-    ({ Body, Bodies, Composite, Engine, Events } = Matter);
+    ({ Body, Bodies, Composite, Engine, Events, Sleeping } = Matter);
   },
 
   ensureAudioPlayers() {
@@ -2552,11 +3053,14 @@ Page({
       const pairs = event && event.pairs ? event.pairs : [];
       if (!pairs.length) return;
       this.handleFrozenImpactCollision(pairs);
+      this.handleTrayWallCollision(pairs);
+      this.containImpactCollisionBodies(pairs);
       if (this.suppressStringingSounds || this.data.isShuffling || this.data.isStringingFinishing) return;
       let maxRelSpeed = 0;
       let impactVector = null;
       pairs.forEach(pair => {
         this.applyCollisionSpin(pair);
+        this.dampenNeighborBeadCollision(pair);
         const bodyA = pair.bodyA;
         const bodyB = pair.bodyB;
         if (!bodyA || !bodyB) return;
@@ -2593,6 +3097,10 @@ Page({
   isWorkspaceBeadBody(body) {
     const plugin = (body && body.plugin) || {};
     return !!plugin.materialId && plugin.designIndex != null;
+  },
+
+  isTrayWallBody(body) {
+    return !!body && body.label === 'tray-wall';
   },
 
   clampAngularVelocity(value, limit = MAX_BEAD_ANGULAR_VELOCITY) {
@@ -2647,11 +3155,48 @@ Page({
     const signSeed = Math.abs(tangentSpeed) > 0.01 ? tangentSpeed : cross;
     const sign = signSeed >= 0 ? 1 : -1;
     const spin = this.clampAngularVelocity(
-      tangentSpeed * COLLISION_SPIN_FACTOR + sign * Math.min(0.055, normalSpeed * 0.007),
-      0.09
+      tangentSpeed * COLLISION_SPIN_FACTOR + sign * Math.min(0.065, normalSpeed * 0.0085),
+      0.11
     );
     if (beadA) this.addBodySpin(bodyA, -spin);
     if (beadB) this.addBodySpin(bodyB, spin);
+  },
+
+  dampenNeighborBeadCollision(pair) {
+    if (!Body || !pair) return;
+    const bodyA = pair.bodyA;
+    const bodyB = pair.bodyB;
+    if (!bodyA || !bodyB || bodyA.isStatic || bodyB.isStatic) return;
+    if (!this.isWorkspaceBeadBody(bodyA) || !this.isWorkspaceBeadBody(bodyB)) return;
+    const plugA = bodyA.plugin || {};
+    const plugB = bodyB.plugin || {};
+    if (plugA.isLauncher || plugB.isLauncher) return;
+    const normal = this.getCollisionNormal(pair, bodyA, bodyB);
+    let normalX = normal.x;
+    let normalY = normal.y;
+    const vAX = Number(bodyA.velocity && bodyA.velocity.x) || 0;
+    const vAY = Number(bodyA.velocity && bodyA.velocity.y) || 0;
+    const vBX = Number(bodyB.velocity && bodyB.velocity.x) || 0;
+    const vBY = Number(bodyB.velocity && bodyB.velocity.y) || 0;
+    let separationSpeed = (vBX - vAX) * normalX + (vBY - vAY) * normalY;
+    if (separationSpeed < -BILLIARD_NEIGHBOR_REBOUND_MIN_SPEED) {
+      separationSpeed = -separationSpeed;
+      normalX = -normalX;
+      normalY = -normalY;
+    }
+    if (separationSpeed <= BILLIARD_NEIGHBOR_REBOUND_MIN_SPEED) return;
+    const correction = Math.min(
+      BILLIARD_NEIGHBOR_REBOUND_MAX_CORRECTION,
+      separationSpeed * (1 - BILLIARD_NEIGHBOR_REBOUND_DAMPING) * 0.5
+    );
+    Body.setVelocity(bodyA, {
+      x: vAX + normalX * correction,
+      y: vAY + normalY * correction
+    });
+    Body.setVelocity(bodyB, {
+      x: vBX - normalX * correction,
+      y: vBY - normalY * correction
+    });
   },
 
   handleFrozenImpactCollision(pairs = []) {
@@ -2672,26 +3217,142 @@ Page({
     }
   },
 
+  handleTrayWallCollision(pairs = []) {
+    if (!Body || !pairs.length) return;
+    let touchedWall = false;
+    pairs.forEach(pair => {
+      const bodyA = pair && pair.bodyA;
+      const bodyB = pair && pair.bodyB;
+      const beadBody = this.isTrayWallBody(bodyA) && this.isWorkspaceBeadBody(bodyB)
+        ? bodyB
+        : (this.isTrayWallBody(bodyB) && this.isWorkspaceBeadBody(bodyA) ? bodyA : null);
+      if (!beadBody) return;
+      if (beadBody.plugin) beadBody.plugin.launchAssistUntil = 0;
+      this.resolveTrayBoundaryForBody(beadBody, {
+        padding: TRAY_BOUNDARY_PADDING_RPX,
+        guard: TRAY_BOUNDARY_GUARD_RPX + 10,
+        lookaheadFrames: TRAY_BOUNDARY_MAX_LOOKAHEAD_FRAMES,
+        force: true
+      });
+      touchedWall = true;
+    });
+    if (touchedWall) {
+      this.extendTrayImpactContainment(520);
+      this.scheduleCanvasRender(true);
+    }
+  },
+
+  containImpactCollisionBodies(pairs = []) {
+    if (!Body || !pairs.length) return;
+    const layout = this.getStageLayout();
+    let contained = false;
+    let hasBeadCollision = false;
+    pairs.forEach(pair => {
+      [pair && pair.bodyA, pair && pair.bodyB].forEach(body => {
+        if (!this.isWorkspaceBeadBody(body) || body.isStatic) return;
+        hasBeadCollision = true;
+        const fixed = this.resolveTrayBoundaryForBody(body, {
+          layout,
+          padding: TRAY_BOUNDARY_PADDING_RPX,
+          guard: TRAY_IMPACT_CONTAIN_GUARD_RPX,
+          lookaheadFrames: TRAY_BOUNDARY_MAX_LOOKAHEAD_FRAMES
+        });
+        if (fixed) contained = true;
+      });
+    });
+    if (hasBeadCollision) this.extendTrayImpactContainment(720);
+    if (contained) this.scheduleCanvasRender(true);
+  },
+
   releaseFrozenBodiesFromImpact(launcher, hitBody) {
     if (!this.pendingFrozenImpact || !Body) return;
     this.pendingFrozenImpact = false;
-    const origin = (launcher && launcher.position) || this.getStageLayout();
+    this.extendTrayImpactContainment();
+    if (launcher && launcher.plugin) launcher.plugin.launchAssistUntil = 0;
+    const layout = this.getStageLayout();
+    const origin = (launcher && launcher.position) || { x: layout.center, y: layout.center };
     const launchVelocity = (launcher && launcher.velocity) || { x: 1, y: 0 };
     const launchSpeed = Math.sqrt(launchVelocity.x ** 2 + launchVelocity.y ** 2) || 1;
-    const baseSpeed = Math.max(1.2, Math.min(4.8, launchSpeed * 0.18));
+    const baseSpeed = Math.max(3.8, Math.min(8.4, launchSpeed * 0.40));
+    const impactPoint = (hitBody && hitBody.position) || origin;
+    const launchDirX = launchVelocity.x / launchSpeed;
+    const launchDirY = launchVelocity.y / launchSpeed;
+    if (launcher && this.isWorkspaceBeadBody(launcher) && !launcher.isStatic) {
+      Body.setVelocity(launcher, this.shapeVelocityForTrayContainment(
+        launcher,
+        launcher.velocity,
+        layout,
+        {
+          guard: TRAY_IMPACT_CONTAIN_GUARD_RPX,
+          maxSpeed: this.isLowPerformanceDevice ? 10.4 : 12.2,
+          inwardBias: 1.32
+        }
+      ));
+      this.resolveTrayBoundaryForBody(launcher, {
+        layout,
+        padding: TRAY_BOUNDARY_PADDING_RPX,
+        guard: TRAY_IMPACT_CONTAIN_GUARD_RPX,
+        lookaheadFrames: TRAY_BOUNDARY_MAX_LOOKAHEAD_FRAMES
+      });
+    }
     (this.physicsBodies || []).forEach((body, index) => {
       if (!body || !body.plugin || !body.plugin.frozenUntilImpact) return;
       const dx = body.position.x - origin.x;
       const dy = body.position.y - origin.y;
       const distance = Math.max(1, Math.sqrt(dx * dx + dy * dy));
-      const nearBoost = body === hitBody ? 1.55 : Math.max(0.55, 1.2 - distance / 520);
+      const impactDx = body.position.x - impactPoint.x;
+      const impactDy = body.position.y - impactPoint.y;
+      const impactDistance = Math.sqrt(impactDx * impactDx + impactDy * impactDy);
+      const influenceRadius = Math.max(132, Number(body.plugin.beadSize || 54) * 3.15);
+      const proximity = body === hitBody
+        ? 1
+        : Math.max(0, 1 - impactDistance / influenceRadius);
+      const localImpulse = body === hitBody ? 1.0 : proximity * proximity * 0.62;
+      const tangentSign = index % 2 ? 1 : -1;
+      const tangentX = -dy / distance * tangentSign;
+      const tangentY = dx / distance * tangentSign;
       Body.setStatic(body, false);
+      if (Sleeping) Sleeping.set(body, false);
+      body.isSleeping = false;
+      body.sleepCounter = 0;
       body.plugin.frozenUntilImpact = false;
-      Body.setVelocity(body, {
-        x: dx / distance * baseSpeed * nearBoost + launchVelocity.x * 0.08,
-        y: dy / distance * baseSpeed * nearBoost + launchVelocity.y * 0.08
+      if (localImpulse <= 0.025) {
+        Body.setVelocity(body, { x: 0, y: 0 });
+        Body.setAngularVelocity(body, 0);
+        return;
+      }
+      const radialSpeed = baseSpeed * (body === hitBody ? 1.0 : 0.52 * localImpulse);
+      const carrySpeed = launchSpeed * (body === hitBody ? 0.24 : 0.07 * localImpulse);
+      const tangentSpeed = baseSpeed * 0.14 * localImpulse;
+      const releaseVelocity = {
+        x: dx / distance * radialSpeed + launchDirX * carrySpeed + tangentX * tangentSpeed,
+        y: dy / distance * radialSpeed + launchDirY * carrySpeed + tangentY * tangentSpeed
+      };
+      const maxReleaseSpeed = body === hitBody
+        ? (this.isLowPerformanceDevice ? 8.8 : 10.0)
+        : (this.isLowPerformanceDevice ? 5.8 : 6.8);
+      Body.setVelocity(body, this.shapeVelocityForTrayContainment(
+        body,
+        releaseVelocity,
+        layout,
+        {
+          guard: TRAY_IMPACT_CONTAIN_GUARD_RPX,
+          maxSpeed: maxReleaseSpeed,
+          inwardBias: body === hitBody ? 1.35 : 1.12
+        }
+      ));
+      this.clampBodyVelocity(body, maxReleaseSpeed);
+      this.resolveTrayBoundaryForBody(body, {
+        layout,
+        padding: TRAY_BOUNDARY_PADDING_RPX,
+        guard: TRAY_IMPACT_CONTAIN_GUARD_RPX,
+        lookaheadFrames: TRAY_BOUNDARY_MAX_LOOKAHEAD_FRAMES
       });
-      Body.setAngularVelocity(body, (index % 2 ? 1 : -1) * 0.035 * nearBoost);
+      Body.setAngularVelocity(body, tangentSign * 0.060 * localImpulse);
+    });
+    this.clampBodiesInsideTray(layout, {
+      guard: TRAY_IMPACT_CONTAIN_GUARD_RPX,
+      lookaheadFrames: TRAY_BOUNDARY_MAX_LOOKAHEAD_FRAMES
     });
     this.triggerTrayImpactFeedback(launchVelocity);
     if (this.pendingImpactTargets && this.pendingImpactTargets.length) {
@@ -2736,6 +3397,7 @@ Page({
       const braceletCanvasState = this.setupCanvasNode(braceletInfo, circleRect);
       if (!braceletCanvasState || !braceletCanvasState.ctx) {
         this.switchToDomRendererFallback('bracelet canvas unavailable');
+        this.markWorkspaceReady('canvas');
         return;
       }
       this.braceletCanvasState = braceletCanvasState;
@@ -2749,6 +3411,7 @@ Page({
       this.materialImagePreloadSet = this.materialImagePreloadSet || {};
       this.scheduleCanvasRender();
       this.scheduleMaterialPreload(this.data.visibleMaterials);
+      this.markWorkspaceReady('canvas');
     });
   },
 
@@ -2760,12 +3423,16 @@ Page({
     this.flightCanvasState = null;
     this.canvasImageCache = {};
     this.canvasTextureCache = {};
+    this.canvasShadowCache = {};
     this.materialImagePreloadSet = {};
     this.canvasFlight = null;
     this.setData({
       useCanvasRenderer: false,
       canvasFlightActive: false
-    }, () => this.recalculate({ persist: false }));
+    }, () => {
+      this.recalculate({ persist: false });
+      this.markWorkspaceReady('canvas');
+    });
   },
 
   setupCanvasNode(info, rect = {}) {
@@ -2815,24 +3482,68 @@ Page({
     clearTimeout(frame.id);
   },
 
-  scheduleCanvasRender(keepLoop = false) {
+  hasActiveBraceletCanvasMotion() {
+    return !!(
+      this.physicsTimer
+      || this.dragState
+      || this.ringDragState
+      || this.ringSlideState
+      || this.canvasImpact
+      || this.data.isShuffling
+      || this.data.isStringingFinishing
+      || this.data.isReleasingString
+    );
+  },
+
+  hasActiveCanvasMotion() {
+    return !!(
+      this.hasActiveBraceletCanvasMotion()
+      || this.canvasFlight
+      || this.data.canvasFlightActive
+    );
+  },
+
+  scheduleCanvasRender(keepLoop = false, options = {}) {
     if (!this.data.useCanvasRenderer || this.data.workspaceCanvasVisible === false) return;
+    if (options.markDirty !== false) this.braceletCanvasDirty = true;
     this.canvasKeepLoop = this.canvasKeepLoop || keepLoop;
     if (this.canvasFramePending) return;
     this.canvasFramePending = true;
     this.canvasFrame = this.requestCanvasFrame(() => {
       this.canvasFramePending = false;
       if (this.data.workspaceCanvasVisible === false) return;
-      this.renderBraceletCanvas();
-      this.renderWorkspaceFlightCanvas();
-      const shouldContinue = this.canvasKeepLoop
-        || !!this.physicsTimer
-        || !!this.canvasFlight
-        || !!this.dragState
-        || !!this.ringDragState
-        || this.data.isShuffling;
+      const keepLoopRequested = !!this.canvasKeepLoop;
       this.canvasKeepLoop = false;
-      if (shouldContinue) this.scheduleCanvasRender(true);
+      const hasFlightMotion = !!(this.canvasFlight || this.data.canvasFlightActive);
+      const hasBraceletMotion = this.hasActiveBraceletCanvasMotion();
+      const shouldCheckSignature = !this.braceletCanvasDirty
+        && !this.canvasImpact
+        && (hasBraceletMotion || (keepLoopRequested && !hasFlightMotion));
+      const nextBraceletContext = shouldCheckSignature
+        ? this.getCanvasBeadSpriteContext()
+        : null;
+      const nextBraceletSnapshot = shouldCheckSignature
+        ? this.buildCanvasRenderSceneSnapshot(nextBraceletContext)
+        : null;
+      const nextBraceletSignature = shouldCheckSignature
+        ? nextBraceletSnapshot.signature
+        : '';
+      const braceletSceneChanged = shouldCheckSignature
+        ? nextBraceletSignature !== this.lastBraceletCanvasRenderSignature
+        : true;
+      const needsBraceletRender = this.braceletCanvasDirty
+        || !!this.canvasImpact
+        || (hasBraceletMotion && braceletSceneChanged)
+        || (keepLoopRequested && !hasFlightMotion && braceletSceneChanged);
+      if (needsBraceletRender) {
+        this.renderBraceletCanvas(nextBraceletSignature, nextBraceletContext, nextBraceletSnapshot);
+        this.braceletCanvasDirty = false;
+      }
+      if (this.canvasFlight || this.data.canvasFlightActive) {
+        this.renderWorkspaceFlightCanvas();
+      }
+      const shouldContinue = this.canvasKeepLoop || this.hasActiveCanvasMotion();
+      if (shouldContinue) this.scheduleCanvasRender(true, { markDirty: false });
     });
   },
 
@@ -2876,29 +3587,60 @@ Page({
     if (!flight) return;
     const elapsed = Date.now() - flight.startedAt;
     const raw = Math.max(0, Math.min(1, elapsed / flight.duration));
-    const progress = flight.easing === 'linear' ? raw : this.easeOutCubic(raw);
+    if (flight.trail && raw > 0.08) {
+      [0.26, 0.16, 0.08].forEach((lag, trailIndex) => {
+        const frame = this.resolveFlightFrame(flight, raw - lag);
+        if (!frame) return;
+        this.drawCanvasBead(ctx, {
+          item: flight.material,
+          x: frame.point.x,
+          y: frame.point.y,
+          size: frame.size * (0.90 + trailIndex * 0.025),
+          rotation: frame.rotation,
+          active: false,
+          deleteReady: false,
+          screenSpace: true,
+          opacity: 0.10 + trailIndex * 0.07
+        });
+      });
+    }
+    const frame = this.resolveFlightFrame(flight, raw);
+    if (!frame) return;
+    this.drawCanvasBead(ctx, {
+      item: flight.material,
+      x: frame.point.x,
+      y: frame.point.y,
+      size: frame.size,
+      rotation: frame.rotation,
+      active: false,
+      deleteReady: false,
+      screenSpace: true,
+      opacity: 1
+    });
+    this.clearEnergyPanelCanvasOverlap(ctx, state);
+  },
+
+  resolveFlightFrame(flight, rawValue) {
+    if (!flight) return null;
+    const raw = Math.max(0, Math.min(1, Number(rawValue) || 0));
+    const progress = flight.easing === 'linear'
+      ? raw
+      : (flight.easing === 'swish' ? this.easeOutQuart(raw) : this.easeOutCubic(raw));
     const point = flight.path === 'line'
       ? {
         x: flight.start.x + (flight.end.x - flight.start.x) * progress,
         y: flight.start.y + (flight.end.y - flight.start.y) * progress
       }
       : this.quadraticBezier(flight.start, flight.control, flight.end, progress);
-    const size = flight.sourceSize + (flight.targetSize - flight.sourceSize) * progress;
-    const rotation = flight.rotation + flight.rotationDelta * progress;
-    this.drawCanvasBead(ctx, {
-      item: flight.material,
-      x: point.x,
-      y: point.y,
-      size,
-      rotation,
-      active: false,
-      deleteReady: false,
-      screenSpace: true
-    });
-    this.clearEnergyPanelCanvasOverlap(ctx, state);
+    const sizeProgress = flight.easing === 'linear' ? raw : this.easeOutCubic(raw);
+    return {
+      point,
+      size: flight.sourceSize + (flight.targetSize - flight.sourceSize) * sizeProgress,
+      rotation: flight.rotation + flight.rotationDelta * progress
+    };
   },
 
-  renderBraceletCanvas() {
+  renderBraceletCanvas(sceneSignature = '', spriteContext = null, sceneSnapshot = null) {
     const state = this.braceletCanvasState;
     if (!state || !state.ctx) return;
     const ctx = state.ctx;
@@ -2906,16 +3648,13 @@ Page({
     const impactOffset = this.getCanvasImpactOffset();
     ctx.save();
     ctx.translate(impactOffset.x, impactOffset.y);
-    const sprites = this.getCanvasBeadSprites();
-    const normal = [];
-    const floating = [];
-    sprites.forEach(sprite => {
-      if (sprite.dragging || sprite.deleteReady) floating.push(sprite);
-      else normal.push(sprite);
-    });
-    normal.concat(floating).forEach(sprite => this.drawCanvasBead(ctx, sprite));
+    const renderedSignature = this.drawCanvasBeadSprites(ctx, spriteContext, sceneSnapshot);
     ctx.restore();
     this.clearEnergyPanelCanvasOverlap(ctx, state);
+    if (!this.canvasImpact) {
+      this.lastBraceletCanvasRenderSignature = sceneSignature || renderedSignature || this.buildCanvasEmptySceneSignature();
+      this.lastBraceletCanvasRenderSnapshot = this.latestCanvasDrawSnapshot || sceneSnapshot || null;
+    }
   },
 
   clearEnergyPanelCanvasOverlap(ctx, state) {
@@ -2960,82 +3699,550 @@ Page({
       layout.radius,
       (items || []).map(item => `${item.id}:${item.size}`).join('|')
     ].join('::');
-    if (this.canvasGeometryCache && this.canvasGeometryCache.key === key) {
-      return this.canvasGeometryCache.geometry;
+    if (this.braceletGeometryCache && this.braceletGeometryCache.key === key) {
+      return this.braceletGeometryCache.geometry;
     }
     const geometry = this.calculateBraceletGeometry(items || []);
-    this.canvasGeometryCache = { key, geometry };
+    this.braceletGeometryCache = { key, geometry };
     return geometry;
+  },
+
+  getCachedCanvasBeadItems(selected = [], placements = []) {
+    const imageKey = this.canvasPlacementImageKey(selected, placements);
+    const key = [
+      this.materialCatalogDesignVersion || 0,
+      selected.join('|'),
+      imageKey
+    ].join('::');
+    if (this.canvasSelectedItemsCache && this.canvasSelectedItemsCache.key === key) {
+      return this.canvasSelectedItemsCache.items;
+    }
+    const materials = this.getCachedSelectedMaterials(selected);
+    const items = selected.map((id, index) => {
+      const material = materials[index];
+      if (!material) return null;
+      const placement = placements[index] || {};
+      return {
+        ...material,
+        image_url: placement.image_url || material.image_url || ''
+      };
+    }).filter(Boolean);
+    this.canvasSelectedItemsCache = { key, items };
+    return items;
+  },
+
+  canvasPlacementImageKey(selected = [], placements = []) {
+    return (placements || [])
+      .slice(0, selected.length)
+      .map(placement => (placement && placement.image_url) || '')
+      .join('|');
+  },
+
+  getCanvasSpriteStaticContext(selected = [], placements = []) {
+    const layout = this.getStageLayout();
+    const state = this.braceletCanvasState;
+    const key = [
+      this.materialCatalogDesignVersion || 0,
+      selected.join('|'),
+      this.canvasPlacementImageKey(selected, placements),
+      layout.center,
+      layout.radius,
+      state && state.width || 0
+    ].join('::');
+    if (this.canvasSpriteContextCache && this.canvasSpriteContextCache.key === key) {
+      return this.canvasSpriteContextCache.context;
+    }
+    const items = this.getCachedCanvasBeadItems(selected, placements);
+    const geometry = this.getCachedBraceletGeometry(items);
+    const logicalSize = layout.center * 2;
+    const scale = state && state.width ? state.width / logicalSize : 1;
+    const context = { items, geometry, layout, scale };
+    this.canvasSpriteContextCache = { key, context };
+    return context;
+  },
+
+  setLivePlacements(placements = []) {
+    this.livePlacements = placements;
+    this.livePlacementsSelectedKey = (this.data.selected || []).join('|');
+    this.livePlacementsDesignVersion = this.materialCatalogDesignVersion || 0;
+  },
+
+  clearLivePlacements() {
+    this.livePlacements = null;
+    this.livePlacementsSelectedKey = '';
+    this.livePlacementsDesignVersion = -1;
+    this.lastPhysicsPlacementSyncSignature = '';
+    this.selectedItemStylePatchCache = null;
+  },
+
+  physicsPlacementSyncSignature(placements = []) {
+    const selectedKey = (this.data.selected || []).join('|');
+    return [
+      selectedKey,
+      (placements || []).map((placement, index) => {
+        const x = Math.round((Number(placement && placement.looseX) || 0) * 2);
+        const y = Math.round((Number(placement && placement.looseY) || 0) * 2);
+        const rotation = Math.round((Number(placement && placement.rotation) || 0) * 2);
+        const size = Math.round((Number(placement && placement.beadSize) || 0) * 2);
+        return `${index}:${x},${y},${rotation},${size}`;
+      }).join('|')
+    ].join('::');
+  },
+
+  shouldSyncPhysicsPlacements(placements = [], force = false) {
+    const signature = this.physicsPlacementSyncSignature(placements);
+    if (!force && signature && signature === this.lastPhysicsPlacementSyncSignature) return false;
+    this.lastPhysicsPlacementSyncSignature = signature;
+    return true;
+  },
+
+  buildPhysicsPlacementsSnapshot(basePlacements = null) {
+    const selected = this.data.selected || [];
+    const source = basePlacements || (this.data.useCanvasRenderer
+      ? this.getCachedCanvasPlacements(selected, this.data.placements)
+      : this.normalizePlacements(selected, this.data.placements));
+    const placements = source.slice();
+    this.sanitizePhysicsBodies(this.getStageLayout());
+    (this.physicsBodies || []).forEach(body => {
+      const index = body && body.plugin && body.plugin.designIndex;
+      if (index == null || !placements[index] || !body.position) return;
+      placements[index] = {
+        ...placements[index],
+        looseX: body.position.x,
+        looseY: body.position.y,
+        rotation: body.angle * 180 / Math.PI,
+        beadSize: body.plugin.beadSize
+      };
+    });
+    return placements;
+  },
+
+  buildPhysicsBodyCluster(limit = 0) {
+    const activeCount = Math.max(0, Number(limit) || 0);
+    if (!activeCount) return null;
+    const cluster = { x: 0, y: 0, count: 0 };
+    (this.physicsBodies || []).forEach(body => {
+      const index = body && body.plugin && body.plugin.designIndex;
+      if (index == null || index < 0 || index >= activeCount || !body.position) return;
+      const x = Number(body.position.x);
+      const y = Number(body.position.y);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+      cluster.x += x;
+      cluster.y += y;
+      cluster.count += 1;
+    });
+    return cluster.count ? cluster : null;
+  },
+
+  scheduleDragPhysicsFrame(force = false, onSynced) {
+    if (force) {
+      clearTimeout(this.dragPhysicsSyncTimer);
+      this.dragPhysicsSyncTimer = null;
+      this.lastDragPhysicsSyncAt = Date.now();
+      this.syncPhysicsFrame(onSynced);
+      return;
+    }
+    if (!this.data.useCanvasRenderer) {
+      this.syncPhysicsFrame(onSynced);
+      return;
+    }
+    this.scheduleCanvasRender(true);
+    const now = Date.now();
+    const minInterval = Math.max(24, Number(this.physicsRenderInterval || 50));
+    const elapsed = now - Number(this.lastDragPhysicsSyncAt || 0);
+    if (elapsed >= minInterval) {
+      this.lastDragPhysicsSyncAt = now;
+      this.syncPhysicsFrame(onSynced);
+      return;
+    }
+    clearTimeout(this.dragPhysicsSyncTimer);
+    this.dragPhysicsSyncTimer = setTimeout(() => {
+      this.dragPhysicsSyncTimer = null;
+      this.lastDragPhysicsSyncAt = Date.now();
+      this.syncPhysicsFrame(onSynced);
+    }, Math.max(16, minInterval - elapsed));
+  },
+
+  getCanvasRenderPlacements(selected = [], sourcePlacements = []) {
+    const selectedKey = (selected || []).join('|');
+    if (
+      sourcePlacements
+      && sourcePlacements === this.livePlacements
+      && this.livePlacementsSelectedKey === selectedKey
+      && this.livePlacementsDesignVersion === (this.materialCatalogDesignVersion || 0)
+    ) {
+      return sourcePlacements;
+    }
+    return this.getCachedCanvasPlacements(selected, sourcePlacements);
+  },
+
+  getCachedCanvasPlacements(selected = [], placements = []) {
+    const selectedKey = (selected || []).join('|');
+    const cache = this.canvasPlacementsCache;
+    if (
+      cache
+      && cache.selectedRef === selected
+      && cache.placementsRef === placements
+      && cache.selectedKey === selectedKey
+      && cache.materialCatalogDesignVersion === (this.materialCatalogDesignVersion || 0)
+    ) {
+      return cache.placements;
+    }
+    const normalized = this.normalizePlacements(selected, placements);
+    this.canvasPlacementsCache = {
+      selectedRef: selected,
+      placementsRef: placements,
+      selectedKey,
+      materialCatalogDesignVersion: this.materialCatalogDesignVersion || 0,
+      placements: normalized
+    };
+    return normalized;
+  },
+
+  trimCanvasImageCache() {
+    const cache = this.canvasImageCache || {};
+    const keys = Object.keys(cache);
+    if (keys.length <= CANVAS_IMAGE_CACHE_LIMIT) return;
+    keys
+      .map(key => ({ key, entry: cache[key] || {} }))
+      .filter(item => !item.entry.loading)
+      .sort((a, b) => Number(a.entry.lastUsedAt || 0) - Number(b.entry.lastUsedAt || 0))
+      .slice(0, Math.max(0, keys.length - CANVAS_IMAGE_CACHE_LIMIT))
+      .forEach(item => {
+        delete cache[item.key];
+      });
+  },
+
+  trimCanvasTextureCache() {
+    const cache = this.canvasTextureCache || {};
+    const keys = Object.keys(cache);
+    if (keys.length <= CANVAS_TEXTURE_CACHE_LIMIT) return;
+    keys
+      .map(key => ({ key, entry: cache[key] || {} }))
+      .sort((a, b) => Number(a.entry.lastUsedAt || 0) - Number(b.entry.lastUsedAt || 0))
+      .slice(0, Math.max(0, keys.length - CANVAS_TEXTURE_CACHE_LIMIT))
+      .forEach(item => {
+        delete cache[item.key];
+      });
+  },
+
+  trimCanvasShadowCache() {
+    const cache = this.canvasShadowCache || {};
+    const keys = Object.keys(cache);
+    if (keys.length <= CANVAS_SHADOW_CACHE_LIMIT) return;
+    keys
+      .map(key => ({ key, entry: cache[key] || {} }))
+      .sort((a, b) => Number(a.entry.lastUsedAt || 0) - Number(b.entry.lastUsedAt || 0))
+      .slice(0, Math.max(0, keys.length - CANVAS_SHADOW_CACHE_LIMIT))
+      .forEach(item => {
+        delete cache[item.key];
+      });
+  },
+
+  activeCanvasImageUsageKey(selected = this.data.selected || [], placements = this.livePlacements || this.data.placements || []) {
+    const flightUrl = this.canvasFlight && this.canvasFlight.material && this.canvasFlight.material.image_url || '';
+    return [
+      this.materialCatalogVersion || 0,
+      this.materialCatalogDesignVersion || 0,
+      (selected || []).join('|'),
+      this.canvasPlacementImageKey(selected, placements),
+      flightUrl
+    ].join('::');
+  },
+
+  getActiveCanvasImageUsageMap() {
+    const selected = this.data.selected || [];
+    const placements = this.livePlacements || this.data.placements || [];
+    const key = this.activeCanvasImageUsageKey(selected, placements);
+    if (this.activeCanvasImageUsageCache && this.activeCanvasImageUsageCache.key === key) {
+      return this.activeCanvasImageUsageCache.map;
+    }
+    const map = Object.create(null);
+    const flightUrl = this.canvasFlight && this.canvasFlight.material && this.canvasFlight.material.image_url || '';
+    if (flightUrl) map[flightUrl] = true;
+    const materials = this.getCachedSelectedMaterials(selected);
+    for (let index = 0; index < selected.length; index += 1) {
+      const placement = placements[index] || {};
+      if (placement.image_url) map[placement.image_url] = true;
+      const material = materials[index];
+      if (material && material.image_url) map[material.image_url] = true;
+    }
+    this.activeCanvasImageUsageCache = { key, map };
+    return map;
+  },
+
+  isCanvasImageUsedByActiveScene(url) {
+    if (!url) return false;
+    const usageMap = this.getActiveCanvasImageUsageMap();
+    return !!(usageMap && usageMap[url]);
+  },
+
+  scheduleCanvasImageReadyRender(url) {
+    if (!this.data.useCanvasRenderer || this.data.workspaceCanvasVisible === false) return;
+    if (this.isCanvasImageUsedByActiveScene(url)) {
+      this.scheduleCanvasRender();
+    }
   },
 
   getCanvasImage(url) {
     if (!url || !this.braceletCanvasState || !this.braceletCanvasState.canvas) return null;
     this.canvasImageCache = this.canvasImageCache || {};
     const cached = this.canvasImageCache[url];
-    if (cached && cached.loaded) return cached.image;
-    if (cached && cached.loading) return null;
+    if (cached && cached.loaded) {
+      cached.lastUsedAt = Date.now();
+      return cached.image;
+    }
+    if (cached && cached.loading) {
+      cached.lastUsedAt = Date.now();
+      return null;
+    }
     const image = this.braceletCanvasState.canvas.createImage();
-    const entry = { image, loading: true, loaded: false, failed: false };
+    const entry = { image, loading: true, loaded: false, failed: false, lastUsedAt: Date.now() };
     this.canvasImageCache[url] = entry;
+    this.trimCanvasImageCache();
     image.onload = () => {
       entry.loading = false;
       entry.loaded = true;
-      this.scheduleCanvasRender();
+      entry.lastUsedAt = Date.now();
+      this.scheduleCanvasImageReadyRender(url);
     };
     image.onerror = () => {
       entry.loading = false;
       entry.failed = true;
-      this.scheduleCanvasRender();
+      entry.lastUsedAt = Date.now();
+      this.scheduleCanvasImageReadyRender(url);
     };
     image.src = url;
     return null;
   },
 
-  preloadVisibleCanvasImages(materials = []) {
-    if (!this.data.useCanvasRenderer || !this.braceletCanvasState || !this.braceletCanvasState.canvas) return;
-    const preloadCount = this.isLowPerformanceDevice ? 4 : 8;
-    (materials || [])
-      .slice(0, preloadCount)
+  hasCanvasImagePreloadRecord(url) {
+    if (!url || !this.canvasImageCache) return false;
+    const cached = this.canvasImageCache[url];
+    if (!cached) return false;
+    cached.lastUsedAt = Date.now();
+    return !!(cached.loaded || cached.loading || cached.failed);
+  },
+
+  hasMaterialImagePreloadRecord(url) {
+    if (!url || !this.materialImagePreloadSet) return false;
+    const record = this.materialImagePreloadSet[url];
+    if (!record) return false;
+    if (record && typeof record === 'object') record.lastUsedAt = Date.now();
+    return true;
+  },
+
+  materialPreloadSignature(materials = []) {
+    return (materials || [])
+      .map(item => item && item.image_url)
+      .filter(Boolean)
+      .join('|');
+  },
+
+  rememberMaterialImagePreload(url, status = 'loaded') {
+    if (!url) return;
+    this.materialImagePreloadSet = this.materialImagePreloadSet || {};
+    this.materialImagePreloadSet[url] = {
+      status,
+      lastUsedAt: Date.now()
+    };
+    this.trimMaterialImagePreloadRecords();
+  },
+
+  trimMaterialImagePreloadRecords() {
+    const records = this.materialImagePreloadSet || {};
+    const keys = Object.keys(records);
+    if (keys.length <= MATERIAL_PRELOAD_RECORD_LIMIT) return;
+    keys
+      .map(key => {
+        const entry = records[key];
+        return {
+          key,
+          lastUsedAt: entry && typeof entry === 'object' ? Number(entry.lastUsedAt || 0) : 0
+        };
+      })
+      .sort((a, b) => a.lastUsedAt - b.lastUsedAt)
+      .slice(0, Math.max(0, keys.length - MATERIAL_PRELOAD_RECORD_LIMIT))
       .forEach(item => {
-        if (item && item.image_url) this.getCanvasImage(item.image_url);
+        delete records[item.key];
       });
   },
 
   scheduleMaterialPreload(materials = []) {
+    const signature = this.materialPreloadSignature(materials);
+    if (
+      signature
+      && signature === this.materialPreloadActiveSignature
+      && (this.materialPreloadTimer || (this.materialPreloadQueue && this.materialPreloadQueue.length))
+    ) {
+      return;
+    }
+    if (
+      signature
+      && signature === this.materialPreloadCompletedSignature
+      && !this.materialPreloadTimer
+      && !(this.materialPreloadQueue && this.materialPreloadQueue.length)
+    ) {
+      return;
+    }
     clearTimeout(this.materialPreloadTimer);
+    this.materialPreloadToken = Number(this.materialPreloadToken || 0) + 1;
+    const token = this.materialPreloadToken;
+    this.materialPreloadActiveSignature = signature;
+    this.materialPreloadDeferStartedAt = 0;
     const delay = this.isLowPerformanceDevice ? 420 : 180;
     this.materialPreloadTimer = setTimeout(() => {
-      this.preloadMaterialImages(materials);
-      this.preloadVisibleCanvasImages(materials);
+      this.materialPreloadTimer = null;
+      this.materialPreloadQueue = this.buildMaterialPreloadQueue(materials);
+      this.runMaterialPreloadBatch(token);
     }, delay);
   },
 
-  preloadMaterialImages(materials = []) {
-    if (!wx.getImageInfo) return;
-    this.materialImagePreloadSet = this.materialImagePreloadSet || {};
+  buildMaterialPreloadQueue(materials = []) {
     const preloadCount = this.isLowPerformanceDevice ? 4 : 10;
-    (materials || [])
-      .slice(0, preloadCount)
-      .forEach(item => {
-        const url = item && item.image_url;
-        if (!url || this.materialImagePreloadSet[url]) return;
-        this.materialImagePreloadSet[url] = true;
-        wx.getImageInfo({
-          src: url,
-          success: () => {},
-          fail: () => {}
-        });
-      });
+    const canvasPreloadCount = this.isLowPerformanceDevice ? 4 : 8;
+    const seen = {};
+    const queue = [];
+    let infoQueued = 0;
+    let canvasQueued = 0;
+    (materials || []).some(item => {
+      const url = item && item.image_url;
+      if (!url || seen[url]) return false;
+      seen[url] = true;
+      const preloadInfo = infoQueued < preloadCount && !this.hasMaterialImagePreloadRecord(url);
+      const preloadCanvas = canvasQueued < canvasPreloadCount && !this.hasCanvasImagePreloadRecord(url);
+      if (!preloadInfo && !preloadCanvas) return false;
+      queue.push({ url, preloadInfo, preloadCanvas });
+      if (preloadInfo) infoQueued += 1;
+      if (preloadCanvas) canvasQueued += 1;
+      return infoQueued >= preloadCount && canvasQueued >= canvasPreloadCount;
+    });
+    return queue;
+  },
+
+  isMaterialPreloadBusy() {
+    return !!(
+      this.flightActive
+      || (this.flightQueue && this.flightQueue.length)
+      || this.canvasFlight
+      || this.data.canvasFlightActive
+      || this.physicsTimer
+      || this.dragState
+      || this.ringDragState
+      || this.ringSlideState
+      || this.data.isShuffling
+      || this.data.isStringingFinishing
+      || this.data.isReleasingString
+    );
+  },
+
+  shouldDeferMaterialPreloadForMotion() {
+    if (!this.isMaterialPreloadBusy()) {
+      this.materialPreloadDeferStartedAt = 0;
+      return false;
+    }
+    const now = Date.now();
+    if (!this.materialPreloadDeferStartedAt) this.materialPreloadDeferStartedAt = now;
+    const maxDefer = this.isLowPerformanceDevice
+      ? MATERIAL_PRELOAD_MAX_DEFER_MS * 1.35
+      : MATERIAL_PRELOAD_MAX_DEFER_MS;
+    return now - this.materialPreloadDeferStartedAt < maxDefer;
+  },
+
+  scheduleMaterialPreloadRetry(token, delay) {
+    clearTimeout(this.materialPreloadTimer);
+    this.materialPreloadTimer = setTimeout(() => {
+      this.materialPreloadTimer = null;
+      this.runMaterialPreloadBatch(token);
+    }, delay);
+  },
+
+  runMaterialPreloadBatch(token = this.materialPreloadToken) {
+    if (token !== this.materialPreloadToken) return;
+    const queue = this.materialPreloadQueue || [];
+    if (!queue.length) {
+      this.materialPreloadCompletedSignature = this.materialPreloadActiveSignature || '';
+      this.materialPreloadDeferStartedAt = 0;
+      return;
+    }
+    if (this.shouldDeferMaterialPreloadForMotion()) {
+      const retryDelay = this.isLowPerformanceDevice
+        ? MATERIAL_PRELOAD_IDLE_RETRY_MS * 1.5
+        : MATERIAL_PRELOAD_IDLE_RETRY_MS;
+      this.scheduleMaterialPreloadRetry(token, retryDelay);
+      return;
+    }
+    const busy = this.isMaterialPreloadBusy();
+    const batchSize = busy ? 1 : (this.isLowPerformanceDevice ? 2 : MATERIAL_PRELOAD_BATCH_SIZE);
+    queue.splice(0, batchSize).forEach(task => {
+      if (!task || !task.url) return;
+      if (task.preloadCanvas && this.data.useCanvasRenderer && this.braceletCanvasState && this.braceletCanvasState.canvas) {
+        this.getCanvasImage(task.url);
+      }
+      if (task.preloadInfo && wx.getImageInfo) {
+        if (!this.hasMaterialImagePreloadRecord(task.url)) {
+          this.rememberMaterialImagePreload(task.url, 'loading');
+          wx.getImageInfo({
+            src: task.url,
+            success: () => this.rememberMaterialImagePreload(task.url, 'loaded'),
+            fail: () => this.rememberMaterialImagePreload(task.url, 'failed')
+          });
+        }
+      }
+    });
+    if (!queue.length || token !== this.materialPreloadToken) {
+      if (!queue.length && token === this.materialPreloadToken) {
+        this.materialPreloadCompletedSignature = this.materialPreloadActiveSignature || '';
+        this.materialPreloadDeferStartedAt = 0;
+      }
+      return;
+    }
+    if (busy) this.materialPreloadDeferStartedAt = Date.now();
+    const delay = busy
+      ? (this.isLowPerformanceDevice ? MATERIAL_PRELOAD_IDLE_RETRY_MS * 1.5 : MATERIAL_PRELOAD_IDLE_RETRY_MS)
+      : (this.isLowPerformanceDevice ? MATERIAL_PRELOAD_BATCH_DELAY_MS * 2 : MATERIAL_PRELOAD_BATCH_DELAY_MS);
+    this.scheduleMaterialPreloadRetry(token, delay);
+  },
+
+  pauseMaterialBackgroundPreload() {
+    clearTimeout(this.materialPreloadTimer);
+    this.materialPreloadTimer = null;
+    this.materialPreloadToken = Number(this.materialPreloadToken || 0) + 1;
+    this.materialPreloadQueue = [];
+    this.materialPreloadActiveSignature = '';
+    this.materialPreloadCompletedSignature = '';
+    this.materialPreloadDeferStartedAt = 0;
+    Object.values(this.materialImagePoolWarmTimers || {}).forEach(timer => clearTimeout(timer));
+    this.materialImagePoolWarmTimers = {};
+  },
+
+  canvasRenderBucket(value, min = 1, max = Infinity, step = 8) {
+    const raw = Number(value);
+    const safeMin = Number.isFinite(Number(min)) ? Number(min) : 1;
+    const safeMax = Number.isFinite(Number(max)) ? Number(max) : Infinity;
+    const safeStep = Math.max(1, Number(step) || 1);
+    if (!Number.isFinite(raw)) return safeMin;
+    const bucket = Math.round(raw / safeStep) * safeStep;
+    return Math.max(safeMin, Math.min(safeMax, bucket));
   },
 
   getCanvasBeadTexture(item = {}, size = 64) {
     const dpr = (this.braceletCanvasState && this.braceletCanvasState.dpr) || 1;
     const baseSize = Math.round(Number(size) || 64);
-    const bucket = Math.max(64, Math.min(item.image_url ? 256 : 160, Math.round(baseSize * dpr)));
+    const bucket = this.canvasRenderBucket(
+      baseSize * dpr,
+      64,
+      item.image_url ? 256 : 160,
+      CANVAS_TEXTURE_BUCKET_STEP
+    );
     const key = `${item.id || item.skuId || item.image_url || item.name || 'bead'}::${item.image_url || item.color || ''}::${bucket}`;
     this.canvasTextureCache = this.canvasTextureCache || {};
     const cached = this.canvasTextureCache[key];
-    if (cached && cached.ready) return cached.canvas;
+    if (cached && cached.ready) {
+      cached.lastUsedAt = Date.now();
+      return cached.canvas;
+    }
+    if (cached && cached.failed) return null;
     if (!wx.createOffscreenCanvas) return null;
     const sourceImage = item.image_url ? this.getCanvasImage(item.image_url) : null;
     if (item.image_url && !sourceImage) return null;
@@ -3046,7 +4253,8 @@ Page({
       if (sourceImage) {
         ctx.clearRect(0, 0, bucket, bucket);
         ctx.drawImage(sourceImage, 0, 0, bucket, bucket);
-        this.canvasTextureCache[key] = { ready: true, canvas };
+        this.canvasTextureCache[key] = { ready: true, canvas, lastUsedAt: Date.now() };
+        this.trimCanvasTextureCache();
         return canvas;
       }
       ctx.save();
@@ -3076,12 +4284,94 @@ Page({
       ctx.strokeStyle = 'rgba(255,255,255,0.16)';
       ctx.lineWidth = 0.8;
       ctx.stroke();
-      this.canvasTextureCache[key] = { ready: true, canvas };
+      this.canvasTextureCache[key] = { ready: true, canvas, lastUsedAt: Date.now() };
+      this.trimCanvasTextureCache();
       return canvas;
     } catch (error) {
-      this.canvasTextureCache[key] = { ready: false, failed: true };
+      this.canvasTextureCache[key] = { ready: false, failed: true, lastUsedAt: Date.now() };
+      this.trimCanvasTextureCache();
       return null;
     }
+  },
+
+  drawCanvasBeadShadowFallback(ctx, radius, hasImage) {
+    const shadowStrength = hasImage ? 1 : 0.82;
+    ctx.save();
+    ctx.translate(radius * 0.26, radius * 0.90);
+    ctx.scale(1.22, 0.44);
+    const softShadow = ctx.createRadialGradient(0, 0, radius * 0.10, 0, 0, radius * 0.96);
+    softShadow.addColorStop(0, `rgba(42, 33, 24, ${0.30 * shadowStrength})`);
+    softShadow.addColorStop(0.40, `rgba(42, 33, 24, ${0.16 * shadowStrength})`);
+    softShadow.addColorStop(0.72, `rgba(42, 33, 24, ${0.055 * shadowStrength})`);
+    softShadow.addColorStop(1, 'rgba(44, 36, 26, 0)');
+    ctx.fillStyle = softShadow;
+    ctx.beginPath();
+    ctx.arc(0, 0, radius * 0.96, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    ctx.save();
+    ctx.translate(radius * 0.22, radius * 1.02);
+    ctx.scale(0.78, 0.20);
+    const contactShadow = ctx.createRadialGradient(0, 0, radius * 0.02, 0, 0, radius * 0.76);
+    contactShadow.addColorStop(0, `rgba(30, 24, 18, ${0.38 * shadowStrength})`);
+    contactShadow.addColorStop(0.42, `rgba(30, 24, 18, ${0.20 * shadowStrength})`);
+    contactShadow.addColorStop(0.72, `rgba(30, 24, 18, ${0.07 * shadowStrength})`);
+    contactShadow.addColorStop(1, 'rgba(34, 27, 20, 0)');
+    ctx.fillStyle = contactShadow;
+    ctx.beginPath();
+    ctx.arc(0, 0, radius * 0.76, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  },
+
+  getCanvasBeadShadowTexture(radius = 24, hasImage = true) {
+    if (!wx.createOffscreenCanvas) return null;
+    const dpr = (this.braceletCanvasState && this.braceletCanvasState.dpr) || 1;
+    const bucket = this.canvasRenderBucket(radius * 2 * dpr, 20, Infinity, CANVAS_SHADOW_BUCKET_STEP);
+    const key = `${hasImage ? 'image' : 'fallback'}::${bucket}`;
+    this.canvasShadowCache = this.canvasShadowCache || {};
+    const cached = this.canvasShadowCache[key];
+    if (cached && cached.ready) {
+      cached.lastUsedAt = Date.now();
+      return cached;
+    }
+    if (cached && cached.failed) return null;
+    const logicalRadius = bucket / (2 * dpr);
+    const left = -logicalRadius * 1.05;
+    const top = logicalRadius * 0.38;
+    const width = logicalRadius * 2.62;
+    const height = logicalRadius * 1.08;
+    try {
+      const canvas = wx.createOffscreenCanvas({
+        type: '2d',
+        width: Math.ceil(width * dpr),
+        height: Math.ceil(height * dpr)
+      });
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return null;
+      if (ctx.setTransform) ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      else ctx.scale(dpr, dpr);
+      ctx.translate(-left, -top);
+      this.drawCanvasBeadShadowFallback(ctx, logicalRadius, hasImage);
+      const entry = { ready: true, canvas, left, top, width, height, lastUsedAt: Date.now() };
+      this.canvasShadowCache[key] = entry;
+      this.trimCanvasShadowCache();
+      return entry;
+    } catch (error) {
+      this.canvasShadowCache[key] = { ready: false, failed: true, lastUsedAt: Date.now() };
+      this.trimCanvasShadowCache();
+      return null;
+    }
+  },
+
+  drawCanvasBeadShadow(ctx, radius, hasImage) {
+    const texture = this.getCanvasBeadShadowTexture(radius, hasImage);
+    if (texture && texture.canvas) {
+      ctx.drawImage(texture.canvas, texture.left, texture.top, texture.width, texture.height);
+      return;
+    }
+    this.drawCanvasBeadShadowFallback(ctx, radius, hasImage);
   },
 
   drawCanvasBead(ctx, sprite) {
@@ -3089,38 +4379,12 @@ Page({
     const size = Math.max(8, Number(sprite.size) || 48);
     const radius = size / 2;
     ctx.save();
-    ctx.globalAlpha = sprite.deleteReady ? 0.58 : 1;
+    const opacity = Number.isFinite(Number(sprite.opacity)) ? Math.max(0, Math.min(1, Number(sprite.opacity))) : 1;
+    ctx.globalAlpha = (sprite.deleteReady ? 0.58 : 1) * opacity;
     ctx.translate(sprite.x, sprite.y);
     const hasImage = Boolean(sprite.item.image_url);
     if (!sprite.screenSpace) {
-      const shadowStrength = hasImage ? 1 : 0.82;
-      ctx.save();
-      ctx.translate(radius * 0.26, radius * 0.90);
-      ctx.scale(1.22, 0.44);
-      const softShadow = ctx.createRadialGradient(0, 0, radius * 0.10, 0, 0, radius * 0.96);
-      softShadow.addColorStop(0, `rgba(42, 33, 24, ${0.30 * shadowStrength})`);
-      softShadow.addColorStop(0.40, `rgba(42, 33, 24, ${0.16 * shadowStrength})`);
-      softShadow.addColorStop(0.72, `rgba(42, 33, 24, ${0.055 * shadowStrength})`);
-      softShadow.addColorStop(1, 'rgba(44, 36, 26, 0)');
-      ctx.fillStyle = softShadow;
-      ctx.beginPath();
-      ctx.arc(0, 0, radius * 0.96, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.restore();
-
-      ctx.save();
-      ctx.translate(radius * 0.22, radius * 1.02);
-      ctx.scale(0.78, 0.20);
-      const contactShadow = ctx.createRadialGradient(0, 0, radius * 0.02, 0, 0, radius * 0.76);
-      contactShadow.addColorStop(0, `rgba(30, 24, 18, ${0.38 * shadowStrength})`);
-      contactShadow.addColorStop(0.42, `rgba(30, 24, 18, ${0.20 * shadowStrength})`);
-      contactShadow.addColorStop(0.72, `rgba(30, 24, 18, ${0.07 * shadowStrength})`);
-      contactShadow.addColorStop(1, 'rgba(34, 27, 20, 0)');
-      ctx.fillStyle = contactShadow;
-      ctx.beginPath();
-      ctx.arc(0, 0, radius * 0.76, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.restore();
+      this.drawCanvasBeadShadow(ctx, radius, hasImage);
     }
     ctx.rotate((Number(sprite.rotation) || 0) * Math.PI / 180);
     if (sprite.active || sprite.deleteReady) {
@@ -3178,94 +4442,304 @@ Page({
     ctx.restore();
   },
 
-  getCanvasBeadSprites() {
-    const selected = this.data.selected || [];
-    if (!selected.length) return [];
-    const placements = this.normalizePlacements(selected, this.livePlacements || this.data.placements);
-    const items = selected.map((id, index) => {
-      const material = this.findMaterialById(id);
-      if (!material) return null;
-      const placement = placements[index] || {};
-      return {
-        ...material,
-        image_url: placement.image_url || material.image_url || ''
-      };
-    }).filter(Boolean);
-    const geometry = this.getCachedBraceletGeometry(items);
-    const layout = this.getStageLayout();
-    const logicalSize = layout.center * 2;
-    const state = this.braceletCanvasState;
-    const scale = state && state.width ? state.width / logicalSize : 1;
-    const bodyByIndex = {};
-    (this.physicsBodies || []).forEach(body => {
+  getPhysicsBodyByDesignIndex() {
+    const bodies = this.physicsBodies || [];
+    if (!bodies.length) return [];
+    const cache = this.physicsBodyByDesignIndexCache;
+    if (cache && cache.bodiesRef === bodies && cache.length === bodies.length) {
+      return cache.bodyByIndex;
+    }
+    const bodyByIndex = [];
+    bodies.forEach(body => {
       if (body && body.plugin && body.plugin.designIndex != null) {
         bodyByIndex[body.plugin.designIndex] = body;
       }
     });
-    return items.map((item, index) => {
-      const placement = placements[index] || {};
-      const angle = geometry.angles[index] || 0;
-      const body = bodyByIndex[index];
-      const beadSize = geometry.beadSizes[index] || this.getMaterialDisplaySize(item.id);
-      let x;
-      let y;
-      let rotation;
-      if (this.data.isLooseMode) {
-        x = body && body.position ? body.position.x : Number(placement.looseX || layout.center);
-        y = body && body.position ? body.position.y : Number(placement.looseY || layout.center);
-        rotation = body && body.angle != null ? body.angle * 180 / Math.PI : Number(placement.rotation || 0);
-      } else {
-        x = layout.center + Math.cos(angle) * geometry.radius;
-        y = layout.center + Math.sin(angle) * geometry.radius;
-        rotation = angle * 180 / Math.PI;
-      }
-      x += Number(placement.dx || 0);
-      y += Number(placement.dy || 0);
-      let dragging = false;
-      let deleteReady = false;
-      if (this.dragState && this.dragState.index === index && this.dragState.body && this.dragState.body.position) {
-        x = this.dragState.body.position.x;
-        y = this.dragState.body.position.y;
-        rotation = this.dragState.body.angle * 180 / Math.PI;
-        dragging = true;
-        deleteReady = !!this.data.dragDeleteArmed;
-      }
-      if (this.ringDragState && this.ringDragState.currentIndex === index && this.ringDragState.draggingX != null) {
-        x = this.ringDragState.draggingX;
-        y = this.ringDragState.draggingY;
-        rotation = Math.atan2(y - layout.center, x - layout.center) * 180 / Math.PI;
-        dragging = true;
-        deleteReady = !!this.data.dragDeleteArmed;
-      }
+    this.physicsBodyByDesignIndexCache = {
+      bodiesRef: bodies,
+      length: bodies.length,
+      bodyByIndex
+    };
+    return bodyByIndex;
+  },
+
+  getCanvasBeadSpriteContext() {
+    const selected = this.data.selected || [];
+    if (!selected.length) return null;
+    const sourcePlacements = this.livePlacements || this.data.placements;
+    const placements = this.getCanvasRenderPlacements(selected, sourcePlacements);
+    const isLooseMode = this.data.isLooseMode;
+    const bodyByIndex = isLooseMode && this.physicsBodies && this.physicsBodies.length
+      ? this.getPhysicsBodyByDesignIndex()
+      : null;
+    return {
+      ...this.getCanvasSpriteStaticContext(selected, placements),
+      placements,
+      isLooseMode,
+      bodyByIndex,
+      selectedBeadIndex: this.data.selectedBeadIndex,
+      dragDeleteArmed: this.data.dragDeleteArmed
+    };
+  },
+
+  fillCanvasBeadSprite(target, context, index) {
+    if (!target || !context || !context.items) return null;
+    const { items, placements, geometry, layout, scale, isLooseMode, bodyByIndex } = context;
+    const item = items[index];
+    if (!item) return null;
+    const placement = placements[index] || {};
+    const angle = geometry.angles[index] || 0;
+    const body = bodyByIndex ? bodyByIndex[index] : null;
+    const beadSize = geometry.beadSizes[index] || this.getMaterialDisplaySize(item.id);
+    let x;
+    let y;
+    let rotation;
+    if (isLooseMode) {
+      x = body && body.position ? body.position.x : Number(placement.looseX || layout.center);
+      y = body && body.position ? body.position.y : Number(placement.looseY || layout.center);
+      rotation = body && body.angle != null ? body.angle * 180 / Math.PI : Number(placement.rotation || 0);
+    } else {
+      x = layout.center + Math.cos(angle) * geometry.radius;
+      y = layout.center + Math.sin(angle) * geometry.radius;
+      rotation = stringedBeadRotationDeg(angle);
+    }
+    x += Number(placement.dx || 0);
+    y += Number(placement.dy || 0);
+    if (!isLooseMode) {
+      rotation = stringedBeadRotationFromPoint(x, y, layout.center);
+    }
+    let dragging = false;
+    let deleteReady = false;
+    if (isLooseMode && this.dragState && this.dragState.index === index && this.dragState.body && this.dragState.body.position) {
+      x = this.dragState.body.position.x;
+      y = this.dragState.body.position.y;
+      rotation = this.dragState.body.angle * 180 / Math.PI;
+      dragging = true;
+      deleteReady = !!context.dragDeleteArmed;
+    }
+    if (this.ringDragState && this.ringDragState.currentIndex === index && this.ringDragState.draggingX != null) {
+      x = this.ringDragState.draggingX;
+      y = this.ringDragState.draggingY;
+      rotation = stringedBeadRotationFromPoint(x, y, layout.center);
+      dragging = true;
+      deleteReady = !!context.dragDeleteArmed;
+    }
+    target.item = item;
+    target.index = index;
+    target.x = x * scale;
+    target.y = y * scale;
+    target.size = beadSize * scale;
+    target.logicalX = x;
+    target.logicalY = y;
+    target.logicalSize = beadSize;
+    target.rotation = rotation;
+    target.active = index === context.selectedBeadIndex;
+    target.dragging = dragging;
+    target.deleteReady = deleteReady;
+    target.opacity = 1;
+    target.screenSpace = false;
+    return target;
+  },
+
+  buildCanvasEmptySceneSignature() {
+    const state = this.braceletCanvasState || {};
+    const panel = this.energyPanelRect || {};
+    return [
+      'empty',
+      Number(state.width || 0),
+      Number(state.height || 0),
+      this.data.showEnergyPanel ? 1 : 0,
+      Math.round(Number(panel.left || 0)),
+      Math.round(Number(panel.top || 0)),
+      Math.round(Number(panel.width || 0)),
+      Math.round(Number(panel.height || 0))
+    ].join(':');
+  },
+
+  canvasSpriteSignaturePart(sprite = {}) {
+    const item = sprite.item || {};
+    return [
+      sprite.index,
+      item.id || '',
+      item.image_url || '',
+      Math.round((Number(sprite.x) || 0) * 2),
+      Math.round((Number(sprite.y) || 0) * 2),
+      Math.round((Number(sprite.size) || 0) * 2),
+      Math.round((Number(sprite.rotation) || 0) * 2),
+      sprite.active ? 1 : 0,
+      sprite.dragging ? 1 : 0,
+      sprite.deleteReady ? 1 : 0
+    ].join(',');
+  },
+
+  buildCanvasRenderSceneSignatureParts(context = {}) {
+    const state = this.braceletCanvasState || {};
+    const panel = this.energyPanelRect || {};
+    return [
+      'scene',
+      Number(state.width || 0),
+      Number(state.height || 0),
+      context.isLooseMode ? 1 : 0,
+      context.selectedBeadIndex,
+      context.dragDeleteArmed ? 1 : 0,
+      this.data.showEnergyPanel ? 1 : 0,
+      Math.round(Number(panel.left || 0)),
+      Math.round(Number(panel.top || 0)),
+      Math.round(Number(panel.width || 0)),
+      Math.round(Number(panel.height || 0))
+    ];
+  },
+
+  buildCanvasRenderSceneSnapshot(context = this.getCanvasBeadSpriteContext()) {
+    if (!context || !context.items || !context.items.length) {
       return {
-        item,
-        index,
-        x: x * scale,
-        y: y * scale,
-        size: beadSize * scale,
-        logicalX: x,
-        logicalY: y,
-        logicalSize: beadSize,
-        rotation,
-        active: index === this.data.selectedBeadIndex,
-        dragging,
-        deleteReady
+        signature: this.buildCanvasEmptySceneSignature(),
+        normalSprites: [],
+        overlaySprites: []
       };
-    });
+    }
+    const parts = this.buildCanvasRenderSceneSignatureParts(context);
+    const normalSprites = [];
+    const overlaySprites = [];
+    const sprite = {};
+    for (let index = 0; index < context.items.length; index += 1) {
+      const nextSprite = this.fillCanvasBeadSprite(sprite, context, index);
+      if (!nextSprite) continue;
+      parts.push(this.canvasSpriteSignaturePart(nextSprite));
+      const snapshotSprite = { ...nextSprite };
+      if (nextSprite.dragging || nextSprite.deleteReady) {
+        overlaySprites.push(snapshotSprite);
+      } else {
+        normalSprites.push(snapshotSprite);
+      }
+    }
+    return {
+      signature: parts.join('|'),
+      normalSprites,
+      overlaySprites
+    };
+  },
+
+  buildCanvasRenderSceneSignature(context = this.getCanvasBeadSpriteContext()) {
+    return this.buildCanvasRenderSceneSnapshot(context).signature;
+  },
+
+  drawCanvasBeadSprites(ctx, contextOverride = null, sceneSnapshot = null) {
+    const snapshot = sceneSnapshot || this.buildCanvasRenderSceneSnapshot(contextOverride || this.getCanvasBeadSpriteContext());
+    this.latestCanvasDrawSnapshot = snapshot;
+    (snapshot.normalSprites || []).forEach(item => this.drawCanvasBead(ctx, item));
+    (snapshot.overlaySprites || []).forEach(item => this.drawCanvasBead(ctx, item));
+    return snapshot.signature || this.buildCanvasEmptySceneSignature();
+  },
+
+  getReusableCanvasSpriteSnapshot() {
+    const snapshot = this.lastBraceletCanvasRenderSnapshot;
+    if (!snapshot || !snapshot.signature) return null;
+    if (this.braceletCanvasDirty || this.canvasImpact || this.hasActiveBraceletCanvasMotion()) return null;
+    if (snapshot.signature !== this.lastBraceletCanvasRenderSignature) return null;
+    return snapshot;
+  },
+
+  getReusableCanvasHitTestSprites() {
+    const snapshot = this.getReusableCanvasSpriteSnapshot();
+    if (!snapshot) return null;
+    const signature = snapshot.signature || '';
+    const cache = this.canvasHitTestSpritesCache;
+    if (cache && cache.signature === signature) return cache.sprites;
+    const sprites = [
+      ...(snapshot.normalSprites || []),
+      ...(snapshot.overlaySprites || [])
+    ];
+    this.canvasHitTestSpritesCache = { signature, sprites };
+    return sprites;
+  },
+
+  getCanvasBeadSprites() {
+    const reusable = this.getReusableCanvasHitTestSprites();
+    if (reusable) return reusable.map(sprite => ({ ...sprite }));
+    const context = this.getCanvasBeadSpriteContext();
+    if (!context || !context.items.length) return [];
+    const sprite = {};
+    return context.items.map((item, index) => {
+      const nextSprite = this.fillCanvasBeadSprite(sprite, context, index);
+      return nextSprite ? { ...nextSprite } : null;
+    }).filter(Boolean);
   },
 
   hitTestCanvasBead(touch) {
+    const hit = this.hitTestCanvasBeadInfo(touch);
+    return hit ? hit.index : -1;
+  },
+
+  hitTestCanvasBeadInfo(touch) {
     const point = this.touchToCanvasTrayPoint(touch);
-    if (!point) return -1;
-    const sprites = this.getCanvasBeadSprites();
-    for (let index = sprites.length - 1; index >= 0; index -= 1) {
-      const sprite = sprites[index];
-      const dx = point.x - sprite.logicalX;
-      const dy = point.y - sprite.logicalY;
-      const radius = Math.max(24, sprite.logicalSize / 2 + 8);
-      if (dx * dx + dy * dy <= radius * radius) return sprite.index;
+    if (!point) return null;
+    const hitPoint = { x: point.x, y: point.y };
+    const reusableSprites = this.getReusableCanvasHitTestSprites();
+    if (reusableSprites) {
+      const layout = point.layout || this.getStageLayout();
+      return this.hitTestCanvasSpriteList(point, hitPoint, reusableSprites, layout);
     }
-    return -1;
+    const context = this.getCanvasBeadSpriteContext();
+    if (!context || !context.items.length) {
+      return { index: -1, point: hitPoint, sprite: null, outwardProjection: 0, isOuterEdge: false };
+    }
+    const layout = point.layout || this.getStageLayout();
+    const sprite = {};
+    for (let index = context.items.length - 1; index >= 0; index -= 1) {
+      const current = this.fillCanvasBeadSprite(sprite, context, index);
+      if (!current) continue;
+      const dx = point.x - current.logicalX;
+      const dy = point.y - current.logicalY;
+      const radius = Math.max(24, current.logicalSize / 2 + 8);
+      if (dx * dx + dy * dy <= radius * radius) {
+        const beadDx = current.logicalX - layout.center;
+        const beadDy = current.logicalY - layout.center;
+        const beadDistance = Math.max(1, Math.sqrt(beadDx * beadDx + beadDy * beadDy));
+        const outwardX = beadDx / beadDistance;
+        const outwardY = beadDy / beadDistance;
+        const outwardProjection = dx * outwardX + dy * outwardY;
+        const coreRadius = Math.max(12, current.logicalSize * RING_SLIDE_EDGE_RATIO);
+        return {
+          index: current.index,
+          point: hitPoint,
+          sprite: { ...current },
+          outwardProjection,
+          isOuterEdge: outwardProjection > coreRadius
+        };
+      }
+    }
+    return { index: -1, point: hitPoint, sprite: null, outwardProjection: 0, isOuterEdge: false };
+  },
+
+  hitTestCanvasSpriteList(point, hitPoint, sprites = [], layout = this.getStageLayout()) {
+    if (!sprites || !sprites.length) {
+      return { index: -1, point: hitPoint, sprite: null, outwardProjection: 0, isOuterEdge: false };
+    }
+    for (let index = sprites.length - 1; index >= 0; index -= 1) {
+      const current = sprites[index];
+      if (!current) continue;
+      const dx = point.x - current.logicalX;
+      const dy = point.y - current.logicalY;
+      const radius = Math.max(24, current.logicalSize / 2 + 8);
+      if (dx * dx + dy * dy <= radius * radius) {
+        const beadDx = current.logicalX - layout.center;
+        const beadDy = current.logicalY - layout.center;
+        const beadDistance = Math.max(1, Math.sqrt(beadDx * beadDx + beadDy * beadDy));
+        const outwardX = beadDx / beadDistance;
+        const outwardY = beadDy / beadDistance;
+        const outwardProjection = dx * outwardX + dy * outwardY;
+        const coreRadius = Math.max(12, current.logicalSize * RING_SLIDE_EDGE_RATIO);
+        return {
+          index: current.index,
+          point: hitPoint,
+          sprite: { ...current },
+          outwardProjection,
+          isOuterEdge: outwardProjection > coreRadius
+        };
+      }
+    }
+    return { index: -1, point: hitPoint, sprite: null, outwardProjection: 0, isOuterEdge: false };
   },
 
   touchToCanvasTrayPoint(touch) {
@@ -3277,7 +4751,8 @@ Page({
     const scale = state.rect.width / (layout.center * 2);
     return {
       x: (clientX - state.rect.left) / scale,
-      y: (clientY - state.rect.top) / scale
+      y: (clientY - state.rect.top) / scale,
+      layout
     };
   },
 
@@ -3310,12 +4785,18 @@ Page({
   },
 
   onBraceletCanvasTouchStart(e) {
-    if (this.data.isShuffling) return;
+    if (this.data.isShuffling || this.data.isStringingFinishing || this.data.isReleasingString) return;
     const touch = e.touches && e.touches[0];
     if (!touch) return;
     this.refreshBraceletCanvasRect(rect => {
-      const index = this.hitTestCanvasBead(touch);
-      if (!Number.isInteger(index) || index < 0) return;
+      const hit = this.hitTestCanvasBeadInfo(touch);
+      const index = hit && Number.isInteger(hit.index) ? hit.index : -1;
+      if (!this.data.isLooseMode && this.shouldStartRingSlide(hit)) {
+        this.pushHistory();
+        this.beginRingSlide(touch, rect, { originIndex: index });
+        return;
+      }
+      if (index < 0) return;
       this.pushHistory();
       if (this.data.isLooseMode && (!this.physicsBodies || !this.physicsBodies.length)) {
         this.startPhysicsFromCurrentDesign();
@@ -3340,6 +4821,10 @@ Page({
     return 1 - Math.pow(1 - t, 3);
   },
 
+  easeOutQuart(t) {
+    return 1 - Math.pow(1 - t, 4);
+  },
+
   easeOutBack(t) {
     const c1 = 1.12;
     const c3 = c1 + 1;
@@ -3358,16 +4843,20 @@ Page({
     if (!this.physicsEngine) this.createPhysicsEngine();
     const beadSize = Number(placement.beadSize) || this.getMaterialDisplaySize(id);
     const bodyRadius = Math.max(19, beadSize * 0.5 - 0.2);
+    const initialPoint = this.constrainPointInsideTray({
+      x: options.x == null ? placement.looseX : options.x,
+      y: options.y == null ? placement.looseY : options.y
+    }, beadSize, this.getStageLayout(), 12);
     const body = Bodies.circle(
-      options.x == null ? placement.looseX : options.x,
-      options.y == null ? placement.looseY : options.y,
+      initialPoint.x,
+      initialPoint.y,
       bodyRadius,
       {
         isStatic: !!options.isStatic,
-        restitution: options.restitution == null ? 0.62 : options.restitution,
-        friction: options.friction == null ? 0.028 : options.friction,
-        frictionStatic: options.frictionStatic == null ? 0.12 : options.frictionStatic,
-        frictionAir: options.frictionAir == null ? 0.018 : options.frictionAir,
+        restitution: options.restitution == null ? BILLIARD_BEAD_RESTITUTION : options.restitution,
+        friction: options.friction == null ? BILLIARD_FRICTION : options.friction,
+        frictionStatic: options.frictionStatic == null ? BILLIARD_STATIC_FRICTION : options.frictionStatic,
+        frictionAir: options.frictionAir == null ? BILLIARD_FRICTION_AIR : options.frictionAir,
         density: options.density == null ? 0.0018 : options.density,
         slop: options.slop == null ? 0.006 : options.slop,
         sleepThreshold: 44,
@@ -3381,11 +4870,26 @@ Page({
       bodyRadius,
       isLauncher: !!options.isLauncher,
       frozenUntilImpact: !!options.frozenUntilImpact,
-      billiardDamping: options.billiardDamping
+      billiardDamping: options.billiardDamping,
+      angularDamping: options.angularDamping,
+      launchAimX: Number(options.launchAimX),
+      launchAimY: Number(options.launchAimY),
+      launchSpeed: Number(options.launchSpeed),
+      launchAssistUntil: Number(options.launchAssistMs) > 0 ? Date.now() + Number(options.launchAssistMs) : 0
     };
     Body.setAngle(body, (Number(placement.rotation) || 0) * Math.PI / 180);
-    if (options.velocity) Body.setVelocity(body, options.velocity);
-    if (options.angularVelocity) Body.setAngularVelocity(body, options.angularVelocity);
+    if (options.velocity) {
+      if (Sleeping) Sleeping.set(body, false);
+      body.isSleeping = false;
+      body.sleepCounter = 0;
+      Body.setVelocity(body, options.velocity);
+    }
+    if (options.angularVelocity) {
+      if (Sleeping) Sleeping.set(body, false);
+      body.isSleeping = false;
+      body.sleepCounter = 0;
+      Body.setAngularVelocity(body, options.angularVelocity);
+    }
     Composite.add(this.physicsEngine.world, body);
     this.physicsBodies.push(body);
     return body;
@@ -3402,6 +4906,472 @@ Page({
     this.runPhysics();
   },
 
+  applyLauncherTrajectoryAssist(now = Date.now(), layout = this.getStageLayout()) {
+    if (!Body) return;
+    (this.physicsBodies || []).forEach(body => {
+      const plugin = body && body.plugin;
+      if (!body || !plugin || !plugin.isLauncher || !plugin.launchAssistUntil) return;
+      if (now > plugin.launchAssistUntil) {
+        plugin.launchAssistUntil = 0;
+        return;
+      }
+      const rawAimX = Number(plugin.launchAimX);
+      const rawAimY = Number(plugin.launchAimY);
+      if (!Number.isFinite(rawAimX) || !Number.isFinite(rawAimY) || !body.position) {
+        plugin.launchAssistUntil = 0;
+        return;
+      }
+      const safeAim = this.constrainPointInsideTray(
+        { x: rawAimX, y: rawAimY },
+        plugin.beadSize,
+        layout,
+        14
+      );
+      const aimX = safeAim.x;
+      const aimY = safeAim.y;
+      const dx = aimX - body.position.x;
+      const dy = aimY - body.position.y;
+      const distance = Math.sqrt(dx * dx + dy * dy);
+      const radius = Number(plugin.bodyRadius || plugin.beadSize * 0.5) || 24;
+      if (!Number.isFinite(distance) || distance < Math.max(10, radius * 0.35)) {
+        plugin.launchAssistUntil = 0;
+        return;
+      }
+      const speed = Math.max(9.8, Math.min(this.getBodySpeedLimit(body), Number(plugin.launchSpeed) || 13.8));
+      if (Sleeping) Sleeping.set(body, false);
+      body.isSleeping = false;
+      body.sleepCounter = 0;
+      Body.setVelocity(body, {
+        x: dx / distance * speed,
+        y: dy / distance * speed
+      });
+    });
+  },
+
+  getTrayPhysicsRadius(layout = this.getStageLayout()) {
+    const center = Number(layout && layout.center) || 300;
+    const radius = Number(layout && layout.radius);
+    const fallback = center * 0.78;
+    return Math.max(80, Math.min(center - 8, Number.isFinite(radius) && radius > 0 ? radius : fallback));
+  },
+
+  getTraySafeDistance(beadSize = 0, layout = this.getStageLayout(), padding = 12) {
+    const visualSize = Number(beadSize);
+    const bodyRadius = Math.max(19, Number.isFinite(visualSize) && visualSize > 0 ? visualSize * 0.5 - 0.2 : 24);
+    const trayRadius = this.getTrayPhysicsRadius(layout);
+    return Math.max(8, trayRadius - bodyRadius - padding);
+  },
+
+  constrainPointInsideTray(point = {}, beadSize = 0, layout = this.getStageLayout(), padding = 12) {
+    const center = Number(layout && layout.center) || 300;
+    const x = Number(point.x);
+    const y = Number(point.y);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return { x: center, y: center };
+    const maxDistance = this.getTraySafeDistance(beadSize, layout, padding);
+    let dx = x - center;
+    let dy = y - center;
+    let distance = Math.sqrt(dx * dx + dy * dy);
+    if (!Number.isFinite(distance)) return { x: center, y: center };
+    if (distance <= maxDistance) return { x, y };
+    if (distance <= 0.0001) {
+      dx = 1;
+      dy = 0;
+      distance = 1;
+    }
+    return {
+      x: center + dx / distance * maxDistance,
+      y: center + dy / distance * maxDistance
+    };
+  },
+
+  constrainPhysicsTarget(target = {}, layout = this.getStageLayout(), padding = 12) {
+    const beadSize = Number(target.beadSize || target.size || 0);
+    return {
+      ...target,
+      ...this.constrainPointInsideTray(target, beadSize, layout, padding)
+    };
+  },
+
+  getBodyRadius(body) {
+    return Number(body && body.plugin && (body.plugin.bodyRadius || body.plugin.beadSize * 0.5)) || 24;
+  },
+
+  getTrayBoundaryState(body, layout = this.getStageLayout(), padding = TRAY_BOUNDARY_PADDING_RPX) {
+    const center = Number(layout && layout.center) || 300;
+    const radius = this.getBodyRadius(body);
+    const trayRadius = this.getTrayPhysicsRadius(layout);
+    const maxDistance = Math.max(8, trayRadius - radius - (Number(padding) || 0));
+    const x = Number(body && body.position && body.position.x);
+    const y = Number(body && body.position && body.position.y);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) {
+      return {
+        valid: false,
+        center,
+        radius,
+        maxDistance,
+        normalX: 1,
+        normalY: 0,
+        distance: 0,
+        overflow: 0
+      };
+    }
+    let dx = x - center;
+    let dy = y - center;
+    let distance = Math.sqrt(dx * dx + dy * dy);
+    if (!Number.isFinite(distance)) {
+      return {
+        valid: false,
+        center,
+        radius,
+        maxDistance,
+        normalX: 1,
+        normalY: 0,
+        distance: 0,
+        overflow: 0
+      };
+    }
+    if (distance <= 0.0001) {
+      dx = 1;
+      dy = 0;
+      distance = 0;
+    }
+    const normalDistance = Math.max(distance, 1);
+    return {
+      valid: true,
+      center,
+      radius,
+      maxDistance,
+      normalX: dx / normalDistance,
+      normalY: dy / normalDistance,
+      distance,
+      overflow: distance - maxDistance
+    };
+  },
+
+  extendTrayImpactContainment(duration = TRAY_IMPACT_CONTAIN_MS) {
+    const nextUntil = Date.now() + Math.max(120, Number(duration) || TRAY_IMPACT_CONTAIN_MS);
+    this.trayImpactContainUntil = Math.max(Number(this.trayImpactContainUntil) || 0, nextUntil);
+  },
+
+  isTrayImpactContainmentActive(now = Date.now()) {
+    return !!this.pendingFrozenImpact || now < (Number(this.trayImpactContainUntil) || 0);
+  },
+
+  refreshTrayImpactContainmentFromMotion(now = Date.now(), layout = this.getStageLayout(), profile = null) {
+    const bodies = this.physicsBodies || [];
+    if (!bodies.length) return;
+    const motionProfile = profile || this.getPhysicsMotionProfile(now, layout, { includeBoundaryRisk: false });
+    const active = this.isTrayImpactContainmentActive(now);
+    if (motionProfile.keepAlive) {
+      this.extendTrayImpactContainment(active ? TRAY_IMPACT_KEEPALIVE_MS : TRAY_IMPACT_KEEPALIVE_MS + 180);
+    }
+  },
+
+  getPhysicsMotionProfile(now = Date.now(), layout = this.getStageLayout(), options = {}) {
+    const bodies = this.physicsBodies || [];
+    const profile = {
+      maxSpeed: 0,
+      hasLauncherAssist: false,
+      hasBoundaryRisk: false,
+      keepAlive: false
+    };
+    if (!bodies.length) return profile;
+    const activeContainment = this.isTrayImpactContainmentActive(now);
+    const speedThreshold = activeContainment ? TRAY_IMPACT_KEEPALIVE_SPEED_RPX : TRAY_IMPACT_REARM_SPEED_RPX;
+    const includeBoundaryRisk = options.includeBoundaryRisk !== false;
+    const padding = activeContainment ? TRAY_IMPACT_CONTAIN_PADDING_RPX : TRAY_BOUNDARY_PADDING_RPX;
+    bodies.forEach(body => {
+      if (!this.isWorkspaceBeadBody(body) || body.isStatic) return;
+      const plugin = body.plugin || {};
+      const vx = Number(body.velocity && body.velocity.x);
+      const vy = Number(body.velocity && body.velocity.y);
+      const speed = Number.isFinite(vx) && Number.isFinite(vy)
+        ? Math.sqrt(vx * vx + vy * vy)
+        : Number(body.speed || 0);
+      if (Number.isFinite(speed)) profile.maxSpeed = Math.max(profile.maxSpeed, speed);
+      if (plugin.launchAssistUntil && now < plugin.launchAssistUntil) {
+        profile.hasLauncherAssist = true;
+        profile.keepAlive = true;
+      }
+      if (plugin.isLauncher && speed > 0.55) profile.keepAlive = true;
+      if (speed > speedThreshold) profile.keepAlive = true;
+      if (!includeBoundaryRisk) return;
+      const state = this.getTrayBoundaryState(body, layout, padding);
+      if (!state.valid || !Number.isFinite(vx) || !Number.isFinite(vy)) return;
+      const outwardSpeed = vx * state.normalX + vy * state.normalY;
+      if (outwardSpeed <= 0.02) return;
+      const projectedDistance = state.distance + outwardSpeed * TRAY_BOUNDARY_MAX_LOOKAHEAD_FRAMES;
+      if (projectedDistance >= state.maxDistance - TRAY_IMPACT_CONTAIN_GUARD_RPX) {
+        profile.hasBoundaryRisk = true;
+      }
+    });
+    return profile;
+  },
+
+  shouldUsePhysicsSubsteps(now = Date.now(), layout = this.getStageLayout(), profile = null) {
+    if (this.physicsTargets || this.pendingFrozenImpact) return true;
+    if (!this.isTrayImpactContainmentActive(now)) return false;
+    const motionProfile = profile || this.getPhysicsMotionProfile(now, layout);
+    return motionProfile.hasLauncherAssist
+      || motionProfile.hasBoundaryRisk
+      || motionProfile.maxSpeed > TRAY_IMPACT_KEEPALIVE_SPEED_RPX;
+  },
+
+  normalizeTrayContainmentOptions(options = {}) {
+    const active = this.isTrayImpactContainmentActive();
+    const rawPadding = options.padding == null ? TRAY_BOUNDARY_PADDING_RPX : Number(options.padding);
+    const rawGuard = options.guard == null ? TRAY_BOUNDARY_GUARD_RPX : Number(options.guard);
+    const rawTouchGuard = options.touchGuard == null
+      ? (active ? TRAY_IMPACT_TOUCH_GUARD_RPX : TRAY_BOUNDARY_TOUCH_GUARD_RPX)
+      : Number(options.touchGuard);
+    const rawLookahead = options.lookaheadFrames == null
+      ? TRAY_BOUNDARY_LOOKAHEAD_FRAMES
+      : Number(options.lookaheadFrames);
+    const padding = Number.isFinite(rawPadding) ? rawPadding : TRAY_BOUNDARY_PADDING_RPX;
+    const guard = Number.isFinite(rawGuard) ? rawGuard : TRAY_BOUNDARY_GUARD_RPX;
+    const touchGuard = Number.isFinite(rawTouchGuard) ? rawTouchGuard : TRAY_BOUNDARY_TOUCH_GUARD_RPX;
+    const lookaheadFrames = Number.isFinite(rawLookahead) ? rawLookahead : TRAY_BOUNDARY_LOOKAHEAD_FRAMES;
+    if (!active) {
+      return {
+        ...options,
+        padding,
+        guard,
+        touchGuard,
+        lookaheadFrames
+      };
+    }
+    const activeMaxSpeed = this.isLowPerformanceDevice ? 76.0 : 96.0;
+    const rawMaxSpeed = Number(options.maxSpeed);
+    return {
+      ...options,
+      padding: Math.max(padding, TRAY_IMPACT_CONTAIN_PADDING_RPX),
+      guard: Math.max(guard, TRAY_IMPACT_CONTAIN_GUARD_RPX),
+      touchGuard: Math.max(touchGuard, TRAY_IMPACT_TOUCH_GUARD_RPX),
+      lookaheadFrames: Math.max(lookaheadFrames, TRAY_BOUNDARY_MAX_LOOKAHEAD_FRAMES),
+      maxSpeed: Number.isFinite(rawMaxSpeed) && rawMaxSpeed > 0
+        ? Math.min(rawMaxSpeed, activeMaxSpeed)
+        : activeMaxSpeed,
+      inwardBias: Math.max(Number(options.inwardBias) || 0, 1.85),
+      reserveRatio: Math.max(Number(options.reserveRatio) || 0, 0.46)
+    };
+  },
+
+  shapeVelocityForTrayContainment(body, velocity = {}, layout = this.getStageLayout(), options = {}) {
+    const vx = Number(velocity && velocity.x);
+    const vy = Number(velocity && velocity.y);
+    if (!Number.isFinite(vx) || !Number.isFinite(vy)) return { x: 0, y: 0 };
+    const containmentOptions = this.normalizeTrayContainmentOptions(options);
+    const state = this.getTrayBoundaryState(
+      body,
+      layout,
+      containmentOptions.padding
+    );
+    if (!state.valid) return { x: 0, y: 0 };
+    const guard = Math.max(0, Number(containmentOptions.guard));
+    const tangentX = -state.normalY;
+    const tangentY = state.normalX;
+    let outwardSpeed = vx * state.normalX + vy * state.normalY;
+    let tangentSpeed = vx * tangentX + vy * tangentY;
+    const touchGuard = Math.max(0, Number(containmentOptions.touchGuard || 0));
+    const nearWall = state.distance >= state.maxDistance - touchGuard;
+    if (outwardSpeed > 0 && nearWall) {
+      const wallPressure = Math.max(0, Math.min(1, (state.distance - (state.maxDistance - guard)) / Math.max(guard, 1)));
+      const bounce = Math.max(BILLIARD_WALL_RESTITUTION, Number(containmentOptions.wallRestitution || 0));
+      outwardSpeed = -Math.max(3.2, Math.min(outwardSpeed * bounce, this.isLowPerformanceDevice ? 22.0 : 30.0));
+      tangentSpeed *= Math.max(0.64, 0.90 - wallPressure * 0.16);
+    }
+    const shaped = {
+      x: state.normalX * outwardSpeed + tangentX * tangentSpeed,
+      y: state.normalY * outwardSpeed + tangentY * tangentSpeed
+    };
+    const maxSpeed = Number(containmentOptions.maxSpeed || this.getBodySpeedLimit(body));
+    const speed = Math.sqrt(shaped.x * shaped.x + shaped.y * shaped.y);
+    if (!Number.isFinite(speed) || speed <= maxSpeed) return shaped;
+    const scale = maxSpeed / Math.max(speed, 0.0001);
+    return {
+      x: shaped.x * scale,
+      y: shaped.y * scale
+    };
+  },
+
+  resolveTrayBoundaryForBody(body, options = {}) {
+    if (!Body || !body || !body.position) return false;
+    if (body.isStatic && !options.includeStatic) return false;
+    const containmentOptions = this.normalizeTrayContainmentOptions(options);
+    const layout = options.layout || this.getStageLayout();
+    const padding = containmentOptions.padding;
+    const state = this.getTrayBoundaryState(body, layout, padding);
+    if (!state.valid) {
+      Body.setPosition(body, { x: state.center, y: state.center });
+      Body.setVelocity(body, { x: 0, y: 0 });
+      Body.setAngularVelocity(body, 0);
+      return true;
+    }
+    const velocityX = Number(body.velocity && body.velocity.x);
+    const velocityY = Number(body.velocity && body.velocity.y);
+    if (!Number.isFinite(velocityX) || !Number.isFinite(velocityY)) {
+      Body.setVelocity(body, { x: 0, y: 0 });
+      Body.setAngularVelocity(body, 0);
+      return true;
+    }
+    const speed = Math.sqrt(velocityX * velocityX + velocityY * velocityY);
+    const outwardSpeed = velocityX * state.normalX + velocityY * state.normalY;
+    const needsPositionClamp = state.overflow > 0.001;
+    const touchGuard = Math.max(0, Number(containmentOptions.touchGuard || 0));
+    const nearWall = state.distance >= state.maxDistance - touchGuard;
+    const needsVelocityGuard = containmentOptions.force || needsPositionClamp || (nearWall && outwardSpeed > 0.02);
+    if (!needsPositionClamp && !needsVelocityGuard) return false;
+    const shouldPreLimitOutwardSpeed = false;
+
+    if (needsPositionClamp) {
+      Body.setPosition(body, {
+        x: state.center + state.normalX * state.maxDistance,
+        y: state.center + state.normalY * state.maxDistance
+      });
+    }
+
+    if (!shouldPreLimitOutwardSpeed || projectedOverflow > 0) {
+      this.applyTrayWallSpin(body, state.normalX, state.normalY, outwardSpeed);
+    }
+    const tangentX = -state.normalY;
+    const tangentY = state.normalX;
+    const tangentSpeed = velocityX * tangentX + velocityY * tangentY;
+    const penetration = Math.max(0, state.overflow);
+    let nextOutwardSpeed;
+    let tangentDamping;
+    const inwardBias = Math.max(0.1, Number(containmentOptions.inwardBias || 1));
+    if (shouldPreLimitOutwardSpeed) {
+      const reserve = Math.max(10, dynamicGuard * Math.max(0.18, Number(containmentOptions.reserveRatio || 0.34)));
+      const allowedOutwardSpeed = (state.maxDistance - state.distance - reserve) / Math.max(lookaheadFrames, 1);
+      nextOutwardSpeed = Math.min(outwardSpeed, Math.max(-0.52 * inwardBias, allowedOutwardSpeed));
+      if (projectedOverflow > 0) {
+        nextOutwardSpeed = Math.min(nextOutwardSpeed, Math.max(-0.72 * inwardBias, outwardSpeed * 0.48));
+      }
+      tangentDamping = Math.max(0.70, 0.93 - Math.max(0, projectedOverflow) / 160);
+    } else {
+      const bounce = Math.max(BILLIARD_WALL_RESTITUTION, Number(containmentOptions.wallRestitution || 0));
+      const maxBounceSpeed = this.isLowPerformanceDevice ? 24.0 : 32.0;
+      nextOutwardSpeed = outwardSpeed > 0.02
+        ? -Math.max(
+          1.45 * inwardBias,
+          Math.min(maxBounceSpeed, outwardSpeed * bounce + Math.max(0, penetration) * 0.018)
+        )
+        : Math.max(-maxBounceSpeed, outwardSpeed * 0.82);
+      tangentDamping = penetration > 0
+        ? Math.max(0.58, 0.84 - penetration / 130)
+        : 0.86;
+    }
+    Body.setVelocity(body, {
+      x: state.normalX * nextOutwardSpeed + tangentX * tangentSpeed * tangentDamping,
+      y: state.normalY * nextOutwardSpeed + tangentY * tangentSpeed * tangentDamping
+    });
+    if (penetration > 10) {
+      Body.setAngularVelocity(body, (Number(body.angularVelocity) || 0) * 0.62);
+    }
+    const maxSpeed = Number(containmentOptions.maxSpeed || Math.min(this.getBodySpeedLimit(body), this.isLowPerformanceDevice ? 7.4 : 8.4));
+    this.clampBodyVelocity(body, Math.min(this.getBodySpeedLimit(body), maxSpeed));
+    return true;
+  },
+
+  getBodySpeedLimit(body) {
+    const plugin = (body && body.plugin) || {};
+    if (plugin.isLauncher) return this.isLowPerformanceDevice ? 84.0 : 108.0;
+    return this.isLowPerformanceDevice ? 22.0 : 30.0;
+  },
+
+  clampBodyVelocity(body, maxSpeed = this.getBodySpeedLimit(body)) {
+    if (!Body || !body || !body.velocity) return;
+    const vx = Number(body.velocity.x);
+    const vy = Number(body.velocity.y);
+    if (!Number.isFinite(vx) || !Number.isFinite(vy)) {
+      Body.setVelocity(body, { x: 0, y: 0 });
+      return;
+    }
+    const speed = Math.sqrt(vx * vx + vy * vy);
+    if (!Number.isFinite(speed) || speed <= maxSpeed) return;
+    const scale = maxSpeed / Math.max(speed, 0.0001);
+    Body.setVelocity(body, { x: vx * scale, y: vy * scale });
+  },
+
+  recoverInvalidPhysicsBody(body, layout = this.getStageLayout()) {
+    if (!Body || !body || !this.isWorkspaceBeadBody(body)) return false;
+    const plugin = body.plugin || {};
+    const designIndex = Number(plugin.designIndex);
+    const placements = this.livePlacements || this.data.placements || [];
+    const placement = Number.isInteger(designIndex) && designIndex >= 0 ? (placements[designIndex] || {}) : {};
+    const beadSize = Number(plugin.beadSize || placement.beadSize || placement.size || placement.diameter || 54);
+    let recovered = false;
+    const positionX = Number(body.position && body.position.x);
+    const positionY = Number(body.position && body.position.y);
+    if (!Number.isFinite(positionX) || !Number.isFinite(positionY)) {
+      const fallbackPoint = this.constrainPointInsideTray({
+        x: Number(placement.looseX),
+        y: Number(placement.looseY)
+      }, beadSize, layout, TRAY_BOUNDARY_GUARD_RPX + 24);
+      Body.setPosition(body, fallbackPoint);
+      recovered = true;
+    } else {
+      const escapePadding = this.isTrayImpactContainmentActive()
+        ? TRAY_IMPACT_CONTAIN_PADDING_RPX
+        : TRAY_BOUNDARY_PADDING_RPX;
+      const escapeGuard = this.isTrayImpactContainmentActive()
+        ? TRAY_IMPACT_ESCAPE_RESET_GUARD_RPX
+        : TRAY_ESCAPE_RESET_GUARD_RPX;
+      const state = this.getTrayBoundaryState(body, layout, escapePadding);
+      if (state.valid && state.distance > state.maxDistance + escapeGuard) {
+        const fallbackPoint = this.constrainPointInsideTray(
+          { x: positionX, y: positionY },
+          beadSize,
+          layout,
+          escapePadding + 12
+        );
+        Body.setPosition(body, fallbackPoint);
+        Body.setVelocity(body, { x: 0, y: 0 });
+        Body.setAngularVelocity(body, 0);
+        recovered = true;
+      }
+    }
+    const velocityX = Number(body.velocity && body.velocity.x);
+    const velocityY = Number(body.velocity && body.velocity.y);
+    const rawSpeed = body.speed;
+    const speedInvalid = rawSpeed != null && !Number.isFinite(Number(rawSpeed));
+    if (!Number.isFinite(velocityX) || !Number.isFinite(velocityY) || speedInvalid) {
+      Body.setVelocity(body, { x: 0, y: 0 });
+      recovered = true;
+    }
+    if (!Number.isFinite(Number(body.angle))) {
+      Body.setAngle(body, (Number(placement.rotation) || 0) * Math.PI / 180);
+      recovered = true;
+    }
+    if (!Number.isFinite(Number(body.angularVelocity))) {
+      Body.setAngularVelocity(body, 0);
+      recovered = true;
+    }
+    if (recovered) {
+      if (Sleeping) Sleeping.set(body, false);
+      body.isSleeping = false;
+      body.sleepCounter = 0;
+    }
+    return recovered;
+  },
+
+  sanitizePhysicsBodies(layout = this.getStageLayout()) {
+    const bodies = this.physicsBodies || [];
+    if (!bodies.length || !Body) return false;
+    let recovered = false;
+    bodies.forEach(body => {
+      if (this.recoverInvalidPhysicsBody(body, layout)) recovered = true;
+    });
+    return recovered;
+  },
+
+  clampPhysicsVelocities() {
+    (this.physicsBodies || []).forEach(body => {
+      if (!body || body.isStatic) return;
+      this.clampBodyVelocity(body);
+    });
+  },
+
   runPhysics() {
     if (!this.physicsEngine || this.physicsTimer) return;
     this.physicsLastTime = Date.now();
@@ -3411,20 +5381,44 @@ Page({
     this.physicsTimer = setInterval(() => {
       try {
         const now = Date.now();
+        const layout = this.getStageLayout();
         this.physicsLastTime = now;
-        if (this.physicsTargets) this.applyStringingForces();
-        Engine.update(this.physicsEngine, this.physicsStepMs || 1000 / 30);
-        if (!this.physicsTargets && !this.data.isShuffling && !this.data.isStringingFinishing) {
-          this.applyRollingSpinFromVelocity();
+        this.sanitizePhysicsBodies(layout);
+        const motionProfile = this.getPhysicsMotionProfile(now, layout);
+        this.refreshTrayImpactContainmentFromMotion(now, layout, motionProfile);
+        const boundaryOptions = {
+          guard: TRAY_BOUNDARY_GUARD_RPX + 24,
+          lookaheadFrames: TRAY_BOUNDARY_MAX_LOOKAHEAD_FRAMES
+        };
+        const useSubsteps = this.shouldUsePhysicsSubsteps(now, layout, motionProfile);
+        const substepCount = useSubsteps ? (this.isLowPerformanceDevice ? 2 : 3) : 1;
+        const substepMs = (this.physicsStepMs || 1000 / 30) / substepCount;
+        for (let substepIndex = 0; substepIndex < substepCount; substepIndex += 1) {
+          const substepNow = now + substepIndex * substepMs;
+          if (this.physicsTargets) this.applyStringingForces(layout);
+          this.applyLauncherTrajectoryAssist(substepNow, layout);
+          this.clampPhysicsVelocities();
+          this.clampBodiesInsideTray(layout, boundaryOptions);
+          Engine.update(this.physicsEngine, substepMs);
+          this.sanitizePhysicsBodies(layout);
+          this.refreshTrayImpactContainmentFromMotion(substepNow, layout);
+          this.clampPhysicsVelocities();
+          this.clampBodiesInsideTray(layout, boundaryOptions);
         }
-        if (!this.physicsTargets) this.applyBilliardDamping();
-        this.resolveBeadOverlaps();
-        this.clampBodiesInsideTray();
+        if (!this.physicsTargets && !this.data.isShuffling && !this.data.isStringingFinishing) {
+          this.applyRollingSpinFromVelocity(layout);
+        }
+        const dampingSettled = !this.physicsTargets ? this.applyBilliardDamping() : false;
+        const overlapsCorrected = this.resolveBeadOverlaps(layout);
+        this.clampBodiesInsideTray(layout, {
+          guard: TRAY_BOUNDARY_GUARD_RPX + 24,
+          lookaheadFrames: TRAY_BOUNDARY_MAX_LOOKAHEAD_FRAMES
+        });
         if (this.pendingFrozenImpact && now - (this.pendingFrozenImpactAt || now) > 760) {
           const launcher = (this.physicsBodies || []).find(body => body && body.plugin && body.plugin.isLauncher);
           this.releaseFrozenBodiesFromImpact(launcher, null);
         }
-        if (this.physicsTargets && this.isStringingSettled()) {
+        if (this.physicsTargets && this.isStringingSettled(layout)) {
           this.physicsStillFrames += 1;
           if (this.physicsStillFrames > 6) {
             if (this.data.isShuffling) this.finishStringing();
@@ -3439,11 +5433,8 @@ Page({
           else this.finishImpactTargeting();
           return;
         }
-        const allSleeping = this.physicsBodies.length > 0
-          && this.physicsBodies.every(body => body.isSleeping
-            || (body.speed < 0.045 && Math.abs(Number(body.angularVelocity) || 0) < 0.004));
         if (!this.physicsTargets) {
-          this.physicsStillFrames = allSleeping ? this.physicsStillFrames + 1 : 0;
+          this.physicsStillFrames = dampingSettled && !overlapsCorrected ? this.physicsStillFrames + 1 : 0;
         }
         if (now - this.physicsLastRender >= (this.physicsRenderInterval || 50)) {
           this.physicsLastRender = now;
@@ -3459,29 +5450,48 @@ Page({
     }, this.physicsTimerInterval || 33);
   },
 
-  resolveBeadOverlaps() {
+  resolveBeadOverlaps(layout = this.getStageLayout()) {
     const bodies = this.physicsBodies || [];
-    if (bodies.length < 2 || !Body) return;
+    if (bodies.length < 2 || !Body) return false;
+    let correctedAny = false;
     const maxCorrectionPerPass = this.isLowPerformanceDevice ? 16 : 26;
     const passes = this.isLowPerformanceDevice ? 2 : 3;
+    const boundaryOptions = {
+      layout,
+      guard: this.isTrayImpactContainmentActive() ? TRAY_IMPACT_CONTAIN_GUARD_RPX : TRAY_BOUNDARY_GUARD_RPX + 24,
+      lookaheadFrames: TRAY_BOUNDARY_MAX_LOOKAHEAD_FRAMES
+    };
+    const bodyEntries = bodies.map(body => {
+      const plugin = body && body.plugin || {};
+      return {
+        body,
+        radius: Number(plugin.bodyRadius || plugin.beadSize * 0.5) || 24,
+        isStatic: !!(body && body.isStatic)
+      };
+    });
     for (let pass = 0; pass < passes; pass += 1) {
-      for (let i = 0; i < bodies.length - 1; i += 1) {
-        const bodyA = bodies[i];
+      let passCorrected = false;
+      for (let i = 0; i < bodyEntries.length - 1; i += 1) {
+        const entryA = bodyEntries[i];
+        const bodyA = entryA && entryA.body;
         if (!bodyA || !bodyA.position) continue;
-        for (let j = i + 1; j < bodies.length; j += 1) {
-          const bodyB = bodies[j];
+        for (let j = i + 1; j < bodyEntries.length; j += 1) {
+          const entryB = bodyEntries[j];
+          const bodyB = entryB && entryB.body;
           if (!bodyB || !bodyB.position) continue;
-          const radiusA = Number(bodyA.plugin && (bodyA.plugin.bodyRadius || bodyA.plugin.beadSize * 0.5)) || 24;
-          const radiusB = Number(bodyB.plugin && (bodyB.plugin.bodyRadius || bodyB.plugin.beadSize * 0.5)) || 24;
-          const minDistance = radiusA + radiusB + 3.2;
+          if (entryA.isStatic && entryB.isStatic) continue;
+          const minDistance = entryA.radius + entryB.radius + 3.2;
           let dx = bodyB.position.x - bodyA.position.x;
           let dy = bodyB.position.y - bodyA.position.y;
+          if (Math.abs(dx) >= minDistance || Math.abs(dy) >= minDistance) continue;
           let distanceSq = dx * dx + dy * dy;
           if (distanceSq <= 0.0001) {
             const seed = (i + 1) * 17 + (j + 1) * 31 + pass * 13;
             dx = Math.cos(seed);
             dy = Math.sin(seed);
             distanceSq = 1;
+          } else if (distanceSq >= minDistance * minDistance) {
+            continue;
           }
           const distance = Math.sqrt(distanceSq);
           const overlap = minDistance - distance;
@@ -3489,7 +5499,7 @@ Page({
           const normalX = dx / distance;
           const normalY = dy / distance;
           const correction = Math.min(overlap, maxCorrectionPerPass) * 0.82;
-          if (bodyA.isStatic && bodyB.isStatic) continue;
+          passCorrected = true;
           if (bodyA.isStatic) {
             Body.setPosition(bodyB, {
               x: bodyB.position.x + normalX * correction,
@@ -3516,9 +5526,16 @@ Page({
             });
             this.applyOverlapSeparationSpin(bodyA, bodyB, normalX, normalY, correction);
           }
+          this.resolveTrayBoundaryForBody(bodyA, boundaryOptions);
+          this.resolveTrayBoundaryForBody(bodyB, boundaryOptions);
         }
       }
+      if (passCorrected) {
+        correctedAny = true;
+        this.clampBodiesInsideTray(layout, boundaryOptions);
+      }
     }
+    return correctedAny;
   },
 
   applyOverlapSeparationSpin(bodyA, bodyB, normalX, normalY, correction) {
@@ -3536,10 +5553,9 @@ Page({
     if (beadB) this.addBodySpin(bodyB, spin, { maxDelta: 0.035 });
   },
 
-  applyRollingSpinFromVelocity() {
+  applyRollingSpinFromVelocity(layout = this.getStageLayout()) {
     const bodies = this.physicsBodies || [];
     if (!bodies.length || !Body) return;
-    const layout = this.getStageLayout();
     const center = layout.center;
     bodies.forEach(body => {
       if (!this.isWorkspaceBeadBody(body) || body.isStatic || !body.position) return;
@@ -3560,64 +5576,71 @@ Page({
 
   applyBilliardDamping() {
     const bodies = this.physicsBodies || [];
-    if (!bodies.length || !Body) return;
-    const defaultMu = this.isLowPerformanceDevice ? 0.82 : (this.isRealDevice ? 0.86 : 0.875);
+    if (!bodies.length || !Body) return false;
+    const defaultMu = BILLIARD_LINEAR_DAMPING;
+    let allSettled = true;
     bodies.forEach(body => {
-      if (!body || !body.position || body.isStatic) return;
+      if (!body || !body.position) {
+        allSettled = false;
+        return;
+      }
+      if (body.isStatic || body.isSleeping) return;
       const plugin = body.plugin || {};
       const mu = Number(plugin.billiardDamping || defaultMu);
-      if (body.speed < 0.045) {
+      const angularMu = Number(plugin.angularDamping || BILLIARD_ANGULAR_DAMPING);
+      if (body.speed < 0.055) {
         Body.setVelocity(body, { x: 0, y: 0 });
         const angularVelocity = Number(body.angularVelocity) || 0;
-        if (Math.abs(angularVelocity) < 0.004) {
+        if (Math.abs(angularVelocity) < 0.005) {
           Body.setAngularVelocity(body, 0);
         } else {
-          Body.setAngularVelocity(body, angularVelocity * 0.82);
+          Body.setAngularVelocity(body, angularVelocity * angularMu);
           body.isSleeping = false;
           body.sleepCounter = 0;
+          allSettled = false;
         }
         return;
       }
+      allSettled = false;
       Body.setVelocity(body, {
         x: body.velocity.x * mu,
         y: body.velocity.y * mu
       });
-      Body.setAngularVelocity(body, body.angularVelocity * Math.max(0.72, mu - 0.04));
+      Body.setAngularVelocity(body, body.angularVelocity * angularMu);
     });
+    return allSettled;
   },
 
-  clampBodiesInsideTray() {
+  clampBodiesInsideTray(layout = this.getStageLayout(), options = {}) {
     const bodies = this.physicsBodies || [];
     if (!bodies.length || !Body) return;
-    const layout = this.getStageLayout();
-    const center = layout.center;
+    const activeContainment = this.isTrayImpactContainmentActive();
     bodies.forEach(body => {
-      if (!body || !body.position || body.isStatic) return;
-      const radius = Number(body.plugin && (body.plugin.bodyRadius || body.plugin.beadSize * 0.5)) || 24;
-      const maxDistance = center - radius - 9;
-      let dx = body.position.x - center;
-      let dy = body.position.y - center;
-      let distance = Math.sqrt(dx * dx + dy * dy);
-      if (distance <= maxDistance) return;
-      if (distance <= 0.0001) {
-        dx = 1;
-        dy = 0;
-        distance = 1;
+      const clampOptions = {
+        layout,
+        padding: options.padding == null ? TRAY_BOUNDARY_PADDING_RPX : options.padding,
+        guard: options.guard == null ? TRAY_BOUNDARY_GUARD_RPX : options.guard,
+        lookaheadFrames: options.lookaheadFrames,
+        force: options.force
+      };
+      if (activeContainment && this.isWorkspaceBeadBody(body) && !body.isStatic && body.velocity) {
+        const shapedVelocity = this.shapeVelocityForTrayContainment(
+          body,
+          body.velocity,
+          layout,
+          clampOptions
+        );
+        const vx = Number(body.velocity.x);
+        const vy = Number(body.velocity.y);
+        if (Number.isFinite(shapedVelocity.x)
+          && Number.isFinite(shapedVelocity.y)
+          && (Math.abs(shapedVelocity.x - vx) > 0.001 || Math.abs(shapedVelocity.y - vy) > 0.001)) {
+          Body.setVelocity(body, shapedVelocity);
+        }
       }
-      const normalX = dx / distance;
-      const normalY = dy / distance;
-      Body.setPosition(body, {
-        x: center + normalX * maxDistance,
-        y: center + normalY * maxDistance
+      this.resolveTrayBoundaryForBody(body, {
+        ...clampOptions
       });
-      const outwardSpeed = body.velocity.x * normalX + body.velocity.y * normalY;
-      this.applyTrayWallSpin(body, normalX, normalY, outwardSpeed);
-      if (outwardSpeed > 0) {
-        Body.setVelocity(body, {
-          x: body.velocity.x - normalX * outwardSpeed * 1.28,
-          y: body.velocity.y - normalY * outwardSpeed * 1.28
-        });
-      }
     });
   },
 
@@ -3631,75 +5654,109 @@ Page({
     this.addBodySpin(body, spin, { maxDelta: 0.065, limit: 0.13 });
   },
 
+  buildSelectedItemStylePatchUpdates(selectedItems = []) {
+    const selectedKey = (this.data.selected || []).join('|');
+    const cache = this.selectedItemStylePatchCache;
+    const canReuseCache = cache
+      && cache.selectedKey === selectedKey
+      && cache.length === selectedItems.length;
+    const styles = canReuseCache ? cache.styles.slice() : [];
+    const updates = {};
+    let changed = false;
+    (selectedItems || []).forEach((item, index) => {
+      const style = item && item.style || '';
+      if (!canReuseCache || styles[index] !== style) {
+        updates[`selectedItems[${index}].style`] = style;
+        changed = true;
+      }
+      styles[index] = style;
+    });
+    this.selectedItemStylePatchCache = {
+      selectedKey,
+      length: selectedItems.length,
+      styles
+    };
+    return { updates, changed };
+  },
+
   syncPhysicsFrame(onSynced) {
+    const hasSyncedCallback = typeof onSynced === 'function';
     if (this.physicsFramePending) {
-      if (onSynced) {
-        setTimeout(
-          () => this.syncPhysicsFrame(onSynced),
-          this.physicsRenderInterval || 50
-        );
+      if (hasSyncedCallback) {
+        clearTimeout(this.physicsFrameRetryTimer);
+        this.physicsFrameRetryTimer = setTimeout(() => {
+          this.physicsFrameRetryTimer = null;
+          this.syncPhysicsFrame(onSynced);
+        }, this.physicsRenderInterval || 50);
       }
       return;
     }
     if (!this.data.isLooseMode || !this.physicsBodies.length) {
-      if (onSynced) onSynced();
+      if (hasSyncedCallback) onSynced();
       return;
     }
     this.physicsFramePending = true;
-    const placements = this.normalizePlacements(this.data.selected, this.data.placements);
-    this.physicsBodies.forEach(body => {
-      const index = body.plugin.designIndex;
-      if (!placements[index]) return;
-      placements[index] = {
-        ...placements[index],
-        looseX: body.position.x,
-        looseY: body.position.y,
-        rotation: body.angle * 180 / Math.PI,
-        beadSize: body.plugin.beadSize
-      };
-    });
-    const items = this.data.selected.map(id => this.findMaterialById(id)).filter(Boolean);
-    const geometry = this.calculateBraceletGeometry(items);
-    this.livePlacements = placements;
     this.physicsFrameSequence = (this.physicsFrameSequence || 0) + 1;
     if (this.data.useCanvasRenderer) {
       this.scheduleCanvasRender(true);
-      const shouldPersistFrame = onSynced || this.physicsFrameSequence % 10 === 0;
-      if (shouldPersistFrame) {
+      const shouldPersistFrame = hasSyncedCallback || this.physicsFrameSequence % 10 === 0;
+      if (!shouldPersistFrame) {
+        this.physicsFramePending = false;
+        return;
+      }
+      const placements = this.buildPhysicsPlacementsSnapshot();
+      this.setLivePlacements(placements);
+      const shouldSyncPlacements = shouldPersistFrame
+        && this.shouldSyncPhysicsPlacements(placements, hasSyncedCallback);
+      if (shouldSyncPlacements) {
         this.setData({ placements }, () => {
           this.physicsFramePending = false;
-          if (onSynced) onSynced();
+          if (hasSyncedCallback) onSynced();
         });
       } else {
         this.physicsFramePending = false;
-        if (onSynced) onSynced();
+        if (hasSyncedCallback) onSynced();
       }
       return;
     }
+    const placements = this.buildPhysicsPlacementsSnapshot();
+    this.setLivePlacements(placements);
+    const items = this.getCachedSelectedMaterials(this.data.selected).filter(Boolean);
+    const geometry = this.getCachedBraceletGeometry(items);
     const selectedItems = this.layoutSelectedItems(items, placements, geometry);
     const canPatchStyles = (this.data.selectedItems || []).length === selectedItems.length;
     const updates = {};
+    let hasUpdates = false;
     if (canPatchStyles) {
-      selectedItems.forEach((item, index) => {
-        updates[`selectedItems[${index}].style`] = item.style;
-      });
+      const stylePatch = this.buildSelectedItemStylePatchUpdates(selectedItems);
+      Object.assign(updates, stylePatch.updates);
+      hasUpdates = stylePatch.changed;
       if (onSynced || this.physicsFrameSequence % 4 === 0) {
         updates.placements = placements;
+        hasUpdates = true;
       }
     } else {
+      this.selectedItemStylePatchCache = null;
       updates.placements = placements;
       updates.selectedItems = selectedItems;
+      hasUpdates = true;
+    }
+    if (!hasUpdates) {
+      this.physicsFramePending = false;
+      if (hasSyncedCallback) onSynced();
+      return;
     }
     this.setData(updates, () => {
       this.physicsFramePending = false;
-      if (onSynced) onSynced();
+      if (hasSyncedCallback) onSynced();
     });
   },
 
-  applyStringingForces() {
+  applyStringingForces(layout = this.getStageLayout()) {
     this.physicsBodies.forEach((body, index) => {
-      const target = this.physicsTargets[index];
-      if (!target) return;
+      const rawTarget = this.physicsTargets[index];
+      if (!rawTarget) return;
+      const target = this.constrainPhysicsTarget(rawTarget, layout, 12);
       const dx = target.x - body.position.x;
       const dy = target.y - body.position.y;
       const distance = Math.sqrt(dx ** 2 + dy ** 2);
@@ -3723,10 +5780,11 @@ Page({
     });
   },
 
-  isStringingSettled() {
+  isStringingSettled(layout = this.getStageLayout()) {
     return this.physicsBodies.every((body, index) => {
-      const target = this.physicsTargets[index];
-      if (!target) return true;
+      const rawTarget = this.physicsTargets[index];
+      if (!rawTarget) return true;
+      const target = this.constrainPhysicsTarget(rawTarget, layout, 12);
       const distance = Math.sqrt(
         (target.x - body.position.x) ** 2 + (target.y - body.position.y) ** 2
       );
@@ -3744,15 +5802,15 @@ Page({
       this.completeStringing();
       return;
     }
+    const layout = this.getStageLayout();
+    const safeTargets = targets.map(target => (
+      target ? this.constrainPhysicsTarget(target, layout, 12) : target
+    ));
     const starts = this.physicsBodies.map(body => ({
       x: body.position.x,
       y: body.position.y,
       angle: body.angle
     }));
-    const stageCenter = this.getStageLayout().center;
-    const targetAngles = targets.map(target => (
-      Math.atan2(target.y - stageCenter, target.x - stageCenter)
-    ));
     const totalFrames = this.isLowPerformanceDevice ? 8 : (this.isRealDevice ? 12 : 10);
     let frame = 0;
     this.setData({ isStringingFinishing: true });
@@ -3766,14 +5824,16 @@ Page({
         const shifted = progress - 1;
         const eased = 1 + c3 * shifted ** 3 + c1 * shifted ** 2;
         this.physicsBodies.forEach((body, index) => {
-          const target = targets[index];
+          const target = safeTargets[index];
           const start = starts[index];
           if (!target || !start) return;
           Body.setPosition(body, {
             x: start.x + (target.x - start.x) * eased,
             y: start.y + (target.y - start.y) * eased
           });
-          const targetAngle = targetAngles[index] || 0;
+          const targetAngle = target.rotation == null
+            ? start.angle
+            : Number(target.rotation) * Math.PI / 180;
           Body.setAngle(body, start.angle + (targetAngle - start.angle) * progress);
           Body.setVelocity(body, { x: 0, y: 0 });
           Body.setAngularVelocity(body, 0);
@@ -3811,6 +5871,7 @@ Page({
       isLooseMode: false,
       isShuffling: false,
       isStringingFinishing: false,
+      isReleasingString: false,
       draggingBeadIndex: -1,
       dragDeleteArmed: false
     }, () => {
@@ -3824,6 +5885,9 @@ Page({
       clearInterval(this.physicsTimer);
       this.physicsTimer = null;
     }
+    if (this.data.isLooseMode && this.physicsBodies && this.physicsBodies.length) {
+      this.setLivePlacements(this.buildPhysicsPlacementsSnapshot());
+    }
     if (this.data.isLooseMode && this.livePlacements) {
       this.setData({ placements: this.livePlacements });
     }
@@ -3831,8 +5895,12 @@ Page({
 
   stopPhysics() {
     this.pausePhysics();
+    clearTimeout(this.physicsFrameRetryTimer);
+    this.physicsFrameRetryTimer = null;
     clearInterval(this.stringingFinishTimer);
     this.stringingFinishTimer = null;
+    clearInterval(this.releaseStringTimer);
+    this.releaseStringTimer = null;
     clearTimeout(this.stringingCompleteTimer);
     this.stringingCompleteTimer = null;
     clearTimeout(this.stringingGuardTimer);
@@ -3840,13 +5908,14 @@ Page({
     if (this.physicsEngine) Engine.clear(this.physicsEngine);
     this.physicsEngine = null;
     this.physicsBodies = [];
+    this.physicsBodyByDesignIndexCache = null;
     this.physicsTargets = null;
     this.pendingImpactTargets = null;
     this.pendingFrozenImpact = false;
     this.pendingFrozenImpactAt = 0;
     this.physicsFramePending = false;
     this.suppressStringingSounds = false;
-    this.livePlacements = null;
+    this.clearLivePlacements();
   },
 
   clearFlightRuntime() {
@@ -3854,6 +5923,10 @@ Page({
     this.flightTimer = null;
     clearTimeout(this.flightSafetyTimer);
     this.flightSafetyTimer = null;
+    clearTimeout(this.flightAnimationTimer);
+    this.flightAnimationTimer = null;
+    clearTimeout(this.canvasFlightRetryTimer);
+    this.canvasFlightRetryTimer = null;
     this.flightQueue = [];
     this.flightActive = false;
     this.canvasFlightReadyRetries = 0;
@@ -3863,11 +5936,18 @@ Page({
 
   resetWorkspaceRuntime() {
     this.clearFlightRuntime();
-    this.livePlacements = null;
+    this.clearLivePlacements();
     this.stopPhysics();
     this.dragState = null;
     this.ringDragState = null;
+    this.ringSlideState = null;
+    this.braceletGeometryCache = null;
+    this.canvasSpriteContextCache = null;
+    this.scaleTicksCache = null;
+    this.wristOptionItemsCache = null;
+    this.workspaceSummaryCache = null;
     this.suppressBeadTapUntil = 0;
+    this.lastPersistedDraftSignature = '';
   },
 
   resetInteractionData(extra = {}, callback) {
@@ -3877,6 +5957,7 @@ Page({
       launchingMaterialId: '',
       isShuffling: false,
       isStringingFinishing: false,
+      isReleasingString: false,
       draggingBeadIndex: -1,
       dragDeleteArmed: false,
       ...extra
@@ -3891,12 +5972,15 @@ Page({
     return !!(
       this.data.isShuffling
       || this.data.isStringingFinishing
+      || this.data.isReleasingString
       || this.data.canvasFlightActive
       || this.flightActive
       || (this.flightQueue && this.flightQueue.length)
       || this.canvasFlight
       || this.physicsTimer
       || this.stringingFinishTimer
+      || this.ringSlideState
+      || this.releaseStringTimer
       || this.stringingCompleteTimer
       || this.stringingGuardTimer
     );
@@ -3993,6 +6077,7 @@ Page({
       launchingMaterialId: '',
       isShuffling: false,
       isStringingFinishing: false,
+      isReleasingString: false,
       draggingBeadIndex: -1,
       dragDeleteArmed: false,
       canUndo: (this.historyStack || []).length > 0,
@@ -4038,8 +6123,10 @@ Page({
     const pool = (this.materialCatalog || DEFAULT_MATERIALS).filter(item => item.top === this.data.activeTop);
     const backendCategories = (this.categoriesByTop || {})[this.data.activeTop] || [];
     const keyword = this.normalizeMaterialSearchKeyword(this.data.materialSearchKeyword);
-    const searchPool = keyword ? pool.filter(item => this.materialMatchesSearch(item, keyword)) : [];
-    const searchTarget = keyword ? this.resolveMaterialSearchTarget(searchPool) : null;
+    const searchTerms = this.materialSearchTerms(keyword);
+    const searchPool = searchTerms.length ? pool.filter(item => this.materialMatchesSearch(item, searchTerms)) : [];
+    const shouldAutoTargetSearch = searchTerms.length && options.autoTargetSearch !== false;
+    const searchTarget = shouldAutoTargetSearch ? this.resolveMaterialSearchTarget(searchPool, searchTerms) : null;
     let categoryNames = backendCategories.length ? backendCategories : [ALL_OPTION_LABEL, ...Array.from(new Set(pool.map(item => item.category)))];
     if (searchTarget && searchTarget.category && !categoryNames.includes(searchTarget.category)) {
       categoryNames = [...categoryNames, searchTarget.category];
@@ -4066,10 +6153,10 @@ Page({
     const decoratedSeriesOptions = this.decorateOptionList(seriesOptions, activeSeries, '', 'series-filter');
     const activeCategoryAnchor = this.getActiveOptionAnchor(decoratedCategories);
     const activeSeriesAnchor = this.getActiveOptionAnchor(decoratedSeriesOptions);
-    const filteredMaterials = keyword ? searchPool : categoryPool.filter(item => {
+    const filteredMaterials = categoryPool.filter(item => {
       const series = item.series || item.name || '';
       const matchesSeries = this.isAllFilterValue(activeSeries) || series === activeSeries;
-      return matchesSeries && this.materialMatchesSearch(item);
+      return matchesSeries && this.materialMatchesSearch(item, searchTerms);
     });
     this.filteredMaterialCatalog = filteredMaterials;
     const requestedLimit = Number(options.limit) || this.materialPageSize || MATERIAL_PAGE_SIZE;
@@ -4099,17 +6186,18 @@ Page({
       return;
     }
     const filteredMaterials = this.filteredMaterialCatalog || [];
-    const currentCount = this.data.visibleMaterials.length;
+    const currentCount = (this.data.visibleMaterials || []).length;
     if (currentCount >= filteredMaterials.length) return;
-    const visibleMaterials = this.decorateVisibleMaterials(filteredMaterials.slice(
-      0,
-      currentCount + (this.materialPageSize || MATERIAL_PAGE_SIZE)
-    ));
+    const nextMaterials = this.decorateVisibleMaterials(
+      filteredMaterials.slice(currentCount, currentCount + (this.materialPageSize || MATERIAL_PAGE_SIZE)),
+      currentCount
+    );
+    const nextCount = currentCount + nextMaterials.length;
     this.setData({
-      visibleMaterials,
-      hasMoreMaterials: visibleMaterials.length < filteredMaterials.length
+      ...this.buildVisibleMaterialAppendUpdates(nextMaterials, currentCount),
+      hasMoreMaterials: nextCount < filteredMaterials.length
     }, () => {
-      this.scheduleMaterialPreload(visibleMaterials);
+      this.scheduleMaterialPreload(nextMaterials);
     });
   },
 
@@ -4134,22 +6222,109 @@ Page({
     return active ? active.anchorId : '';
   },
 
-  decorateVisibleMaterials(materials) {
+  buildVisibleMaterialAppendUpdates(materials = [], startIndex = 0) {
+    return (materials || []).reduce((updates, item, index) => {
+      updates[`visibleMaterials[${startIndex + index}]`] = item;
+      return updates;
+    }, {});
+  },
+
+  materialCardClass(item = {}, displayIndex = 0, launchingMaterialId = this.data.launchingMaterialId || '') {
+    const baseClass = item.baseCardClass || `material-card-${displayIndex}`;
+    const itemId = String(item.id || '');
+    const launchingId = String(launchingMaterialId || '');
+    return `${baseClass}${launchingId && itemId === launchingId ? ' launching' : ''}`;
+  },
+
+  buildLaunchingMaterialUpdates(nextLaunchingMaterialId = '', extraUpdates = {}) {
+    const nextId = String(nextLaunchingMaterialId || '');
+    const previousId = this.data.launchingMaterialId || '';
+    const updates = {
+      ...extraUpdates,
+      launchingMaterialId: nextId
+    };
+    const visibleMaterials = this.data.visibleMaterials || [];
+    if (!previousId && !nextId) return updates;
+    visibleMaterials.forEach((item, index) => {
+      const itemId = String(item && item.id || '');
+      if (!item || (itemId !== previousId && itemId !== nextId)) return;
+      const cardClass = this.materialCardClass(item, index, nextId);
+      if (item.cardClass !== cardClass) {
+        updates[`visibleMaterials[${index}].cardClass`] = cardClass;
+      }
+    });
+    return updates;
+  },
+
+  setLaunchingMaterialState(nextLaunchingMaterialId = '', extraUpdates = {}, callback) {
+    this.setData(this.buildLaunchingMaterialUpdates(nextLaunchingMaterialId, extraUpdates), callback);
+  },
+
+  decoratedMaterialCacheKey(item = {}, displayIndex = 0) {
+    return [
+      this.materialCatalogVersion || 0,
+      displayIndex,
+      item.id || item.skuId || item.sku_id || item.material_code || '',
+      item.image_url || '',
+      item.name || '',
+      item.series || '',
+      item.grade || '',
+      (item.effects || []).join('|'),
+      item.price || '',
+      item.size || ''
+    ].join('::');
+  },
+
+  getDecoratedMaterialCache() {
+    if (!this.decoratedMaterialCache) {
+      this.decoratedMaterialCache = {
+        entries: Object.create(null),
+        keys: []
+      };
+    }
+    return this.decoratedMaterialCache;
+  },
+
+  rememberDecoratedMaterial(key, value) {
+    const cache = this.getDecoratedMaterialCache();
+    if (!cache.entries[key]) cache.keys.push(key);
+    cache.entries[key] = value;
+    if (cache.keys.length <= DECORATED_MATERIAL_CACHE_LIMIT) return;
+    const deleteCount = cache.keys.length - DECORATED_MATERIAL_CACHE_LIMIT;
+    cache.keys.splice(0, deleteCount).forEach(oldKey => {
+      delete cache.entries[oldKey];
+    });
+  },
+
+  decorateVisibleMaterials(materials, startIndex = 0) {
+    const launchingMaterialId = this.data.launchingMaterialId || '';
     return (materials || []).map((item, index) => {
+      const displayIndex = startIndex + index;
+      const cacheKey = this.decoratedMaterialCacheKey(item, displayIndex);
+      const cached = this.decoratedMaterialCache && this.decoratedMaterialCache.entries
+        ? this.decoratedMaterialCache.entries[cacheKey]
+        : null;
+      if (cached) {
+        const cardClass = this.materialCardClass(cached, displayIndex, launchingMaterialId);
+        return cached.cardClass === cardClass ? cached : { ...cached, cardClass };
+      }
       const seriesText = repairMaybeMojibakeText(item.series);
       const effectsText = (item.effects || [])
         .map(effect => repairMaybeMojibakeText(effect))
         .filter(effect => effect && !isMaterialGradeText(effect))
         .slice(0, 2)
         .join(' / ');
-      return {
+      const decorated = {
         ...item,
-        cardClass: `material-card-${index}${this.data.launchingMaterialId === item.id ? ' launching' : ''}`,
+        baseCardClass: `material-card-${displayIndex}`,
+        cardClass: this.materialCardClass(item, displayIndex, launchingMaterialId),
         effectText: [
           seriesText && seriesText !== item.name && !isMaterialGradeText(seriesText) ? seriesText : '',
           effectsText
         ].filter(Boolean).join(' / ')
       };
+      this.rememberDecoratedMaterial(cacheKey, decorated);
+      return decorated;
     });
   },
 
@@ -4162,42 +6337,57 @@ Page({
 
   selectCategory(e) {
     this.setData({ activeCategory: e.currentTarget.dataset.category, activeSeries: ALL_OPTION_LABEL }, () => {
-      if (this.useServerMaterialPagination) this.loadMaterials();
-      else this.refreshFilters();
+      if (this.useServerMaterialPagination) this.loadMaterials({ autoTargetSearch: false });
+      else this.refreshFilters({ autoTargetSearch: false });
     });
   },
 
   selectSeries(e) {
     this.setData({ activeSeries: e.currentTarget.dataset.series }, () => {
-      if (this.useServerMaterialPagination) this.loadMaterials();
-      else this.refreshFilters();
+      if (this.useServerMaterialPagination) this.loadMaterials({ autoTargetSearch: false });
+      else this.refreshFilters({ autoTargetSearch: false });
     });
   },
 
-  reloadMaterialsForSearch() {
-    if (this.useServerMaterialPagination) this.loadMaterials();
-    else this.refreshFilters();
+  reloadMaterialsForSearch(options = {}) {
+    const keyword = this.normalizeMaterialSearchKeyword(this.data.materialSearchKeyword);
+    if (!options.force && keyword === this.appliedMaterialSearchKeyword) return;
+    this.appliedMaterialSearchKeyword = keyword;
+    const autoTargetSearch = options.autoTargetSearch !== false;
+    const reload = () => {
+      if (this.useServerMaterialPagination) this.loadMaterials({ autoTargetSearch });
+      else this.refreshFilters({ autoTargetSearch });
+    };
+    if (keyword && autoTargetSearch && (!this.isAllFilterValue(this.data.activeCategory) || !this.isAllFilterValue(this.data.activeSeries))) {
+      this.setData({
+        activeCategory: ALL_OPTION_LABEL,
+        activeSeries: ALL_OPTION_LABEL
+      }, reload);
+      return;
+    }
+    reload();
   },
 
   onMaterialSearchInput(e) {
     const keyword = (e.detail && e.detail.value) || '';
+    if (keyword === this.data.materialSearchKeyword) return;
     this.setData({ materialSearchKeyword: keyword });
     clearTimeout(this.materialSearchTimer);
     this.materialSearchTimer = setTimeout(() => {
       this.reloadMaterialsForSearch();
-    }, 320);
+    }, MATERIAL_SEARCH_DEBOUNCE_MS);
   },
 
   submitMaterialSearch(e) {
     const keyword = (e.detail && e.detail.value) || this.data.materialSearchKeyword || '';
     clearTimeout(this.materialSearchTimer);
-    this.setData({ materialSearchKeyword: keyword }, () => this.reloadMaterialsForSearch());
+    this.setData({ materialSearchKeyword: keyword }, () => this.reloadMaterialsForSearch({ force: true }));
   },
 
   clearMaterialSearch() {
     if (!this.data.materialSearchKeyword) return;
     clearTimeout(this.materialSearchTimer);
-    this.setData({ materialSearchKeyword: '' }, () => this.reloadMaterialsForSearch());
+    this.setData({ materialSearchKeyword: '' }, () => this.reloadMaterialsForSearch({ force: true }));
   },
 
   onMaterialImageError(e) {
@@ -4206,6 +6396,7 @@ Page({
     this.materialCatalog = (this.materialCatalog || DEFAULT_MATERIALS).map(item => (
       item.id === id ? { ...item, image_url: '' } : item
     ));
+    this.rebuildMaterialLookup();
     if (this.useServerMaterialPagination) {
       this.setData({
         visibleMaterials: (this.data.visibleMaterials || []).map(item => (
@@ -4216,7 +6407,7 @@ Page({
       return;
     }
     this.refreshFilters({
-      limit: Math.max(this.materialPageSize || MATERIAL_PAGE_SIZE, this.data.visibleMaterials.length)
+      limit: Math.max(this.materialPageSize || MATERIAL_PAGE_SIZE, (this.data.visibleMaterials || []).length)
     });
     this.recalculate();
   },
@@ -4408,26 +6599,136 @@ Page({
   },
 
   releaseString() {
-    if (this.data.isLooseMode || !this.data.selected.length || this.data.isShuffling) return;
+    if (
+      this.data.isLooseMode
+      || !this.data.selected.length
+      || this.data.isShuffling
+      || this.data.isStringingFinishing
+      || this.data.isReleasingString
+    ) return;
     this.pushHistory();
-    const placements = [];
-    this.data.selected.forEach((id, index) => {
-      const previous = this.data.placements[index] || {};
-      const loosePlacement = this.createLoosePlacement(index, id, placements);
-      placements.push({
+    this.stopPhysics();
+    const selected = this.data.selected || [];
+    const currentPlacements = this.normalizePlacements(selected, this.data.placements);
+    const items = selected.map((id, index) => {
+      const material = this.findMaterialById(id) || {};
+      const placement = currentPlacements[index] || {};
+      return {
+        ...placement,
+        ...material,
+        id,
+        image_url: placement.image_url || material.image_url || ''
+      };
+    });
+    const geometry = this.getCachedBraceletGeometry(items);
+    const targetPlacements = [];
+    selected.forEach((id, index) => {
+      const previous = currentPlacements[index] || {};
+      const loosePlacement = this.createLoosePlacement(index, id, targetPlacements);
+      targetPlacements.push({
+        ...previous,
         ...loosePlacement,
-        image_url: previous.image_url || loosePlacement.image_url || ''
+        image_url: previous.image_url || loosePlacement.image_url || '',
+        name: previous.name || loosePlacement.name || '',
+        category: previous.category || loosePlacement.category || '',
+        series: previous.series || loosePlacement.series || '',
+        size: previous.size || previous.diameter || loosePlacement.size || '',
+        diameter: previous.diameter || previous.size || loosePlacement.diameter || '',
+        price: previous.price || loosePlacement.price || ''
       });
     });
+    const startPlacements = currentPlacements.map((placement, index) => {
+      const angle = geometry.angles[index] || 0;
+      const beadSize = geometry.beadSizes[index] || Number(placement.beadSize) || this.getMaterialDisplaySize(selected[index]);
+      return {
+        ...placement,
+        looseX: geometry.center + Math.cos(angle) * geometry.radius,
+        looseY: geometry.center + Math.sin(angle) * geometry.radius,
+        rotation: Number(placement.rotation || 0),
+        beadSize
+      };
+    });
     this.setData({
-      placements,
+      placements: startPlacements,
       isLooseMode: true,
+      isReleasingString: true,
       selectedBeadIndex: -1,
+      selectedBeadInfo: null,
       draggingBeadIndex: -1,
       dragDeleteArmed: false
+    }, () => {
+      this.recalculate({ persist: false });
+      this.animateReleaseString(startPlacements, targetPlacements, items, geometry);
     });
-    this.recalculate();
-    wx.nextTick(() => this.startPhysicsFromCurrentDesign());
+  },
+
+  animateReleaseString(startPlacements, targetPlacements, items, geometry) {
+    clearInterval(this.releaseStringTimer);
+    this.releaseStringTimer = null;
+    const duration = this.isLowPerformanceDevice ? RELEASE_STRING_LOW_PERF_DURATION : RELEASE_STRING_FLIGHT_DURATION;
+    const stagger = this.isLowPerformanceDevice ? RELEASE_STRING_LOW_PERF_STAGGER_MS : RELEASE_STRING_STAGGER_MS;
+    const interval = this.isLowPerformanceDevice ? 28 : (this.isRealDevice ? 20 : 16);
+    const startedAt = Date.now();
+    const totalDuration = duration + Math.max(0, (startPlacements.length - 1) * stagger);
+    const center = geometry.center || this.getStageLayout().center;
+    this.releaseStringTimer = setInterval(() => {
+      const elapsed = Date.now() - startedAt;
+      const nextPlacements = startPlacements.map((start, index) => {
+        const target = targetPlacements[index] || start;
+        const progress = Math.max(0, Math.min(1, (elapsed - index * stagger) / duration));
+        const eased = progress;
+        const startX = Number(start.looseX || center);
+        const startY = Number(start.looseY || center);
+        const x = startX + (Number(target.looseX || center) - startX) * eased;
+        const y = startY + (Number(target.looseY || center) - startY) * eased;
+        const fromRotation = Number(start.rotation || 0);
+        const toRotation = Number(target.rotation || 0);
+        return {
+          ...target,
+          looseX: x,
+          looseY: y,
+          rotation: fromRotation + (toRotation - fromRotation) * eased,
+          beadSize: Number(start.beadSize || target.beadSize || 54)
+            + (Number(target.beadSize || start.beadSize || 54) - Number(start.beadSize || target.beadSize || 54)) * eased
+        };
+      });
+      this.setLivePlacements(nextPlacements);
+      const updates = {};
+      if (!this.data.useCanvasRenderer) {
+        updates.placements = nextPlacements;
+        updates.selectedItems = this.layoutSelectedItems(items, nextPlacements, geometry);
+      }
+      const isComplete = elapsed >= totalDuration;
+      if (isComplete) {
+        clearInterval(this.releaseStringTimer);
+        this.releaseStringTimer = null;
+      }
+      if (this.data.useCanvasRenderer) {
+        this.scheduleCanvasRender(true);
+        if (isComplete) this.completeReleaseString(targetPlacements);
+        return;
+      }
+      this.setData(updates, () => {
+        if (!isComplete) return;
+        this.completeReleaseString(targetPlacements);
+      });
+    }, interval);
+  },
+
+  completeReleaseString(targetPlacements) {
+    this.setLivePlacements(targetPlacements);
+    this.setData({
+      placements: targetPlacements,
+      isLooseMode: true,
+      isReleasingString: false,
+      selectedBeadIndex: -1,
+      selectedBeadInfo: null,
+      draggingBeadIndex: -1,
+      dragDeleteArmed: false
+    }, () => {
+      this.recalculate({ persistDelay: 260 });
+      wx.nextTick(() => this.startPhysicsFromCurrentDesign());
+    });
   },
 
   toggleStringMode() {
@@ -4496,8 +6797,8 @@ Page({
       wx.showToast({ title: `至少选择${MIN_STRING_BEAD_COUNT}颗珠子成串`, icon: 'none' });
       return false;
     }
-    if (this.data.isShuffling || this.data.isStringingFinishing) {
-      wx.showToast({ title: '正在成串，请稍候', icon: 'none' });
+    if (this.data.isShuffling || this.data.isStringingFinishing || this.data.isReleasingString) {
+      wx.showToast({ title: this.data.isReleasingString ? '正在散开，请稍候' : '正在成串，请稍候', icon: 'none' });
       return false;
     }
     if (this.data.isLooseMode) {
@@ -4708,9 +7009,127 @@ Page({
     return null;
   },
 
+  resolveMaterialFlightTarget(task = {}, material = {}, layout = this.getStageLayout()) {
+    const beadSize = Math.max(42, Math.min(78, Number(material.size || 8) * 5.4));
+    const center = layout.center || 300;
+    const rawX = Number(task.placement && task.placement.looseX);
+    const rawY = Number(task.placement && task.placement.looseY);
+    let x = Number.isFinite(rawX) ? rawX : center;
+    let y = Number.isFinite(rawY) ? rawY : center;
+    const safePoint = this.constrainPointInsideTray({ x, y }, beadSize, layout, 12);
+    x = safePoint.x;
+    y = safePoint.y;
+    return { x, y, beadSize };
+  },
+
+  getMaterialFlightDuration(startX, startY, endX, endY) {
+    const maxDuration = this.isLowPerformanceDevice
+      ? MATERIAL_FLIGHT_LOW_PERF_DURATION
+      : (this.isRealDevice ? MATERIAL_FLIGHT_REAL_DURATION : MATERIAL_FLIGHT_DEV_DURATION);
+    const points = [startX, startY, endX, endY].map(Number);
+    if (!points.every(Number.isFinite)) return maxDuration;
+    const distance = Math.sqrt((points[2] - points[0]) ** 2 + (points[3] - points[1]) ** 2);
+    return Math.round(Math.max(
+      MATERIAL_FLIGHT_MIN_DURATION,
+      Math.min(maxDuration, distance / MATERIAL_FLIGHT_SPEED_PX_PER_MS)
+    ));
+  },
+
+  resolveMaterialLaunchPhysics({
+    startX,
+    startY,
+    circleRect,
+    target,
+    layout = this.getStageLayout(),
+    scale = 1,
+    previousCount = 0
+  } = {}) {
+    const center = Number(layout.center) || 300;
+    const beadSize = Math.max(42, Math.min(78, Number(target && target.beadSize) || 54));
+    const activeCount = Number(previousCount) || 0;
+    this.launchSequence = (Number(this.launchSequence) || 0) + 1;
+    const safeRadius = this.getTraySafeDistance(beadSize, layout, TRAY_LAUNCH_ENTRY_PADDING_RPX);
+    const rectLeft = Number(circleRect && circleRect.left);
+    const rectTop = Number(circleRect && circleRect.top);
+    const safeScale = Number(scale) > 0 ? Number(scale) : 1;
+    const logicalStartX = Number.isFinite(Number(startX)) && Number.isFinite(rectLeft)
+      ? (Number(startX) - rectLeft) / safeScale
+      : center;
+    const logicalStartY = Number.isFinite(Number(startY)) && Number.isFinite(rectTop)
+      ? (Number(startY) - rectTop) / safeScale
+      : center + safeRadius + beadSize;
+    let aimX = center;
+    let aimY = center - safeRadius * 0.96;
+    if (activeCount > 0) aimY = center - safeRadius * 0.92;
+    const safeAim = this.constrainPointInsideTray({ x: aimX, y: aimY }, beadSize, layout, TRAY_LAUNCH_AIM_PADDING_RPX);
+    aimX = safeAim.x;
+    aimY = safeAim.y;
+    let rayX = aimX - logicalStartX;
+    let rayY = aimY - logicalStartY;
+    let rayLength = Math.sqrt(rayX * rayX + rayY * rayY);
+    if (!Number.isFinite(rayLength) || rayLength < 1) {
+      rayX = center - logicalStartX;
+      rayY = center - safeRadius * 0.82 - logicalStartY;
+      rayLength = Math.sqrt(rayX * rayX + rayY * rayY) || 1;
+    }
+    const startRelX = logicalStartX - center;
+    const startRelY = logicalStartY - center;
+    const a = rayX * rayX + rayY * rayY;
+    const b = 2 * (startRelX * rayX + startRelY * rayY);
+    const c = startRelX * startRelX + startRelY * startRelY - safeRadius * safeRadius;
+    const disc = b * b - 4 * a * c;
+    let entryT = 0;
+    if (disc >= 0 && a > 0.0001) {
+      const sqrtDisc = Math.sqrt(disc);
+      const t1 = (-b - sqrtDisc) / (2 * a);
+      const t2 = (-b + sqrtDisc) / (2 * a);
+      const candidates = [t1, t2].filter(value => Number.isFinite(value) && value >= 0 && value <= 1);
+      entryT = candidates.length ? Math.min(...candidates) : 0;
+    }
+    let entryX = logicalStartX + rayX * entryT;
+    let entryY = logicalStartY + rayY * entryT;
+    const entrySafePoint = this.constrainPointInsideTray({ x: entryX, y: entryY }, beadSize, layout, TRAY_LAUNCH_ENTRY_PADDING_RPX);
+    entryX = entrySafePoint.x;
+    entryY = entrySafePoint.y;
+    let dx = aimX - entryX;
+    let dy = aimY - entryY;
+    let distance = Math.sqrt(dx * dx + dy * dy);
+    if (!Number.isFinite(distance) || distance < 1) {
+      dx = center - entryX;
+      dy = center - entryY;
+      distance = Math.sqrt(dx * dx + dy * dy) || 1;
+    }
+    const baseSpeed = BILLIARD_LAUNCH_MIN_SPEED + Math.min(distance, 640) / 640 * 18 + Math.min(activeCount, 10) * 0.8;
+    const speed = Math.max(
+      BILLIARD_LAUNCH_MIN_SPEED,
+      Math.min(this.isLowPerformanceDevice ? BILLIARD_LAUNCH_MAX_SPEED - 1.2 : BILLIARD_LAUNCH_MAX_SPEED, baseSpeed)
+    );
+    const velocity = {
+      x: dx / distance * speed,
+      y: dy / distance * speed
+    };
+    return {
+      x: entryX,
+      y: entryY,
+      entryX,
+      entryY,
+      velocity,
+      angularVelocity: (Math.random() * 2 - 1) * 0.035,
+      launchAimX: aimX,
+      launchAimY: aimY,
+      launchSpeed: speed,
+      launchAssistMs: 0,
+      billiardDamping: BILLIARD_LINEAR_DAMPING,
+      angularDamping: BILLIARD_ANGULAR_DAMPING,
+      frictionAir: BILLIARD_FRICTION_AIR,
+      restitution: BILLIARD_BEAD_RESTITUTION,
+      density: 0.0024
+    };
+  },
+
   async addMaterial(e) {
-    if (this.data.isShuffling) {
-      this.showMaterialQueueToast('正在成串，请稍候');
+    if (this.data.isShuffling || this.data.isStringingFinishing || this.data.isReleasingString) {
+      this.showMaterialQueueToast(this.data.isReleasingString ? '正在散开，请稍候' : '正在成串，请稍候');
       return;
     }
     const id = e.currentTarget.dataset.id;
@@ -4728,7 +7147,12 @@ Page({
       this.showMaterialQueueToast('吊坠功能暂未开放');
       return;
     }
-    const currentMaterial = await this.ensureMaterialImagePool(material);
+    let currentMaterial = material;
+    if (this.canUseHydratedMaterialImagePool(material)) {
+      currentMaterial = await this.ensureMaterialImagePool(material);
+    } else {
+      this.warmMaterialImagePool(material);
+    }
     const pendingCount = this.data.selected.length + this.flightQueue.length;
     if (pendingCount >= MAX_WORKSPACE_BEADS) {
       this.showMaterialQueueToast('珠子已经很多了，先整理一下');
@@ -4747,6 +7171,9 @@ Page({
     );
     const imageUrl = placement.image_url || this.pickMaterialImageUrl(currentMaterial) || currentMaterial.image_url || '';
     placement.image_url = imageUrl;
+    if (imageUrl && this.data.useCanvasRenderer && this.braceletCanvasState) {
+      this.getCanvasImage(imageUrl);
+    }
     this.flightQueue.push({
       id,
       cardIndex,
@@ -4786,32 +7213,24 @@ Page({
       const scale = circleRect.width / logicalSize;
       const startX = cardRect.left + cardRect.width / 2;
       const startY = cardRect.top + cardRect.height / 2;
-      const beadSize = Math.max(42, Math.min(78, material.size * 5.4));
-      const launchIndex = this.data.selected.length + this.flightQueue.length;
-      const launchSeed = (task.placement.rotation + launchIndex * 47) % 101;
-      const laneBias = ((launchIndex % 6) - 2.5) / 2.5;
-      const entryAngle = Math.PI / 2 + laneBias * 0.92 + ((launchSeed / 100) - 0.5) * 0.38;
-      const entryRadius = layout.center - 28 - beadSize / 2;
-      const entryLogicalX = layout.center + Math.cos(entryAngle) * entryRadius;
-      const entryLogicalY = layout.center + Math.sin(entryAngle) * entryRadius;
-      const launchSpeed = 16.2 + (launchSeed % 12) * 0.5 + Math.min(launchIndex, 12) * 0.22;
-      const targetAngle = -Math.PI / 2 + laneBias * 0.58 + ((launchSeed / 100) - 0.5) * 0.62;
-      const targetRadius = layout.center * (0.26 + (launchSeed % 5) * 0.018);
-      const aimX = layout.center + Math.cos(targetAngle) * targetRadius;
-      const aimY = layout.center + Math.sin(targetAngle) * targetRadius;
-      const aimDx = aimX - entryLogicalX;
-      const aimDy = aimY - entryLogicalY;
-      const aimLength = Math.max(1, Math.sqrt(aimDx ** 2 + aimDy ** 2));
-      const tangentX = -aimDy / aimLength;
-      const tangentY = aimDx / aimLength;
-      const scatterStrength = 2.1 + Math.abs(laneBias) * 1.06;
-      const endX = circleRect.left + entryLogicalX * scale;
-      const endY = circleRect.top + entryLogicalY * scale;
+      const target = this.resolveMaterialFlightTarget(task, material, layout);
+      const launchPhysics = this.resolveMaterialLaunchPhysics({
+        startX,
+        startY,
+        circleRect,
+        target,
+        layout,
+        scale,
+        previousCount: this.data.selected.length
+      });
+      const beadSize = target.beadSize;
+      const endX = circleRect.left + launchPhysics.x * scale;
+      const endY = circleRect.top + launchPhysics.y * scale;
       const sourceSize = Math.min(cardRect.width, cardRect.height);
       const targetSize = beadSize * scale;
       const animation = wx.createAnimation({ transformOrigin: '50% 50%' });
-      const flightDelay = this.isRealDevice ? 34 : 18;
-      const flightDuration = this.isLowPerformanceDevice ? 430 : (this.isRealDevice ? 390 : 320);
+      const flightDelay = 4;
+      const flightDuration = this.getMaterialFlightDuration(startX, startY, endX, endY);
       this.setData({
         flightBead: {
           id: `${task.id}-${Date.now()}`,
@@ -4824,13 +7243,14 @@ Page({
       }, () => {
         // 先确保飞行替身已经在素材珠子上方完成首帧绘制，再隐藏原珠。
         // 多留一个绘制帧后才启动动画，避免繁忙设备直接跳到圆盘入口。
-        this.setData({ launchingMaterialId: task.id }, () => {
-          setTimeout(() => {
+        this.setLaunchingMaterialState(task.id, {}, () => {
+          clearTimeout(this.flightAnimationTimer);
+          this.flightAnimationTimer = setTimeout(() => {
+            this.flightAnimationTimer = null;
             animation
               .translate(endX - startX, endY - startY)
-              .rotate(22 + task.placement.rotation * 0.08)
               .scale(targetSize / sourceSize)
-              .step({ duration: flightDuration, timingFunction: 'cubic-bezier(.16,.92,.24,1)' });
+              .step({ duration: flightDuration, timingFunction: 'linear' });
             this.setData({ 'flightBead.animation': animation.export() });
           }, flightDelay);
         });
@@ -4838,19 +7258,11 @@ Page({
       this.flightTimer = setTimeout(() => {
         const launchPlacement = {
           ...task.placement,
-          looseX: entryLogicalX,
-          looseY: entryLogicalY
+          looseX: launchPhysics.x,
+          looseY: launchPhysics.y
         };
-        this.commitMaterial(task.id, launchPlacement, {
-          x: entryLogicalX,
-          y: entryLogicalY,
-          velocity: {
-            x: aimDx / aimLength * launchSpeed + tangentX * scatterStrength,
-            y: aimDy / aimLength * launchSpeed + tangentY * scatterStrength
-          },
-          angularVelocity: ((task.placement.rotation % 9) - 4) * 0.009
-        }, () => this.finishFlight());
-      }, flightDelay + flightDuration + 24);
+        this.commitMaterial(task.id, launchPlacement, launchPhysics, () => this.finishFlight());
+      }, flightDelay + flightDuration + 4);
     });
   },
 
@@ -4860,7 +7272,11 @@ Page({
       this.canvasFlightReadyRetries = (this.canvasFlightReadyRetries || 0) + 1;
       if (this.canvasFlightReadyRetries <= 5) {
         this.initWorkspaceCanvases();
-        setTimeout(() => this.processCanvasFlightQueue(), 70);
+        clearTimeout(this.canvasFlightRetryTimer);
+        this.canvasFlightRetryTimer = setTimeout(() => {
+          this.canvasFlightRetryTimer = null;
+          this.processCanvasFlightQueue();
+        }, 70);
         return;
       }
       this.canvasFlightReadyRetries = 0;
@@ -4890,43 +7306,32 @@ Page({
       const layout = this.getStageLayout();
       const logicalSize = layout.center * 2;
       const scale = circleRect.width / logicalSize;
-      const beadSize = Math.max(42, Math.min(78, material.size * 5.4));
-      const launchIndex = this.data.selected.length + this.flightQueue.length;
-      const launchSeed = (task.placement.rotation + launchIndex * 47) % 101;
       const startX = startRect.left + startRect.width / 2;
       const startY = startRect.top + startRect.height / 2;
-      const startLogicalX = (startX - circleRect.left) / scale;
-      const startLogicalY = (startY - circleRect.top) / scale;
-      const shotDx = layout.center - startLogicalX;
-      const shotDy = layout.center - startLogicalY;
-      const shotLength = Math.max(1, Math.sqrt(shotDx ** 2 + shotDy ** 2));
-      const shotX = shotDx / shotLength;
-      const shotY = shotDy / shotLength;
-      const entryRadius = layout.center - beadSize / 2 - 14;
-      const entryLogicalX = layout.center - shotX * entryRadius;
-      const entryLogicalY = layout.center - shotY * entryRadius;
-      const tangentX = -shotY;
-      const tangentY = shotX;
-      const baseLaunchSpeed = this.isLowPerformanceDevice ? 38 : (this.isRealDevice ? 48 : 52);
-      const powerRoll = Math.random();
-      const powerFactor = powerRoll < 0.12
-        ? 0.92 + Math.random() * 0.08
-        : (powerRoll > 0.84 ? 1.12 + Math.random() * 0.12 : 1.0 + Math.random() * 0.12);
-      const launchSpeed = baseLaunchSpeed * powerFactor + (launchSeed % 7) * 0.35;
-      const scatterStrength = (Math.random() - 0.5) * 0.9;
+      const target = this.resolveMaterialFlightTarget(task, material, layout);
+      const launchPhysics = this.resolveMaterialLaunchPhysics({
+        startX,
+        startY,
+        circleRect,
+        target,
+        layout,
+        scale,
+        previousCount: this.data.selected.length
+      });
+      const beadSize = target.beadSize;
       const launchPlacement = {
         ...task.placement,
-        looseX: entryLogicalX,
-        looseY: entryLogicalY
+        looseX: launchPhysics.x,
+        looseY: launchPhysics.y
       };
-      const endX = circleRect.left + entryLogicalX * scale;
-      const endY = circleRect.top + entryLogicalY * scale;
+      const endX = circleRect.left + launchPhysics.x * scale;
+      const endY = circleRect.top + launchPhysics.y * scale;
       const controlX = (startX + endX) / 2;
       const controlY = (startY + endY) / 2;
       const sourceSize = Math.max(36, Math.min(76, Math.min(startRect.width, startRect.height)));
       const targetSize = beadSize * scale;
-      const flightDuration = this.isLowPerformanceDevice ? 300 : (this.isRealDevice ? 270 : 240);
-      const flightStartDelay = this.isRealDevice ? 48 : 24;
+      const flightDuration = this.getMaterialFlightDuration(startX, startY, endX, endY);
+      const flightStartDelay = 4;
       const flightMaterial = {
         ...material,
         image_url: task.image_url || material.image_url || ''
@@ -4942,29 +7347,19 @@ Page({
         end: { x: endX, y: endY },
         path: 'line',
         easing: 'linear',
+        trail: false,
         sourceSize,
         targetSize,
         rotation: Number(task.placement.rotation || 0),
-        rotationDelta: 8 + (launchSeed % 5),
+        rotationDelta: 0,
         startedAt: Date.now() + flightStartDelay,
         duration: flightDuration
       };
-      this.setData({ launchingMaterialId: task.id }, () => {
-        this.setData({ canvasFlightActive: true }, () => this.scheduleCanvasRender(true));
+      this.setLaunchingMaterialState(task.id, { canvasFlightActive: true }, () => {
+        this.scheduleCanvasRender(true);
         this.flightTimer = setTimeout(() => {
-          this.commitMaterial(task.id, launchPlacement, {
-            x: entryLogicalX,
-            y: entryLogicalY,
-            billiardDamping: this.isLowPerformanceDevice ? 0.88 : 0.92,
-            frictionAir: 0.002,
-            restitution: 0.9,
-            velocity: {
-              x: shotX * launchSpeed + tangentX * scatterStrength,
-              y: shotY * launchSpeed + tangentY * scatterStrength
-            },
-            angularVelocity: ((task.placement.rotation % 9) - 4) * 0.018
-          }, () => this.finishCanvasFlight());
-        }, flightStartDelay + flightDuration + 18);
+          this.commitMaterial(task.id, launchPlacement, launchPhysics, () => this.finishCanvasFlight());
+        }, flightStartDelay + flightDuration + 4);
       });
     });
   },
@@ -4976,7 +7371,7 @@ Page({
     this.flightSafetyTimer = null;
     this.canvasFlight = null;
     this.clearWorkspaceFlightCanvas();
-    this.setData({ canvasFlightActive: false, launchingMaterialId: '' }, () => {
+    this.setLaunchingMaterialState('', { canvasFlightActive: false }, () => {
       this.scheduleCanvasRender();
       this.flightActive = false;
       this.processCanvasFlightQueue();
@@ -4988,7 +7383,15 @@ Page({
     const previousCount = this.data.selected.length;
     const launchVelocity = physicsOptions.velocity;
     const launchAngularVelocity = physicsOptions.angularVelocity;
-    const freezeExistingUntilImpact = !!physicsOptions.freezeExistingUntilImpact && previousCount > 0;
+    if (launchVelocity) {
+      this.extendTrayImpactContainment();
+    }
+    const existingImpactPhysics = {
+      billiardDamping: BILLIARD_LINEAR_DAMPING,
+      angularDamping: BILLIARD_ANGULAR_DAMPING,
+      frictionAir: BILLIARD_FRICTION_AIR,
+      restitution: BILLIARD_BEAD_RESTITUTION
+    };
     const restingPhysicsOptions = {
       ...physicsOptions,
       velocity: { x: 0, y: 0 },
@@ -5001,28 +7404,29 @@ Page({
       isLooseMode: true,
       selectedBeadIndex: -1
     });
-    this.recalculate();
+    this.recalculate({ persistDelay: 520 });
     wx.nextTick(() => {
-      if (freezeExistingUntilImpact || !this.physicsEngine || !wasLooseMode) {
+      if (previousCount === 0 || !this.physicsEngine || !wasLooseMode) {
         this.stopPhysics();
         this.createPhysicsEngine();
         this.data.selected.slice(0, previousCount).forEach((materialId, index) => {
           this.createPhysicsBody(materialId, this.data.placements[index], index, {
-            isStatic: freezeExistingUntilImpact,
-            frozenUntilImpact: freezeExistingUntilImpact,
-            billiardDamping: 0.86,
-            frictionAir: freezeExistingUntilImpact ? 0.045 : 0.07,
-            restitution: 0.68
+            ...existingImpactPhysics
           });
         });
       }
-      if (freezeExistingUntilImpact) {
-        this.pendingFrozenImpact = true;
-        this.pendingFrozenImpactAt = Date.now();
-        this.pendingImpactTargets = physicsOptions.impactTargets || null;
-      } else if (Body) {
+      if (Body) {
         (this.physicsBodies || []).forEach(body => {
           if (!body || !body.plugin || body.plugin.designIndex >= previousCount) return;
+          body.restitution = BILLIARD_BEAD_RESTITUTION;
+          body.friction = BILLIARD_FRICTION;
+          body.frictionStatic = BILLIARD_STATIC_FRICTION;
+          body.frictionAir = BILLIARD_FRICTION_AIR;
+          body.plugin.billiardDamping = BILLIARD_LINEAR_DAMPING;
+          body.plugin.angularDamping = BILLIARD_ANGULAR_DAMPING;
+          if (Sleeping) Sleeping.set(body, false);
+          body.isSleeping = false;
+          body.sleepCounter = 0;
           Body.setVelocity(body, { x: 0, y: 0 });
           Body.setAngularVelocity(body, 0);
         });
@@ -5034,18 +7438,32 @@ Page({
         {
           ...restingPhysicsOptions,
           isLauncher: true,
-          billiardDamping: physicsOptions.billiardDamping || 0.86,
-          frictionAir: physicsOptions.frictionAir == null ? 0.075 : physicsOptions.frictionAir,
-          restitution: physicsOptions.restitution == null ? 0.74 : physicsOptions.restitution,
-          density: physicsOptions.density == null ? 0.0022 : physicsOptions.density
+          velocity: launchVelocity || restingPhysicsOptions.velocity,
+          angularVelocity: launchAngularVelocity || restingPhysicsOptions.angularVelocity,
+          billiardDamping: physicsOptions.billiardDamping || BILLIARD_LINEAR_DAMPING,
+          angularDamping: physicsOptions.angularDamping || BILLIARD_ANGULAR_DAMPING,
+          frictionAir: physicsOptions.frictionAir == null ? BILLIARD_FRICTION_AIR : physicsOptions.frictionAir,
+          restitution: physicsOptions.restitution == null ? BILLIARD_BEAD_RESTITUTION : physicsOptions.restitution,
+          density: physicsOptions.density == null ? 0.0024 : physicsOptions.density
         }
       );
       this.syncPhysicsFrame(() => {
-        if (onReady) onReady();
         wx.nextTick(() => {
-          if (launchVelocity) Body.setVelocity(launchedBody, launchVelocity);
-          if (launchAngularVelocity) Body.setAngularVelocity(launchedBody, launchAngularVelocity);
+          if (launchVelocity) {
+            if (Sleeping) Sleeping.set(launchedBody, false);
+            launchedBody.isSleeping = false;
+            launchedBody.sleepCounter = 0;
+            Body.setVelocity(launchedBody, launchVelocity);
+          }
+          if (launchAngularVelocity) {
+            if (Sleeping) Sleeping.set(launchedBody, false);
+            launchedBody.isSleeping = false;
+            launchedBody.sleepCounter = 0;
+            Body.setAngularVelocity(launchedBody, launchAngularVelocity);
+          }
           this.runPhysics();
+          if (this.data.useCanvasRenderer) this.scheduleCanvasRender(true);
+          if (onReady) onReady();
         });
       });
     });
@@ -5056,13 +7474,14 @@ Page({
     this.flightTimer = null;
     clearTimeout(this.flightSafetyTimer);
     this.flightSafetyTimer = null;
-    this.setData({ flightBead: null, launchingMaterialId: '' });
-    this.flightActive = false;
-    this.processFlightQueue();
+    this.setLaunchingMaterialState('', { flightBead: null }, () => {
+      this.flightActive = false;
+      this.processFlightQueue();
+    });
   },
 
   shuffleDesign() {
-    if (this.data.isShuffling) return;
+    if (this.data.isShuffling || this.data.isStringingFinishing || this.data.isReleasingString) return;
     if (this.flightActive || this.flightQueue.length) {
       wx.showToast({ title: '珠子还在入盘，请稍候', icon: 'none' });
       return;
@@ -5092,8 +7511,11 @@ Page({
       selected: shuffled,
       placements: this.normalizePlacements(shuffled, placements),
       selectedBeadIndex: -1,
+      selectedBeadInfo: null,
       isShuffling: true,
-      isLooseMode: true
+      isLooseMode: true,
+      draggingBeadIndex: -1,
+      dragDeleteArmed: false
     });
     this.recalculate();
     wx.nextTick(() => this.startStringingPhysics());
@@ -5102,14 +7524,18 @@ Page({
   startStringingPhysics() {
     try {
       this.stopPhysics();
+      this.dragState = null;
+      this.ringDragState = null;
+      this.ringSlideState = null;
       const selected = this.data.selected || [];
       if (!selected.length) {
         this.recoverStringingRuntime();
         return;
       }
       const placements = this.normalizePlacements(selected, this.data.placements);
+      const materials = this.getCachedSelectedMaterials(selected);
       const items = selected.map((id, index) => {
-        const material = this.findMaterialById(id) || {};
+        const material = materials[index] || {};
         const placement = placements[index] || {};
         const size = Number(material.size || placement.size || placement.diameter || 8);
         return {
@@ -5120,11 +7546,11 @@ Page({
           image_url: placement.image_url || material.image_url || ''
         };
       });
-      const geometry = this.calculateBraceletGeometry(items);
+      const geometry = this.getCachedBraceletGeometry(items);
       const targets = geometry.angles.map((angle, index) => ({
         x: geometry.center + Math.cos(angle) * geometry.radius,
         y: geometry.center + Math.sin(angle) * geometry.radius,
-        rotation: angle * 180 / Math.PI,
+        rotation: stringedBeadRotationDeg(angle),
         beadSize: geometry.beadSizes[index] || this.getMaterialDisplaySize(selected[index])
       }));
       if (!targets.length || targets.length !== selected.length) {
@@ -5139,19 +7565,50 @@ Page({
         rotation: Number(placement.rotation || 0),
         beadSize: Number(placement.beadSize || targets[index].beadSize)
       }));
-      const totalFrames = this.isLowPerformanceDevice ? 9 : (this.isRealDevice ? 12 : 10);
-      let frame = 0;
+      const duration = this.isLowPerformanceDevice ? STRINGING_LOW_PERF_DURATION : STRINGING_FLIGHT_DURATION;
+      const stagger = this.isLowPerformanceDevice ? STRINGING_LOW_PERF_STAGGER_MS : STRINGING_STAGGER_MS;
+      const interval = this.isLowPerformanceDevice ? 24 : (this.isRealDevice ? 18 : 16);
+      const startedAt = Date.now();
+      const totalDuration = duration + Math.max(0, (placements.length - 1) * stagger);
+      const finishStringingFrame = () => {
+        const finalPlacements = placements.map((placement, index) => ({
+          ...placement,
+          looseX: targets[index].x,
+          looseY: targets[index].y,
+          rotation: targets[index].rotation,
+          beadSize: targets[index].beadSize
+        }));
+        this.setLivePlacements(finalPlacements);
+        this.setData({
+          placements: finalPlacements,
+          isLooseMode: false,
+          isShuffling: false,
+          isStringingFinishing: false,
+          isReleasingString: false,
+          selectedBeadIndex: -1,
+          draggingBeadIndex: -1,
+          dragDeleteArmed: false
+        }, () => {
+          this.suppressStringingSounds = false;
+          this.recalculate();
+        });
+      };
       clearTimeout(this.stringingGuardTimer);
       this.stringingGuardTimer = null;
       clearInterval(this.stringingFinishTimer);
-      this.setData({ isStringingFinishing: true });
+      this.setData({
+        isStringingFinishing: true,
+        selectedBeadInfo: null,
+        draggingBeadIndex: -1,
+        dragDeleteArmed: false
+      });
       this.stringingFinishTimer = setInterval(() => {
-        frame += 1;
-        const progress = Math.min(1, frame / totalFrames);
-        const eased = 1 - (1 - progress) ** 3;
+        const elapsed = Date.now() - startedAt;
         const nextPlacements = placements.map((placement, index) => {
           const start = starts[index] || {};
           const target = targets[index] || {};
+          const progress = Math.max(0, Math.min(1, (elapsed - index * stagger) / duration));
+          const eased = 1 - (1 - progress) ** 3;
           return {
             ...placement,
             looseX: start.x + (target.x - start.x) * eased,
@@ -5160,37 +7617,27 @@ Page({
             beadSize: start.beadSize + (target.beadSize - start.beadSize) * eased
           };
         });
-        this.livePlacements = nextPlacements;
-        const updates = { placements: nextPlacements };
+        this.setLivePlacements(nextPlacements);
+        const updates = {};
         if (!this.data.useCanvasRenderer) {
+          updates.placements = nextPlacements;
           updates.selectedItems = this.layoutSelectedItems(items, nextPlacements, geometry);
         }
-        this.setData(updates, () => {
-          if (this.data.useCanvasRenderer) this.scheduleCanvasRender(true);
-          if (progress < 1) return;
+        const isComplete = elapsed >= totalDuration;
+        if (isComplete) {
           clearInterval(this.stringingFinishTimer);
           this.stringingFinishTimer = null;
-          const finalPlacements = placements.map((placement, index) => ({
-            ...placement,
-            looseX: targets[index].x,
-            looseY: targets[index].y,
-            rotation: targets[index].rotation,
-            beadSize: targets[index].beadSize
-          }));
-          this.setData({
-            placements: finalPlacements,
-            isLooseMode: false,
-            isShuffling: false,
-            isStringingFinishing: false,
-            selectedBeadIndex: -1,
-            draggingBeadIndex: -1,
-            dragDeleteArmed: false
-          }, () => {
-            this.suppressStringingSounds = false;
-            this.recalculate();
-          });
+        }
+        if (this.data.useCanvasRenderer) {
+          this.scheduleCanvasRender(true);
+          if (isComplete) finishStringingFrame();
+          return;
+        }
+        this.setData(updates, () => {
+          if (!isComplete) return;
+          finishStringingFrame();
         });
-      }, this.isLowPerformanceDevice ? 24 : 18);
+      }, interval);
     } catch (error) {
       this.suppressStringingSounds = false;
       this.recoverStringingRuntime();
@@ -5204,6 +7651,7 @@ Page({
 
   removeItemAt(index, options = {}) {
     if (!Number.isInteger(index) || index < 0 || index >= this.data.selected.length) return;
+    if (this.data.isReleasingString) return;
     if (options.pushHistory !== false) this.pushHistory();
     const selected = [...this.data.selected];
     const placements = [...this.data.placements];
@@ -5324,17 +7772,88 @@ Page({
     wx.nextTick(() => this.beginRingReorder(index, touch));
   },
 
+  getStringedRingContext() {
+    const selected = this.data.selected || [];
+    const placements = this.normalizePlacements(selected, this.data.placements);
+    const materials = this.getCachedSelectedMaterials(selected);
+    const items = selected.map((id, index) => {
+      const material = materials[index] || {};
+      const placement = placements[index] || {};
+      const size = Number(material.size || placement.size || placement.diameter || 8);
+      return {
+        ...placement,
+        ...material,
+        id,
+        size: Number.isFinite(size) && size > 0 ? size : 8
+      };
+    }).filter(Boolean);
+    const geometry = this.getCachedBraceletGeometry(items);
+    return { selected, placements, items, geometry };
+  },
+
+  shouldStartRingSlide(hit) {
+    if (this.data.isLooseMode || !hit || !hit.point || (this.data.selected || []).length < 3) return false;
+    const context = this.getStringedRingContext();
+    if (hit.index >= 0) return !!hit.isOuterEdge;
+    return this.isPointInRingSlideBand(hit.point, context.geometry);
+  },
+
+  isPointInRingSlideBand(point, geometry) {
+    if (!point || !geometry) return false;
+    const sizes = geometry.beadSizes || [];
+    if (!sizes.length) return false;
+    const averageBeadSize = sizes.reduce((sum, size) => sum + size, 0) / sizes.length;
+    const dx = point.x - geometry.center;
+    const dy = point.y - geometry.center;
+    const distance = Math.sqrt(dx * dx + dy * dy);
+    return distance >= geometry.radius + averageBeadSize * 0.08
+      && distance <= geometry.radius + averageBeadSize * 0.72 + 18;
+  },
+
+  isOuterEdgeTouchOnRingBead(point, index, geometry, placements) {
+    if (!point || !geometry || !Number.isInteger(index) || index < 0) return false;
+    const slot = this.getRingVisualSlots([], placements, geometry)[index] || {};
+    const beadX = Number.isFinite(slot.x) ? slot.x : geometry.center;
+    const beadY = Number.isFinite(slot.y) ? slot.y : geometry.center;
+    const dx = point.x - beadX;
+    const dy = point.y - beadY;
+    const beadDx = beadX - geometry.center;
+    const beadDy = beadY - geometry.center;
+    const beadDistance = Math.max(1, Math.sqrt(beadDx * beadDx + beadDy * beadDy));
+    const outwardProjection = dx * beadDx / beadDistance + dy * beadDy / beadDistance;
+    const beadSize = geometry.beadSizes[index] || 54;
+    return outwardProjection > Math.max(12, beadSize * RING_SLIDE_EDGE_RATIO);
+  },
+
   beginRingReorder(index, touch, rectOverride = null) {
     const setup = rect => {
       if (!rect) return;
-      const items = this.data.selected.map(id => this.findMaterialById(id)).filter(Boolean);
-      const geometry = this.calculateBraceletGeometry(items);
+      const context = this.getStringedRingContext();
+      const { selected, items, geometry, placements } = context;
+      const scale = rect.width / (geometry.center * 2);
+      const point = this.touchToTrayPoint(touch, rect, scale);
+      const hit = {
+        index,
+        point,
+        isOuterEdge: this.isOuterEdgeTouchOnRingBead(point, index, geometry, placements)
+      };
+      if (this.shouldStartRingSlide(hit)) {
+        this.beginRingSlide(touch, rect, { originIndex: index });
+        return;
+      }
+      const visualSlots = this.getRingVisualSlots(items, placements, geometry);
       this.ringDragState = {
         currentIndex: index,
         originalIndex: index,
         rect,
-        scale: rect.width / (geometry.center * 2),
+        scale,
+        selected,
+        placements,
+        items,
+        geometry,
+        visualSlots,
         moved: false,
+        dragAngle: (visualSlots[index] || {}).angle,
         draggingX: null,
         draggingY: null,
         beadSize: geometry.beadSizes[index] || 54
@@ -5356,6 +7875,125 @@ Page({
     query.exec(rects => setup(rects && rects[0]));
   },
 
+  beginRingSlide(touch, rectOverride = null, options = {}) {
+    const setup = rect => {
+      if (!rect) return;
+      const context = this.getStringedRingContext();
+      if (!context.items.length) return;
+      const scale = rect.width / (context.geometry.center * 2);
+      const point = this.touchToTrayPoint(touch, rect, scale);
+      const angle = Math.atan2(point.y - context.geometry.center, point.x - context.geometry.center);
+      this.ringSlideState = {
+        rect,
+        scale,
+        basePlacements: context.placements,
+        items: context.items,
+        geometry: context.geometry,
+        originIndex: Number.isInteger(options.originIndex) ? options.originIndex : -1,
+        lastAngle: angle,
+        totalDelta: 0,
+        moved: false
+      };
+      this.setData({
+        draggingBeadIndex: -1,
+        selectedBeadIndex: -1,
+        selectedBeadInfo: null,
+        dragDeleteArmed: false
+      });
+      this.scheduleCanvasRender(true);
+    };
+    if (rectOverride) {
+      setup(rectOverride);
+      return;
+    }
+    const query = wx.createSelectorQuery().in(this);
+    query.select('.bracelet-circle').boundingClientRect();
+    query.exec(rects => setup(rects && rects[0]));
+  },
+
+  normalizeAngleDelta(delta) {
+    let value = Number(delta) || 0;
+    while (value > Math.PI) value -= Math.PI * 2;
+    while (value < -Math.PI) value += Math.PI * 2;
+    return value;
+  },
+
+  buildRingSlidePlacements(basePlacements, angleDelta, geometryOverride = null) {
+    const geometry = geometryOverride || this.getStringedRingContext().geometry;
+    const cos = Math.cos(angleDelta);
+    const sin = Math.sin(angleDelta);
+    return (basePlacements || []).map((placement, index) => {
+      const angle = geometry.angles[index] || 0;
+      const baseX = geometry.center + Math.cos(angle) * geometry.radius;
+      const baseY = geometry.center + Math.sin(angle) * geometry.radius;
+      const currentX = baseX + Number(placement.dx || 0);
+      const currentY = baseY + Number(placement.dy || 0);
+      const relX = currentX - geometry.center;
+      const relY = currentY - geometry.center;
+      const rotatedX = geometry.center + relX * cos - relY * sin;
+      const rotatedY = geometry.center + relX * sin + relY * cos;
+      return {
+        ...placement,
+        dx: rotatedX - baseX,
+        dy: rotatedY - baseY
+      };
+    });
+  },
+
+  getRingVisualSlots(items = [], placements = [], geometry) {
+    if (!geometry) return [];
+    const center = geometry.center;
+    const count = Math.max(
+      (items && items.length) || 0,
+      (placements && placements.length) || 0,
+      (geometry.angles && geometry.angles.length) || 0
+    );
+    return Array.from({ length: count }).map((_, index) => {
+      const angle = geometry.angles[index] || 0;
+      const placement = placements[index] || {};
+      const x = center + Math.cos(angle) * geometry.radius + Number(placement.dx || 0);
+      const y = center + Math.sin(angle) * geometry.radius + Number(placement.dy || 0);
+      return {
+        x,
+        y,
+        angle: Math.atan2(y - center, x - center)
+      };
+    });
+  },
+
+  rebuildRingPlacementsForVisualSlots(selected, sourcePlacements, visualSlots) {
+    const normalized = this.normalizePlacements(selected, sourcePlacements);
+    const materials = this.getCachedSelectedMaterials(selected);
+    const items = selected.map((id, index) => {
+      const material = materials[index] || {};
+      const placement = normalized[index] || {};
+      const size = Number(material.size || placement.size || placement.diameter || 8);
+      return {
+        ...placement,
+        ...material,
+        id,
+        size: Number.isFinite(size) && size > 0 ? size : 8
+      };
+    }).filter(Boolean);
+    const geometry = this.getCachedBraceletGeometry(items);
+    return normalized.map((placement, index) => {
+      const angle = geometry.angles[index] || 0;
+      const baseX = geometry.center + Math.cos(angle) * geometry.radius;
+      const baseY = geometry.center + Math.sin(angle) * geometry.radius;
+      const slot = visualSlots[index] || {};
+      const visualX = Number.isFinite(slot.x) ? slot.x : baseX;
+      const visualY = Number.isFinite(slot.y) ? slot.y : baseY;
+      return {
+        ...placement,
+        dx: visualX - baseX,
+        dy: visualY - baseY,
+        looseX: visualX,
+        looseY: visualY,
+        beadSize: geometry.beadSizes[index] || placement.beadSize || this.getMaterialDisplaySize(selected[index])
+      };
+    });
+  },
+
   beginBeadDrag(index, touch, rectOverride = null) {
     const setup = rect => {
       const body = this.physicsBodies.find(item => item.plugin.designIndex === index);
@@ -5363,6 +8001,9 @@ Page({
       const layout = this.getStageLayout();
       const scale = rect.width / (layout.center * 2);
       const point = this.touchToTrayPoint(touch, rect, scale);
+      clearTimeout(this.dragPhysicsSyncTimer);
+      this.dragPhysicsSyncTimer = null;
+      this.lastDragPhysicsSyncAt = Date.now();
       Body.setStatic(body, true);
       Body.setPosition(body, point);
       this.dragState = {
@@ -5370,6 +8011,7 @@ Page({
         body,
         rect,
         scale,
+        layout,
         lastPoint: point,
         lastAt: Date.now(),
         velocity: { x: 0, y: 0 },
@@ -5380,7 +8022,7 @@ Page({
         draggingBeadIndex: index,
         selectedBeadIndex: index,
         selectedBeadInfo: this.buildSelectedBeadInfo(index),
-        dragDeleteArmed: this.isPointOutsideTray(point, body.plugin.beadSize)
+        dragDeleteArmed: this.isPointOutsideTray(point, body.plugin.beadSize, layout)
       });
       this.syncPhysicsFrame();
     };
@@ -5394,6 +8036,10 @@ Page({
   },
 
   onBeadTouchMove(e) {
+    if (this.ringSlideState) {
+      this.onRingSlideMove(e);
+      return;
+    }
     if (this.ringDragState) {
       this.onRingReorderMove(e);
       return;
@@ -5420,45 +8066,78 @@ Page({
     state.lastAt = now;
     state.moved = true;
     Body.setPosition(state.body, point);
-    const outside = this.isPointOutsideTray(point, state.body.plugin.beadSize);
+    const outside = this.isPointOutsideTray(point, state.body.plugin.beadSize, state.layout);
     if (outside !== this.data.dragDeleteArmed) {
       this.setData({ dragDeleteArmed: outside });
     }
-    this.syncPhysicsFrame();
+    this.scheduleDragPhysicsFrame();
+  },
+
+  onRingSlideMove(e) {
+    const state = this.ringSlideState;
+    const touch = e.touches && e.touches[0];
+    if (!state || !touch) return;
+    const geometry = state.geometry || this.getStringedRingContext().geometry;
+    const point = this.touchToTrayPoint(touch, state.rect, state.scale);
+    const angle = Math.atan2(point.y - geometry.center, point.x - geometry.center);
+    const delta = this.normalizeAngleDelta(angle - state.lastAngle);
+    state.lastAngle = angle;
+    state.totalDelta += delta;
+    if (Math.abs(state.totalDelta) > RING_SLIDE_MIN_MOVE_RAD) state.moved = true;
+    const placements = this.buildRingSlidePlacements(state.basePlacements, state.totalDelta, geometry);
+    this.setLivePlacements(placements);
+    if (this.data.useCanvasRenderer) {
+      this.scheduleCanvasRender(true);
+      return;
+    }
+    const selectedItems = this.layoutSelectedItems(state.items || [], placements, geometry);
+    this.setData({ placements, selectedItems });
   },
 
   onRingReorderMove(e) {
     const state = this.ringDragState;
     const touch = e.touches && e.touches[0];
     if (!state || !touch) return;
-    const items = this.data.selected.map(id => this.findMaterialById(id)).filter(Boolean);
+    const currentSelected = state.selected || this.data.selected || [];
+    const currentPlacements = state.placements || this.data.placements || [];
+    const items = state.items || [];
+    const geometry = state.geometry || this.getStringedRingContext().geometry;
     const currentItem = items[state.currentIndex];
     if (!currentItem) return;
-    const geometry = this.calculateBraceletGeometry(items);
+    const visualSlots = state.visualSlots || this.getRingVisualSlots(items, currentPlacements, geometry);
     const point = this.touchToTrayPoint(touch, state.rect, state.scale);
     const dx = point.x - geometry.center;
     const dy = point.y - geometry.center;
-    const length = Math.max(1, Math.sqrt(dx ** 2 + dy ** 2));
-    const outside = this.isPointOutsideTray(point, currentItem.size * 5.4);
+    const distanceFromCenter = Math.sqrt(dx ** 2 + dy ** 2);
+    const stableAngleDistance = Math.max(
+      geometry.radius * RING_REORDER_CENTER_DEAD_ZONE_RATIO,
+      (geometry.beadSizes[state.currentIndex] || 54) * 0.75
+    );
+    if (distanceFromCenter >= stableAngleDistance) {
+      state.dragAngle = Math.atan2(dy, dx);
+    } else if (!Number.isFinite(state.dragAngle)) {
+      state.dragAngle = geometry.angles[state.currentIndex] || 0;
+    }
+    const projected = {
+      x: geometry.center + Math.cos(state.dragAngle) * geometry.radius,
+      y: geometry.center + Math.sin(state.dragAngle) * geometry.radius
+    };
+    const outside = this.isPointOutsideTray(point, currentItem.size * 5.4, geometry);
     if (outside !== this.data.dragDeleteArmed) {
       this.setData({ dragDeleteArmed: outside });
     }
     state.moved = true;
     state.deleteArmed = outside;
-    state.draggingX = point.x;
-    state.draggingY = point.y;
+    state.draggingX = outside ? point.x : projected.x;
+    state.draggingY = outside ? point.y : projected.y;
     this.patchRingDraggingBeadPosition(state);
     if (outside) return;
-    if (this.data.selected.length < 2) return;
-    const projected = {
-      x: geometry.center + dx / length * geometry.radius,
-      y: geometry.center + dy / length * geometry.radius
-    };
+    if (currentSelected.length < 2) return;
     let targetIndex = state.currentIndex;
     let nearestDistance = Infinity;
-    geometry.angles.forEach((angle, index) => {
-      const targetX = geometry.center + Math.cos(angle) * geometry.radius;
-      const targetY = geometry.center + Math.sin(angle) * geometry.radius;
+    visualSlots.forEach((slot, index) => {
+      const targetX = Number.isFinite(slot.x) ? slot.x : geometry.center;
+      const targetY = Number.isFinite(slot.y) ? slot.y : geometry.center;
       const distance = (projected.x - targetX) ** 2 + (projected.y - targetY) ** 2;
       if (distance < nearestDistance) {
         nearestDistance = distance;
@@ -5466,13 +8145,25 @@ Page({
       }
     });
     if (targetIndex === state.currentIndex) return;
-    const selected = [...this.data.selected];
-    const placements = [...this.data.placements];
+    const selected = [...currentSelected];
+    const itemPlacements = [...currentPlacements];
+    const nextItems = [...items];
     const [selectedItem] = selected.splice(state.currentIndex, 1);
-    const [placementItem] = placements.splice(state.currentIndex, 1);
+    const [placementItem] = itemPlacements.splice(state.currentIndex, 1);
+    const [item] = nextItems.splice(state.currentIndex, 1);
     selected.splice(targetIndex, 0, selectedItem);
-    placements.splice(targetIndex, 0, placementItem);
+    itemPlacements.splice(targetIndex, 0, placementItem);
+    nextItems.splice(targetIndex, 0, item);
+    const placements = this.rebuildRingPlacementsForVisualSlots(selected, itemPlacements, visualSlots);
+    const nextGeometry = this.getCachedBraceletGeometry(nextItems);
+    const nextVisualSlots = this.getRingVisualSlots(nextItems, placements, nextGeometry);
     state.currentIndex = targetIndex;
+    state.selected = selected;
+    state.placements = placements;
+    state.items = nextItems;
+    state.geometry = nextGeometry;
+    state.visualSlots = nextVisualSlots;
+    state.beadSize = nextGeometry.beadSizes[targetIndex] || state.beadSize || 54;
     state.moved = true;
     this.setData({
       selected,
@@ -5491,20 +8182,46 @@ Page({
       this.scheduleCanvasRender(true);
       return;
     }
-    const items = this.data.selected.map(id => this.findMaterialById(id)).filter(Boolean);
-    const geometry = this.calculateBraceletGeometry(items);
+    const items = this.getCachedSelectedMaterials(this.data.selected).filter(Boolean);
+    const geometry = this.getCachedBraceletGeometry(items);
     const beadSize = Number(state.beadSize || geometry.beadSizes[state.currentIndex] || 54);
     const left = state.draggingX - beadSize / 2;
     const top = state.draggingY - beadSize / 2;
-    const rad = Math.atan2(state.draggingY - geometry.center, state.draggingX - geometry.center);
+    const rotation = stringedBeadRotationFromPoint(state.draggingX, state.draggingY, geometry.center);
     const updates = {};
-    updates[`selectedItems[${state.currentIndex}].style`] = `left:0;top:0;width:${beadSize}rpx;height:${beadSize}rpx;background:${this.buildBeadBackground(items[state.currentIndex])};transform:translate3d(${left.toFixed(1)}rpx,${top.toFixed(1)}rpx,0) rotate(${(rad * 180 / Math.PI).toFixed(1)}deg);`;
+    updates[`selectedItems[${state.currentIndex}].style`] = `left:0;top:0;width:${beadSize}rpx;height:${beadSize}rpx;background:${this.buildBeadBackground(items[state.currentIndex])};transform:translate3d(${left.toFixed(1)}rpx,${top.toFixed(1)}rpx,0) rotate(${rotation.toFixed(1)}deg);`;
     const baseClass = state.currentIndex === this.data.selectedBeadIndex ? 'active' : '';
     updates[`selectedItems[${state.currentIndex}].className`] = `${baseClass} dragging${state.deleteArmed ? ' delete-ready' : ''}`.trim();
     this.setData(updates);
   },
 
   onBeadTouchEnd() {
+    if (this.ringSlideState) {
+      const state = this.ringSlideState;
+      this.ringSlideState = null;
+      if (state.moved) this.suppressBeadTapUntil = Date.now() + 320;
+      const placements = state.moved
+        ? this.buildRingSlidePlacements(state.basePlacements, state.totalDelta)
+        : state.basePlacements;
+      this.clearLivePlacements();
+      this.setData({
+        placements,
+        draggingBeadIndex: -1,
+        dragDeleteArmed: false
+      }, () => {
+        if (!state.moved && state.originIndex >= 0) {
+          this.showSelectedBeadInfo(state.originIndex);
+          return;
+        }
+        if (state.moved) {
+          this.recalculate({ persist: false });
+          this.scheduleDraftPersistence();
+        } else if (this.data.useCanvasRenderer) {
+          this.scheduleCanvasRender(true);
+        }
+      });
+      return;
+    }
     if (this.ringDragState) {
       const state = this.ringDragState;
       this.ringDragState = null;
@@ -5543,6 +8260,8 @@ Page({
       return;
     }
     if (shouldDelete) {
+      clearTimeout(this.dragPhysicsSyncTimer);
+      this.dragPhysicsSyncTimer = null;
       Composite.remove(this.physicsEngine.world, state.body);
       this.physicsBodies = this.physicsBodies.filter(body => body !== state.body);
       this.removeItemAt(state.index, { pushHistory: false });
@@ -5553,7 +8272,9 @@ Page({
     Body.setVelocity(state.body, state.velocity);
     Body.setAngularVelocity(state.body, this.clampAngularVelocity(state.angularVelocity || state.body.angularVelocity || 0, 0.13));
     this.setData({ draggingBeadIndex: -1, dragDeleteArmed: false });
-    this.scheduleDraftPersistence();
+    this.scheduleDragPhysicsFrame(true, () => {
+      this.scheduleDraftPersistence();
+    });
     this.runPhysics();
   },
 
@@ -5566,8 +8287,7 @@ Page({
     };
   },
 
-  isPointOutsideTray(point, beadSize) {
-    const layout = this.getStageLayout();
+  isPointOutsideTray(point, beadSize, layout = this.getStageLayout()) {
     const distance = Math.sqrt(
       (point.x - layout.center) ** 2 + (point.y - layout.center) ** 2
     );
@@ -5590,20 +8310,29 @@ Page({
       wx.showToast({ title: '已经到边界了', icon: 'none' });
       return;
     }
+    const context = this.getStringedRingContext();
     const selected = [...this.data.selected];
-    const placements = this.normalizePlacements(selected, this.data.placements);
+    const placements = this.data.isLooseMode
+      ? this.normalizePlacements(selected, this.data.placements)
+      : [...context.placements];
+    const visualSlots = this.data.isLooseMode
+      ? []
+      : this.getRingVisualSlots(context.items, context.placements, context.geometry);
     const selectedItem = selected[index];
     const placementItem = placements[index];
     selected[index] = selected[nextIndex];
     selected[nextIndex] = selectedItem;
     placements[index] = placements[nextIndex];
     placements[nextIndex] = placementItem;
+    const nextPlacements = this.data.isLooseMode
+      ? placements
+      : this.rebuildRingPlacementsForVisualSlots(selected, placements, visualSlots);
     this.pushHistory();
     this.setData({
       selected,
-      placements,
+      placements: nextPlacements,
       selectedBeadIndex: nextIndex,
-      selectedBeadInfo: this.buildSelectedBeadInfo(nextIndex, selected, placements)
+      selectedBeadInfo: this.buildSelectedBeadInfo(nextIndex, selected, nextPlacements)
     });
     this.recalculate();
   },
@@ -5613,8 +8342,9 @@ Page({
     const safeSelectedBeadIndex = this.data.selectedBeadIndex >= 0 && this.data.selectedBeadIndex < this.data.selected.length
       ? this.data.selectedBeadIndex
       : -1;
+    const materials = this.getCachedSelectedMaterials(this.data.selected);
     const items = this.data.selected.map((id, index) => {
-      const material = this.findMaterialById(id);
+      const material = materials[index];
       const placement = placements[index] || {};
       if (!material && !(placement.name || placement.image_url || placement.size || placement.diameter)) return null;
       const size = Number((material && material.size) || placement.size || placement.diameter || placement.size_mm || 8);
@@ -5629,55 +8359,16 @@ Page({
       };
     }).filter(Boolean);
     const attachedPendants = [];
-    const price = items.reduce((sum, item) => sum + Number(item.price || 0), 0);
-    const length = items.reduce((sum, item) => sum + item.size, 0) / 10;
-    const weight = items.reduce((sum, item) => sum + item.weight, 0);
-    const targetLength = this.data.wristSize + 0.8;
-    const warning = items.length === 0
-      ? ''
-      : length > targetLength + 0.5
-        ? '偏长'
-        : length < targetLength - 0.5
-          ? '偏短'
-          : '合适';
-    const braceletGeometry = this.calculateBraceletGeometry(items);
-    const selectedItems = this.layoutSelectedItems(items, placements, braceletGeometry);
+    const summaryMetrics = this.getCachedWorkspaceSummary(items);
+    const { summary, length } = summaryMetrics;
+    const braceletGeometry = this.getCachedBraceletGeometry(items);
+    const selectedItems = this.data.useCanvasRenderer
+      ? []
+      : this.layoutSelectedItems(items, placements, braceletGeometry);
     const stringStyle = this.buildStringStyle(braceletGeometry);
-    const counts = {};
-    let energyItemCount = 0;
-    items.forEach(item => {
-      const key = this.materialElementKey(item);
-      if (!key) return;
-      energyItemCount += 1;
-      counts[key] = (counts[key] || 0) + 1;
-    });
-    const energy = ELEMENTS.map(element => ({
-      ...element,
-      value: energyItemCount ? Math.round(((counts[element.key] || 0) / energyItemCount) * 100) : 0
-    }));
-
-    const currentWrist = items.length
-      ? Math.max(0, length - 0.8)
-      : 0;
-    const sizes = items.map(item => Number(item.size || 0)).filter(Boolean);
-    const minSize = sizes.length ? Math.min(...sizes) : 0;
-    const maxSize = sizes.length ? Math.max(...sizes) : 0;
-    const beadSizeText = !sizes.length ? '--' : minSize === maxSize ? maxSize + 'mm' : minSize + '-' + maxSize + 'mm';
-    const summary = {
-      count: items.length,
-      price: price,
-      priceText: price.toFixed(2),
-      length: length.toFixed(1),
-      weight: weight.toFixed(2),
-      currentWrist: currentWrist.toFixed(1),
-      beadSizeText: beadSizeText,
-      maxLength: targetLength.toFixed(1),
-      warning: warning,
-      energy: energy
-    };
     _energySvgCache = '';
     var energyChartSvgUrl = '';
-    const scaleTicks = this.buildScaleTicks(braceletGeometry);
+    const scaleTicks = this.getCachedScaleTicks(braceletGeometry);
     const actionState = this.buildActionState(items.length);
     const updates = {
       summary,
@@ -5686,27 +8377,30 @@ Page({
       attachedPendants,
       scaleTicks,
       countOverClass: items.length > 18 ? 'over' : '',
+      lengthOverClass: items.length && length > Number(this.data.wristSize || 0) ? 'over-length' : '',
       braceletStringClass: items.length ? 'has-beads' : 'empty',
       completionWatermarkClass: items.length ? 'has-beads' : '',
       wearStyle: 'single',
       selectedBeadIndex: safeSelectedBeadIndex,
       selectedBeadInfo: this.buildSelectedBeadInfo(safeSelectedBeadIndex, this.data.selected, placements),
-      wristOptionItems: this.buildWristOptionItems(),
+      wristOptionItems: this.getCachedWristOptionItems(),
       ...actionState,
       energyChartSvgUrl
     };
     if (this.data.useCanvasRenderer) {
-      this.livePlacements = placements;
+      this.setLivePlacements(placements);
+      this.selectedItemStylePatchCache = null;
       updates.selectedItems = [];
       updates.attachedPendantItems = [];
     } else {
+      this.selectedItemStylePatchCache = null;
       updates.selectedItems = selectedItems;
       updates.attachedPendantItems = [];
     }
     this.setData(updates, () => {
       if (this.data.useCanvasRenderer) this.scheduleCanvasRender();
     });
-    if (options.persist !== false) this.scheduleDraftPersistence();
+    if (options.persist !== false) this.scheduleDraftPersistence(options.persistDelay);
   },
 
   formatBeadDiameter(size) {
@@ -5738,9 +8432,24 @@ Page({
     const beadIndex = Number(index);
     if (!Number.isInteger(beadIndex) || beadIndex < 0 || beadIndex >= (selected || []).length) return null;
     const id = selected[beadIndex];
-    const material = this.findMaterialById(id) || {};
     const placement = (placements || [])[beadIndex] || {};
     const selectedItem = (this.data.selectedItems || [])[beadIndex] || {};
+    const cacheKey = [
+      this.materialCatalogDesignVersion || 0,
+      beadIndex,
+      id,
+      placement.image_url || '',
+      placement.size || placement.size_mm || placement.diameter || '',
+      placement.price || placement.priceText || '',
+      placement.name || '',
+      selectedItem.name || '',
+      selectedItem.price || '',
+      selectedItem.diameter || selectedItem.size || ''
+    ].join('::');
+    if (this.selectedBeadInfoCache && this.selectedBeadInfoCache.key === cacheKey) {
+      return this.selectedBeadInfoCache.value;
+    }
+    const material = this.findMaterialById(id) || {};
     const source = {
       ...placement,
       ...selectedItem,
@@ -5750,7 +8459,7 @@ Page({
     const diameter = source.size || source.size_mm || source.diameter || (source.sku && source.sku.size_mm) || '';
     const price = Number(source.price || 0);
     const priceText = Number.isFinite(price) && price > 0 ? `¥${price.toFixed(2).replace(/\.00$/, '')}` : '--';
-    return {
+    const info = {
       index: beadIndex,
       position: beadIndex + 1,
       id,
@@ -5758,31 +8467,82 @@ Page({
       diameterText: this.formatBeadDiameter(diameter),
       priceText
     };
+    this.selectedBeadInfoCache = { key: cacheKey, value: info };
+    return info;
   },
 
-  scheduleDraftPersistence() {
-    clearTimeout(this.persistDraftTimer);
-    this.persistDraftTimer = setTimeout(() => {
-      const existingDesign = wx.getStorageSync('currentDesign') || {};
-      wx.setStorage({
-        key: 'currentDesign',
-        data: {
-          designId: existingDesign.designId || existingDesign.design_id || '',
-          design_id: existingDesign.designId || existingDesign.design_id || '',
-          name: existingDesign.name || existingDesign.title || '',
-          title: existingDesign.title || existingDesign.name || '',
-          userId: existingDesign.userId || '',
-          selected: this.data.selected,
-          placements: this.data.placements,
-          attachedPendants: [],
-          wristSize: this.data.wristSize,
-          wearStyle: 'single',
-          isLooseMode: this.data.isLooseMode,
-          sourceContext: this.data.sourceContext || this.sourceContext || existingDesign.sourceContext || null,
-          summary: this.data.summary
+  buildDraftPersistencePayload(existingDesign = {}) {
+    return {
+      designId: existingDesign.designId || existingDesign.design_id || '',
+      design_id: existingDesign.designId || existingDesign.design_id || '',
+      name: existingDesign.name || existingDesign.title || '',
+      title: existingDesign.title || existingDesign.name || '',
+      userId: existingDesign.userId || '',
+      selected: this.data.selected,
+      placements: this.data.placements,
+      attachedPendants: [],
+      wristSize: this.data.wristSize,
+      wearStyle: 'single',
+      isLooseMode: this.data.isLooseMode,
+      sourceContext: this.data.sourceContext || this.sourceContext || existingDesign.sourceContext || null,
+      summary: this.data.summary
+    };
+  },
+
+  draftPersistenceSignature(payload = {}) {
+    try {
+      const compactPlacements = (payload.placements || []).map(placement => ({
+        x: Number(Number(placement && placement.looseX).toFixed(2)) || 0,
+        y: Number(Number(placement && placement.looseY).toFixed(2)) || 0,
+        dx: Number(Number(placement && placement.dx).toFixed(2)) || 0,
+        dy: Number(Number(placement && placement.dy).toFixed(2)) || 0,
+        r: Number(Number(placement && placement.rotation).toFixed(2)) || 0,
+        s: Number(Number(placement && placement.beadSize).toFixed(2)) || 0,
+        size: Number(Number(placement && (placement.size || placement.size_mm || placement.diameter)).toFixed(2)) || 0,
+        price: Number(Number(placement && (placement.price || placement.priceText)).toFixed(2)) || 0,
+        img: placement && placement.image_url || '',
+        name: placement && placement.name || ''
+      }));
+      const summary = payload.summary || {};
+      return JSON.stringify({
+        designId: payload.designId || payload.design_id || '',
+        name: payload.name || payload.title || '',
+        userId: payload.userId || '',
+        selected: payload.selected || [],
+        placements: compactPlacements,
+        wristSize: Number(Number(payload.wristSize).toFixed(2)) || 0,
+        isLooseMode: !!payload.isLooseMode,
+        sourceContext: payload.sourceContext || null,
+        summary: {
+          count: Number(summary.count) || 0,
+          priceText: summary.priceText || '',
+          length: summary.length || '',
+          currentWrist: summary.currentWrist || '',
+          warning: summary.warning || ''
         }
       });
-    }, 140);
+    } catch (error) {
+      return '';
+    }
+  },
+
+  scheduleDraftPersistence(delayMs) {
+    clearTimeout(this.persistDraftTimer);
+    const delay = Number(delayMs == null
+      ? (this.flightActive || (this.flightQueue && this.flightQueue.length) ? 420 : 140)
+      : delayMs);
+    this.persistDraftTimer = setTimeout(() => {
+      this.persistDraftTimer = null;
+      const existingDesign = wx.getStorageSync('currentDesign') || {};
+      const data = this.buildDraftPersistencePayload(existingDesign);
+      const signature = this.draftPersistenceSignature(data);
+      if (signature && signature === this.lastPersistedDraftSignature) return;
+      this.lastPersistedDraftSignature = signature;
+      wx.setStorage({
+        key: 'currentDesign',
+        data
+      });
+    }, Math.max(80, delay));
   },
 
   layoutSelectedItems(items, placements, geometry) {
@@ -5795,13 +8555,12 @@ Page({
       const targetY = this.data.isLooseMode ? placement.looseY : center + Math.sin(rad) * geometry.radius;
       const left = targetX - beadSize / 2 + placement.dx;
       const top = targetY - beadSize / 2 + placement.dy;
-      const ringRotation = rad * 180 / Math.PI;
+      const visualX = targetX + Number(placement.dx || 0);
+      const visualY = targetY + Number(placement.dy || 0);
       const containerRotation = this.data.isLooseMode
         ? Number(placement.rotation || 0)
-        : ringRotation;
-      const faceRotation = this.data.isLooseMode
-        ? 0
-        : (Math.round(Number(placement.rotation || 0) / 180) * 180);
+        : stringedBeadRotationFromPoint(visualX, visualY, center);
+      const faceRotation = 0;
       const background = item.image_url ? 'transparent' : this.buildBeadBackground(item);
       const classes = [];
       if (item.image_url) classes.push('has-image');
@@ -5828,22 +8587,26 @@ Page({
   calculateBraceletGeometry(items) {
     const layout = this.getStageLayout();
     const center = layout.center;
+    let beadSizes = items.map(item => Math.max(42, Math.min(78, item.size * 5.4)));
+    const largestBeadRadius = beadSizes.length ? Math.max(...beadSizes) / 2 : 0;
+    const safeOuterRadius = Math.max(
+      largestBeadRadius + 8,
+      Math.min(center - 25, this.getTrayPhysicsRadius(layout) - 12)
+    );
     if (items.length < 3) {
       const count = Math.max(items.length, 1);
       return {
         center,
-        radius: layout.radius,
-        beadSizes: items.map(item => Math.max(42, Math.min(78, item.size * 5.4))),
+        radius: Math.max(0, safeOuterRadius - largestBeadRadius),
+        beadSizes,
         angles: items.map((item, index) => (-90 + (360 / count) * index) * Math.PI / 180)
       };
     }
 
-    let beadSizes = items.map(item => Math.max(42, Math.min(78, item.size * 5.4)));
     let radius = this.solveTangentRingRadius(beadSizes);
     // 物理盘壁的内缘约为 center - 22rpx；额外留 3rpx 安全间距，
     // 避免成串目标与静态盘壁重叠，造成弹簧和碰撞墙持续对抗。
-    const maxOuterRadius = center - 25;
-    const largestBeadRadius = Math.max(...beadSizes) / 2;
+    const maxOuterRadius = safeOuterRadius;
     if (radius + largestBeadRadius > maxOuterRadius) {
       const scale = maxOuterRadius / (radius + largestBeadRadius);
       beadSizes = beadSizes.map(size => size * scale);
@@ -5886,6 +8649,88 @@ Page({
     return `left:${offset}rpx;top:${offset}rpx;width:${diameter}rpx;height:${diameter}rpx;`;
   },
 
+  workspaceSummaryCacheKey(items = []) {
+    const wristSize = Number(this.data.wristSize || 16);
+    const itemKey = (items || []).map(item => [
+      item.id,
+      item.skuId,
+      item.sku_id,
+      item.material_code,
+      item.size,
+      item.price,
+      item.weight,
+      item.top,
+      item.item_type,
+      item.type,
+      item.element_key,
+      item.primary_element,
+      item.element,
+      item.name,
+      item.category,
+      item.series,
+      Array.isArray(item.effects) ? item.effects.join('|') : item.effects
+    ].map(value => String(value || '').trim()).join('~')).join('||');
+    return [
+      this.materialCatalogDesignVersion || 0,
+      wristSize,
+      itemKey
+    ].join('::');
+  },
+
+  getCachedWorkspaceSummary(items = []) {
+    const key = this.workspaceSummaryCacheKey(items);
+    if (this.workspaceSummaryCache && this.workspaceSummaryCache.key === key) {
+      return this.workspaceSummaryCache.value;
+    }
+    const price = items.reduce((sum, item) => sum + Number(item.price || 0), 0);
+    const effectiveLengthMm = estimateStringedLengthMm(items);
+    const length = effectiveLengthMm / 10;
+    const weight = items.reduce((sum, item) => sum + item.weight, 0);
+    const wristSize = Number(this.data.wristSize || 16);
+    const targetLength = wristSize + 0.8;
+    const warning = items.length === 0
+      ? ''
+      : length > targetLength + 0.5
+        ? '\u504f\u957f'
+        : length < targetLength - 0.5
+          ? '\u504f\u77ed'
+          : '\u5408\u9002';
+    const counts = {};
+    let energyItemCount = 0;
+    items.forEach(item => {
+      const elementKey = this.materialElementKey(item);
+      if (!elementKey) return;
+      energyItemCount += 1;
+      counts[elementKey] = (counts[elementKey] || 0) + 1;
+    });
+    const energy = ELEMENTS.map(element => ({
+      ...element,
+      value: energyItemCount ? Math.round(((counts[element.key] || 0) / energyItemCount) * 100) : 0
+    }));
+    const currentWrist = items.length
+      ? Math.max(0, length - 0.8)
+      : 0;
+    const sizes = items.map(item => Number(item.size || 0)).filter(Boolean);
+    const minSize = sizes.length ? Math.min(...sizes) : 0;
+    const maxSize = sizes.length ? Math.max(...sizes) : 0;
+    const beadSizeText = !sizes.length ? '--' : minSize === maxSize ? maxSize + 'mm' : minSize + '-' + maxSize + 'mm';
+    const summary = {
+      count: items.length,
+      price,
+      priceText: price.toFixed(2),
+      length: length.toFixed(1),
+      weight: weight.toFixed(2),
+      currentWrist: currentWrist.toFixed(1),
+      beadSizeText,
+      maxLength: targetLength.toFixed(1),
+      warning,
+      energy
+    };
+    const value = { summary, length };
+    this.workspaceSummaryCache = { key, value };
+    return value;
+  },
+
   buildScaleTicks(geometry) {
     const wristSize = Number(this.data.wristSize || 16);
     const total = Math.max(44, Math.min(72, Math.round(wristSize * 3.6)));
@@ -5907,14 +8752,34 @@ Page({
     return ticks;
   },
 
+  getCachedScaleTicks(geometry = {}) {
+    const wristSize = Number(this.data.wristSize || 16);
+    const key = [
+      wristSize,
+      Number(geometry.center || 0).toFixed(3),
+      Number(geometry.radius || 0).toFixed(3)
+    ].join('::');
+    if (this.scaleTicksCache && this.scaleTicksCache.key === key) {
+      return this.scaleTicksCache.ticks;
+    }
+    const ticks = this.buildScaleTicks(geometry);
+    this.scaleTicksCache = { key, ticks };
+    return ticks;
+  },
+
   buildActionState() {
+    const isWorking = this.data.isShuffling || this.data.isStringingFinishing || this.data.isReleasingString;
     return {
-      shuffleButtonClass: this.data.isShuffling ? 'working' : '',
-      randomIconText: this.data.isShuffling ? '...' : '串',
-      randomTitle: this.data.isShuffling
-        ? '正在成串'
-        : (this.data.isLooseMode ? '随机成串' : '解除成串'),
-      randomSubtitle: this.data.isLooseMode ? '随机排列珠面' : '恢复自由编辑'
+      shuffleButtonClass: isWorking ? 'working' : '',
+      randomIconText: isWorking ? '...' : '串',
+      randomTitle: this.data.isReleasingString
+        ? '正在散开'
+        : this.data.isShuffling
+          ? '正在成串'
+          : (this.data.isLooseMode ? '随机成串' : '解除成串'),
+      randomSubtitle: this.data.isReleasingString
+        ? '恢复自由编辑'
+        : (this.data.isLooseMode ? '随机排列珠面' : '恢复自由编辑')
     };
   },
 
@@ -5927,6 +8792,18 @@ Page({
     }));
   },
 
+  getCachedWristOptionItems() {
+    const current = Number(this.data.wristSize || 16);
+    const optionsKey = (this.data.wristOptions || []).join('|');
+    const key = `${current}::${optionsKey}`;
+    if (this.wristOptionItemsCache && this.wristOptionItemsCache.key === key) {
+      return this.wristOptionItemsCache.items;
+    }
+    const items = this.buildWristOptionItems();
+    this.wristOptionItemsCache = { key, items };
+    return items;
+  },
+
   getStageLayout() {
     if (this.stageLayout && this.stageLayout.center) {
       return {
@@ -5934,17 +8811,25 @@ Page({
         radius: this.stageLayout.radius
       };
     }
-    const deviceClass = this.data.deviceClass || '';
-    if (deviceClass.includes('device-narrow')) {
-      return { center: 260, radius: 200 };
-    }
-    if (deviceClass.includes('device-short') || deviceClass.includes('device-compact')) {
-      return { center: 270, radius: 208 };
-    }
-    if (deviceClass.includes('device-tall') || deviceClass.includes('device-wide')) {
-      return { center: 310, radius: 242 };
-    }
-    return { center: 288, radius: 224 };
+    const info = this.data.deviceInfo && this.data.deviceInfo.windowWidth
+      ? this.data.deviceInfo
+      : getWorkspaceSystemInfo();
+    const windowWidth = Number(info.windowWidth) || 375;
+    const windowHeight = Number(info.windowHeight) || 667;
+    const screenHeight = Number(info.screenHeight) || windowHeight;
+    const safeArea = info.safeArea || {};
+    const bottomInset = Number(info.bottomInset) || (safeArea.bottom ? Math.max(0, screenHeight - safeArea.bottom) : 0);
+    const rpxRatio = 750 / windowWidth;
+    const layout = this.buildResponsiveWorkspaceLayout({
+      windowWidth,
+      windowHeight,
+      viewportRpx: Math.round(windowHeight * rpxRatio),
+      bottomInsetRpx: Math.round(bottomInset * rpxRatio)
+    }).stageLayout;
+    return {
+      center: layout.center,
+      radius: layout.radius
+    };
   },
 
   drawDesignPreviewBackdrop(ctx, state) {

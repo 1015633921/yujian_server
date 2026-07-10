@@ -38,7 +38,7 @@ from .schemas import (
 )
 from .service import AssessmentService
 
-router = APIRouter(prefix="/api/v1", tags=["专属水晶测算"])
+router = APIRouter(prefix="/api/v1", tags=["专属水晶分析"])
 legacy_router = APIRouter(prefix="/api", tags=["兼容接口"])
 service = AssessmentService()
 daily_service = DailyEnergyService()
@@ -64,7 +64,7 @@ class AvatarBase64Payload(BaseModel):
     filename: str | None = Field(default="avatar.jpg", max_length=120)
 
 
-@router.get("/assessment/options", summary="获取测算表单选项")
+@router.get("/assessment/options", summary="获取分析表单选项")
 def assessment_options():
     return success(service.options())
 
@@ -576,14 +576,14 @@ async def wechat_pay_refund_notify(request: Request):
 @router.post("/assessment/calculate", summary="计算专属水晶与手串方案")
 def calculate_assessment(payload: AssessmentRequest):
     result, cache_hit = service.calculate(payload)
-    message = "读取已有测算结果" if cache_hit else "测算完成"
+    message = "读取已有分析结果" if cache_hit else "分析完成"
     return success({**result, "cache_hit": cache_hit}, message)
 
 
-@router.post("/assessment/energy", summary="第一步：计算五行能量画像")
+@router.post("/assessment/energy", summary="第一步：生成五行元素画像")
 def calculate_energy(payload: AssessmentRequest):
     result, cache_hit = service.calculate_energy(payload)
-    message = "读取已有能量画像" if cache_hit else "能量计算完成"
+    message = "读取已有元素画像" if cache_hit else "元素分析完成"
     return success({**result, "cache_hit": cache_hit}, message)
 
 
@@ -591,17 +591,17 @@ def calculate_energy(payload: AssessmentRequest):
 def create_diy_recommendation(assessment_id: str, payload: DIYRecommendationRequest):
     result = service.create_diy_recommendation(assessment_id, payload)
     if not result:
-        raise HTTPException(status_code=404, detail="测算结果不存在")
+        raise HTTPException(status_code=404, detail="分析结果不存在")
     return success(result, "专属手串已生成")
 
 
-@legacy_router.post("/crystal/assessment/", summary="兼容旧小程序路径的专属水晶测算")
+@legacy_router.post("/crystal/assessment/", summary="兼容旧小程序路径的专属水晶分析")
 def legacy_calculate_assessment(payload: AssessmentRequest):
     result, cache_hit = service.calculate(payload)
-    return success({**result, "cache_hit": cache_hit}, "测算完成")
+    return success({**result, "cache_hit": cache_hit}, "分析完成")
 
 
-@router.get("/assessment/history", summary="获取用户历史测算")
+@router.get("/assessment/history", summary="获取用户历史分析")
 def assessment_history(
     user_id: str = Query(min_length=1, max_length=64),
     limit: int = Query(default=20, ge=1, le=100),
@@ -609,11 +609,11 @@ def assessment_history(
     return success(service.history(user_id, limit))
 
 
-@router.get("/assessment/{assessment_id}", summary="获取测算详情")
+@router.get("/assessment/{assessment_id}", summary="获取分析详情")
 def assessment_detail(assessment_id: str):
     result = service.get(assessment_id)
     if not result:
-        raise HTTPException(status_code=404, detail="测算结果不存在")
+        raise HTTPException(status_code=404, detail="分析结果不存在")
     return success(result)
 
 
@@ -627,12 +627,12 @@ def parse_key_list(values: list[str] | None) -> list[str]:
     return keys
 
 
-@router.get("/daily-energy/options", summary="获取今日能量可选标签、场景和目标")
+@router.get("/daily-energy/options", summary="获取今日搭配可选标签、场景和目标")
 def daily_energy_options():
     return success(daily_service.options())
 
 
-@router.get("/daily-energy/today", summary="获取今日能量补给站内容")
+@router.get("/daily-energy/today", summary="获取今日搭配建议内容")
 def today_daily_energy(
     user_id: str = Query(min_length=1, max_length=100),
     initial_wish: str | None = Query(default=None, max_length=100),
@@ -650,7 +650,7 @@ def today_daily_energy(
         goal_keys=parse_key_list(goal_keys),
         force_recalculate=force_recalculate,
     )
-    return success({**result, "cache_hit": cache_hit}, "读取今日能量" if cache_hit else "今日能量已生成")
+    return success({**result, "cache_hit": cache_hit}, "读取今日搭配" if cache_hit else "今日搭配已生成")
 
 
 @router.post("/daily-energy/check-in", summary="提交每日心情、睡眠和压力签到")
@@ -661,7 +661,7 @@ def daily_energy_check_in(
     return success(daily_service.check_in(payload, checkin_date or beijing_today()), "签到成功")
 
 
-@router.get("/daily-energy/{energy_date}", summary="获取指定日期能量内容")
+@router.get("/daily-energy/{energy_date}", summary="获取指定日期搭配建议")
 def dated_daily_energy(
     energy_date: date,
     user_id: str = Query(min_length=1, max_length=100),

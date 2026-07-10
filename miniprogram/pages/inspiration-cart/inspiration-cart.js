@@ -49,6 +49,11 @@ const MATERIAL_ASSETS = {
 const MINI_PREVIEW_STAGE_SIZE = 360;
 const MINI_PREVIEW_CENTER = MINI_PREVIEW_STAGE_SIZE / 2;
 const WORKSPACE_PREVIEW_CENTER = 288;
+const CART_TRAY_IMAGE_URL = assetUrl('workspace/tray-yustream-transparent-user-20260701-v6.webp');
+const CART_ACTION_ICONS = {
+  workbench: assetUrl('cart/cart-workbench.png'),
+  remove: assetUrl('cart/cart-delete.png')
+};
 const DEFAULT_CART_PLAN_NAME = 'Yustream DIY 手串方案';
 const DESIGN_NAME_MODAL_HINT_KEYWORD = '给这条手串起个名字';
 
@@ -95,14 +100,29 @@ function formatCreatedTime(value) {
     const timestamp = numeric < 100000000000 ? numeric * 1000 : numeric;
     date = new Date(timestamp);
   } else {
-    date = new Date(String(value));
+    const text = String(value || '').trim();
+    const matched = text.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:[ T](\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?/);
+    if (matched) {
+      date = new Date(
+        Number(matched[1]),
+        Number(matched[2]) - 1,
+        Number(matched[3]),
+        Number(matched[4] || 0),
+        Number(matched[5] || 0),
+        Number(matched[6] || 0)
+      );
+    } else {
+      date = new Date(text);
+    }
   }
   if (!date || Number.isNaN(date.getTime())) return '';
+  const year = `${date.getFullYear()}`;
   const month = `${date.getMonth() + 1}`.padStart(2, '0');
   const day = `${date.getDate()}`.padStart(2, '0');
   const hour = `${date.getHours()}`.padStart(2, '0');
   const minute = `${date.getMinutes()}`.padStart(2, '0');
-  return `${month}-${day} ${hour}:${minute}`;
+  const second = `${date.getSeconds()}`.padStart(2, '0');
+  return `${year}-${month}-${day} ${hour}:${minute}:${second}`;
 }
 
 function firstImageUrl(entry = {}) {
@@ -398,6 +418,8 @@ function normalizeCartItem(item = {}, index = 0) {
 Page({
   data: {
     items: [],
+    trayImageUrl: CART_TRAY_IMAGE_URL,
+    cartActionIcons: CART_ACTION_ICONS,
     manageMode: false,
     checkoutLoadingKey: '',
     checkoutActionText: '\u53bb\u7ed3\u7b97',

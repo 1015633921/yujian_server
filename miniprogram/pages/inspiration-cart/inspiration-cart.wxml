@@ -17,12 +17,15 @@
 
     <view class="cart-list">
       <view wx:for="{{items}}" wx:key="key" class="cart-item yu-card yu-card-pressable {{checkoutLoadingKey == item.key ? 'checkout-loading' : ''}}" data-key="{{item.key}}" bindtap="checkoutDesign">
-        <view class="cart-workbench-btn" data-key="{{item.key}}" catchtap="editDesign">工作台</view>
-        <view class="cart-delete-btn" data-key="{{item.key}}" catchtap="removeItem">删除</view>
         <view class="item-preview tone-{{item.tone}}">
+          <view class="cart-workbench-btn" data-key="{{item.key}}" catchtap="editDesign" aria-role="button" aria-label="打开工作台">
+            <image class="cart-action-image" src="{{cartActionIcons.workbench}}" mode="aspectFit" />
+          </view>
+          <view class="cart-delete-btn" data-key="{{item.key}}" catchtap="removeItem" aria-role="button" aria-label="删除方案">
+            <image class="cart-action-image" src="{{cartActionIcons.remove}}" mode="aspectFit" />
+          </view>
           <view class="cart-tray-fallback"></view>
-          <image class="item-tray-image" src="/assets/workspace/tray-yustream-transparent-user-20260701-v6.webp" mode="aspectFit" />
-          <view class="cart-plan-name">{{item.planName}}</view>
+          <image class="item-tray-image" src="{{trayImageUrl}}" mode="aspectFit" />
           <view class="mini-ring">
             <view wx:for="{{item.miniBeads}}" wx:key="index" class="mini-bead" style="{{item.style}}">
               <image wx:if="{{item.src}}" class="mini-bead-image" src="{{item.src}}" mode="aspectFill" />
@@ -31,10 +34,14 @@
           </view>
         </view>
 
-        <view wx:if="{{item.createdTime}}" class="cart-created-time">{{item.createdTime}}</view>
-        <view class="item-price cart-row-price">
-          <text class="cart-row-amount">¥{{item.priceText}}</text>
-          <text class="cart-row-action">{{checkoutActionText}}</text>
+        <view class="cart-info-row">
+          <view class="cart-meta-row">
+            <view wx:if="{{item.createdTime}}" class="cart-created-time">{{item.createdTime}}</view>
+            <view class="item-price cart-row-price">
+              <text class="cart-row-amount">¥{{item.priceText}}</text>
+            </view>
+          </view>
+          <view class="cart-plan-name">{{item.planName}}</view>
         </view>
       </view>
     </view>

@@ -38,15 +38,15 @@ const STATUS_GROUPS = [
   { key: 'emotion', label: '情绪' },
   { key: 'energy', label: '精力' },
   { key: 'social', label: '人际' },
-  { key: 'fortune', label: '运势' }
+  { key: 'fortune', label: '目标' }
 ];
 
 const MOOD_OPTIONS = [
   { key: 'calm', label: '平静', short_label: '平静', emoji: '🫧', group: 'emotion', desc: '状态稳定，可以轻推进', priority: 0, featured: true },
   { key: 'pressure', label: '压力山大', short_label: '压力', emoji: '🤯', group: 'emotion', desc: '脑子太满，需要降噪', priority: 1, featured: true },
   { key: 'internal_loss', label: '严重内耗', short_label: '内耗', emoji: '🥱', group: 'energy', desc: '想太多，行动太少', priority: 2, featured: true },
-  { key: 'battery_low', label: '电量告急', short_label: '低电量', emoji: '🔋', group: 'energy', desc: '能量偏低，先省电', priority: 3, featured: false },
-  { key: 'money', label: '一心搞钱', short_label: '搞钱', emoji: '💰', group: 'fortune', desc: '目标明确，适合稳步变现', priority: 4, featured: true },
+  { key: 'battery_low', label: '精力偏低', short_label: '低精力', emoji: '🔋', group: 'energy', desc: '精力偏低，先放慢节奏', priority: 3, featured: false },
+  { key: 'money', label: '目标推进', short_label: '目标', emoji: '💰', group: 'fortune', desc: '目标明确，适合稳步推进', priority: 4, featured: true },
   { key: 'need_focus', label: '需要专注', short_label: '专注', emoji: '🎯', group: 'energy', desc: '适合减少干扰', priority: 5, featured: true },
   { key: 'emo', label: '随时 EMO', short_label: 'EMO', emoji: '🌧️', group: 'emotion', desc: '情绪起伏，需要被接住', priority: 6, featured: true },
   { key: 'lost', label: '迷茫', short_label: '迷茫', emoji: '🌫️', group: 'emotion', desc: '方向感弱，先整理优先级', priority: 7, featured: false },
@@ -54,42 +54,85 @@ const MOOD_OPTIONS = [
   { key: 'inspiration_low', label: '灵感枯竭', short_label: '灵感', emoji: '💡', group: 'energy', desc: '先输入，再输出', priority: 9, featured: false },
   { key: 'full_power', label: '满血复活', short_label: '满血', emoji: '🚀', group: 'energy', desc: '适合推进关键动作', priority: 10, featured: false },
   { key: 'angry', label: '暴躁', short_label: '暴躁', emoji: '🔥', group: 'emotion', desc: '火气偏强，需要柔化', priority: 11, featured: false },
-  { key: 'hug', label: '抱抱自己', short_label: '抱抱', emoji: '🕊️', group: 'emotion', desc: '需要温柔修复', priority: 12, featured: false },
+  { key: 'hug', label: '抱抱自己', short_label: '抱抱', emoji: '🕊️', group: 'emotion', desc: '需要温柔放松', priority: 12, featured: false },
   { key: 'social_anxiety', label: '社恐发作', short_label: '社恐', emoji: '🙈', group: 'social', desc: '保持边界，低压社交', priority: 13, featured: false },
   { key: 'charm', label: '散发魅力', short_label: '魅力', emoji: '🧲', group: 'social', desc: '适合展示与见面', priority: 14, featured: false },
-  { key: 'protect', label: '自动退散', short_label: '防护', emoji: '🛡️', group: 'social', desc: '不想被打扰，需要防护感', priority: 15, featured: false },
-  { key: 'peach', label: '桃花绝缘体', short_label: '桃花', emoji: '🌸', group: 'social', desc: '想让关系更柔和', priority: 16, featured: false },
-  { key: 'noble', label: '求贵人', short_label: '贵人', emoji: '🤝', group: 'social', desc: '需要被看见与支持', priority: 17, featured: false },
-  { key: 'career', label: '搞事业', short_label: '事业', emoji: '💼', group: 'fortune', desc: '适合推进工作成果', priority: 18, featured: false },
-  { key: 'lucky', label: '锦鲤本鲤', short_label: '好运', emoji: '🐟', group: 'fortune', desc: '想要一点好运气', priority: 19, featured: false },
-  { key: 'exam', label: '逢考必过', short_label: '考试', emoji: '📚', group: 'fortune', desc: '需要专注和稳定输出', priority: 20, featured: false },
-  { key: 'anti_mercury', label: '水逆退散', short_label: '退散', emoji: '🧿', group: 'fortune', desc: '减少沟通误会与突发干扰', priority: 21, featured: false }
+  { key: 'protect', label: '安定边界', short_label: '边界', emoji: '🛡️', group: 'social', desc: '不想被打扰，需要安定感', priority: 15, featured: false },
+  { key: 'peach', label: '关系柔和', short_label: '关系', emoji: '🌸', group: 'social', desc: '想让关系更柔和', priority: 16, featured: false },
+  { key: 'noble', label: '协作支持', short_label: '协作', emoji: '🤝', group: 'social', desc: '需要被看见与支持', priority: 17, featured: false },
+  { key: 'career', label: '工作推进', short_label: '工作', emoji: '💼', group: 'fortune', desc: '适合推进工作成果', priority: 18, featured: false },
+  { key: 'lucky', label: '积极期待', short_label: '积极', emoji: '🐟', group: 'fortune', desc: '想要一点积极感', priority: 19, featured: false },
+  { key: 'exam', label: '考试专注', short_label: '考试', emoji: '📚', group: 'fortune', desc: '需要专注和稳定输出', priority: 20, featured: false },
+  { key: 'anti_mercury', label: '沟通顺畅', short_label: '沟通', emoji: '🧿', group: 'fortune', desc: '减少沟通误会与突发干扰', priority: 21, featured: false }
 ];
 
 const SCENE_OPTIONS = [
   { key: 'work', label: '上班沟通' },
   { key: 'social', label: '轻社交' },
   { key: 'focus', label: '学习专注' },
-  { key: 'rest', label: '休息修复' }
+  { key: 'rest', label: '放松休息' }
 ];
 
 const GOAL_OPTIONS = [
   { key: 'stable_expression', label: '稳定表达', wish: '正缘桃花/人际和合' },
   { key: 'less_overthinking', label: '减少内耗', wish: '健康护身/保持专注' },
   { key: 'move_task', label: '推进任务', wish: '招财进宝/事业腾飞' },
-  { key: 'low_pressure_protect', label: '低压防护', wish: '辟邪防小人/消除焦虑' }
+  { key: 'low_pressure_protect', label: '低压边界', wish: '辟邪防小人/消除焦虑' }
 ];
+
+const DISPLAY_REPLACEMENTS = [
+  ['招财进宝/事业腾飞', '事业专注/稳步推进'],
+  ['正缘桃花/人际和合', '人际亲和/柔和沟通'],
+  ['辟邪防小人/消除焦虑', '安定边界/舒缓压力'],
+  ['健康护身/保持专注', '日常平衡/保持专注'],
+  ['运势', '目标'],
+  ['搞钱', '目标'],
+  ['桃花绝缘体', '关系柔和'],
+  ['桃花', '亲和'],
+  ['求贵人', '协作支持'],
+  ['贵人', '协作'],
+  ['锦鲤本鲤', '积极期待'],
+  ['好运', '积极感'],
+  ['逢考必过', '考试专注'],
+  ['水逆退散', '沟通顺畅'],
+  ['自动退散', '安定边界'],
+  ['防护', '边界'],
+  ['修复睡眠', '放松休息'],
+  ['睡眠修复', '放松休息'],
+  ['休息修复', '放松休息'],
+  ['能量不足', '状态偏弱'],
+  ['能量偏低', '精力偏低'],
+  ['能量', '状态'],
+  ['流月', '近期'],
+  ['天干地支', '传统历法'],
+  ['招财', '目标感'],
+  ['辟邪', '安定'],
+  ['护身', '安定'],
+  ['疗愈', '舒缓'],
+  ['净化磁场', '整理氛围'],
+  ['磁场', '氛围']
+];
+
+function sanitizeDisplayText(value, fallback = '') {
+  let text = `${value || fallback || ''}`.trim();
+  DISPLAY_REPLACEMENTS.forEach(([from, to]) => {
+    text = text.split(from).join(to);
+  });
+  return text;
+}
 
 function decorateOptions(options, selectedKey) {
   return options.map(item => ({
     ...item,
+    label: sanitizeDisplayText(item.label || item.key),
+    desc: sanitizeDisplayText(item.desc || ''),
     className: item.key === selectedKey ? 'active' : ''
   }));
 }
 
 function normalizeStatusTag(item = {}, index = 0) {
-  const label = item.label || item.short_label || item.shortLabel || item.key || '';
-  const shortLabel = item.short_label || item.shortLabel || label;
+  const label = sanitizeDisplayText(item.label || item.short_label || item.shortLabel || item.key || '');
+  const shortLabel = sanitizeDisplayText(item.short_label || item.shortLabel || label);
   const priority = Number.isFinite(Number(item.priority)) ? Number(item.priority) : index + 999;
   return {
     ...item,
@@ -97,7 +140,7 @@ function normalizeStatusTag(item = {}, index = 0) {
     shortLabel: String(shortLabel || label).slice(0, 5),
     emoji: item.emoji || item.icon || '',
     group: item.group || 'emotion',
-    desc: item.desc || '',
+    desc: sanitizeDisplayText(item.desc || ''),
     priority,
     featured: item.featured === undefined ? false : !!item.featured
   };
@@ -117,7 +160,7 @@ function normalizeStatusGroups(groups = [], tags = []) {
   const usedGroups = new Set(tags.map(item => item.group).filter(Boolean));
   const normalized = source
     .filter(item => item && item.key)
-    .map(item => ({ key: item.key, label: item.label || item.key }))
+    .map(item => ({ key: item.key, label: sanitizeDisplayText(item.label || item.key) }))
     .filter(item => !usedGroups.size || usedGroups.has(item.key));
   return normalized.length ? normalized : STATUS_GROUPS;
 }
@@ -125,6 +168,7 @@ function normalizeStatusGroups(groups = [], tags = []) {
 function decorateStatusGroups(groups, selectedKey) {
   return groups.map(item => ({
     ...item,
+    label: sanitizeDisplayText(item.label || item.key),
     className: item.key === selectedKey ? 'active' : ''
   }));
 }
@@ -134,6 +178,9 @@ function decorateTagOptions(options, selectedKeys = [], activeGroup = '') {
     .filter(item => !activeGroup || item.group === activeGroup)
     .map(item => ({
       ...item,
+      label: sanitizeDisplayText(item.label || item.key),
+      shortLabel: sanitizeDisplayText(item.shortLabel || item.short_label || item.label || item.key),
+      desc: sanitizeDisplayText(item.desc || ''),
       className: selectedKeys.includes(item.key) ? 'active' : ''
     }));
 }
@@ -179,7 +226,7 @@ function normalizeRuleOptions(payload = {}) {
 function isFreshDailyPayload(daily) {
   return !!(
     daily
-    && Number(daily.content_version) >= 3
+    && Number(daily.content_version) >= 6
     && daily.season_hint
     && daily.season_hint.summary
   );
@@ -275,7 +322,7 @@ Page({
   async loadDaily(options = {}) {
     this.setData({ loading: true });
     try {
-      const user = await auth.requireLogin('登录后才能查看今日能量建议。');
+      const user = await auth.requireLogin('登录后才能查看今日状态建议。');
       const goal = this.currentGoal();
       const daily = await getTodayDailyEnergy(user.user_id, {
         initialWish: goal && goal.wish,
@@ -305,9 +352,10 @@ Page({
 
   buildViewDaily(raw) {
     const score = Math.max(0, Math.min(100, Math.round(Number(raw.score) || 76)));
-    const keywords = Array.isArray(raw.keywords) && raw.keywords.length
+    const keywords = (Array.isArray(raw.keywords) && raw.keywords.length
       ? raw.keywords.slice(0, 3)
-      : [raw.daily_keyword || raw.theme || '稳定', '表达', '清透'].slice(0, 3);
+      : [raw.daily_keyword || raw.theme || '稳定', '表达', '清透'].slice(0, 3)
+    ).map(item => sanitizeDisplayText(item));
     const dimensions = this.buildDimensions(raw.dimensions, raw.energy_profile, score);
     const wearing = raw.wearing_guide || {};
     const actionAdvice = raw.action_advice || raw.actions || [];
@@ -315,11 +363,11 @@ Page({
     const scene = this.currentScene();
     const seasonHint = this.buildSeasonHint(raw.season_hint, raw);
     const wearingView = {
-      hand: wearing.hand || '建议左手佩戴，用更安静的方式稳定状态。',
-      colors: wearing.colors || ['透明', '冰蓝', '奶白'],
-      avoid: wearing.avoid || '避免过于强烈的颜色和厚重金属感。',
-      scenes: wearing.scenes || [scene.label, '上班沟通', '轻社交'],
-      notRecommended: wearing.not_recommended || '高压谈判或强对抗场合。'
+      hand: sanitizeDisplayText(wearing.hand || '建议左手佩戴，用更安静的方式稳定状态。'),
+      colors: (wearing.colors || ['透明', '冰蓝', '奶白']).map(item => sanitizeDisplayText(item)),
+      avoid: sanitizeDisplayText(wearing.avoid || '避免过于强烈的颜色和厚重金属感。'),
+      scenes: (wearing.scenes || [scene.label, '上班沟通', '轻社交']).map(item => sanitizeDisplayText(item)),
+      notRecommended: sanitizeDisplayText(wearing.not_recommended || '高压谈判或强对抗场合。')
     };
     wearingView.colorsText = wearingView.colors.join('、');
     wearingView.scenesText = wearingView.scenes.join('、');
@@ -330,27 +378,27 @@ Page({
     return {
       dateText: raw.date || '今天',
       score,
-      status: raw.today_status || raw.level || '温和上升',
+      status: sanitizeDisplayText(raw.today_status || raw.level || '温和上升'),
       keywords,
       keywordText: keywords.join(' · '),
-      title: raw.title || raw.theme || '今日能量建议',
-      summary: raw.summary || '今天适合用更轻盈的方式推进事情，不必强行加速。',
+      title: sanitizeDisplayText(raw.title || raw.theme || '今日状态建议'),
+      summary: sanitizeDisplayText(raw.summary || '今天适合用更轻盈的方式推进事情，不必强行加速。'),
       seasonHint,
       dimensions,
-      dimensionCommentary: raw.dimension_commentary || '先完成一件确定的小事，再推进复杂任务。',
+      dimensionCommentary: sanitizeDisplayText(raw.dimension_commentary || '先完成一件确定的小事，再推进复杂任务。'),
       wearing: wearingView,
       actions: (actionAdvice.length ? actionAdvice : [
         '先完成一件确定的小事，再推进复杂任务。',
         '沟通时少解释过程，多表达结论。',
         '晚上适合整理手串或保存一个新的搭配方案。'
-      ]).slice(0, 3).map((text, index) => ({ index: index + 1, text })),
+      ]).slice(0, 3).map((text, index) => ({ index: index + 1, text: sanitizeDisplayText(text) })),
       plan: {
-        title: dailyPlan.title || '今日专属手串方案',
-        style: dailyPlan.style || '清透通勤款',
-        mainColors: dailyPlan.main_colors || ['冰蓝', '透明', '奶白'],
+        title: sanitizeDisplayText(dailyPlan.title || '今日专属手串方案'),
+        style: sanitizeDisplayText(dailyPlan.style || '清透通勤款'),
+        mainColors: (dailyPlan.main_colors || ['冰蓝', '透明', '奶白']).map(item => sanitizeDisplayText(item)),
         beadSizes: dailyPlan.bead_sizes || ['6mm', '8mm'],
-        wristHint: dailyPlan.wrist_hint || '将按你在 DIY 工作台选择的手围自动排布。',
-        description: dailyPlan.description || '结合今日能量方向生成可继续编辑的手串方案。'
+        wristHint: sanitizeDisplayText(dailyPlan.wrist_hint || '将按你在 DIY 工作台选择的手围自动排布。'),
+        description: sanitizeDisplayText(dailyPlan.description || '结合今日状态方向生成可继续编辑的手串方案。')
       },
       elementBars: this.buildElementBars(raw.energy_profile || {})
     };
@@ -361,9 +409,9 @@ Page({
     const focusElement = raw.dominant_element || raw.supporting_element || '水';
     const supportElement = raw.supporting_element || '金';
     return {
-      summary: seasonHint.summary || `近期适合把节奏放稳，先照顾${supportElement}能量，再顺着${focusElement}能量推进事情。`,
-      drainPoint: seasonHint.drain_point || seasonHint.drainPoint || `${supportElement}能量不足时，容易出现注意力分散或节奏断档。`,
-      suggestion: seasonHint.suggestion || '先完成一件确定的小事，再推进需要沟通、创意或临场判断的任务。'
+      summary: sanitizeDisplayText(seasonHint.summary || `近期适合把节奏放稳，先照顾${supportElement}元素，再顺着${focusElement}元素推进事情。`),
+      drainPoint: sanitizeDisplayText(seasonHint.drain_point || seasonHint.drainPoint || `${supportElement}元素状态偏弱时，容易出现注意力分散或节奏断档。`),
+      suggestion: sanitizeDisplayText(seasonHint.suggestion || '先完成一件确定的小事，再推进需要沟通、创意或临场判断的任务。')
     };
   },
 
@@ -373,7 +421,9 @@ Page({
         const meta = DIMENSION_META[item.key] || Object.values(DIMENSION_META)[index % 5];
         const value = Math.max(0, Math.min(100, Math.round(Number(item.value) || 0)));
         return {
-        ...item,
+          ...item,
+          name: sanitizeDisplayText(item.name || ''),
+          description: sanitizeDisplayText(item.description || ''),
           icon: meta.icon,
           color: meta.color,
           value,
@@ -383,8 +433,8 @@ Page({
     }
     const base = Math.round(score || 76);
     const values = [
-      { key: 'stability', name: '稳定能量', value: base + 4 },
-      { key: 'action', name: '行动能量', value: base - 8 },
+      { key: 'stability', name: '稳定状态', value: base + 4 },
+      { key: 'action', name: '行动状态', value: base - 8 },
       { key: 'softness', name: '情绪柔和', value: base - 2 },
       { key: 'expression', name: '表达社交', value: base + 1 },
       { key: 'intuition', name: '灵感直觉', value: base - 12 }

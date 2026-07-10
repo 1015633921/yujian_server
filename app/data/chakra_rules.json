@@ -32,7 +32,7 @@
       "keywords": ["接纳", "关系", "柔软"],
       "colors": ["#ECA8B7", "#548B62", "#DDEAD7"],
       "color_families": ["pink", "green"],
-      "mood_tags": ["接纳", "关系", "柔软", "修复"],
+      "mood_tags": ["接纳", "关系", "柔软", "放松"],
       "visual_tags": ["柔和", "花园感", "温柔"],
       "element_weights": {"木": 1.7, "火": 1.0, "水": 0.6}
     },
@@ -56,10 +56,10 @@
     },
     "crown": {
       "name": "顶轮",
-      "keywords": ["连接", "安静", "净化"],
+      "keywords": ["连接", "安静", "清爽"],
       "colors": ["#F4F1EA", "#B9A7D8", "#E8EDF0"],
       "color_families": ["white", "purple", "clear"],
-      "mood_tags": ["连接", "安静", "净化", "修复"],
+      "mood_tags": ["连接", "安静", "清爽", "放松"],
       "visual_tags": ["白色", "通透", "月光感"],
       "element_weights": {"金": 1.5, "水": 1.0, "土": 0.6}
     }
@@ -83,7 +83,7 @@
         {"id": "need_grounding", "label": "稳定和落地", "chakra": "root"},
         {"id": "need_flow", "label": "流动和创造力", "chakra": "sacral"},
         {"id": "need_action", "label": "自信和行动力", "chakra": "solar_plexus"},
-        {"id": "need_acceptance", "label": "接纳和关系修复", "chakra": "heart"},
+        {"id": "need_acceptance", "label": "接纳和关系柔和", "chakra": "heart"},
         {"id": "need_clarity", "label": "表达和清晰沟通", "chakra": "throat"}
       ]
     }

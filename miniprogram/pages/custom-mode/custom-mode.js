@@ -3,8 +3,8 @@ const MODE_STORAGE_KEY = 'customMode';
 const MODES = [
   {
     id: 'wuxing',
-    title: '五行定制',
-    desc: '根据出生信息建立五行画像，平衡能量，改善趋势',
+    title: '五行风格定制',
+    desc: '根据出生信息建立元素画像，生成更贴合的搭配参考',
     badge: '五',
     tone: 'green',
     type: 'switchTab',
@@ -22,7 +22,7 @@ const MODES = [
   {
     id: 'mbti',
     title: 'MBTI 定制',
-    desc: '解析性格倾向，匹配你的能量主石与配色',
+    desc: '解析性格偏好，匹配你的主石与配色',
     badge: 'M',
     tone: 'blue',
     type: 'switchTab',

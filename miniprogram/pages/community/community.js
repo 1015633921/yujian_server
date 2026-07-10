@@ -178,7 +178,7 @@ Page({
     } else if (activeTopic === 'element') {
       list = list.filter(item => /五行|金|木|水|火|土|能量|平衡/.test(item.searchText));
     } else if (activeTopic === 'emotion') {
-      list = list.filter(item => /情绪|治愈|疗愈|睡眠|放松|温柔|守护/.test(item.searchText));
+      list = list.filter(item => /情绪|舒缓|放松|温柔|陪伴|边界/.test(item.searchText));
     } else if (activeTopic === 'style') {
       list = list.filter(item => /风格|通勤|礼物|日常|清爽|夏日|穿搭/.test(item.searchText));
     }

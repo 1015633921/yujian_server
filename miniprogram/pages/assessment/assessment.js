@@ -18,14 +18,14 @@ const MBTI_TYPES = [
   'ISTJ', 'ISFJ', 'ESTJ', 'ESFJ',
   'ISTP', 'ISFP', 'ESTP', 'ESFP'
 ];
-const WISHES = ['情绪平衡', '事业财富', '爱情人缘', '睡眠修复', '专注灵感', '守护辟邪'];
+const WISHES = ['情绪平衡', '事业专注', '人际亲和', '放松休息', '专注灵感', '安定边界'];
 const WISH_MAPPING = {
   情绪平衡: '辟邪防小人/消除焦虑',
-  事业财富: '招财进宝/事业腾飞',
-  爱情人缘: '正缘桃花/人际和合',
-  睡眠修复: '辟邪防小人/消除焦虑',
+  事业专注: '招财进宝/事业腾飞',
+  人际亲和: '正缘桃花/人际和合',
+  放松休息: '辟邪防小人/消除焦虑',
   专注灵感: '健康护身/保持专注',
-  守护辟邪: '辟邪防小人/消除焦虑'
+  安定边界: '辟邪防小人/消除焦虑'
 };
 const CHAKRA_OPTIONS = [
   { value: 'state_expression', label: '表达卡住', desc: '喉轮' },
@@ -49,31 +49,31 @@ const MOOD_PALETTES = [
 ];
 const MODE_COPY = {
   wuxing: {
-    navTitle: '五行测算',
+    navTitle: '五行风格分析',
     kicker: 'BASIC PROFILE',
-    title: '建立你的五行能量档案',
-    desc: '填写出生日期、时间和地点后，先生成能量分布，再进入专属手串推荐。'
+    title: '建立你的元素搭配档案',
+    desc: '填写出生日期、时间和地点后，生成元素比例参考，再进入专属手串推荐。'
   },
   astro: {
     navTitle: '星座灵感',
     kicker: 'ASTRO PROFILE',
-    title: '结合星座气质做灵感推荐',
-    desc: '出生信息会帮助系统理解你的阶段状态，并生成更适合的水晶搭配方向。'
+    title: '结合星座气质做搭配灵感',
+    desc: '出生信息会帮助系统理解你的偏好线索，并生成更适合的水晶搭配方向。'
   },
   mbti: {
     navTitle: 'MBTI 定制',
     kicker: 'MBTI PROFILE',
     title: '用性格偏好辅助配色与主石',
-    desc: '你可以补充 MBTI 与当下愿望，让推荐方案更贴近日常佩戴场景。'
+    desc: '你可以补充 MBTI 与当下目标，让推荐方案更贴近日常佩戴场景。'
   }
 };
 const FLOW_STEPS = [
-  { key: 'basic', label: '基础', title: '基础信息', desc: '先建立真实命盘底色。', badge: '必填', optional: false },
-  { key: 'wish', label: '愿望', title: '核心愿望', desc: '选择这次最想被手串承接的方向。', badge: '必填', optional: false },
+  { key: 'basic', label: '基础', title: '基础信息', desc: '先建立基础元素参考。', badge: '必填', optional: false },
+  { key: 'wish', label: '目标', title: '佩戴目标', desc: '选择这次最想被手串提醒的方向。', badge: '必填', optional: false },
   { key: 'mbti', label: '性格', title: '性格偏好', desc: 'MBTI 会辅助理解表达方式，不填写也可以继续。', badge: '可选', optional: true },
-  { key: 'state', label: '状态', title: '当下状态', desc: '用七脉轮捕捉最近的身体感受和情绪倾向。', badge: '可选', optional: true },
+  { key: 'state', label: '状态', title: '当下状态', desc: '用状态选项捕捉最近的身体感受和情绪倾向。', badge: '可选', optional: true },
   { key: 'palette', label: '色彩', title: '直觉色彩', desc: '凭第一眼选择最吸引你的颜色气质。', badge: '可选', optional: true },
-  { key: 'review', label: '确认', title: '确认信息', desc: '确认无误后生成专属能量报告。', badge: '生成', optional: false }
+  { key: 'review', label: '确认', title: '确认信息', desc: '确认无误后生成专属搭配报告。', badge: '生成', optional: false }
 ];
 const REGION_OPTIONS = [
   { province: '北京市', cities: ['北京市'] },
@@ -306,7 +306,7 @@ Page({
       canProceed: this.canProceed(currentStep.key, form),
       showPrevious: currentStepIndex > 0,
       showSkip: Boolean(currentStep.optional),
-      primaryButtonText: currentStep.key === 'review' ? '开始测算' : '下一步',
+      primaryButtonText: currentStep.key === 'review' ? '生成分析' : '下一步',
       reviewRows: this.buildReviewRows(form)
     };
   },
@@ -458,7 +458,7 @@ Page({
       { label: '出生日期', value: form.birthDate || '未填写', stepIndex: 0 },
       { label: '出生时刻', value: form.birthTimeUnknown || !form.birthTime ? '未知，按 12:00 估算' : form.birthTime, stepIndex: 0 },
       { label: '出生地点', value: form.birthRegion.join(' ') || form.birthPlace || '未填写', stepIndex: 0 },
-      { label: '核心愿望', value: form.wishes.length ? form.wishes.join(' / ') : '未选择', stepIndex: 1 },
+      { label: '佩戴目标', value: form.wishes.length ? form.wishes.join(' / ') : '未选择', stepIndex: 1 },
       { label: 'MBTI', value: form.mbti || '已跳过', stepIndex: 2 },
       { label: '当下状态', value: selectedStates.length ? selectedStates.join(' / ') : '已跳过', stepIndex: 3 },
       { label: '直觉色彩', value: selectedPalette || '已跳过', stepIndex: 4 }
@@ -500,7 +500,7 @@ Page({
     if (index > -1) {
       wishes.splice(index, 1);
     } else if (wishes.length >= 3) {
-      wx.showToast({ title: '最多选择 3 项愿望', icon: 'none' });
+      wx.showToast({ title: '最多选择 3 项目标', icon: 'none' });
       return;
     } else {
       wishes.push(value);
@@ -621,7 +621,7 @@ Page({
 
   validationMessage(stepKey) {
     if (stepKey === 'basic') return '请先填写昵称';
-    if (stepKey === 'wish') return '请选择至少 1 项愿望';
+    if (stepKey === 'wish') return '请选择至少 1 项目标';
     return '请完善当前步骤';
   },
 
@@ -661,7 +661,7 @@ Page({
   async startAssessment() {
     let user;
     try {
-      user = await auth.requireLogin('登录后才能保存测算结果和生成每日能量。');
+      user = await auth.requireLogin('登录后才能保存分析结果和生成每日搭配建议。');
     } catch (error) {
       return;
     }
@@ -673,7 +673,7 @@ Page({
     }
     if (!form.wishes.length) {
       this.goToStep(1);
-      wx.showToast({ title: '请选择至少 1 项愿望', icon: 'none' });
+      wx.showToast({ title: '请选择至少 1 项目标', icon: 'none' });
       return;
     }
     const selectedWishes = form.wishes.length ? form.wishes : [DEFAULT_WISH];
@@ -691,7 +691,7 @@ Page({
       force_recalculate: true
     };
     this.setData({ submitting: true });
-    wx.showLoading({ title: '正在计算能量' });
+    wx.showLoading({ title: '正在生成分析' });
     try {
       const report = await calculateEnergy(payload);
       this.persistLastProfile(form);
@@ -707,7 +707,7 @@ Page({
       });
       wx.navigateTo({ url: '/pages/report/report' });
     } catch (error) {
-      wx.showToast({ title: error.message || '测算失败，请稍后重试', icon: 'none' });
+      wx.showToast({ title: error.message || '分析失败，请稍后重试', icon: 'none' });
     } finally {
       wx.hideLoading();
       this.setData({ submitting: false });

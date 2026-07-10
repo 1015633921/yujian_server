@@ -1,6 +1,7 @@
 const auth = require('../../utils/auth');
 const env = require('../../config/env');
 const { createOrder, mockPayOrder, getMaterials } = require('../../utils/api');
+const { assetUrl } = require('../../utils/assets');
 
 const MATERIALS = {
   clearQuartz8: { name: '喜马拉雅白水晶 8mm', sku: 'SKU_CLEAR_8MM', price: 5 },
@@ -28,9 +29,9 @@ const CHECKOUT_PREVIEW_STAGE_SIZE = 560;
 const CHECKOUT_PREVIEW_CENTER = CHECKOUT_PREVIEW_STAGE_SIZE / 2;
 const CHECKOUT_WORKSPACE_CENTER = 288;
 const CHECKOUT_TRAY_IMAGES = {
-  white: '/assets/workspace/tray-yustream-white-transparent-user-20260701.webp',
-  warm: '/assets/workspace/tray-yustream-transparent-user-20260701-v6.webp',
-  black: '/assets/workspace/tray-yustream-black-transparent-user-20260701.webp'
+  white: assetUrl('workspace/tray-yustream-white-transparent-user-20260701.webp'),
+  warm: assetUrl('workspace/tray-yustream-transparent-user-20260701-v6.webp'),
+  black: assetUrl('workspace/tray-yustream-black-transparent-user-20260701.webp')
 };
 const DEFAULT_CHECKOUT_DESIGN_TITLE = '\u6e29\u67d4\u5b88\u62a4 \u00b7 \u548c\u8c10\u5e73\u8861\u6b3e';
 const DESIGN_NAME_MODAL_HINT_KEYWORD = '\u7ed9\u8fd9\u6761\u624b\u4e32\u8d77\u4e2a\u540d\u5b57';

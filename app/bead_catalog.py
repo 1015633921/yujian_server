@@ -299,7 +299,7 @@ def infer_bead_profile(category: str, series: str) -> dict[str, str]:
     if any(key in text for key in ["紫", "舒俱来", "云母", "超七", "极光"]):
         return {"element": "火", "effect": "灵感与睡眠", "color": "#8a69a8", "shine": "#f1e8ff"}
     if any(key in text for key in ["白", "贝母", "月光", "水胆", "方解石"]):
-        return {"element": "金", "effect": "净化与放大", "color": "#dfe3e5", "shine": "#ffffff"}
+        return {"element": "金", "effect": "清爽与干净感", "color": "#dfe3e5", "shine": "#ffffff"}
     return {"element": "土", "effect": "平衡与守护", "color": "#9f8d7a", "shine": "#fff5e8"}
 
 

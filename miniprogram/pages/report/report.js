@@ -23,9 +23,9 @@ const ELEMENT_NAME_ALIASES = {
 };
 const STEPS = [
   { key: 'basic', index: 1, label: '基础信息', activeClass: 'done' },
-  { key: 'wish', index: 2, label: '核心愿望', activeClass: 'done' },
+  { key: 'wish', index: 2, label: '佩戴目标', activeClass: 'done' },
   { key: 'state', index: 3, label: '当下状态', activeClass: 'done' },
-  { key: 'analysis', index: 4, label: '能量分析', activeClass: 'active' }
+  { key: 'analysis', index: 4, label: '搭配分析', activeClass: 'active' }
 ];
 const POSTER_WIDTH = 750;
 const POSTER_MIN_HEIGHT = 2180;
@@ -42,6 +42,70 @@ function safeText(value, fallback = '') {
   if (value === null || value === undefined) return fallback;
   const text = String(value).trim();
   return text || fallback;
+}
+
+const DISPLAY_REPLACEMENTS = [
+  ['招财进宝/事业腾飞', '事业专注/稳步推进'],
+  ['正缘桃花/人际和合', '人际亲和/柔和沟通'],
+  ['辟邪防小人/消除焦虑', '安定边界/舒缓压力'],
+  ['健康护身/保持专注', '日常平衡/保持专注'],
+  ['招财进宝', '稳步推进'],
+  ['事业腾飞', '事业专注'],
+  ['正缘桃花', '人际亲和'],
+  ['辟邪防小人', '安定边界'],
+  ['消除焦虑', '舒缓压力'],
+  ['健康护身', '日常平衡'],
+  ['修复睡眠', '放松休息'],
+  ['睡眠修复', '放松休息'],
+  ['命盘底色', '风格底色'],
+  ['日主与喜用', '基础参考'],
+  ['日主', '基础点'],
+  ['喜用', '搭配参考'],
+  ['排盘', '生成参考'],
+  ['命盘', '风格'],
+  ['运势', '状态'],
+  ['流月', '近期'],
+  ['流失点', '留意点'],
+  ['待补', '可调和'],
+  ['缺失', '偏低'],
+  ['补足', '调和'],
+  ['五行能量', '五行元素'],
+  ['能量分布', '元素比例'],
+  ['能量报告', '搭配报告'],
+  ['能量画像', '搭配画像'],
+  ['能量标签', '搭配标签'],
+  ['整体能量', '整体比例'],
+  ['核心愿望', '佩戴目标'],
+  ['愿望', '目标'],
+  ['七脉轮', '状态线索'],
+  ['招财', '目标感'],
+  ['财运', '目标推进'],
+  ['财富', '目标'],
+  ['聚财', '积极行动'],
+  ['桃花', '亲和'],
+  ['正缘', '亲和'],
+  ['贵人运', '协作感'],
+  ['贵人', '协作'],
+  ['辟邪', '安定'],
+  ['防小人', '边界感'],
+  ['护身', '安定'],
+  ['疗愈', '舒缓'],
+  ['治疗', '舒缓'],
+  ['净化磁场', '整理氛围'],
+  ['磁场', '氛围'],
+  ['净化', '清爽'],
+  ['转运', '积极调整'],
+  ['求好运', '积极期待'],
+  ['好运', '积极感'],
+  ['能量', '状态']
+];
+
+function sanitizeDisplayText(value, fallback = '') {
+  let text = safeText(value, fallback);
+  DISPLAY_REPLACEMENTS.forEach(([from, to]) => {
+    text = text.split(from).join(to);
+  });
+  return text;
 }
 
 function repairMojibakeText(value) {
@@ -218,9 +282,9 @@ function drawPosterElementRows(ctx, elements, x, y, width) {
 function drawPosterTags(ctx, keywords, x, y, maxWidth) {
   let cursorX = x;
   let cursorY = y;
-  const tags = Array.isArray(keywords) && keywords.length ? keywords : [{ label: '清透' }, { label: '稳定' }, { label: '调和' }];
-  tags.forEach(item => {
-    const label = safeText(item.label, '能量标签');
+    const tags = Array.isArray(keywords) && keywords.length ? keywords : [{ label: '清透' }, { label: '稳定' }, { label: '调和' }];
+    tags.forEach(item => {
+    const label = sanitizeDisplayText(item.label, '搭配标签');
     ctx.font = '700 24px "PingFang SC", "Microsoft YaHei", sans-serif';
     const tagWidth = Math.min(210, Math.max(104, ctx.measureText(label).width + 42));
     if (cursorX + tagWidth > x + maxWidth) {
@@ -241,7 +305,7 @@ function measurePosterTags(ctx, keywords, x, y, maxWidth) {
   let cursorY = y;
   const tags = Array.isArray(keywords) && keywords.length ? keywords : [{ label: '清透' }, { label: '稳定' }, { label: '调和' }];
   tags.forEach(item => {
-    const label = safeText(item.label, '能量标签');
+    const label = sanitizeDisplayText(item.label, '搭配标签');
     ctx.font = '700 24px "PingFang SC", "Microsoft YaHei", sans-serif';
     const tagWidth = Math.min(210, Math.max(104, ctx.measureText(label).width + 42));
     if (cursorX + tagWidth > x + maxWidth) {
@@ -392,7 +456,7 @@ Page({
     });
     const score = this.normalizeScore(report.interpretation && report.interpretation.balance_index);
     return {
-      title: (report.interpretation && report.interpretation.headline) || '你的五行能量分布已生成',
+      title: sanitizeDisplayText((report.interpretation && report.interpretation.headline) || '你的元素比例参考已生成'),
       mbti: (report.input_summary && report.input_summary.mbti) || '未填写 MBTI',
       wish: this.buildWishText(report.input_summary || {}),
       summary: this.buildSummary(report),
@@ -408,7 +472,7 @@ Page({
       chakra: this.buildChakraView(report.chakra_analysis || {}),
       mood: this.buildMoodView(report.mood_analysis || {}),
       zodiac: this.buildZodiacView(report.zodiac_analysis || {}),
-      recommendationStrategy: report.recommendation_strategy || '',
+      recommendationStrategy: sanitizeDisplayText(report.recommendation_strategy || ''),
       recommendationReasons: this.buildRecommendationReasons(report, elements),
       elements,
       ringGradient: this.buildRingGradient(elements)
@@ -425,46 +489,57 @@ Page({
     if (score >= 85) return '状态稳定';
     if (score >= 70) return '状态良好';
     if (score >= 55) return '可继续调和';
-    return '建议温柔补足';
+    return '建议温柔调和';
   },
 
   buildWishText(inputSummary) {
     const wishes = inputSummary.core_wishes || (inputSummary.core_wish ? [inputSummary.core_wish] : []);
-    return wishes.length ? wishes.join(' / ') : '未填写愿望';
+    return wishes.length ? wishes.map(item => sanitizeDisplayText(item)).join(' / ') : '未填写目标';
   },
 
   buildSummary(report) {
     const interpretation = report.interpretation || {};
-    const strongest = interpretation.strongest || `${report.strongest_element || '优势'}能量较为鲜明。`;
-    const weakest = interpretation.weakest || `${report.weakest_element || '待补'}能量适合慢慢调和。`;
-    return `${strongest}${weakest}`;
+    const strongest = interpretation.strongest || `${report.strongest_element || '优势'}元素倾向较为鲜明。`;
+    const weakest = interpretation.weakest || `${report.weakest_element || '可调和'}元素适合慢慢调和。`;
+    return sanitizeDisplayText(`${strongest}${weakest}`);
   },
 
   buildKeywordTags(keywords) {
     const list = Array.isArray(keywords) ? keywords : [];
     return list.map(item => {
-      if (typeof item === 'string') return { label: item, source: '能量标签' };
+      if (typeof item === 'string') return { label: sanitizeDisplayText(item), source: '搭配标签' };
       return {
-        label: item.label || '',
-        source: item.source || '能量标签',
+        label: sanitizeDisplayText(item.label || ''),
+        source: sanitizeDisplayText(item.source || '搭配标签'),
         element: item.element || ''
       };
     }).filter(item => item.label);
   },
 
   buildSeasonalEnergy(seasonal, report) {
-    if (seasonal && seasonal.summary) return seasonal;
+    if (seasonal && seasonal.summary) {
+      return {
+        ...seasonal,
+        title: sanitizeDisplayText(seasonal.title || '近期状态提示'),
+        period: sanitizeDisplayText(seasonal.period || '近期参考'),
+        seasonal_copy: sanitizeDisplayText(seasonal.seasonal_copy || ''),
+        notice: sanitizeDisplayText(seasonal.notice || ''),
+        drain_point: sanitizeDisplayText(seasonal.drain_point || ''),
+        suggestion: sanitizeDisplayText(seasonal.suggestion || ''),
+        summary: sanitizeDisplayText(seasonal.summary || '')
+      };
+    }
     const strongest = report.strongest_element || '优势';
-    const weakest = report.weakest_element || '待补';
+    const weakest = report.weakest_element || '可调和';
     return {
-      title: '近期能量运势提示',
-      period: '当前流月',
+      title: '近期状态提示',
+      period: '近期参考',
       seasonal_element: strongest,
-      seasonal_copy: '当下适合观察自己的能量节奏。',
-      notice: `你的${strongest}能量较明显。`,
-      drain_point: `${weakest}能量适合慢慢补足，不宜一次调整太多。`,
+      seasonal_copy: '当下适合观察自己的状态节奏。',
+      notice: `你的${strongest}元素倾向较明显。`,
+      drain_point: `${weakest}元素适合慢慢调和，不宜一次调整太多。`,
       suggestion: '保持规律作息，把注意力放回最重要的一件事。',
-      summary: `你的${strongest}能量较明显，${weakest}能量适合慢慢补足。保持规律作息，把注意力放回最重要的一件事。`
+      summary: `你的${strongest}元素倾向较明显，${weakest}元素适合慢慢调和。保持规律作息，把注意力放回最重要的一件事。`
     };
   },
 
@@ -473,10 +548,10 @@ Page({
     const useful = Array.isArray(bazi.useful_elements) ? bazi.useful_elements.join(' / ') : '';
     return {
       pillarsText: [pillars.year, pillars.month, pillars.day, pillars.time].filter(Boolean).join(' · '),
-      dayMaster: bazi.day_master ? `${bazi.day_master}日主` : '',
-      strength: bazi.day_master_strength || '',
+      dayMaster: bazi.day_master ? `${bazi.day_master}元素参考` : '',
+      strength: sanitizeDisplayText(bazi.day_master_strength || ''),
       usefulText: useful,
-      strategy: bazi.strategy || ''
+      strategy: sanitizeDisplayText(bazi.strategy || '')
     };
   },
 
@@ -485,7 +560,7 @@ Page({
     return {
       name: chakra.primary_chakra_name || '未选择',
       keywords,
-      summary: chakra.summary || '未选择当下状态，系统按中性状态参与计算。',
+      summary: sanitizeDisplayText(chakra.summary || '未选择当下状态，系统按中性状态参与计算。'),
       colors: Array.isArray(chakra.colors) ? chakra.colors : []
     };
   },
@@ -494,7 +569,7 @@ Page({
     return {
       name: mood.name || '未选择',
       subtitle: mood.subtitle || '未选择直觉色彩',
-      summary: mood.summary || '未选择色彩时，系统不额外偏向某一组情绪色。',
+      summary: sanitizeDisplayText(mood.summary || '未选择色彩时，系统不额外偏向某一组情绪色。'),
       colors: Array.isArray(mood.colors) ? mood.colors : []
     };
   },
@@ -511,10 +586,10 @@ Page({
       modality: zodiac.modality || '',
       keywords,
       keywordText: keywords.join(' / '),
-      summary: zodiac.summary || '',
-      wuxingHint: zodiac.wuxing_hint || '',
-      integration: zodiac.integration || '',
-      suggestion: zodiac.suggestion || ''
+      summary: sanitizeDisplayText(zodiac.summary || ''),
+      wuxingHint: sanitizeDisplayText(zodiac.wuxing_hint || ''),
+      integration: sanitizeDisplayText(zodiac.integration || ''),
+      suggestion: sanitizeDisplayText(zodiac.suggestion || '')
     };
   },
 
@@ -525,7 +600,7 @@ Page({
     const usefulElements = Array.isArray(bazi.useful_elements) ? bazi.useful_elements.filter(Boolean) : [];
     const strategy = safeText(bazi.strategy || report.recommendation_strategy);
     const strongest = safeText(report.strongest_element, '优势');
-    const weakest = safeText(report.weakest_element, '待补');
+    const weakest = safeText(report.weakest_element, '可调和');
     const chakra = report.chakra_analysis || {};
     const mood = report.mood_analysis || {};
     const topElements = (elements || [])
@@ -536,36 +611,36 @@ Page({
       .filter(Boolean);
     const usefulText = usefulElements.length ? usefulElements.join(' / ') : weakest;
     const baseDesc = strategy
-      || `当前${strongest}能量较明显，${usefulText}适合温柔调和，推荐会优先选择能让整体比例更平衡的材料。`;
+      || `当前${strongest}元素倾向较明显，${usefulText}适合温柔调和，推荐会优先选择能让整体比例更平衡的材料。`;
     const wishDesc = wishes.length
-      ? `你选择了「${wishes.slice(0, 2).join('、')}」，材料筛选会更偏向这个佩戴目标和场景。`
-      : '未填写愿望时，系统会先以五行平衡和佩戴舒适度作为主要推荐依据。';
+      ? `你选择了「${wishes.slice(0, 2).map(item => sanitizeDisplayText(item)).join('、')}」，材料筛选会更偏向这个佩戴目标和场景。`
+      : '未填写目标时，系统会先以元素比例和佩戴舒适度作为主要推荐依据。';
     const stateParts = [
-      chakra.primary_chakra_name ? `七脉轮偏向「${chakra.primary_chakra_name}」` : '',
+      chakra.primary_chakra_name ? `状态线索偏向「${sanitizeDisplayText(chakra.primary_chakra_name)}」` : '',
       mood.name ? `直觉色彩选择「${mood.name}」` : ''
     ].filter(Boolean);
     const stateDesc = stateParts.length
-      ? `${stateParts.join('，')}，会影响辅助珠的颜色、功效标签和排序权重。`
+      ? `${stateParts.join('，')}，会影响辅助珠的颜色、寓意标签和排序权重。`
       : '未选择当下状态时，推荐会保持中性，不额外放大某一类颜色或情绪标签。';
 
     return [
       {
         index: '01',
-        title: '命盘与五行',
-        desc: baseDesc,
-        meta: topElements.length ? `主要参考：${topElements.join(' / ')}` : '主要参考：五行比例'
+        title: '风格与元素',
+        desc: sanitizeDisplayText(baseDesc),
+        meta: topElements.length ? `主要参考：${topElements.join(' / ')}` : '主要参考：元素比例'
       },
       {
         index: '02',
-        title: '愿望与场景',
+        title: '目标与场景',
         desc: wishDesc,
-        meta: wishes.length ? `愿望：${wishes.slice(0, 3).join(' / ')}` : '愿望：未填写'
+        meta: wishes.length ? `目标：${wishes.slice(0, 3).map(item => sanitizeDisplayText(item)).join(' / ')}` : '目标：未填写'
       },
       {
         index: '03',
         title: '当下状态',
         desc: stateDesc,
-        meta: '七脉轮 / 直觉色彩'
+        meta: '状态线索 / 直觉色彩'
       }
     ];
   },
@@ -1007,13 +1082,13 @@ Page({
     const input = report.input_summary || {};
     const name = safeText(input.name, '你');
     const seasonal = view.seasonal || {};
-    const mainTitle = `${name}的五行能量报告`;
+    const mainTitle = `${name}的元素搭配报告`;
     const wishText = safeText(view.wish, '保持稳定与清透');
-    const summaryText = safeText(view.summary, '你的能量分布已经生成，适合以温和的方式继续调和。');
+    const summaryText = sanitizeDisplayText(view.summary, '你的元素比例已经生成，适合以温和的方式继续调和。');
     const suggestion = safeText(seasonal.suggestion || seasonal.summary, '保持规律作息，把注意力放回最重要的一件事。');
     const elements = view.elements || [];
     const strongest = safeText(view.strongest, '优势');
-    const weakest = safeText(view.weakest, '待补');
+    const weakest = safeText(view.weakest, '可调和');
     const bazi = view.bazi || {};
     const chakra = view.chakra || {};
     const mood = view.mood || {};
@@ -1029,49 +1104,49 @@ Page({
     const keywordY = elementY + elementHeight + 26;
 
     const baziDetail = [
-      bazi.dayMaster ? `日主：${bazi.dayMaster}` : '',
-      bazi.strength ? `强弱：${bazi.strength}` : '',
-      bazi.usefulText ? `喜用：${bazi.usefulText}` : ''
+      bazi.dayMaster ? `基础点：${bazi.dayMaster}` : '',
+      bazi.strength ? `状态：${sanitizeDisplayText(bazi.strength)}` : '',
+      bazi.usefulText ? `搭配参考：${bazi.usefulText}` : ''
     ].filter(Boolean).join(' · ');
     const baziRows = [
-      { label: '排盘', text: bazi.pillarsText || view.trueSolarTime || '已按真太阳时排盘', color: '#20201F' },
-      { label: '日主与喜用', text: baziDetail || '系统已结合出生信息完成五行底色分析。' },
-      { label: '推荐策略', text: bazi.strategy || view.recommendationStrategy || '系统会结合五行比例、核心愿望和佩戴舒适度生成推荐方案。' }
+      { label: '参考', text: bazi.pillarsText || view.trueSolarTime || '已按出生地时间校准', color: '#20201F' },
+      { label: '基础参考', text: baziDetail || '系统已结合出生信息完成元素底色分析。' },
+      { label: '推荐策略', text: bazi.strategy || view.recommendationStrategy || '系统会结合元素比例、佩戴目标和佩戴舒适度生成推荐方案。' }
     ];
     const liveRows = [
       {
-        label: '七脉轮',
-        text: `${safeText(chakra.name, '未选择')}｜${safeText(chakra.summary, '系统按中性状态参与计算。')}`,
+        label: '状态线索',
+        text: `${safeText(chakra.name, '未选择')}｜${sanitizeDisplayText(chakra.summary, '系统按中性状态参与计算。')}`,
         accent: '#647C70'
       },
       {
         label: '直觉色彩',
-        text: `${safeText(mood.name, '未选择')}｜${safeText(mood.summary, '未选择色彩时，系统不额外偏向某一组情绪色。')}`,
+        text: `${safeText(mood.name, '未选择')}｜${sanitizeDisplayText(mood.summary, '未选择色彩时，系统不额外偏向某一组情绪色。')}`,
         accent: '#8B82B3'
       }
     ];
     const zodiacRows = zodiac.name ? [
       {
-        label: '星座底色',
+        label: '星座气质',
         text: `${safeText(zodiac.name)} · ${safeText(zodiac.element, '星座气质')} · ${safeText(zodiac.modality, '节奏')}`,
         meta: safeText(zodiac.keywordText, ''),
         accent: '#9D7A3F'
       },
       {
-        label: '五行参照',
-        text: safeText(zodiac.wuxingHint, '星座气质会作为五行报告外的性格侧写参考。'),
+        label: '元素参照',
+        text: sanitizeDisplayText(zodiac.wuxingHint, '星座气质会作为元素报告外的性格侧写参考。'),
         accent: '#9D7A3F'
       },
       {
         label: '调和建议',
-        text: safeText(zodiac.suggestion, zodiac.integration || '保持温和节奏，让优势被看见，也给待补能量留出空间。'),
+        text: sanitizeDisplayText(zodiac.suggestion, zodiac.integration || '保持温和节奏，让优势被看见，也给可调和元素留出空间。'),
         accent: '#9D7A3F'
       }
     ] : [];
     const seasonalRows = [
-      { label: '周期', text: `${safeText(seasonal.period, '当前流月')} · ${safeText(seasonal.seasonal_element, strongest)}气当令` },
-      { label: '能量提示', text: safeText(seasonal.seasonal_copy || seasonal.notice, '当下适合观察自己的能量节奏。') },
-      { label: '流失点', text: safeText(seasonal.drain_point, `${weakest}能量适合慢慢补足，不宜一次调整太多。`) },
+      { label: '周期', text: `${sanitizeDisplayText(seasonal.period, '近期参考')} · ${safeText(seasonal.seasonal_element, strongest)}元素参考` },
+      { label: '状态提示', text: sanitizeDisplayText(seasonal.seasonal_copy || seasonal.notice, '当下适合观察自己的状态节奏。') },
+      { label: '留意点', text: sanitizeDisplayText(seasonal.drain_point, `${weakest}元素适合慢慢调和，不宜一次调整太多。`) },
       { label: '调和建议', text: suggestion, accent: '#365C9C' }
     ];
     const recommendRows = (view.recommendationReasons || []).map(item => ({
@@ -1121,7 +1196,7 @@ Page({
     ctx.fillText('宇涧水晶', 58, 76);
     ctx.fillStyle = '#8B8881';
     ctx.font = '700 18px "PingFang SC", "Microsoft YaHei", sans-serif';
-    ctx.fillText('WU XING ENERGY REPORT', 58, 106);
+    ctx.fillText('ELEMENT STYLE REPORT', 58, 106);
     ctx.textAlign = 'right';
     ctx.fillText('LIGHT STUDIO LAB', 692, 82);
     ctx.textAlign = 'left';
@@ -1133,16 +1208,16 @@ Page({
     drawWrappedText(ctx, mainTitle, contentX, 206, 336, 54, 2);
     ctx.fillStyle = '#64615B';
     ctx.font = '500 24px "PingFang SC", "Microsoft YaHei", sans-serif';
-    drawWrappedText(ctx, `愿望：${wishText}`, contentX, 320, 340, 34, 2);
+    drawWrappedText(ctx, `目标：${sanitizeDisplayText(wishText)}`, contentX, 320, 340, 34, 2);
     ctx.fillStyle = '#8B8881';
     ctx.font = '600 22px "PingFang SC", "Microsoft YaHei", sans-serif';
     ctx.fillText(`MBTI：${safeText(view.mbti, '未填写')}`, contentX, 420);
     ctx.fillText(
-      zodiac.name ? `星座：${safeText(zodiac.name)} · ${safeText(zodiac.element, '星座气质')}` : `偏强 ${strongest} · 待补 ${weakest}`,
+      zodiac.name ? `星座：${safeText(zodiac.name)} · ${safeText(zodiac.element, '星座气质')}` : `偏强 ${strongest} · 可调和 ${weakest}`,
       contentX,
       456
     );
-    if (zodiac.name) ctx.fillText(`偏强 ${strongest} · 待补 ${weakest}`, contentX, 492);
+    if (zodiac.name) ctx.fillText(`偏强 ${strongest} · 可调和 ${weakest}`, contentX, 492);
 
     drawElementRing(ctx, elements, 560, 296, 96, 24);
     fillRoundRect(ctx, 494, 230, 132, 132, 66, '#FBFAF7');
@@ -1159,7 +1234,7 @@ Page({
     strokeRoundRect(ctx, cardX, elementY, cardWidth, elementHeight, 28, '#E5E2DC', 1);
     ctx.fillStyle = '#20201F';
     ctx.font = '800 30px "PingFang SC", "Microsoft YaHei", sans-serif';
-    ctx.fillText('五行比例', contentX, elementY + 58);
+    ctx.fillText('元素比例', contentX, elementY + 58);
     drawPosterElementRows(ctx, elements, contentX, elementY + 96, contentWidth);
 
     fillRoundRect(ctx, cardX, keywordY, cardWidth, keywordHeight, 28, '#FFFFFF');
@@ -1172,12 +1247,12 @@ Page({
     ctx.font = '500 22px "PingFang SC", "Microsoft YaHei", sans-serif';
     drawWrappedText(ctx, summaryText, contentX, afterTagsY + 14, contentWidth, 32);
 
-    drawPosterTextCard(ctx, '命盘底色', baziRows, cardX, baziY, cardWidth, { minHeight: 190, accent: '#365C9C' });
-    drawPosterTextCard(ctx, '当下能量', liveRows, cardX, liveY, cardWidth, { minHeight: 230, accent: '#647C70' });
+    drawPosterTextCard(ctx, '风格底色', baziRows, cardX, baziY, cardWidth, { minHeight: 190, accent: '#365C9C' });
+    drawPosterTextCard(ctx, '当下状态', liveRows, cardX, liveY, cardWidth, { minHeight: 230, accent: '#647C70' });
     if (zodiacRows.length) {
       drawPosterTextCard(ctx, '星座气质', zodiacRows, cardX, zodiacY, cardWidth, { minHeight: 220, accent: '#9D7A3F' });
     }
-    drawPosterTextCard(ctx, '近期能量提示', seasonalRows, cardX, seasonalY, cardWidth, { minHeight: 270, accent: '#365C9C' });
+    drawPosterTextCard(ctx, '近期状态提示', seasonalRows, cardX, seasonalY, cardWidth, { minHeight: 270, accent: '#365C9C' });
     drawPosterTextCard(ctx, '推荐依据', recommendRows, cardX, recommendY, cardWidth, { minHeight: 300, accent: '#9D7A3F' });
 
     fillRoundRect(ctx, cardX, footerY, cardWidth, 92, 24, '#20201F');
@@ -1194,7 +1269,7 @@ Page({
 
     ctx.fillStyle = '#8B8881';
     ctx.font = '500 18px "PingFang SC", "Microsoft YaHei", sans-serif';
-    ctx.fillText('本测算用于文化体验与个性化 DIY 推荐', contentX, footerY + 128);
+    ctx.fillText('本分析仅用于文化体验、审美搭配与个性化 DIY 推荐', contentX, footerY + 128);
 
     return posterHeight;
   },

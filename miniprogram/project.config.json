@@ -4,12 +4,24 @@
   "packOptions": {
     "ignore": [
       {
+        "type": "folder",
+        "value": ".git"
+      },
+      {
+        "type": "folder",
+        "value": "assets"
+      },
+      {
         "type": "file",
         "value": "pages/test.html"
       },
       {
         "type": "folder",
         "value": "assets/icons"
+      },
+      {
+        "type": "folder",
+        "value": "assets/sounds"
       },
       {
         "type": "file",

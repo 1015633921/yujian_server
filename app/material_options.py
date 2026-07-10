@@ -27,9 +27,9 @@ ELEMENT_ALIASES = {
 }
 
 WISH_POOL_OPTIONS: tuple[dict[str, str], ...] = (
-    {"key": "wealth", "label": "招财"},
+    {"key": "wealth", "label": "目标感"},
     {"key": "career", "label": "事业"},
-    {"key": "love", "label": "桃花"},
+    {"key": "love", "label": "亲和关系"},
     {"key": "relationship", "label": "人缘"},
     {"key": "protection", "label": "守护"},
     {"key": "calm", "label": "安定"},
@@ -37,7 +37,7 @@ WISH_POOL_OPTIONS: tuple[dict[str, str], ...] = (
     {"key": "focus", "label": "专注"},
     {"key": "communication", "label": "表达沟通"},
     {"key": "study", "label": "学习考试"},
-    {"key": "sleep", "label": "睡眠修复"},
+    {"key": "sleep", "label": "放松休息"},
     {"key": "emotion", "label": "情绪柔和"},
     {"key": "inspiration", "label": "灵感创作"},
 )
@@ -126,15 +126,15 @@ GRADE_OPTIONS: tuple[dict[str, str], ...] = (
 )
 
 EFFECT_OPTIONS: tuple[dict[str, str], ...] = (
-    {"key": "wealth", "label": "招财"},
+    {"key": "wealth", "label": "目标感"},
     {"key": "career", "label": "事业推进"},
-    {"key": "love", "label": "桃花人缘"},
+    {"key": "love", "label": "亲和人际"},
     {"key": "protection", "label": "守护避煞"},
     {"key": "calm", "label": "稳定安定"},
     {"key": "focus", "label": "专注清晰"},
     {"key": "communication", "label": "表达沟通"},
     {"key": "emotion", "label": "情绪柔和"},
-    {"key": "sleep", "label": "睡眠修复"},
+    {"key": "sleep", "label": "放松休息"},
     {"key": "inspiration", "label": "灵感创作"},
     {"key": "vitality", "label": "活力自信"},
 )
@@ -344,7 +344,7 @@ MATERIAL_OPTION_FIELD_SPECS: tuple[dict[str, Any], ...] = (
         "value_kind": "enum_key",
         "cardinality": "many",
         "mutable": True,
-        "description": "用于能量解释和推荐权重，通常多选。",
+        "description": "用于搭配解释和推荐权重，通常多选。",
     },
     {
         "key": "color_families",
@@ -362,7 +362,7 @@ MATERIAL_OPTION_FIELD_SPECS: tuple[dict[str, Any], ...] = (
         "value_kind": "tag_key",
         "cardinality": "many",
         "mutable": True,
-        "description": "用于今日能量、测算结果和用户共鸣表达，适合动态维护。",
+        "description": "用于今日搭配、分析结果和用户共鸣表达，适合动态维护。",
     },
     {
         "key": "visual_tags",

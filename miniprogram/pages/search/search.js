@@ -21,7 +21,7 @@ function materialRowsOf(data) {
 Page({
   data: {
     keyword: '',
-    hotKeywords: ['海蓝宝', '睡眠', '招财', '粉晶', '配饰', '花托'],
+    hotKeywords: ['海蓝宝', '放松', '目标感', '粉晶', '配饰', '花托'],
     results: [],
     materialResults: [],
     recommendedInspirations: [],

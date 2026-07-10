@@ -27,7 +27,7 @@
       bindtap="openPlan"
     >
       <view class="plan-preview {{item.statusClass}}">
-        <image class="plan-tray-image" src="/assets/workspace/tray-yustream-transparent-user-20260701-v6.webp" mode="aspectFit" />
+        <image class="plan-tray-image" src="{{trayImageUrl}}" mode="aspectFit" />
         <view class="preview-ring">
           <image wx:for="{{item.previewBeads}}" wx:key="index" class="preview-bead" src="{{item.src}}" mode="aspectFill" style="{{item.style}}" />
         </view>

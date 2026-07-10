@@ -131,13 +131,13 @@ def calculate_bazi(true_solar_datetime: datetime, total: float = 50) -> BaziResu
     support_ratio = round(max(0.0, support_raw) / (total_raw or 1.0), 3)
     if support_ratio >= 0.58:
         strength = "身强"
-        strategy = "喜克、泄、耗，用能消耗或规范日主的五行来调节过旺能量。"
+        strategy = "适合用更清晰的边界、表达出口和日常节奏来调和偏强元素。"
     elif support_ratio <= 0.42:
         strength = "身弱"
-        strategy = "喜生、扶，用能滋养或支持日主的五行来补足根气。"
+        strategy = "适合用更稳定的配色、材质和日常提醒来慢慢调和偏低元素。"
     else:
         strength = "中和"
-        strategy = "喜顺势调和，优先在表达、滋养与落地之间保持流动。"
+        strategy = "适合顺势调和，优先在表达、柔和与落地之间保持流动。"
     useful_elements = useful_elements_for_day_master(day_master_element, strength)
     basis = {
         "pillars": pillars,

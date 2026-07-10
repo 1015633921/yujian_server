@@ -105,10 +105,10 @@ def sort_materials_for_customer(materials: list[dict]) -> list[dict]:
 
 
 MATERIAL_CATALOG: list[dict] = [
-    {"id": "clearQuartz8", "skuId": "clearQuartz", "top": "bead", "category": "白水晶", "name": "喜马拉雅白水晶", "effect": "净化与放大", "element": "金", "price": 5, "size": 8, "weight": 1.2, "color": "#dfe3e5", "shine": "#ffffff", "image_path": "beads/clear-quartz-8.png"},
-    {"id": "clearQuartz10", "skuId": "clearQuartz", "top": "bead", "category": "白水晶", "name": "喜马拉雅白水晶", "effect": "净化与放大", "element": "金", "price": 10, "size": 10, "weight": 1.6, "color": "#d6dbde", "shine": "#ffffff", "image_path": "beads/clear-quartz-10.png"},
-    {"id": "clearQuartz12", "skuId": "clearQuartz", "top": "bead", "category": "白水晶", "name": "喜马拉雅白水晶", "effect": "净化与放大", "element": "金", "price": 15, "size": 12, "weight": 2.1, "color": "#cfd5d8", "shine": "#ffffff", "image_path": "beads/clear-quartz-12.png"},
-    {"id": "clearQuartz14", "skuId": "clearQuartz", "top": "bead", "category": "白水晶", "name": "喜马拉雅白水晶", "effect": "净化与放大", "element": "金", "price": 18, "size": 14, "weight": 2.8, "color": "#c8ced1", "shine": "#ffffff", "image_path": "beads/clear-quartz-14.png"},
+    {"id": "clearQuartz8", "skuId": "clearQuartz", "top": "bead", "category": "白水晶", "name": "喜马拉雅白水晶", "effect": "清爽与干净感", "element": "金", "price": 5, "size": 8, "weight": 1.2, "color": "#dfe3e5", "shine": "#ffffff", "image_path": "beads/clear-quartz-8.png"},
+    {"id": "clearQuartz10", "skuId": "clearQuartz", "top": "bead", "category": "白水晶", "name": "喜马拉雅白水晶", "effect": "清爽与干净感", "element": "金", "price": 10, "size": 10, "weight": 1.6, "color": "#d6dbde", "shine": "#ffffff", "image_path": "beads/clear-quartz-10.png"},
+    {"id": "clearQuartz12", "skuId": "clearQuartz", "top": "bead", "category": "白水晶", "name": "喜马拉雅白水晶", "effect": "清爽与干净感", "element": "金", "price": 15, "size": 12, "weight": 2.1, "color": "#cfd5d8", "shine": "#ffffff", "image_path": "beads/clear-quartz-12.png"},
+    {"id": "clearQuartz14", "skuId": "clearQuartz", "top": "bead", "category": "白水晶", "name": "喜马拉雅白水晶", "effect": "清爽与干净感", "element": "金", "price": 18, "size": 14, "weight": 2.8, "color": "#c8ced1", "shine": "#ffffff", "image_path": "beads/clear-quartz-14.png"},
     {"id": "amethyst8", "skuId": "amethyst", "top": "bead", "category": "紫水晶", "name": "乌拉圭紫水晶", "effect": "灵感与睡眠", "element": "火", "price": 12, "size": 8, "weight": 1.4, "color": "#8b6aa5", "shine": "#efe8ff", "image_path": "beads/amethyst-8.png"},
     {"id": "amethyst10", "skuId": "amethyst", "top": "bead", "category": "紫水晶", "name": "乌拉圭紫水晶", "effect": "灵感与睡眠", "element": "火", "price": 18, "size": 10, "weight": 1.8, "color": "#76508f", "shine": "#efe8ff", "image_path": "beads/amethyst-10.png"},
     {"id": "citrine8", "skuId": "citrine", "top": "bead", "category": "黄水晶", "name": "巴西黄水晶", "effect": "财富与行动", "element": "土", "price": 16, "size": 8, "weight": 1.5, "color": "#d6ad50", "shine": "#fff0b7", "image_path": "beads/citrine-8.png"},
@@ -127,7 +127,7 @@ MATERIAL_CATALOG: list[dict] = [
     {"id": "calmIncense8", "skuId": "calmIncense", "top": "incense", "category": "沉香调", "name": "静心合香珠", "effect": "安定与冥想", "element": "土", "price": 28, "size": 8, "weight": 0.8, "color": "#8a6b52", "shine": "#e2c7a8", "image_path": "incense/calm-incense-8.png"},
     {"id": "roseIncense8", "skuId": "roseIncense", "top": "incense", "category": "花香调", "name": "玫瑰合香珠", "effect": "柔和与关系", "element": "木", "price": 26, "size": 8, "weight": 0.8, "color": "#b9787b", "shine": "#ffe3e6", "image_path": "incense/rose-incense-8.png"},
     {"id": "lotusCap", "skuId": "lotusCap", "top": "pendant", "category": "花托", "name": "莲纹花托", "effect": "收束主石", "element": "金", "price": 22, "size": 6, "weight": 0.6, "color": "#c4b29a", "shine": "#fff8eb", "image_path": "findings/lotus-cap.png"},
-    {"id": "foxPendant", "skuId": "foxPendant", "top": "pendant", "category": "吊坠", "name": "粉晶狐狸吊坠", "effect": "桃花与礼物", "element": "木", "price": 88, "size": 12, "weight": 2.2, "color": "#d88b91", "shine": "#fff1f3", "image_path": "findings/fox-pendant.png"},
+    {"id": "foxPendant", "skuId": "foxPendant", "top": "pendant", "category": "吊坠", "name": "粉晶狐狸吊坠", "effect": "亲和与礼物", "element": "木", "price": 88, "size": 12, "weight": 2.2, "color": "#d88b91", "shine": "#fff1f3", "image_path": "findings/fox-pendant.png"},
 ]
 
 
@@ -145,7 +145,7 @@ SEARCH_ALIASES = {
     "粉晶": ["粉水晶", "粉晶", "粉"],
     "白水晶": ["白水晶", "白晶", "白"],
     "黑曜石": ["黑曜石", "黑耀石", "曜石", "耀石"],
-    "招财": ["财富", "黄水晶", "黄晶", "金发晶", "钛晶"],
+    "目标感": ["目标", "黄水晶", "黄晶", "金发晶", "钛晶"],
     "助眠": ["睡眠", "月光石", "紫晶"],
 }
 
@@ -153,10 +153,10 @@ SEARCH_ALIASES = {
 # copies. Keep a clean override here so the public materials API never falls
 # back to unreadable Chinese when managed_materials is empty or unavailable.
 MATERIAL_CATALOG = [
-    {"id": "clearQuartz8", "skuId": "clearQuartz", "top": "bead", "category": "白水晶", "name": "喜马拉雅白水晶", "effect": "净化与放大", "element": "金", "price": 5, "size": 8, "weight": 1.2, "color": "#dfe3e5", "shine": "#ffffff", "image_path": "beads/clear-quartz-8.png"},
-    {"id": "clearQuartz10", "skuId": "clearQuartz", "top": "bead", "category": "白水晶", "name": "喜马拉雅白水晶", "effect": "净化与放大", "element": "金", "price": 10, "size": 10, "weight": 1.6, "color": "#d6dbde", "shine": "#ffffff", "image_path": "beads/clear-quartz-10.png"},
-    {"id": "clearQuartz12", "skuId": "clearQuartz", "top": "bead", "category": "白水晶", "name": "喜马拉雅白水晶", "effect": "净化与放大", "element": "金", "price": 15, "size": 12, "weight": 2.1, "color": "#cfd5d8", "shine": "#ffffff", "image_path": "beads/clear-quartz-12.png"},
-    {"id": "clearQuartz14", "skuId": "clearQuartz", "top": "bead", "category": "白水晶", "name": "喜马拉雅白水晶", "effect": "净化与放大", "element": "金", "price": 18, "size": 14, "weight": 2.8, "color": "#c8ced1", "shine": "#ffffff", "image_path": "beads/clear-quartz-14.png"},
+    {"id": "clearQuartz8", "skuId": "clearQuartz", "top": "bead", "category": "白水晶", "name": "喜马拉雅白水晶", "effect": "清爽与干净感", "element": "金", "price": 5, "size": 8, "weight": 1.2, "color": "#dfe3e5", "shine": "#ffffff", "image_path": "beads/clear-quartz-8.png"},
+    {"id": "clearQuartz10", "skuId": "clearQuartz", "top": "bead", "category": "白水晶", "name": "喜马拉雅白水晶", "effect": "清爽与干净感", "element": "金", "price": 10, "size": 10, "weight": 1.6, "color": "#d6dbde", "shine": "#ffffff", "image_path": "beads/clear-quartz-10.png"},
+    {"id": "clearQuartz12", "skuId": "clearQuartz", "top": "bead", "category": "白水晶", "name": "喜马拉雅白水晶", "effect": "清爽与干净感", "element": "金", "price": 15, "size": 12, "weight": 2.1, "color": "#cfd5d8", "shine": "#ffffff", "image_path": "beads/clear-quartz-12.png"},
+    {"id": "clearQuartz14", "skuId": "clearQuartz", "top": "bead", "category": "白水晶", "name": "喜马拉雅白水晶", "effect": "清爽与干净感", "element": "金", "price": 18, "size": 14, "weight": 2.8, "color": "#c8ced1", "shine": "#ffffff", "image_path": "beads/clear-quartz-14.png"},
     {"id": "amethyst8", "skuId": "amethyst", "top": "bead", "category": "紫水晶", "name": "乌拉圭紫水晶", "effect": "灵感与睡眠", "element": "火", "price": 12, "size": 8, "weight": 1.4, "color": "#8b6aa5", "shine": "#efe8ff", "image_path": "beads/amethyst-8.png"},
     {"id": "amethyst10", "skuId": "amethyst", "top": "bead", "category": "紫水晶", "name": "乌拉圭紫水晶", "effect": "灵感与睡眠", "element": "火", "price": 18, "size": 10, "weight": 1.8, "color": "#76508f", "shine": "#efe8ff", "image_path": "beads/amethyst-10.png"},
     {"id": "citrine8", "skuId": "citrine", "top": "bead", "category": "黄水晶", "name": "巴西黄水晶", "effect": "财富与行动", "element": "土", "price": 16, "size": 8, "weight": 1.5, "color": "#d6ad50", "shine": "#fff0b7", "image_path": "beads/citrine-8.png"},
@@ -173,7 +173,7 @@ MATERIAL_CATALOG = [
     {"id": "silverSpacer", "skuId": "silverSpacer", "top": "accessory", "category": "隔片", "name": "925 银隔片", "effect": "结构与光泽", "element": "金", "price": 18, "size": 3, "weight": 0.4, "color": "#b9bdc2", "shine": "#ffffff", "image_path": "accessories/silver-spacer.png"},
     {"id": "goldSpacer", "skuId": "goldSpacer", "top": "accessory", "category": "隔片", "name": "鎏金隔片", "effect": "礼物感", "element": "土", "price": 16, "size": 3, "weight": 0.4, "color": "#c99d4d", "shine": "#fff0b7", "image_path": "accessories/gold-spacer.png"},
     {"id": "lotusCap", "skuId": "lotusCap", "top": "pendant", "category": "花托", "name": "莲纹花托", "effect": "收束主石", "element": "金", "price": 22, "size": 6, "weight": 0.6, "color": "#c4b29a", "shine": "#fff8eb", "image_path": "findings/lotus-cap.png"},
-    {"id": "foxPendant", "skuId": "foxPendant", "top": "pendant", "category": "吊坠", "name": "粉晶狐狸吊坠", "effect": "桃花与礼物", "element": "木", "price": 88, "size": 12, "weight": 2.2, "color": "#d88b91", "shine": "#fff1f3", "image_path": "findings/fox-pendant.png"},
+    {"id": "foxPendant", "skuId": "foxPendant", "top": "pendant", "category": "吊坠", "name": "粉晶狐狸吊坠", "effect": "亲和与礼物", "element": "木", "price": 88, "size": 12, "weight": 2.2, "color": "#d88b91", "shine": "#fff1f3", "image_path": "findings/fox-pendant.png"},
 ]
 
 TOP_TABS = [
@@ -190,7 +190,7 @@ SEARCH_ALIASES = {
     "粉晶": ["粉水晶", "粉晶", "粉"],
     "白水晶": ["白水晶", "白晶", "白"],
     "黑曜石": ["黑曜石", "黑耀石", "曜石"],
-    "招财": ["财富", "黄水晶", "黄晶", "金发晶", "钛晶"],
+    "目标感": ["目标", "黄水晶", "黄晶", "金发晶", "钛晶"],
     "助眠": ["睡眠", "月光石", "紫晶"],
 }
 

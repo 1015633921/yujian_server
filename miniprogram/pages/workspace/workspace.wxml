@@ -22,7 +22,7 @@
       </view>
       <view class="studio-metric">
         <view class="studio-metric-label">当前串长</view>
-        <view class="studio-metric-value">{{summary.length}}<text class="studio-metric-sub"> cm</text></view>
+        <view class="studio-metric-value {{lengthOverClass}}">{{summary.length}}<text class="studio-metric-sub"> cm</text></view>
       </view>
     </view>
 
@@ -147,6 +147,21 @@
     <image wx:if="{{flightBead.image_url}}" class="flight-bead-image" src="{{flightBead.image_url}}" mode="aspectFit"></image>
     <view wx:else class="flight-bead-fallback" style="background: radial-gradient(circle at 32% 26%, {{flightBead.shine}} 0 10%, {{flightBead.color}} 12% 58%, rgba(0,0,0,.22) 100%);"></view>
   </view>
+
+  <cover-view wx:if="{{workspaceLoading}}" class="workspace-boot-mask {{workspaceLoadingClass}}">
+    <cover-view class="workspace-boot-card">
+      <cover-view class="workspace-boot-plate">
+        <cover-view class="workspace-boot-orbit">
+          <cover-view class="workspace-boot-bead bead-one"></cover-view>
+          <cover-view class="workspace-boot-bead bead-two"></cover-view>
+          <cover-view class="workspace-boot-bead bead-three"></cover-view>
+        </cover-view>
+        <cover-view class="workspace-boot-ring"></cover-view>
+      </cover-view>
+      <cover-view class="workspace-boot-title">{{workspaceLoadingText}}</cover-view>
+      <cover-view class="workspace-boot-subtitle">{{workspaceLoadingSubtext}}</cover-view>
+    </cover-view>
+  </cover-view>
 
   <cover-view wx:if="{{showEnergyPanel}}" class="energy-floating-card">
     <cover-view class="energy-floating-head" bindtap="openEnergyModal">
@@ -368,7 +383,7 @@
   <view wx:if="{{showEnergyModal}}" class="energy-modal-mask" bindtap="closeEnergyModal">
     <view class="energy-modal" catchtap="stopPropagation">
       <view class="energy-modal-head">
-        <view class="energy-modal-title">五行能量图</view>
+        <view class="energy-modal-title">五行元素图</view>
         <view class="energy-modal-close" bindtap="closeEnergyModal">×</view>
       </view>
       <view class="energy-modal-body">

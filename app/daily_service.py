@@ -40,6 +40,8 @@ class DailyEnergyService:
             "goal_keys": goal_keys or [],
         }
         has_live_selection = bool(interaction["status_tags"] or interaction["scene_key"] or interaction["goal_keys"])
+        assessment = self.repository.latest_for_user(user_id)
+        assessment_id = assessment.get("assessment_id") if assessment else None
 
         if not force_recalculate and not has_live_selection:
             existing = self.repository.get_daily_energy(user_id, target_date.isoformat())
@@ -47,10 +49,10 @@ class DailyEnergyService:
                 existing
                 and existing.get("content_version") == DAILY_ENERGY_CONTENT_VERSION
                 and existing.get("rules_version") == rules_version
+                and existing.get("assessment_id") == assessment_id
             ):
                 return existing, True
 
-        assessment = self.repository.latest_for_user(user_id)
         calculated = self.calculator.calculate(user_id, target_date, assessment, interaction, rules)
         result = {
             "user_id": user_id,
@@ -79,5 +81,5 @@ class DailyEnergyService:
         self.repository.save_checkin(checkin)
         return {
             **checkin,
-            "message": "今日状态已记录。新版今日能量会优先使用你本次选择的状态、场景和目标标签。",
+            "message": "今日状态已记录。新版今日搭配建议会优先使用你本次选择的状态、场景和目标标签。",
         }

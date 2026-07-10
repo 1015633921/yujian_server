@@ -1,7 +1,7 @@
 <view class="daily-page yu-page">
   <view class="daily-nav">
     <view class="daily-back yu-pressable" bindtap="goBack">‹</view>
-    <view class="daily-nav-title">今日能量建议</view>
+    <view class="daily-nav-title">今日状态建议</view>
     <view></view>
   </view>
 
@@ -109,7 +109,7 @@
     </view>
 
     <view class="dimension-card yu-card">
-      <view class="card-title"><text class="title-icon blue">▥</text>今日能量维度</view>
+      <view class="card-title"><text class="title-icon blue">▥</text>今日状态维度</view>
       <view class="dimension-row" wx:for="{{viewDaily.dimensions}}" wx:key="key">
         <view class="dimension-icon" style="color: {{item.color}};">{{item.icon}}</view>
         <view class="dimension-name">{{item.name}}</view>
@@ -169,7 +169,7 @@
     </view>
 
     <view class="season-card yu-card">
-      <view class="card-title"><text class="title-icon notice">ⓘ</text>近期能量提示</view>
+      <view class="card-title"><text class="title-icon notice">ⓘ</text>近期状态提示</view>
       <view class="season-summary">{{viewDaily.seasonHint.summary}}</view>
       <view class="season-line" wx:if="{{viewDaily.seasonHint.drainPoint}}">
         <text>流失点</text>
@@ -184,10 +184,10 @@
 
   <view wx:else class="loading-card yu-card">
     <view class="loading-title">正在生成今日建议</view>
-    <view class="loading-sub">会结合今日状态与五行方向生成可进入 DIY 的方案</view>
+    <view class="loading-sub">会结合今日状态与元素方向生成可进入 DIY 的方案</view>
   </view>
 
   <view class="daily-bottom">
-    <button class="yu-button yu-button-primary bottom-primary" bindtap="generateDailyDiy">生成今日手串方案</button>
+    <button class="yu-button yu-button-primary bottom-primary" bindtap="generateDailyDiy">生成今日搭配方案</button>
   </view>
 </view>

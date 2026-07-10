@@ -42,7 +42,7 @@
     <view class="guide-copy">
       <view class="guide-kicker">NEW HERE</view>
       <view class="guide-title">30 秒了解专属定制</view>
-      <view class="guide-desc">看懂五行、MBTI、七脉轮和直觉色彩怎么参与推荐，再开始测算或 DIY。</view>
+      <view class="guide-desc">看懂五行、MBTI、状态线索和直觉色彩怎么参与推荐，再开始分析或 DIY。</view>
     </view>
     <view class="guide-action">
       <text>了解定制</text>
@@ -69,7 +69,7 @@
         <view class="flow-dot">02</view>
         <view class="flow-step">PROFILE</view>
         <view class="flow-title">生成画像</view>
-        <view class="flow-desc">五行分布 / 能量方向</view>
+        <view class="flow-desc">五行比例 / 元素方向</view>
       </view>
       <view class="flow-item yellow" bindtap="goToPage" data-url="/pages/workspace/workspace">
         <view class="flow-dot">03</view>
@@ -104,8 +104,8 @@
     <view class="daily-card-spark spark-a">✦</view>
     <view class="daily-card-spark spark-b">✧</view>
     <view class="daily-copy">
-      <view class="daily-kicker">TODAY ENERGY</view>
-      <view class="daily-title">今日能量建议</view>
+      <view class="daily-kicker">TODAY STYLE</view>
+      <view class="daily-title">今日状态建议</view>
       <view class="daily-subtitle">看看今天适合戴什么</view>
       <view class="daily-tags">
         <text wx:for="{{daily.keywords}}" wx:key="*this">{{item}}</text>
@@ -116,7 +116,7 @@
     <view class="daily-score">
       <view class="daily-score-halo"></view>
       <text>{{daily.inspiration}}</text>
-      <view>能量指数</view>
+      <view>状态指数</view>
     </view>
   </view>
 
