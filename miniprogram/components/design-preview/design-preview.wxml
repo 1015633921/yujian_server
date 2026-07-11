@@ -3,7 +3,7 @@
     wx:if="{{trayImage && !trayFailed}}"
     class="design-preview-tray"
     src="{{trayImage}}"
-    mode="aspectFit"
+    mode="aspectFill"
     binderror="onTrayImageError"
   ></image>
   <view class="design-preview-guide"></view>

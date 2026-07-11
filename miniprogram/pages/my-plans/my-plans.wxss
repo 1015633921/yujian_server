@@ -3,7 +3,11 @@ page {
 }
 
 .my-plans-page {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100vw;
   min-height: 100vh;
+  overflow-x: hidden;
 }
 
 .plans-nav {
@@ -72,12 +76,19 @@ page {
 
 .plan-list {
   display: grid;
+  width: 100%;
+  min-width: 0;
   gap: 18rpx;
 }
 
 .plan-card {
   position: relative;
   display: block;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
   padding: 18rpx;
   border-radius: 24rpx;
 }
@@ -95,6 +106,15 @@ page {
   box-shadow:
     inset 0 -8rpx 18rpx rgba(111, 105, 91, .07),
     0 8rpx 18rpx rgba(46, 45, 40, .05);
+}
+
+.plan-preview-frame {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  width: 560rpx;
+  height: 560rpx;
+  transform: translateX(-50%);
 }
 
 .plan-preview.saved {
@@ -136,74 +156,33 @@ page {
   line-height: 1;
 }
 
-.plan-meta,
-.plan-date,
-.plan-recipe {
+.plan-date {
   overflow: hidden;
   color: var(--yu-color-text-secondary);
   font-size: 20rpx;
   white-space: nowrap;
   text-overflow: ellipsis;
-}
-
-.plan-meta {
   margin-top: 8rpx;
-}
-
-.plan-date,
-.plan-recipe {
-  margin-top: 6rpx;
-}
-
-.plan-footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 14rpx;
-  margin-top: 14rpx;
-}
-
-.status-pill {
-  padding: 7rpx 14rpx;
-  border-radius: var(--yu-radius-pill);
-  font-size: 18rpx;
-  font-weight: 900;
-}
-
-.status-pill.saved {
-  color: var(--yu-color-green);
-  background: rgba(100, 124, 112, .12);
-}
-
-.status-pill.ordered {
-  color: var(--yu-color-blue);
-  background: rgba(54, 92, 156, .1);
-}
-
-.status-pill.completed {
-  color: #9a6d10;
-  background: rgba(242, 181, 29, .16);
-}
-
-.plan-price {
-  color: var(--yu-color-anchor-dark);
-  font-size: 23rpx;
-  font-weight: 900;
 }
 
 .saved-actions {
   display: flex;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
   gap: 14rpx;
-  margin-top: 2rpx;
+  margin-top: 18rpx;
 }
 
 .action-button {
   flex: 1;
+  min-width: 0;
   height: 58rpx;
   min-height: 58rpx;
   margin: 0;
   border: 0;
   border-radius: var(--yu-radius-pill);
+  padding: 0 8rpx;
   font-size: 22rpx;
   font-weight: 800;
   line-height: 58rpx;

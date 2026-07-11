@@ -27,29 +27,26 @@
       bindtap="openPlan"
     >
       <view class="plan-preview {{item.statusClass}}">
-        <design-preview
-          data-key="{{item.key}}"
-          tray-image="{{item.trayImage}}"
-          tray-theme="{{item.trayTheme}}"
-          tray-failed="{{item.trayImageFailed}}"
-          sequence="{{item.previewSequence}}"
-          placements="{{item.previewPlacements}}"
-          design="{{item.previewDesign}}"
-          bindtrayerror="onTrayImageError"
-        ></design-preview>
+        <view class="plan-preview-frame">
+          <design-preview
+            style="position:absolute;left:0;top:0;width:560rpx;height:560rpx;"
+            data-key="{{item.key}}"
+            tray-image="{{item.trayImage}}"
+            tray-theme="{{item.trayTheme}}"
+            tray-failed="{{item.trayImageFailed}}"
+            sequence="{{item.previewSequence}}"
+            placements="{{item.previewPlacements}}"
+            design="{{item.previewDesign}}"
+            bindtrayerror="onTrayImageError"
+          ></design-preview>
+        </view>
       </view>
       <view class="plan-main">
         <view class="plan-topline">
           <view class="plan-name">{{item.name}}</view>
           <view class="plan-arrow">›</view>
         </view>
-        <view class="plan-meta">手围：{{item.wristSize}}</view>
         <view class="plan-date">{{item.dateText}}</view>
-        <view class="plan-recipe">{{item.recipeText}}</view>
-        <view class="plan-footer">
-          <view class="status-pill {{item.statusClass}}">{{item.statusText}}</view>
-          <view class="plan-price">¥{{item.priceText}}</view>
-        </view>
       </view>
       <view wx:if="{{item.type === 'saved'}}" class="saved-actions">
         <button class="action-button edit" data-key="{{item.key}}" catchtap="continueEdit">继续编辑</button>

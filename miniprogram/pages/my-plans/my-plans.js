@@ -37,14 +37,17 @@ const TABS = [
   { key: 'completed', label: '已完成', count: 0 }
 ];
 
-function formatDate(value) {
-  if (!value) return '刚刚保存';
+function formatDateTime(value) {
+  if (!value) return '刚刚创建';
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return String(value).slice(0, 10);
+  if (Number.isNaN(date.getTime())) return String(value).replace('T', ' ').slice(0, 19);
   const year = date.getFullYear();
   const month = `${date.getMonth() + 1}`.padStart(2, '0');
   const day = `${date.getDate()}`.padStart(2, '0');
-  return `${year}-${month}-${day}`;
+  const hour = `${date.getHours()}`.padStart(2, '0');
+  const minute = `${date.getMinutes()}`.padStart(2, '0');
+  const second = `${date.getSeconds()}`.padStart(2, '0');
+  return `${year}-${month}-${day} ${hour}:${minute}:${second}`;
 }
 
 function moneyText(value) {
@@ -133,7 +136,7 @@ function normalizeSavedPlan(item = {}, index = 0, source = 'draft') {
   const selected = beadIdsFromDesign(item);
   const tray = previewTrayFromDesign(item);
   const summary = item.summary || {};
-  const createdAt = item.updatedAt || item.createdAt || item.savedAt || Date.now();
+  const createdAt = item.createdAt || item.savedAt || item.updatedAt || Date.now();
   const wristSize = item.wristSize || summary.wristSize || summary.targetWristText || '15.0cm';
   const name = item.name || item.title || (source === 'current' ? '当前编辑方案' : `自由搭配方案 ${index + 1}`);
 
@@ -146,7 +149,7 @@ function normalizeSavedPlan(item = {}, index = 0, source = 'draft') {
     statusClass: 'saved',
     name,
     wristSize,
-    dateText: `保存于 ${formatDate(createdAt)}`,
+    dateText: `创建时间 ${formatDateTime(createdAt)}`,
     priceText: moneyText(summary.priceText || summary.price || item.price),
     beadCount: selected.length,
     recipeText: buildRecipeText(item, selected),
@@ -198,7 +201,7 @@ function normalizeOrderPlan(order = {}, index = 0) {
     statusClass: isCompleted ? 'completed' : 'ordered',
     name: (design.summary && design.summary.name) || order.title || (isCompleted ? '已完成定制方案' : '已下单定制方案'),
     wristSize,
-    dateText: `${isCompleted ? '完成于' : '下单于'} ${formatDate(order.createdAt || order.created_at)}`,
+    dateText: `创建时间 ${formatDateTime(order.createdAt || order.created_at)}`,
     priceText: moneyText(order.totalAmount || order.total_amount || (design.summary && design.summary.price)),
     beadCount: selected.length || (order.bom || []).reduce((sum, item) => sum + Number(item.qty || 0), 0),
     recipeText: buildRecipeText(design, selected) || '查看订单材料',

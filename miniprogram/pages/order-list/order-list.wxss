@@ -135,6 +135,15 @@
     0 10rpx 24rpx rgba(46, 45, 40, .06);
 }
 
+.order-preview-frame {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  width: 560rpx;
+  height: 560rpx;
+  transform: translateX(-50%);
+}
+
 .order-price {
   color: #111;
   font-size: 32rpx;

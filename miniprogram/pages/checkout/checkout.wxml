@@ -14,15 +14,18 @@
   <view wx:elif="{{design}}" class="checkout-content">
     <view class="plan-preview-card yu-card yu-card-lg">
       <view class="plan-preview">
-        <design-preview
-          tray-image="{{trayPreviewImage}}"
-          tray-theme="{{trayPreviewTheme}}"
-          tray-failed="{{trayPreviewImageFailed}}"
-          sequence="{{sequence}}"
-          placements="{{design.placements}}"
-          design="{{design}}"
-          bindtrayerror="onTrayPreviewImageError"
-        ></design-preview>
+        <view class="design-preview-frame">
+          <design-preview
+            style="position:absolute;left:0;top:0;width:560rpx;height:560rpx;"
+            tray-image="{{trayPreviewImage}}"
+            tray-theme="{{trayPreviewTheme}}"
+            tray-failed="{{trayPreviewImageFailed}}"
+            sequence="{{sequence}}"
+            placements="{{design.placements}}"
+            design="{{design}}"
+            bindtrayerror="onTrayPreviewImageError"
+          ></design-preview>
+        </view>
       </view>
     </view>
 

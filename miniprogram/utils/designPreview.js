@@ -65,7 +65,7 @@ function resolveBeadSize(item = {}, placement = {}, count = 0) {
 function solveTangentRingRadius(beadSizes = []) {
   if (beadSizes.length < 3) return 156;
   const centerDistances = beadSizes.map((size, index) => (
-    (size + beadSizes[(index + 1) % beadSizes.length]) / 2 + 0.5
+    (size + beadSizes[(index + 1) % beadSizes.length]) / 2 + 2
   ));
   let low = Math.max(...centerDistances) / 2 + 0.01;
   let high = Math.max(480, beadSizes.reduce((sum, size) => sum + size, 0));
