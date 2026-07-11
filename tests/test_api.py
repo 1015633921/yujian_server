@@ -4,6 +4,8 @@ from uuid import uuid4
 
 from app.main import app
 from app.order_service import OrderService, generate_numeric_order_no, now_iso
+from app.repository import AssessmentRepository
+from app.service import AssessmentService
 
 client = TestClient(app)
 
@@ -1611,11 +1613,50 @@ def test_cart_items_can_be_created_updated_and_cleared(tmp_path):
     assert item["quantity"] == 1
     assert service.list_cart_items("cart-user")[0]["item"]["name"] == "温柔守护方案"
 
-    updated = service.update_cart_item(item["cart_item_id"], "cart-user", {"quantity": 2})
+    updated = service.update_cart_item(
+        item["cart_item_id"],
+        "cart-user",
+        {"quantity": 2, "item": {"name": "温柔守护方案（已修改）", "price": 299}},
+    )
     assert updated["quantity"] == 2
+    assert updated["item"]["name"] == "温柔守护方案（已修改）"
+    assert len(service.list_cart_items("cart-user")) == 1
 
     service.delete_cart_item(item["cart_item_id"], "cart-user")
     assert service.list_cart_items("cart-user") == []
+
+
+def test_cart_item_idempotency_key_reuses_one_item_for_retries(tmp_path):
+    service = OrderService(tmp_path / "cart-idempotency.db")
+    payload = {
+        "user_id": "cart-retry-user",
+        "idempotency_key": "diy-v1-same-bracelet",
+        "item_type": "diy_design",
+        "item_id": "diy-v1-same-bracelet",
+        "item": {"name": "Same bracelet", "sequence": [{"id": "rose-quartz-8"}]},
+        "quantity": 1,
+    }
+
+    first = service.save_cart_item(payload)
+    retried = service.save_cart_item({**payload, "cart_item_id": "ignored-client-retry-id"})
+
+    assert retried["cart_item_id"] == first["cart_item_id"]
+    assert retried["cart_item_id"].startswith("CARTIDEM")
+    assert len(service.list_cart_items("cart-retry-user")) == 1
+
+
+def test_cart_item_idempotency_key_is_scoped_to_user(tmp_path):
+    service = OrderService(tmp_path / "cart-idempotency-users.db")
+    first = service.save_cart_item(
+        {"user_id": "cart-user-a", "idempotency_key": "same-key", "item": {"name": "A"}}
+    )
+    second = service.save_cart_item(
+        {"user_id": "cart-user-b", "idempotency_key": "same-key", "item": {"name": "B"}}
+    )
+
+    assert first["cart_item_id"] != second["cart_item_id"]
+    assert len(service.list_cart_items("cart-user-a")) == 1
+    assert len(service.list_cart_items("cart-user-b")) == 1
 
 
 def test_community_favorites_are_user_scoped_and_mutable(tmp_path):
@@ -1757,7 +1798,72 @@ def test_two_step_energy_to_diy_workbench_flow():
     assert recommendation_data["status"] == "diy_ready"
     assert recommendation_data["next_step"]["action"] == "navigate_to_diy_workbench"
     assert recommendation_data["workbench_payload"]["wrist_size_cm"] == 16.5
-    assert recommendation_data["workbench_payload"]["bracelet_plan"]["layout"]
+    plan = recommendation_data["workbench_payload"]["bracelet_plan"]
+    assert plan["layout"]
+    assert plan["validation"]["is_valid"] is True
+    assert all(check["passed"] for check in plan["validation"]["checks"])
+
+
+def test_privacy_summary_and_personalization_deletion(tmp_path, monkeypatch):
+    from app import api as api_module
+
+    repository = AssessmentRepository(tmp_path / "privacy-data.db")
+    service = AssessmentService()
+    service.repository = repository
+    monkeypatch.setattr(api_module, "service", service)
+    timestamp = now_iso()
+    repository.upsert_user(
+        {
+            "user_id": "privacy-user",
+            "nickname": "小羽",
+            "gender": "female",
+            "phone_number": "13800000000",
+            "source": "test",
+            "updated_at": timestamp,
+        }
+    )
+    repository.save(
+        {
+            "assessment_id": "privacy-assessment",
+            "input_summary": {
+                "user_id": "privacy-user",
+                "name": "小羽",
+                "birthday": "1995-08-16",
+                "birth_time": "09:30",
+                "birth_place": "重庆市",
+                "core_wish": "健康护身/保持专注",
+                "core_wishes": ["健康护身/保持专注"],
+            },
+            "created_at": timestamp,
+            "strongest_element": "木",
+            "weakest_element": "金",
+        },
+        "privacy-fingerprint",
+    )
+    repository.save_checkin(
+        {
+            "user_id": "privacy-user",
+            "date": "2026-07-11",
+            "mood": 3,
+            "sleep": 4,
+            "stress": 2,
+            "created_at": timestamp,
+        }
+    )
+
+    summary_response = client.get("/api/v1/privacy/data-summary?user_id=privacy-user")
+    assert summary_response.status_code == 200
+    summary = summary_response.json()["data"]
+    assert summary["latest_input"]["birth_place"] == "重庆市"
+    assert summary["counts"]["assessments"] == 1
+    assert summary["counts"]["daily_checkins"] == 1
+
+    delete_response = client.delete("/api/v1/privacy/personalization-data?user_id=privacy-user")
+    assert delete_response.status_code == 200
+    assert delete_response.json()["data"]["deleted"] is True
+    assert repository.history("privacy-user") == []
+    assert repository.recent_checkins("privacy-user", "2026-01-01") == []
+    assert repository.get_user("privacy-user")["nickname"] == "小羽"
 
 
 def test_invalid_mbti_is_rejected():

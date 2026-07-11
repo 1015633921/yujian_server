@@ -41,7 +41,7 @@
   <view class="new-user-guide yu-card yu-card-pressable" bindtap="goToPage" data-url="/pages/assessment-guide/assessment-guide">
     <view class="guide-copy">
       <view class="guide-kicker">NEW HERE</view>
-      <view class="guide-title">30 秒了解专属定制</view>
+      <view class="guide-title">六步了解专属定制</view>
       <view class="guide-desc">看懂五行、MBTI、状态线索和直觉色彩怎么参与推荐，再开始分析或 DIY。</view>
     </view>
     <view class="guide-action">
@@ -113,10 +113,10 @@
       <view class="daily-text">{{daily.summary}}</view>
       <view class="daily-recommend">今日推荐：{{daily.recommendedNames}}</view>
     </view>
-    <view class="daily-score">
+    <view class="daily-score" catchtap="showStatusIndexInfo" aria-role="button" aria-label="查看状态指数说明">
       <view class="daily-score-halo"></view>
       <text>{{daily.inspiration}}</text>
-      <view>状态指数</view>
+      <view>状态指数 <text class="score-help">?</text></view>
     </view>
   </view>
 
@@ -139,10 +139,10 @@
     </scroll-view>
   </view>
 
-  <view wx:if="{{shoppingCart.length}}" class="inspiration-tray yu-card yu-card-pressable" bindtap="viewShoppingCart">
+  <view wx:if="{{shoppingCart.length}}" class="inspiration-tray yu-card yu-card-pressable" bindtap="viewMyPlans">
     <view>
-      <view class="tray-title">购物车</view>
-      <view class="tray-sub">{{shoppingCart.length}} 个定制方案待结算</view>
+      <view class="tray-title">我的方案</view>
+      <view class="tray-sub">{{shoppingCart.length}} 个已保存方案</view>
     </view>
     <view class="tray-action">查看</view>
   </view>
@@ -160,9 +160,9 @@
       <view class="tab-icon">＋</view>
       <text>DIY</text>
     </view>
-    <view class="lab-tab" bindtap="viewShoppingCart">
-      <view class="tab-icon">车</view>
-      <text>购物车</text>
+    <view class="lab-tab" bindtap="viewMyPlans">
+      <view class="tab-icon">案</view>
+      <text>方案</text>
     </view>
     <view class="lab-tab" bindtap="goToPage" data-url="/pages/profile/profile">
       <view class="tab-icon">♙</view>

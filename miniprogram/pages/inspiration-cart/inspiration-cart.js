@@ -132,9 +132,18 @@ function firstImageUrl(entry = {}) {
   return urls[0] || '';
 }
 
-function savedPlacementPoint(placement = {}) {
-  const x = Number(placement.looseX !== undefined ? placement.looseX : placement.x);
-  const y = Number(placement.looseY !== undefined ? placement.looseY : placement.y);
+function placementCoordinate(placement = {}, axis = 'x', preferStringed = false) {
+  const looseKey = axis === 'x' ? 'looseX' : 'looseY';
+  const stringedValue = Number(placement[axis]);
+  const looseValue = Number(placement[looseKey]);
+  if (preferStringed && Number.isFinite(stringedValue)) return stringedValue;
+  if (Number.isFinite(looseValue)) return looseValue;
+  return stringedValue;
+}
+
+function savedPlacementPoint(placement = {}, preferStringed = false) {
+  const x = placementCoordinate(placement, 'x', preferStringed);
+  const y = placementCoordinate(placement, 'y', preferStringed);
   if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
   return {
     x: x + Number(placement.dx || 0),
@@ -201,7 +210,8 @@ function fitPlacementCircle(points = []) {
 }
 
 function inferPlacementSourceOrigin(placements = [], source = {}) {
-  const points = placements.map(savedPlacementPoint).filter(Boolean);
+  const preferStringed = source.isLooseMode === false;
+  const points = placements.map(item => savedPlacementPoint(item, preferStringed)).filter(Boolean);
   const fitted = fitPlacementCircle(points);
   if (fitted) return fitted;
   if (points.length) {
@@ -219,9 +229,9 @@ function inferPlacementSourceOrigin(placements = [], source = {}) {
   return { x: WORKSPACE_PREVIEW_CENTER, y: WORKSPACE_PREVIEW_CENTER, scaleBase: WORKSPACE_PREVIEW_CENTER };
 }
 
-function hasSavedPlacement(placement = {}) {
-  const x = Number(placement.looseX !== undefined ? placement.looseX : placement.x);
-  const y = Number(placement.looseY !== undefined ? placement.looseY : placement.y);
+function hasSavedPlacement(placement = {}, preferStringed = false) {
+  const x = placementCoordinate(placement, 'x', preferStringed);
+  const y = placementCoordinate(placement, 'y', preferStringed);
   return Number.isFinite(x) && Number.isFinite(y);
 }
 
@@ -308,7 +318,8 @@ function createMiniBeads(sequence = [], count = 12, radius = 38, size = 24, plac
   const safeSequence = sequence.length ? sequence : [{ id: 'clearQuartz8' }];
   const displayCount = Math.max(1, Math.min(count, safeSequence.length || count, 24));
   const center = MINI_PREVIEW_CENTER;
-  const hasPlacementLayout = placements.some(hasSavedPlacement);
+  const preferStringed = source.isLooseMode === false;
+  const hasPlacementLayout = placements.some(item => hasSavedPlacement(item, preferStringed));
   const sourceOrigin = inferPlacementSourceOrigin(placements, source);
   const placementScale = center / sourceOrigin.scaleBase;
   return Array.from({ length: displayCount }, (_, index) => {
@@ -322,9 +333,9 @@ function createMiniBeads(sequence = [], count = 12, radius = 38, size = 24, plac
     let x;
     let y;
     let angle;
-    if (hasPlacementLayout && hasSavedPlacement(placement)) {
-      const savedX = Number(placement.looseX !== undefined ? placement.looseX : placement.x) + Number(placement.dx || 0);
-      const savedY = Number(placement.looseY !== undefined ? placement.looseY : placement.y) + Number(placement.dy || 0);
+    if (hasPlacementLayout && hasSavedPlacement(placement, preferStringed)) {
+      const savedX = placementCoordinate(placement, 'x', preferStringed) + Number(placement.dx || 0);
+      const savedY = placementCoordinate(placement, 'y', preferStringed) + Number(placement.dy || 0);
       x = center + (savedX - sourceOrigin.x) * placementScale;
       y = center + (savedY - sourceOrigin.y) * placementScale;
       angle = Number(placement.rotation || 0);
@@ -424,6 +435,10 @@ Page({
     checkoutLoadingKey: '',
     checkoutActionText: '\u53bb\u7ed3\u7b97',
     checkoutLoadingText: '\u6b63\u5728\u8fdb\u5165\u786e\u8ba4\u8ba2\u5355'
+  },
+
+  onLoad() {
+    wx.redirectTo({ url: '/pages/my-plans/my-plans' });
   },
 
   onShow() {
@@ -536,6 +551,9 @@ Page({
 
   buildDesignPayload(item = {}) {
     return {
+      cart_item_id: item.cart_item_id || item.key || item.id || '',
+      cartItemId: item.cart_item_id || item.key || item.id || '',
+      cartIdempotencyKey: item.cartIdempotencyKey || '',
       designId: item.designId || item.design_id || '',
       design_id: item.designId || item.design_id || '',
       name: item.name || item.planName || item.title || '',

@@ -18,13 +18,16 @@
       </view>
       <view class="order-card-content">
         <view class="order-ring-preview {{item.trayImageFailed ? 'tray-image-failed' : ''}}">
-          <image class="order-tray-image" src="{{item.trayImage}}" mode="aspectFit" data-id="{{item.id}}" binderror="onTrayImageError"></image>
-          <image wx:if="{{item.previewImage && !item.previewBeads.length}}" class="order-preview-image" src="{{item.previewImage}}" mode="aspectFit" data-id="{{item.id}}" binderror="onPreviewImageError"></image>
-          <view class="order-ring-plate"></view>
-          <view wx:if="{{item.previewBeads.length}}" class="order-ring-track"></view>
-          <view wx:if="{{item.previewBeads.length}}" wx:for="{{item.previewBeads}}" wx:for-item="bead" wx:key="key" class="order-ring-bead" style="{{bead.style}}">
-            <image wx:if="{{bead.image_url}}" src="{{bead.image_url}}" mode="aspectFill"></image>
-          </view>
+          <design-preview
+            data-id="{{item.id}}"
+            tray-image="{{item.trayImage}}"
+            tray-theme="{{item.trayTheme}}"
+            tray-failed="{{item.trayImageFailed}}"
+            sequence="{{item.previewSequence}}"
+            placements="{{item.previewPlacements}}"
+            design="{{item.previewDesign}}"
+            bindtrayerror="onTrayImageError"
+          ></design-preview>
         </view>
         <view class="order-card-copy">
           <view class="order-time">{{item.createdAtText}}</view>

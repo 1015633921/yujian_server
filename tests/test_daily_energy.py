@@ -3,6 +3,7 @@ from datetime import date
 from app.daily_energy import DailyEnergyCalculator
 from app.daily_service import DailyEnergyService
 from app.energy import ELEMENTS
+from app.recommendation import RecommendationEngine
 
 
 def test_daily_date_profile_totals_100_and_is_stable():
@@ -70,13 +71,19 @@ def test_daily_workbench_payload_respects_latest_assessment_wrist_size():
     plan = payload["bracelet_plan"]
     layout = plan["layout"]
     sizes = [float(item.get("size") or item.get("bead_size_mm") or 8) for item in layout]
-    average_size = sum(sizes) / len(sizes)
-    effective_length_cm = (sum(sizes) - average_size) / 10
+    effective_length_cm = RecommendationEngine.estimate_stringed_length_mm(sizes) / 10
 
     assert payload["wrist_size_cm"] == 14.5
     assert plan["wrist_size_cm"] == 14.5
     assert len(layout) == plan["estimated_bead_count"]
     assert effective_length_cm >= 15.0
+
+
+def test_daily_score_labels_are_descriptive_not_health_claims():
+    assert DailyEnergyCalculator.score_level(90) == "活力充足"
+    assert DailyEnergyCalculator.score_level(80) == "状态稳定"
+    assert DailyEnergyCalculator.score_level(65) == "温柔蓄能"
+    assert DailyEnergyCalculator.score_level(50) == "慢节奏"
 
 
 def test_daily_service_recalculates_when_latest_assessment_changes():

@@ -788,6 +788,19 @@ page {
   font-weight: 850;
 }
 
+.daily-score .score-help {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 25rpx;
+  height: 25rpx;
+  margin-left: 4rpx;
+  border: 1rpx solid currentColor;
+  border-radius: 50%;
+  font-size: 17rpx;
+  line-height: 1;
+}
+
 .plan-scroll {
   width: 100%;
   margin-top: 22rpx;

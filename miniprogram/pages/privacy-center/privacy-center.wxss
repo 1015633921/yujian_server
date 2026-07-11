@@ -1,0 +1,169 @@
+.privacy-page {
+  min-height: 100vh;
+  box-sizing: border-box;
+  padding: 0 28rpx calc(64rpx + env(safe-area-inset-bottom));
+  background: #f7f6f2;
+  color: #191919;
+}
+
+.privacy-lead {
+  padding: 38rpx 8rpx 34rpx;
+}
+
+.lead-kicker {
+  font-size: 20rpx;
+  font-weight: 760;
+  color: #647c70;
+}
+
+.lead-title {
+  margin-top: 10rpx;
+  font-size: 44rpx;
+  font-weight: 800;
+}
+
+.lead-desc {
+  margin-top: 18rpx;
+  font-size: 25rpx;
+  line-height: 1.7;
+  color: #6e6b65;
+}
+
+.privacy-section {
+  margin-bottom: 22rpx;
+  padding: 28rpx;
+  border: 1rpx solid #e5e2dc;
+  border-radius: 24rpx;
+  background: #fff;
+  box-shadow: 0 12rpx 38rpx rgba(20, 20, 20, 0.04);
+}
+
+.section-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20rpx;
+}
+
+.section-head.compact {
+  align-items: center;
+}
+
+.section-title {
+  font-size: 30rpx;
+  font-weight: 780;
+}
+
+.section-desc {
+  margin-top: 8rpx;
+  font-size: 22rpx;
+  color: #8b8881;
+}
+
+.section-action {
+  flex: 0 0 auto;
+  font-size: 24rpx;
+  font-weight: 700;
+  color: #365c9c;
+}
+
+.section-badge {
+  padding: 7rpx 14rpx;
+  border-radius: 8rpx;
+  background: #edf2ef;
+  font-size: 20rpx;
+  font-weight: 700;
+  color: #647c70;
+}
+
+.current-list,
+.disclosure-list {
+  margin-top: 22rpx;
+}
+
+.current-row {
+  display: grid;
+  grid-template-columns: 150rpx minmax(0, 1fr);
+  gap: 18rpx;
+  padding: 18rpx 0;
+  border-top: 1rpx solid #eeece7;
+}
+
+.current-label {
+  font-size: 23rpx;
+  color: #8b8881;
+}
+
+.current-value {
+  min-width: 0;
+  font-size: 24rpx;
+  line-height: 1.5;
+  word-break: break-all;
+}
+
+.disclosure-row {
+  padding: 22rpx 0;
+  border-top: 1rpx solid #eeece7;
+}
+
+.disclosure-field {
+  font-size: 25rpx;
+  font-weight: 720;
+}
+
+.disclosure-purpose,
+.disclosure-retention,
+.account-note,
+.privacy-empty,
+.privacy-error,
+.privacy-loading {
+  margin-top: 8rpx;
+  font-size: 22rpx;
+  line-height: 1.6;
+  color: #77736c;
+}
+
+.disclosure-retention {
+  color: #9a968e;
+}
+
+.privacy-loading {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  padding: 28rpx 0 8rpx;
+}
+
+.privacy-error {
+  color: #c83b3d;
+}
+
+.secondary-button,
+.danger-button {
+  width: 100%;
+  height: 88rpx;
+  margin-top: 24rpx;
+  border-radius: 16rpx;
+  font-size: 25rpx;
+  font-weight: 720;
+}
+
+.secondary-button {
+  border: 1rpx solid #dedbd4;
+  background: #fff;
+  color: #20201f;
+}
+
+.danger-button {
+  border: 1rpx solid rgba(200, 59, 61, 0.2);
+  background: #fff7f7;
+  color: #b83235;
+}
+
+.danger-button[disabled] {
+  opacity: 0.4;
+}
+
+button::after {
+  border: 0;
+}

@@ -13,14 +13,13 @@
     <input
       class="search-input"
       value="{{keyword}}"
-      placeholder="搜索灵感 / 材质 / 功效"
+      placeholder="搜索风格 / 材质 / 场景"
       placeholder-class="search-placeholder"
       confirm-type="search"
       bindinput="onKeywordInput"
       bindconfirm="submitSearch"
     />
     <view wx:if="{{keyword}}" class="search-clear" bindtap="clearKeyword">×</view>
-    <view class="filter-button" bindtap="toggleFilterHint">筛选</view>
   </view>
 
   <scroll-view class="topic-scroll" scroll-x enable-flex show-scrollbar="{{false}}">
@@ -142,9 +141,9 @@
       <view class="tab-icon">＋</view>
       <text>DIY</text>
     </view>
-    <view class="lab-tab" bindtap="goToPage" data-url="/pages/inspiration-cart/inspiration-cart">
-      <view class="tab-icon">车</view>
-      <text>购物车</text>
+    <view class="lab-tab" bindtap="goToPage" data-url="/pages/my-plans/my-plans">
+      <view class="tab-icon">案</view>
+      <text>方案</text>
     </view>
     <view class="lab-tab" bindtap="goToPage" data-url="/pages/profile/profile">
       <view class="tab-icon">♙</view>

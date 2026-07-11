@@ -1,6 +1,15 @@
 const auth = require('../../utils/auth');
-const { getMaterials, saveDIYDesign, getSharedDIYDesign, saveCartItem, uploadDesignPreview } = require('../../utils/api');
+const {
+  getMaterials,
+  saveDIYDesign,
+  getSharedDIYDesign,
+  uploadDesignPreview
+} = require('../../utils/api');
 const { assetUrl } = require('../../utils/assets');
+const {
+  estimateInnerCircumferenceMm,
+  recommendBeadCount
+} = require('../../utils/braceletSizing');
 
 let Body;
 let Bodies;
@@ -18,7 +27,7 @@ const TRAY_THEME_STORAGE_KEY = 'workspaceTrayThemeV1';
 const WORKSPACE_WRIST_SIZE_STORAGE_KEY = 'workspaceWristSizeV1';
 const WORKSPACE_GUIDE_STORAGE_KEY = 'workspaceFirstGuideDismissedV1';
 const MAX_WORKSPACE_BEADS = 40;
-const MAX_RECOMMENDED_RECIPE_BEADS = 18;
+const MAX_RECOMMENDED_RECIPE_BEADS = 40;
 const MIN_STRING_BEAD_COUNT = 8;
 const MAX_MATERIAL_FLIGHT_QUEUE = 6;
 const MATERIAL_TAP_GUARD_MS = 80;
@@ -30,8 +39,6 @@ const MATERIAL_PRELOAD_IDLE_RETRY_MS = 180;
 const MATERIAL_PRELOAD_MAX_DEFER_MS = 1800;
 const STRINGED_BEAD_GAP_RPX = 0.5;
 const STRINGED_COMFORT_ALLOWANCE_MM = 8;
-// Closed bracelets wear smaller than a straight row of beads because bead thickness eats into the inner curve.
-const STRINGED_LOSS_COEFFICIENT = 1;
 const RING_SLIDE_EDGE_RATIO = 0.38;
 const RING_REORDER_CENTER_DEAD_ZONE_RATIO = 0.35;
 const RING_SLIDE_MIN_MOVE_RAD = 0.018;
@@ -92,7 +99,7 @@ const RELEASE_STRING_STAGGER_MS = 10;
 const RELEASE_STRING_LOW_PERF_STAGGER_MS = 12;
 const materialSearchTextCache = typeof WeakMap !== 'undefined' ? new WeakMap() : null;
 const DEFAULT_DESIGN_NAME = 'Yustream DIY 手串方案';
-const DESIGN_NAME_MODAL_HINT = '给这条手串起个名字，方便后续在购物车和方案里识别。';
+const DESIGN_NAME_MODAL_HINT = '给这条手串起个名字，方便后续在我的方案中识别。';
 const WORKSPACE_DEBUG_LOGS = false;
 const WORKSPACE_SOUND_URLS = {
   collisionSoft: assetUrl('sounds/bead-duang-soft-quick.wav'),
@@ -147,7 +154,7 @@ const DEFAULT_MATERIALS = [
   { id: 'obsidian10', skuId: 'obsidian', top: 'bead', category: '曜石', name: '冰种黑曜石', effect: '边界与安定', element: '金', price: 14, size: 10, weight: 1.8, color: '#262529', shine: '#aeb2b5' },
   { id: 'tigerEye8', skuId: 'tigerEye', top: 'bead', category: '虎眼石', name: '南非虎眼石', effect: '执行与稳定', element: '土', price: 13, size: 8, weight: 1.5, color: '#9b6a2e', shine: '#f1c06b' },
   { id: 'moonstone6', skuId: 'moonstone', top: 'bead', category: '月光石', name: '雪花幽灵', effect: '情绪放松', element: '水', price: 4, size: 6, weight: 0.9, color: '#c7cbca', shine: '#ffffff' },
-  { id: 'moonstone8', skuId: 'moonstone', top: 'bead', category: '月光石', name: '雪花幽灵', effect: '情绪修复', element: '水', price: 8, size: 8, weight: 1.2, color: '#bdc2c1', shine: '#ffffff' },
+  { id: 'moonstone8', skuId: 'moonstone', top: 'bead', category: '月光石', name: '雪花幽灵', effect: '情绪舒缓', element: '水', price: 8, size: 8, weight: 1.2, color: '#bdc2c1', shine: '#ffffff' },
   { id: 'aquamarine8', skuId: 'aquamarine', top: 'bead', category: '海蓝宝', name: '巴西海蓝宝', effect: '沟通与平静', element: '水', price: 25, size: 8, weight: 1.4, color: '#80b8c5', shine: '#e8fbff' },
   { id: 'blueRutilatedQuartz10', skuId: 'blueRutilatedQuartz', top: 'bead', category: '蓝发晶', name: '蓝发晶', effect: '冷静与洞察', element: '水', price: 38, size: 10, weight: 1.9, color: '#4f789b', shine: '#dcecf3' },
   { id: 'garnet8', skuId: 'garnet', top: 'bead', category: '石榴石', name: '石榴石', effect: '活力与自信', element: '火', price: 18, size: 8, weight: 1.5, color: '#8e2635', shine: '#e7a1aa' },
@@ -402,13 +409,16 @@ function filterWorkspaceMaterials(materials = []) {
 }
 
 function estimateStringedLengthMm(itemsOrSizes = []) {
-  const sizes = (itemsOrSizes || [])
-    .map(item => Number(typeof item === 'number' ? item : (item && (item.size || item.diameter || item.size_mm))))
-    .filter(size => Number.isFinite(size) && size > 0);
-  if (!sizes.length) return 0;
-  const total = sizes.reduce((sum, size) => sum + size, 0);
-  const average = total / sizes.length;
-  return Math.max(0, total - average * STRINGED_LOSS_COEFFICIENT);
+  return estimateInnerCircumferenceMm(itemsOrSizes);
+}
+
+function recommendedStringedBeadCount(itemsOrSizes = [], wristSize = 16) {
+  return recommendBeadCount(itemsOrSizes, wristSize, {
+    allowanceMm: STRINGED_COMFORT_ALLOWANCE_MM,
+    defaultBeadSizeMm: 8,
+    minCount: MIN_STRING_BEAD_COUNT,
+    maxCount: MAX_RECOMMENDED_RECIPE_BEADS
+  });
 }
 
 function normalizeRotationDeg(value) {
@@ -451,6 +461,21 @@ function repairMaybeMojibakeText(value) {
   return repaired && !/[�]/.test(repaired) ? repaired : text;
 }
 
+function safeMaterialDisplayText(value) {
+  return repairMaybeMojibakeText(value)
+    .replace(/改善睡眠|助眠/g, '睡前放松')
+    .replace(/修复/g, '舒缓')
+    .replace(/治疗|疗效/g, '搭配感受')
+    .replace(/功效/g, '搭配特点')
+    .replace(/太阳神经丛/g, '行动力')
+    .replace(/海底轮/g, '稳定感')
+    .replace(/脐轮/g, '情绪流动')
+    .replace(/心轮/g, '关系感')
+    .replace(/喉轮/g, '表达感')
+    .replace(/眉心轮/g, '灵感')
+    .replace(/顶轮/g, '思考感');
+}
+
 function isMaterialGradeText(value) {
   const text = repairMaybeMojibakeText(value);
   if (!text) return true;
@@ -488,19 +513,19 @@ const WORKSPACE_USAGE_GUIDE = [
   { tag: '五行', title: '查看元素占比', desc: '打开当前方案的五行比例，方便对照分析结果。' },
   { tag: '清空', title: '清空盘面', desc: '移除当前盘面所有珠子，重新开始搭配。' },
   { tag: '成串', title: '随机成串/打散', desc: '在自由摆放和圆串整理之间切换，快速预览佩戴效果。' },
-  { tag: '加购', title: '加入购物车', desc: '确认方案后，可先加入购物车继续下单。' }
+  { tag: '结算', title: '去结算', desc: '确认方案后直接进入订单确认页。' }
 ];
 
 const WORKSPACE_USAGE_GUIDE_WITH_ICONS = [
-  { tag: '撤回', iconClass: 'plate-icon-undo', title: '撤回上一步', desc: '误加、误删或移动珠子后，点它回到上一步。' },
-  { tag: '腕围', iconClass: 'plate-icon-wrist', title: '设置腕围', desc: '调整当前手围，系统会同步重算串长和适配。' },
-  { tag: '分享', iconClass: 'plate-icon-share', title: '分享方案', desc: '生成当前方案分享入口，好友打开后可直接查看。' },
-  { tag: '保存', iconClass: 'plate-icon-save', title: '保存方案', desc: '把当前搭配保存为草稿，之后可以继续编辑。' },
-  { tag: '五行', iconClass: 'plate-icon-energy', title: '五行图', desc: '查看当前方案的五行元素占比。' },
-  { tag: '清空', iconClass: 'plate-icon-clear', title: '清空盘面', desc: '移除当前盘面所有珠子，重新开始搭配。' },
-  { tag: '成串', iconClass: 'plate-random-icon', title: '随机成串 / 解除成串', desc: '在自由摆放和圆串整理之间切换，快速预览佩戴效果。' },
-  { tag: '托盘', iconClass: 'workspace-icon-theme', title: '切换托盘颜色', desc: '顺序切换托盘底色，方便看清不同颜色的珠子。' },
-  { tag: '加购', iconClass: 'workspace-icon-cart', title: '加入购物车', desc: '确认方案后加入购物车，后续继续下单。' }
+  { tag: '撤回', iconUrl: '/images/workspace-icons/workspace-undo.png', previewClass: 'preview-square', title: '撤回上一步', desc: '误加、误删或移动珠子后，点它回到上一步。' },
+  { tag: '腕围', iconUrl: '/images/workspace-icons/workspace-wrist.png', previewClass: 'preview-wrist', buttonText: '腕围16cm', title: '设置腕围', desc: '调整当前手围，系统会同步重算串长和适配。' },
+  { tag: '分享', iconUrl: '/images/workspace-icons/share-button-gold.png', previewClass: 'preview-share', title: '分享方案', desc: '生成当前方案分享入口，好友打开后可直接查看。' },
+  { tag: '保存', iconUrl: '/images/workspace-icons/workspace-save-download.png', previewClass: 'preview-square preview-save', title: '保存方案', desc: '把当前搭配保存为草稿，之后可以继续编辑。' },
+  { tag: '五行', iconUrl: '/images/workspace-icons/workspace-energy-five-elements.png', previewClass: 'preview-square preview-energy', title: '五行图', desc: '查看当前方案的五行元素占比。' },
+  { tag: '清空', iconUrl: '/images/workspace-icons/workspace-clear-pastel.png', previewClass: 'preview-square preview-clear', title: '清空盘面', desc: '移除当前盘面所有珠子，重新开始搭配。' },
+  { tag: '成串', iconUrl: '/images/workspace-icons/workspace-string-dice.png', previewClass: 'preview-dark preview-string', buttonText: '随机成串', title: '随机成串 / 解除成串', desc: '在自由摆放和圆串整理之间切换，快速预览佩戴效果。' },
+  { tag: '托盘', previewClass: 'preview-tray', buttonText: '托盘颜色', showSwatch: true, title: '切换托盘颜色', desc: '顺序切换托盘底色，方便看清不同颜色的珠子。' },
+  { tag: '结算', previewClass: 'preview-dark preview-cart', buttonText: '去结算', title: '去结算', desc: '确认方案后直接进入订单确认页。' }
 ];
 
 const WORKSPACE_GUIDE_ITEMS = [
@@ -561,7 +586,8 @@ Page({
     randomIconText: '串',
     randomTitle: '随机成串',
     randomSubtitle: '随机排列珠面',
-    cartActionText: '\u53bb\u5b9a\u5236',
+    cartActionText: '去结算',
+    isAddingToCart: false,
     flightBead: null,
     launchingMaterialId: '',
     isShuffling: false,
@@ -618,6 +644,8 @@ Page({
       length: '0.0',
       currentWrist: '0.0',
       beadSizeText: '--',
+      recommendedCount: 18,
+      maxBeadCount: 19,
       weight: '0.00',
       maxLength: '16.8',
       warning: '',
@@ -1523,7 +1551,10 @@ Page({
     const rules = item.rules || {};
     const asset = visual.asset || item.asset || {};
     const imageUrls = visual.image_urls || item.image_urls || item.image_pool || [];
-    const effects = energy.effects || item.effects || [];
+    const rawEffects = energy.effects || item.effects || [];
+    const effects = (Array.isArray(rawEffects) ? rawEffects : [rawEffects])
+      .map(safeMaterialDisplayText)
+      .filter(Boolean);
     const top = sku.top || item.top;
     const contributesEnergy = materialContributesEnergy({ ...item, sku, top });
     const primaryElement = contributesEnergy ? (energy.primary_element || item.primary_element || item.element || '') : '';
@@ -1566,7 +1597,13 @@ Page({
       image_pool: imageUrls,
       allowed_roles: rules.allowed_roles || item.allowed_roles || [],
       conflict_codes: rules.conflict_codes || item.conflict_codes || [],
-      material_params: visual.material_params || item.material_params || {}
+      material_params: visual.material_params || item.material_params || {},
+      string_axis_width_mm: Number(
+        (visual.material_params && visual.material_params.string_axis_width_mm)
+        || (item.material_params && item.material_params.string_axis_width_mm)
+        || item.string_axis_width_mm
+        || 0
+      )
     };
   },
 
@@ -6310,7 +6347,7 @@ Page({
       }
       const seriesText = repairMaybeMojibakeText(item.series);
       const effectsText = (item.effects || [])
-        .map(effect => repairMaybeMojibakeText(effect))
+        .map(effect => safeMaterialDisplayText(effect))
         .filter(effect => effect && !isMaterialGradeText(effect))
         .slice(0, 2)
         .join(' / ');
@@ -6739,11 +6776,34 @@ Page({
     this.releaseString();
   },
 
-  buildCurrentSequence() {
+  buildCurrentPersistedPlacements() {
+    const selected = this.data.selected || [];
+    const sourcePlacements = this.data.isLooseMode && this.livePlacements && this.livePlacements.length === selected.length
+      ? this.livePlacements
+      : this.data.placements;
+    const placements = this.normalizePlacements(selected, sourcePlacements);
+    if (this.data.isLooseMode) return placements.map(item => ({ ...item }));
+    const context = this.getStringedRingContext();
+    const geometry = context.geometry || {};
+    const center = Number(geometry.center) || this.getStageLayout().center;
+    return context.placements.map((placement, index) => {
+      const angle = Number((geometry.angles || [])[index]) || 0;
+      return {
+        ...placement,
+        x: center + Math.cos(angle) * Number(geometry.radius || 0),
+        y: center + Math.sin(angle) * Number(geometry.radius || 0),
+        beadSize: Number((geometry.beadSizes || [])[index])
+          || Number(placement.beadSize)
+          || this.getMaterialDisplaySize(selected[index])
+      };
+    });
+  },
+
+  buildCurrentSequence(persistedPlacements = this.buildCurrentPersistedPlacements()) {
     const timestamp = new Date().toISOString();
     const beadSequence = (this.data.selected || []).map((id, index) => {
       const material = this.findMaterialById(id) || {};
-      const placement = (this.data.placements || [])[index] || {};
+      const placement = (persistedPlacements || [])[index] || {};
       const imageUrls = (material.image_urls || material.image_pool || [])
         .concat(material.image_url || [])
         .filter(Boolean);
@@ -6788,7 +6848,7 @@ Page({
     return beadSequence;
   },
 
-  validateStringedDesignForCart() {
+  validateStringedDesignForCheckout() {
     if (!this.data.selected.length) {
       wx.showToast({ title: '请先选择珠子', icon: 'none' });
       return false;
@@ -6802,134 +6862,155 @@ Page({
       return false;
     }
     if (this.data.isLooseMode) {
-      wx.showToast({ title: '请先收拢成串后再加入购物车', icon: 'none' });
+      wx.showToast({ title: '请先收拢成串后再进入结算', icon: 'none' });
+      return false;
+    }
+    const selectedMaterials = this.getCachedSelectedMaterials(this.data.selected).filter(Boolean);
+    const unavailable = selectedMaterials.find(material => (
+      material.enabled === false
+      || String(material.stock_status || (material.sku && material.sku.stock_status) || '').toLowerCase() === 'out'
+    ));
+    if (unavailable) {
+      wx.showToast({ title: `${this.displayMaterialName(unavailable)}暂不可售，请更换后重试`, icon: 'none' });
+      return false;
+    }
+    const invalidPrice = selectedMaterials.find(material => {
+      const price = Number(material.price);
+      return !Number.isFinite(price) || price < 0;
+    });
+    if (invalidPrice) {
+      wx.showToast({ title: `${this.displayMaterialName(invalidPrice)}价格暂不可计算`, icon: 'none' });
       return false;
     }
     return true;
   },
 
-  async addDesignToCart() {
-    if (!this.validateStringedDesignForCart()) return;
-    let user;
-    try {
-      user = await auth.requireLogin('登录后才能保存购物车方案预览。');
-    } catch (error) {
-      return;
-    }
-    wx.showLoading({ title: '生成预览...', mask: true });
-    const current = wx.getStorageSync('currentDesign') || {};
-    const planName = cleanDesignName(current.name) || cleanDesignName(current.title) || DEFAULT_DESIGN_NAME;
-    const sequence = this.buildCurrentSequence();
-    const fallbackPrice = sequence.reduce((sum, item) => sum + Number(item.price || 0), 0);
-    const summaryPrice = Number((this.data.summary && (this.data.summary.priceText || this.data.summary.price)) || fallbackPrice || 0);
-    const price = Number.isFinite(summaryPrice) ? summaryPrice : fallbackPrice;
-    const summary = {
-      ...(this.data.summary || {}),
-      count: this.data.selected.length,
-      price,
-      priceText: price.toFixed(2)
-    };
-    let previewResult = {};
-    try {
-      previewResult = await this.prepareCurrentDesignPreview(user.user_id, {});
-    } catch (error) {
-      wx.hideLoading();
-      wx.showToast({ title: '预览图生成失败，请重试', icon: 'none' });
-      return;
-    }
-    const previewImage = previewResult.previewImage || previewResult.localPreviewImage || '';
-    wx.hideLoading();
-    if (!previewImage) {
-      wx.showToast({ title: '预览图生成失败，请重试', icon: 'none' });
-      return;
-    }
-    const localId = `diy-${Date.now()}`;
-    const stageLayout = this.getStageLayout();
-    const cartPayload = {
-      id: localId,
-      createdAt: Date.now(),
-      name: planName,
-      title: planName,
-      userId: user.user_id,
-      selected: [...this.data.selected],
-      materialIds: sequence.map(item => item.id || item.sku).filter(Boolean),
-      placements: this.data.placements.map(item => ({ ...item })),
-      attachedPendants: [],
-      wristSize: this.data.wristSize,
-      wearStyle: 'single',
-      isLooseMode: this.data.isLooseMode,
-      workspaceStageCenter: stageLayout.center,
-      previewSourceCenter: stageLayout.center,
-      preview_source_center: stageLayout.center,
-      sourceContext: this.data.sourceContext || this.sourceContext || null,
-      preview_image: previewImage,
-      previewImage,
-      image_url: previewImage,
-      local_preview_image: previewResult.localPreviewImage || '',
-      summary,
-      sequence
-    };
-    const localStoredItem = {
-      ...cartPayload,
-      key: localId,
-      cart_item_id: localId,
-      quantity: 1,
-      qty: 1
-    };
-    const localCart = wx.getStorageSync('diyDesignCart') || [];
-    const localNextCart = [
-      localStoredItem,
-      ...localCart.filter(item => (item.cart_item_id || item.id) !== localId)
-    ].slice(0, 20);
-    wx.setStorageSync('diyDesignCart', localNextCart);
-    wx.setStorageSync('currentDesign', localStoredItem);
-    this.syncCartItemToServer(user.user_id, localId, cartPayload);
-    this.hideWorkspaceCanvasForOverlay();
-    wx.showLoading({ title: '正在进入确认订单', mask: true });
-    wx.navigateTo({
-      url: '/pages/checkout/checkout',
-      fail: () => {
-        wx.hideLoading();
-        this.restoreWorkspaceCanvasAfterOverlay();
-        wx.showToast({ title: '打开确认订单失败', icon: 'none' });
-      }
+  confirmCheckoutWristWarning() {
+    const summary = this.data.summary || {};
+    const warning = String(summary.warning || '');
+    if (!warning || warning === '合适') return Promise.resolve(true);
+    const effectiveWrist = summary.currentWrist || '--';
+    const targetWrist = this.data.wristSize || '--';
+    const isTooLarge = warning === '偏长';
+    const title = isTooLarge ? '有效腕围偏大' : '有效腕围偏小';
+    const consequence = isTooLarge
+      ? '成品佩戴时可能偏松。'
+      : '成品可能偏紧或无法舒适佩戴。';
+    return new Promise(resolve => {
+      wx.showModal({
+        title,
+        content: `目标腕围 ${targetWrist}cm，当前有效腕围 ${effectiveWrist}cm，${consequence}是否仍要进入结算？`,
+        cancelText: '继续调整',
+        confirmText: '确认结算',
+        confirmColor: '#171815',
+        success: result => resolve(!!result.confirm),
+        fail: () => resolve(false)
+      });
     });
-    return;
   },
 
-  syncCartItemToServer(userId, localId, cartPayload) {
-    saveCartItem({
-      user_id: userId,
-      cart_item_id: localId,
-      item_type: 'diy_design',
-      item_id: localId,
-      item: cartPayload,
-      quantity: 1
-    }).then(saved => {
-      const savedItem = {
-        ...cartPayload,
-        ...(saved.item || {}),
-        name: (saved.item && (saved.item.name || saved.item.title)) || cartPayload.name,
-        title: (saved.item && (saved.item.title || saved.item.name)) || cartPayload.title,
-        id: saved.cart_item_id || localId,
-        key: saved.cart_item_id || localId,
-        cart_item_id: saved.cart_item_id || localId,
-        quantity: saved.quantity || 1,
-        qty: saved.quantity || 1
-      };
-      const cart = wx.getStorageSync('diyDesignCart') || [];
-      const nextCart = [savedItem, ...cart.filter(item => {
-        const key = item.cart_item_id || item.id;
-        return key !== localId && key !== savedItem.cart_item_id;
-      })].slice(0, 20);
-      wx.setStorageSync('diyDesignCart', nextCart);
+  async checkoutCurrentDesign() {
+    if (!this.validateStringedDesignForCheckout()) return;
+    if (this.checkoutSubmissionInFlight || this.data.isAddingToCart) return;
+    this.checkoutSubmissionInFlight = true;
+    const wristConfirmed = await this.confirmCheckoutWristWarning();
+    if (!wristConfirmed) {
+      this.checkoutSubmissionInFlight = false;
+      return;
+    }
+    this.setData({
+      isAddingToCart: true,
+      cartActionText: '正在打开...'
+    });
+    let user;
+    try {
+      user = await auth.requireLogin('登录后才能进入订单结算。');
+    } catch (error) {
+      this.setData({
+        isAddingToCart: false,
+        cartActionText: '去结算'
+      });
+      this.checkoutSubmissionInFlight = false;
+      return;
+    }
+    try {
       const current = wx.getStorageSync('currentDesign') || {};
-      const currentKey = current.cart_item_id || current.id;
-      if (currentKey === localId || currentKey === savedItem.cart_item_id) {
-        wx.setStorageSync('currentDesign', { ...current, ...savedItem });
-      }
-    }).catch(error => {
-      logWorkspaceWarning('sync cart item failed:', error && (error.message || error));
+      const planName = cleanDesignName(current.name) || cleanDesignName(current.title) || DEFAULT_DESIGN_NAME;
+      const placements = this.buildCurrentPersistedPlacements();
+      const sequence = this.buildCurrentSequence(placements);
+      const fallbackPrice = sequence.reduce((sum, item) => sum + Number(item.price || 0), 0);
+      const summaryPrice = Number((this.data.summary && (this.data.summary.priceText || this.data.summary.price)) || fallbackPrice || 0);
+      const price = Number.isFinite(summaryPrice) ? summaryPrice : fallbackPrice;
+      const summary = {
+        ...(this.data.summary || {}),
+        count: this.data.selected.length,
+        price,
+        priceText: price.toFixed(2)
+      };
+      const stageLayout = this.getStageLayout();
+      const updatedAt = Date.now();
+      const design = {
+        ...current,
+        createdAt: current.createdAt || Date.now(),
+        updatedAt,
+        name: planName,
+        title: planName,
+        userId: user.user_id,
+        selected: [...this.data.selected],
+        materialIds: sequence.map(item => item.id || item.sku).filter(Boolean),
+        placements,
+        attachedPendants: [],
+        wristSize: this.data.wristSize,
+        wearStyle: 'single',
+        isLooseMode: this.data.isLooseMode,
+        trayTheme: this.data.trayTheme,
+        tray_theme: this.data.trayTheme,
+        trayImageUrl: this.data.trayImageUrl,
+        tray_image_url: this.data.trayImageUrl,
+        workspaceStageCenter: stageLayout.center,
+        previewSourceCenter: stageLayout.center,
+        preview_source_center: stageLayout.center,
+        sourceContext: this.data.sourceContext || this.sourceContext || null,
+        preview_image: '',
+        previewImage: '',
+        image_url: '',
+        local_preview_image: '',
+        summary,
+        sequence
+      };
+      delete design.cart_item_id;
+      delete design.cartItemId;
+      delete design.cartIdempotencyKey;
+      wx.setStorageSync('currentDesign', design);
+      this.setData({ isAddingToCart: false, cartActionText: '去结算' });
+      this.hideWorkspaceCanvasForOverlay();
+      await this.openCheckoutPage();
+    } catch (error) {
+      logWorkspaceWarning('open checkout failed:', error && (error.message || error));
+      this.restoreWorkspaceCanvasAfterOverlay();
+      this.setData({
+        isAddingToCart: false,
+        cartActionText: '去结算'
+      });
+      wx.showToast({ title: '进入结算失败，请重试', icon: 'none' });
+    } finally {
+      this.checkoutSubmissionInFlight = false;
+    }
+  },
+
+  openCheckoutPage() {
+    return new Promise((resolve, reject) => {
+      wx.navigateTo({
+        url: '/pages/checkout/checkout',
+        success: resolve,
+        fail: navigateError => {
+          wx.redirectTo({
+            url: '/pages/checkout/checkout',
+            success: resolve,
+            fail: redirectError => reject(redirectError || navigateError)
+          });
+        }
+      });
     });
   },
 
@@ -6946,14 +7027,14 @@ Page({
 
   openToolbox() {
     wx.showActionSheet({
-      itemList: ['撤回上一步', '还原排列', '保存草稿', '分享方案', '调整手围', '加入购物车', '使用帮助', '清空设计'],
+      itemList: ['撤回上一步', '还原排列', '保存草稿', '分享方案', '调整手围', '去结算', '使用帮助', '清空设计'],
       success: res => {
         if (res.tapIndex === 0) this.undo();
         if (res.tapIndex === 1) this.redo();
         if (res.tapIndex === 2) this.saveDraft();
         if (res.tapIndex === 3) this.prepareShareDesign();
         if (res.tapIndex === 4) this.openWristSetting();
-        if (res.tapIndex === 5) this.addDesignToCart();
+        if (res.tapIndex === 5) this.checkoutCurrentDesign();
         if (res.tapIndex === 6) this.showWorkspaceHelp();
         if (res.tapIndex === 7) this.confirmClearDesign();
       }
@@ -7381,6 +7462,10 @@ Page({
   commitMaterial(id, placement, physicsOptions = {}, onReady) {
     const wasLooseMode = this.data.isLooseMode;
     const previousCount = this.data.selected.length;
+    const existingPlacements = wasLooseMode
+      ? this.normalizePlacements(this.data.selected, this.data.placements)
+      : this.buildLoosePlacementsFromStringedRing();
+    const nextPlacement = placement || this.createLoosePlacement(previousCount, id, existingPlacements);
     const launchVelocity = physicsOptions.velocity;
     const launchAngularVelocity = physicsOptions.angularVelocity;
     if (launchVelocity) {
@@ -7400,9 +7485,12 @@ Page({
     this.pushHistory();
     this.setData({
       selected: [...this.data.selected, id],
-      placements: [...this.data.placements, placement || this.createLoosePlacement(this.data.selected.length, id)],
+      placements: [...existingPlacements, nextPlacement],
       isLooseMode: true,
-      selectedBeadIndex: -1
+      selectedBeadIndex: -1,
+      selectedBeadInfo: null,
+      draggingBeadIndex: -1,
+      dragDeleteArmed: false
     });
     this.recalculate({ persistDelay: 520 });
     wx.nextTick(() => {
@@ -7600,7 +7688,8 @@ Page({
         isStringingFinishing: true,
         selectedBeadInfo: null,
         draggingBeadIndex: -1,
-        dragDeleteArmed: false
+        dragDeleteArmed: false,
+        cartActionText: '去结算'
       });
       this.stringingFinishTimer = setInterval(() => {
         const elapsed = Date.now() - startedAt;
@@ -7789,6 +7878,26 @@ Page({
     }).filter(Boolean);
     const geometry = this.getCachedBraceletGeometry(items);
     return { selected, placements, items, geometry };
+  },
+
+  buildLoosePlacementsFromStringedRing() {
+    const context = this.getStringedRingContext();
+    const visualSlots = this.getRingVisualSlots(context.items, context.placements, context.geometry);
+    return context.placements.map((placement, index) => {
+      const slot = visualSlots[index] || {};
+      const looseX = Number.isFinite(Number(slot.x)) ? Number(slot.x) : Number(placement.looseX);
+      const looseY = Number.isFinite(Number(slot.y)) ? Number(slot.y) : Number(placement.looseY);
+      return {
+        ...placement,
+        dx: 0,
+        dy: 0,
+        looseX,
+        looseY,
+        beadSize: Number(context.geometry.beadSizes[index])
+          || Number(placement.beadSize)
+          || this.getMaterialDisplaySize(context.selected[index])
+      };
+    });
   },
 
   shouldStartRingSlide(hit) {
@@ -8376,8 +8485,8 @@ Page({
       placements,
       attachedPendants,
       scaleTicks,
-      countOverClass: items.length > 18 ? 'over' : '',
-      lengthOverClass: items.length && length > Number(this.data.wristSize || 0) ? 'over-length' : '',
+      countOverClass: items.length > Number(summary.maxBeadCount || MAX_RECOMMENDED_RECIPE_BEADS) ? 'over' : '',
+      lengthOverClass: items.length && summary.warning !== '合适' ? 'over-length' : '',
       braceletStringClass: items.length ? 'has-beads' : 'empty',
       completionWatermarkClass: items.length ? 'has-beads' : '',
       wearStyle: 'single',
@@ -8688,6 +8797,8 @@ Page({
     const weight = items.reduce((sum, item) => sum + item.weight, 0);
     const wristSize = Number(this.data.wristSize || 16);
     const targetLength = wristSize + 0.8;
+    const recommendedCount = recommendedStringedBeadCount(items, wristSize);
+    const maxBeadCount = Math.min(MAX_WORKSPACE_BEADS, recommendedCount + 1);
     const warning = items.length === 0
       ? ''
       : length > targetLength + 0.5
@@ -8722,6 +8833,8 @@ Page({
       weight: weight.toFixed(2),
       currentWrist: currentWrist.toFixed(1),
       beadSizeText,
+      recommendedCount,
+      maxBeadCount,
       maxLength: targetLength.toFixed(1),
       warning,
       energy
@@ -9022,6 +9135,7 @@ Page({
       ? (current.designId || current.design_id || '')
       : '';
     const stageLayout = this.getStageLayout();
+    const persistedPlacements = this.buildCurrentPersistedPlacements();
     const design = {
       designId: reusableDesignId,
       design_id: reusableDesignId,
@@ -9029,7 +9143,7 @@ Page({
       title: designName,
       userId: user.user_id,
       selected: this.data.selected,
-      placements: this.data.placements,
+      placements: persistedPlacements,
       attachedPendants: [],
       wristSize: this.data.wristSize,
       wearStyle: 'single',
@@ -9044,7 +9158,7 @@ Page({
       local_preview_image: previewResult.localPreviewImage || current.local_preview_image || '',
       summary: this.data.summary
     };
-    const sequence = this.buildCurrentSequence();
+    const sequence = this.buildCurrentSequence(persistedPlacements);
     design.sequence = sequence;
     try {
       const remoteDesign = { ...design };
@@ -9184,15 +9298,26 @@ Page({
     if (!_energySvgCache) {
       var energyData = {};
       (this.data.summary.energy || []).forEach(function(e) { energyData[e.key] = e.value; });
-      _energySvgCache = svgToDataURI(generateChartSVG(energyData, { width: 460, height: 460, padding: 50, gridColor: 'rgba(0,0,0,0.06)', axisColor: 'rgba(0,0,0,0.1)', areaStroke: '#c0a36b', labelColor: 'rgba(0,0,0,0.7)', valueColor: 'rgba(0,0,0,0.4)', showLabels: true, showValues: true }));
+      _energySvgCache = svgToDataURI(generateChartSVG(energyData, {
+        width: 460,
+        height: 460,
+        padding: 58,
+        gridColor: 'rgba(72,58,40,0.10)',
+        axisColor: 'rgba(72,58,40,0.14)',
+        areaStroke: '#b88a42',
+        areaFillStart: '#e8cf9c',
+        areaFillEnd: '#b88a42',
+        labelColor: 'rgba(35,29,22,0.78)',
+        valueColor: 'rgba(35,29,22,0.46)',
+        showLabels: true,
+        showValues: true
+      }));
     }
-    this.setData({ showEnergyModal: true, energyChartSvgUrl: _energySvgCache });
+    this.setData({ showEnergyPanel: false, showEnergyModal: true, energyChartSvgUrl: _energySvgCache });
   },
 
   toggleEnergyPanel() {
-    this.setData({ showEnergyPanel: !this.data.showEnergyPanel }, () => {
-      if (this.data.useCanvasRenderer) this.scheduleCanvasRender();
-    });
+    this.openEnergyModal();
   },
 
   closeEnergyModal() {
@@ -9256,6 +9381,7 @@ function generateChartSVG(data, opts) {
   o.width = opts.width || 400; o.height = opts.height || 400; o.padding = opts.padding || 45;
   o.gridColor = opts.gridColor || 'rgba(0,0,0,0.06)'; o.axisColor = opts.axisColor || 'rgba(0,0,0,0.1)';
   o.areaStroke = opts.areaStroke || '#c0a36b'; o.labelColor = opts.labelColor || 'rgba(0,0,0,0.7)';
+  o.areaFillStart = opts.areaFillStart || '#e8cf9c'; o.areaFillEnd = opts.areaFillEnd || '#b88a42';
   o.valueColor = opts.valueColor || 'rgba(0,0,0,0.4)'; o.dotRadius = opts.dotRadius || 5;
   o.showLabels = opts.showLabels !== false; o.showValues = opts.showValues !== false;
 
@@ -9268,7 +9394,8 @@ function generateChartSVG(data, opts) {
 
   // gradient
   svg.push('<defs><linearGradient id="eg" x1="0%" y1="0%" x2="100%" y2="100%">');
-  svg.push('<stop offset="0%" stop-color="' + o.areaStroke.replace(/[^,]+\)$/, '0.35)') + '"/><stop offset="100%" stop-color="' + o.areaStroke.replace(/[^,]+\)$/, '0.1)') + '"/></linearGradient>');
+  svg.push('<stop offset="0%" stop-color="' + o.areaFillStart + '" stop-opacity="0.48"/><stop offset="100%" stop-color="' + o.areaFillEnd + '" stop-opacity="0.22"/></linearGradient>');
+  svg.push('<filter id="energyShadow" x="-35%" y="-35%" width="170%" height="170%"><feDropShadow dx="0" dy="7" stdDeviation="8" flood-color="#6f5127" flood-opacity="0.22"/></filter>');
 
   // radial gradients for each dot
   pts.forEach(function(p, i) {
@@ -9292,7 +9419,7 @@ function generateChartSVG(data, opts) {
 
   // energy polygon
   var ep = pts.map(function(p, i) { return (i === 0 ? 'M' : 'L') + p.x.toFixed(1) + ',' + p.y.toFixed(1); }).join('') + 'Z';
-  svg.push('<path d="' + ep + '" fill="url(#eg)" stroke="' + o.areaStroke + '" stroke-width="' + o.areaStrokeWidth + '" stroke-linejoin="round" opacity="0.85"/>');
+  svg.push('<path d="' + ep + '" fill="url(#eg)" stroke="' + o.areaStroke + '" stroke-width="' + o.areaStrokeWidth + '" stroke-linejoin="round" filter="url(#energyShadow)"/>');
 
   // dots and labels
   pts.forEach(function(p, i) {

@@ -52,6 +52,11 @@ image {
   display: block;
 }
 
+.yu-share-button-image {
+  display: block;
+  pointer-events: none;
+}
+
 button {
   display: flex;
   overflow: visible;

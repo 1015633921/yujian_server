@@ -1,0 +1,106 @@
+page {
+  background: #f8f6f1;
+}
+
+.support-page {
+  min-height: 100vh;
+  padding: 44rpx 32rpx calc(64rpx + env(safe-area-inset-bottom));
+  box-sizing: border-box;
+}
+
+.support-lead {
+  padding: 28rpx 8rpx 40rpx;
+}
+
+.lead-kicker {
+  color: #8f7048;
+  font-size: 21rpx;
+  font-weight: 800;
+}
+
+.lead-title {
+  margin-top: 12rpx;
+  color: #20201f;
+  font-size: 52rpx;
+  font-weight: 900;
+  line-height: 1.15;
+}
+
+.lead-desc {
+  margin-top: 18rpx;
+  color: rgba(32, 32, 31, .62);
+  font-size: 27rpx;
+  line-height: 1.75;
+}
+
+.support-band {
+  padding: 30rpx 28rpx;
+  border: 1rpx solid rgba(32, 32, 31, .07);
+  border-radius: 8rpx;
+  background: rgba(255, 255, 255, .84);
+}
+
+.band-title {
+  margin-bottom: 12rpx;
+  color: #20201f;
+  font-size: 29rpx;
+  font-weight: 900;
+}
+
+.support-row {
+  display: grid;
+  grid-template-columns: 56rpx 1fr;
+  gap: 18rpx;
+  padding: 22rpx 0;
+  border-bottom: 1rpx solid rgba(32, 32, 31, .07);
+}
+
+.support-row:last-child {
+  border-bottom: 0;
+}
+
+.row-index {
+  color: #a17d48;
+  font-size: 21rpx;
+  font-weight: 900;
+}
+
+.row-title {
+  color: rgba(32, 32, 31, .88);
+  font-size: 26rpx;
+  font-weight: 850;
+}
+
+.row-desc {
+  margin-top: 8rpx;
+  color: rgba(32, 32, 31, .56);
+  font-size: 24rpx;
+  line-height: 1.65;
+}
+
+.contact-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 92rpx;
+  margin: 32rpx 0 0;
+  border: 0;
+  border-radius: 8rpx;
+  color: #fff;
+  background: #20201f;
+  font-size: 29rpx;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.contact-button::after {
+  display: none;
+}
+
+.contact-note {
+  padding: 18rpx 12rpx 0;
+  color: rgba(32, 32, 31, .48);
+  text-align: center;
+  font-size: 22rpx;
+  line-height: 1.6;
+}

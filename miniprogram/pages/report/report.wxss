@@ -47,8 +47,16 @@
 
 .nav-share {
   justify-self: end;
-  font-size: 30rpx;
-  font-weight: 700;
+  overflow: visible;
+  border: 0;
+  background: transparent;
+  box-shadow: 0 9rpx 22rpx rgba(132, 91, 36, 0.13);
+}
+
+.nav-share-image {
+  width: 64rpx;
+  height: 64rpx;
+  border-radius: 50%;
 }
 
 .nav-title {
@@ -63,8 +71,8 @@
   position: relative;
   z-index: 1;
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 14rpx;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 6rpx;
   margin-top: 26rpx;
   padding: 0 10rpx;
 }
@@ -76,7 +84,7 @@
   align-items: center;
   gap: 10rpx;
   color: var(--yu-color-text-muted);
-  font-size: 21rpx;
+  font-size: 18rpx;
 }
 
 .step-item::before {
@@ -110,6 +118,19 @@
 
 .step-label {
   white-space: nowrap;
+}
+
+.score-help {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24rpx;
+  height: 24rpx;
+  margin-left: 3rpx;
+  border: 1rpx solid currentColor;
+  border-radius: 50%;
+  font-size: 16rpx;
+  line-height: 1;
 }
 
 .step-item.done {
@@ -822,6 +843,14 @@
   padding: 20rpx 32rpx calc(24rpx + env(safe-area-inset-bottom));
   background:
     linear-gradient(180deg, rgba(247, 246, 242, 0), rgba(247, 246, 242, .92) 22%, rgba(247, 246, 242, .98));
+}
+
+.result-disclaimer {
+  margin: 28rpx 12rpx 0;
+  color: rgba(32, 32, 31, .48);
+  text-align: center;
+  font-size: 21rpx;
+  line-height: 1.65;
 }
 
 .result-actions {

@@ -1,0 +1,35 @@
+<view class="support-page yu-page">
+  <view class="support-lead">
+    <view class="lead-kicker">YUSTREAM SUPPORT</view>
+    <view class="lead-title">{{accountDeletion ? '申请注销账号' : '需要协助？'}}</view>
+    <view class="lead-desc" wx:if="{{accountDeletion}}">账号注销需要核验身份，并确认没有进行中的订单、售后或退款。请在客服会话中发送“申请注销账号”。</view>
+    <view class="lead-desc" wx:else>订单、支付、物流、售后和 DIY 定制问题，都可以通过微信客服继续沟通。</view>
+  </view>
+
+  <view class="support-band">
+    <view class="band-title">联系前请准备</view>
+    <view class="support-row">
+      <view class="row-index">01</view>
+      <view><view class="row-title">订单问题</view><view class="row-desc">准备订单号和问题截图，便于快速定位。</view></view>
+    </view>
+    <view class="support-row">
+      <view class="row-index">02</view>
+      <view><view class="row-title">DIY 与材料问题</view><view class="row-desc">说明方案名称、珠材名称和出现问题的步骤。</view></view>
+    </view>
+    <view class="support-row">
+      <view class="row-index">03</view>
+      <view><view class="row-title">非实时回复</view><view class="row-desc">可以先留言，客服会在会话中继续回复。</view></view>
+    </view>
+  </view>
+
+  <button
+    class="contact-button"
+    open-type="contact"
+    session-from="{{sessionFrom}}"
+    show-message-card="{{true}}"
+    send-message-title="{{accountDeletion ? '申请注销宇涧水晶账号' : '宇涧水晶帮助与客服'}}"
+    send-message-path="/pages/support-center/support-center"
+    bindtap="onContactTap"
+  >打开微信客服</button>
+  <view class="contact-note">若未打开会话，请检查网络后重试；当前页面不会自动提交订单或注销申请。</view>
+</view>

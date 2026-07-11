@@ -16,7 +16,7 @@
     </view>
 
     <view class="cart-list">
-      <view wx:for="{{items}}" wx:key="key" class="cart-item yu-card yu-card-pressable {{checkoutLoadingKey == item.key ? 'checkout-loading' : ''}}" data-key="{{item.key}}" bindtap="checkoutDesign">
+      <view wx:for="{{items}}" wx:key="key" class="cart-item yu-card {{checkoutLoadingKey == item.key ? 'checkout-loading' : ''}}">
         <view class="item-preview tone-{{item.tone}}">
           <view class="cart-workbench-btn" data-key="{{item.key}}" catchtap="editDesign" aria-role="button" aria-label="打开工作台">
             <image class="cart-action-image" src="{{cartActionIcons.workbench}}" mode="aspectFit" />
@@ -42,6 +42,10 @@
             </view>
           </view>
           <view class="cart-plan-name">{{item.planName}}</view>
+          <view class="cart-item-actions">
+            <button class="cart-item-action cart-item-action-secondary" data-key="{{item.key}}" bindtap="editDesign">编辑方案</button>
+            <button class="cart-item-action cart-item-action-primary" data-key="{{item.key}}" bindtap="checkoutDesign">去结算</button>
+          </view>
         </view>
       </view>
     </view>

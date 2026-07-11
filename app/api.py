@@ -589,7 +589,10 @@ def calculate_energy(payload: AssessmentRequest):
 
 @router.post("/assessment/{assessment_id}/diy-recommendation", summary="第二步：填写腕围并生成 DIY 推荐")
 def create_diy_recommendation(assessment_id: str, payload: DIYRecommendationRequest):
-    result = service.create_diy_recommendation(assessment_id, payload)
+    try:
+        result = service.create_diy_recommendation(assessment_id, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     if not result:
         raise HTTPException(status_code=404, detail="分析结果不存在")
     return success(result, "专属手串已生成")
@@ -607,6 +610,16 @@ def assessment_history(
     limit: int = Query(default=20, ge=1, le=100),
 ):
     return success(service.history(user_id, limit))
+
+
+@router.get("/privacy/data-summary", summary="查看我的测算与画像数据摘要")
+def privacy_data_summary(user_id: str = Query(min_length=1, max_length=100)):
+    return success(service.privacy_data_summary(user_id))
+
+
+@router.delete("/privacy/personalization-data", summary="删除我的测算、画像与每日状态数据")
+def delete_personalization_data(user_id: str = Query(min_length=1, max_length=100)):
+    return success(service.delete_personalization_data(user_id), "测算与画像数据已删除")
 
 
 @router.get("/assessment/{assessment_id}", summary="获取分析详情")

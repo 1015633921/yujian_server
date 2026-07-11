@@ -24,7 +24,11 @@ const ASSETS = {
   roseQuartz: assetUrl('home/moonstone.webp'),
   obsidian: assetUrl('home/amethyst.webp')
 };
-const PLAN_TRAY_IMAGE_URL = assetUrl('workspace/tray-yustream-transparent-user-20260701-v6.webp');
+const PLAN_TRAY_IMAGES = {
+  white: assetUrl('workspace/tray-yustream-white-transparent-user-20260701.webp'),
+  warm: assetUrl('workspace/tray-yustream-transparent-user-20260701-v6.webp'),
+  black: assetUrl('workspace/tray-yustream-black-transparent-user-20260701.webp')
+};
 
 const TABS = [
   { key: 'all', label: '全部', count: 0 },
@@ -104,21 +108,30 @@ function beadIdsFromDesign(design = {}) {
   return [];
 }
 
-function createPreviewBeads(ids = []) {
-  const safeIds = ids.length ? ids.slice(0, 16) : ['moonstone', 'clearQuartz', 'amethyst', 'clearQuartz'];
-  const count = Math.max(safeIds.length, 8);
-  return Array.from({ length: count }, (_, index) => {
-    const angle = (360 / count) * index;
-    const id = safeIds[index % safeIds.length];
-    return {
-      src: ASSETS[id] || ASSETS.clearQuartz,
-      style: `width:28rpx;height:28rpx;transform:rotate(${angle}deg) translateY(-46rpx) rotate(${-angle}deg);`
-    };
-  });
+function previewSequenceFromDesign(design = {}, selected = []) {
+  if (Array.isArray(design.sequence) && design.sequence.length) return design.sequence;
+  return selected.map(id => ({
+    id,
+    name: MATERIAL_NAMES[id] || id,
+    image_url: ASSETS[id] || '',
+    size: 8
+  }));
+}
+
+function previewTrayFromDesign(design = {}) {
+  const trayTheme = design.trayTheme || design.tray_theme || 'white';
+  return {
+    trayTheme,
+    trayImage: design.trayImageUrl
+      || design.tray_image_url
+      || PLAN_TRAY_IMAGES[trayTheme]
+      || PLAN_TRAY_IMAGES.white
+  };
 }
 
 function normalizeSavedPlan(item = {}, index = 0, source = 'draft') {
   const selected = beadIdsFromDesign(item);
+  const tray = previewTrayFromDesign(item);
   const summary = item.summary || {};
   const createdAt = item.updatedAt || item.createdAt || item.savedAt || Date.now();
   const wristSize = item.wristSize || summary.wristSize || summary.targetWristText || '15.0cm';
@@ -137,7 +150,12 @@ function normalizeSavedPlan(item = {}, index = 0, source = 'draft') {
     priceText: moneyText(summary.priceText || summary.price || item.price),
     beadCount: selected.length,
     recipeText: buildRecipeText(item, selected),
-    previewBeads: createPreviewBeads(selected),
+    previewDesign: item,
+    previewSequence: previewSequenceFromDesign(item, selected),
+    previewPlacements: item.placements || [],
+    trayTheme: tray.trayTheme,
+    trayImage: tray.trayImage,
+    trayImageFailed: false,
     snapshot: {
       ...item,
       selected,
@@ -152,8 +170,21 @@ function normalizeSavedPlan(item = {}, index = 0, source = 'draft') {
 }
 
 function normalizeOrderPlan(order = {}, index = 0) {
-  const design = order.design || {};
-  const selected = beadIdsFromDesign({ ...design, sequence: order.sequence || design.sequence });
+  const orderSequence = Array.isArray(order.sequence) && order.sequence.length
+    ? order.sequence
+    : ((order.design && order.design.sequence) || []);
+  const design = {
+    ...(order.design || {}),
+    sequence: orderSequence,
+    trayTheme: (order.design && (order.design.trayTheme || order.design.tray_theme))
+      || order.trayTheme
+      || order.tray_theme,
+    trayImageUrl: (order.design && (order.design.trayImageUrl || order.design.tray_image_url))
+      || order.trayImageUrl
+      || order.tray_image_url
+  };
+  const selected = beadIdsFromDesign(design);
+  const tray = previewTrayFromDesign(design);
   const isCompleted = order.statusKey === 'done' || order.rawStatus === 'completed' || order.status === '已完成';
   const statusText = isCompleted ? '已完成' : '已下单';
   const wristSize = (design.summary && (design.summary.wristSize || design.summary.targetWristText)) || design.wristSize || '15.0cm';
@@ -170,8 +201,13 @@ function normalizeOrderPlan(order = {}, index = 0) {
     dateText: `${isCompleted ? '完成于' : '下单于'} ${formatDate(order.createdAt || order.created_at)}`,
     priceText: moneyText(order.totalAmount || order.total_amount || (design.summary && design.summary.price)),
     beadCount: selected.length || (order.bom || []).reduce((sum, item) => sum + Number(item.qty || 0), 0),
-    recipeText: buildRecipeText({ ...design, sequence: order.sequence || design.sequence }, selected) || '查看订单材料',
-    previewBeads: createPreviewBeads(selected),
+    recipeText: buildRecipeText(design, selected) || '查看订单材料',
+    previewDesign: design,
+    previewSequence: previewSequenceFromDesign(design, selected),
+    previewPlacements: design.placements || order.placements || [],
+    trayTheme: tray.trayTheme,
+    trayImage: tray.trayImage,
+    trayImageFailed: false,
     order
   };
 }
@@ -180,7 +216,6 @@ Page({
   data: {
     tabs: TABS,
     activeTab: 'all',
-    trayImageUrl: PLAN_TRAY_IMAGE_URL,
     plans: [],
     visiblePlans: [],
     counts: { all: 0, saved: 0, ordered: 0, completed: 0 }
@@ -239,6 +274,17 @@ Page({
     });
   },
 
+  onTrayImageError(e) {
+    const key = e.currentTarget.dataset.key;
+    const plans = (this.data.plans || []).map(plan => (
+      plan.key === key ? { ...plan, trayImageFailed: true } : plan
+    ));
+    this.setData({
+      plans,
+      visiblePlans: this.filterPlans(plans, this.data.activeTab)
+    });
+  },
+
   openPlan(e) {
     const key = e.currentTarget.dataset.key;
     const plan = this.data.plans.find(item => item.key === key);
@@ -259,6 +305,17 @@ Page({
   continueEditPlan(plan) {
     wx.setStorageSync('currentDesign', plan.snapshot);
     wx.switchTab({ url: '/pages/workspace/workspace' });
+  },
+
+  checkoutPlan(e) {
+    const key = e.currentTarget.dataset.key;
+    const plan = this.data.plans.find(item => item.key === key);
+    if (!plan || !plan.snapshot) return;
+    wx.setStorageSync('currentDesign', plan.snapshot);
+    wx.navigateTo({
+      url: '/pages/checkout/checkout',
+      fail: () => wx.showToast({ title: '进入结算失败，请重试', icon: 'none' })
+    });
   },
 
   deletePlan(e) {

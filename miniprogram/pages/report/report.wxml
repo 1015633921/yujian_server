@@ -2,7 +2,9 @@
   <view class="result-nav">
     <view class="nav-back yu-pressable" bindtap="goBack">‹</view>
     <view class="nav-title">五行风格分析</view>
-    <view class="nav-share yu-pressable" bindtap="shareReport">↗</view>
+    <view class="nav-share yu-pressable" bindtap="shareReport">
+      <image class="nav-share-image yu-share-button-image" src="/images/workspace-icons/share-button-gold.png" mode="aspectFit"></image>
+    </view>
   </view>
 
   <view class="result-stepper">
@@ -31,10 +33,10 @@
       <view class="element-percent">{{item.percent}}%</view>
     </view>
 
-    <view class="energy-ring-wrap">
+    <view class="energy-ring-wrap" bindtap="showBalanceIndexInfo" aria-role="button" aria-label="查看五行平衡度说明">
       <view class="energy-ring" style="background: {{viewReport.ringGradient}};">
         <view class="energy-ring-inner">
-          <view class="energy-label">整体比例</view>
+          <view class="energy-label">五行平衡度 <text class="score-help">?</text></view>
           <view class="energy-score">{{viewReport.score}}</view>
           <view class="energy-status">{{viewReport.statusText}}</view>
         </view>
@@ -48,7 +50,7 @@
         <view class="summary-title">搭配解读</view>
         <view class="summary-meta">偏强 {{viewReport.strongest}} · 可调和 {{viewReport.weakest}}</view>
       </view>
-      <view class="balance-badge">平衡 {{viewReport.score}}</view>
+      <view class="balance-badge" bindtap="showBalanceIndexInfo">平衡度 {{viewReport.score}} ?</view>
     </view>
     <view class="summary-copy">{{viewReport.summary}}</view>
   </view>
@@ -187,6 +189,8 @@
     </view>
     <view class="recommend-icon">→</view>
   </view>
+
+  <view class="result-disclaimer">本分析仅用于传统文化体验、审美搭配与个性化 DIY 参考，不构成命理定论、医疗健康建议或效果承诺。</view>
 
   <view class="result-bottom">
     <view class="result-actions">

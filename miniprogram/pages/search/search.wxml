@@ -3,7 +3,7 @@
     <text class="search-icon">搜</text>
     <input
       class="search-input"
-      placeholder="搜索珠子名称 / 品种 / 功效"
+      placeholder="搜索珠子名称 / 品种 / 搭配特点"
       value="{{keyword}}"
       focus
       confirm-type="search"

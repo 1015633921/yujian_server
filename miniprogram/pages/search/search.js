@@ -13,6 +13,21 @@ function normalizeKeyword(value) {
   return `${value || ''}`.trim().toLowerCase();
 }
 
+function safeMaterialDisplayText(value = '') {
+  return String(value || '')
+    .replace(/改善睡眠|助眠/g, '睡前放松')
+    .replace(/修复/g, '舒缓')
+    .replace(/治疗|疗效/g, '搭配感受')
+    .replace(/功效/g, '搭配特点')
+    .replace(/太阳神经丛/g, '行动力')
+    .replace(/海底轮/g, '稳定感')
+    .replace(/脐轮/g, '情绪流动')
+    .replace(/心轮/g, '关系感')
+    .replace(/喉轮/g, '表达感')
+    .replace(/眉心轮/g, '灵感')
+    .replace(/顶轮/g, '思考感');
+}
+
 function materialRowsOf(data) {
   if (Array.isArray(data)) return data;
   return data && (data.materials || data.items || data.data || data.rows) || [];
@@ -158,7 +173,10 @@ Page({
     const sku = item.sku || item;
     const energy = item.energy || {};
     const visual = item.visual || {};
-    const effects = energy.effects || item.effects || [];
+    const rawEffects = energy.effects || item.effects || [];
+    const effects = (Array.isArray(rawEffects) ? rawEffects : [rawEffects])
+      .map(safeMaterialDisplayText)
+      .filter(Boolean);
     const price = Number(
       sku.price_per_bead ?? item.price_per_bead ?? sku.price ?? item.price ?? 0
     );
@@ -180,7 +198,7 @@ Page({
       sizeText: size ? `${size}mm` : '规格可选',
       element,
       categoryName,
-      effect: effects.join(' / ') || item.effect || energy.summary || categoryName || '可用于 DIY 搭配',
+      effect: effects.join(' / ') || safeMaterialDisplayText(item.effect || energy.summary) || categoryName || '可用于 DIY 搭配',
       effects,
       image_url: visual.thumbnail_url || visual.image_url || sku.thumbnail_url || sku.image_url || item.thumbnail_url || item.image_url || '',
       tone: this.toneForMaterial({ element })

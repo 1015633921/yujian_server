@@ -152,6 +152,17 @@ function getAssessmentOptions(options = {}) {
   return request('/api/v1/assessment/options', options);
 }
 
+function getPrivacyDataSummary(userId, options = {}) {
+  return request(`/api/v1/privacy/data-summary?user_id=${encodeURIComponent(userId)}`, options);
+}
+
+function deletePersonalizationData(userId, options = {}) {
+  return request(`/api/v1/privacy/personalization-data?user_id=${encodeURIComponent(userId)}`, {
+    ...options,
+    method: 'DELETE'
+  });
+}
+
 function checkAnyService() {
   return request('/health');
 }
@@ -543,6 +554,8 @@ module.exports = {
   checkAnyService,
   calculateEnergy,
   getAssessmentOptions,
+  getPrivacyDataSummary,
+  deletePersonalizationData,
   createDIYRecommendation,
   wechatLogin,
   getUserProfile,

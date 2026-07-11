@@ -169,6 +169,50 @@ class AssessmentRepository:
             ).fetchone()
         return json.loads(row["result_json"]) if row else None
 
+    def privacy_data_summary(self, user_id: str) -> dict[str, Any]:
+        with self.connect() as connection:
+            assessment_row = connection.execute(
+                "SELECT COUNT(*) AS total FROM energy_assessments WHERE user_id = ?",
+                (user_id,),
+            ).fetchone()
+            daily_row = connection.execute(
+                "SELECT COUNT(*) AS total FROM daily_energies WHERE user_id = ?",
+                (user_id,),
+            ).fetchone()
+            checkin_row = connection.execute(
+                "SELECT COUNT(*) AS total FROM daily_checkins WHERE user_id = ?",
+                (user_id,),
+            ).fetchone()
+        latest = self.latest_for_user(user_id)
+        user = self.get_user(user_id)
+        return {
+            "profile": {
+                "nickname": (user or {}).get("nickname") or "",
+                "gender": (user or {}).get("gender") or "",
+                "phone_number": (user or {}).get("phone_number") or "",
+            },
+            "latest_input": (latest or {}).get("input_summary") or {},
+            "latest_profile": {
+                "assessment_id": (latest or {}).get("assessment_id") or "",
+                "created_at": (latest or {}).get("created_at") or "",
+                "strongest_element": (latest or {}).get("strongest_element") or "",
+                "weakest_element": (latest or {}).get("weakest_element") or "",
+            },
+            "counts": {
+                "assessments": int((assessment_row or {})["total"] or 0),
+                "daily_energies": int((daily_row or {})["total"] or 0),
+                "daily_checkins": int((checkin_row or {})["total"] or 0),
+            },
+        }
+
+    def delete_personalization_data(self, user_id: str) -> dict[str, Any]:
+        summary = self.privacy_data_summary(user_id)
+        with self._lock, self.connect() as connection:
+            connection.execute("DELETE FROM daily_checkins WHERE user_id = ?", (user_id,))
+            connection.execute("DELETE FROM daily_energies WHERE user_id = ?", (user_id,))
+            connection.execute("DELETE FROM energy_assessments WHERE user_id = ?", (user_id,))
+        return {"deleted": True, "counts": summary["counts"]}
+
     def get_daily_energy(self, user_id: str, energy_date: str) -> dict[str, Any] | None:
         with self.connect() as connection:
             row = connection.execute(

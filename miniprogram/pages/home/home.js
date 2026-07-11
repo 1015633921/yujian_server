@@ -198,6 +198,24 @@ function isFreshDailyPayload(daily) {
   );
 }
 
+function sanitizeDailyDisplay(value = '') {
+  return String(value || '')
+    .replace(/改善睡眠|助眠/g, '睡前放松')
+    .replace(/修复睡眠|睡眠修复|休息修复/g, '放松休息')
+    .replace(/低速修复|慢修复/g, '慢节奏')
+    .replace(/治疗|疗效/g, '搭配感受')
+    .replace(/功效/g, '搭配特点')
+    .replace(/五行能量/g, '五行元素')
+    .replace(/([金木水火土])能量/g, '$1元素')
+    .replace(/太阳神经丛/g, '行动力')
+    .replace(/海底轮/g, '稳定感')
+    .replace(/脐轮/g, '情绪流动')
+    .replace(/心轮/g, '关系感')
+    .replace(/喉轮/g, '表达感')
+    .replace(/眉心轮/g, '灵感')
+    .replace(/顶轮/g, '思考感');
+}
+
 Page({
   data: {
     daily: {
@@ -206,7 +224,7 @@ Page({
       color: '海盐蓝',
       number: 7,
       stone: '海蓝宝',
-      keyword: '稳定流动的一天',
+      keyword: '状态稳定的一天',
       keywords: ['稳定', '表达', '清透'],
       summary: '登录后获取你的今日状态建议，并生成适合今天佩戴的手串。',
       actionTip: '先让节奏慢下来',
@@ -237,9 +255,15 @@ Page({
     if (this.data.labTabbarClass) {
       this.setData({ labTabbarClass: '' });
     }
+    const savedPlans = wx.getStorageSync('diyDesignCart') || [];
+    const currentDesign = wx.getStorageSync('currentDesign') || null;
+    const currentHasBeads = currentDesign && (
+      (Array.isArray(currentDesign.selected) && currentDesign.selected.length)
+      || (Array.isArray(currentDesign.sequence) && currentDesign.sequence.length)
+    );
     this.setData({
       inspirationCart: wx.getStorageSync('inspirationCart') || [],
-      shoppingCart: wx.getStorageSync('diyDesignCart') || []
+      shoppingCart: currentHasBeads ? [currentDesign, ...savedPlans] : savedPlans
     });
     this.hydrateDailyEnergyFromStorage();
     this.refreshDailyEnergyOnEntry();
@@ -353,7 +377,12 @@ Page({
           qty: row.quantity
         }));
       wx.setStorageSync('diyDesignCart', shoppingCart);
-      this.setData({ shoppingCart });
+      const currentDesign = wx.getStorageSync('currentDesign') || null;
+      const currentHasBeads = currentDesign && (
+        (Array.isArray(currentDesign.selected) && currentDesign.selected.length)
+        || (Array.isArray(currentDesign.sequence) && currentDesign.sequence.length)
+      );
+      this.setData({ shoppingCart: currentHasBeads ? [currentDesign, ...shoppingCart] : shoppingCart });
     } catch (error) {
       console.warn('home cart refresh skipped:', error.message || error);
     }
@@ -373,16 +402,16 @@ Page({
         color: daily.lucky_color || this.data.daily.color,
         number: daily.lucky_number || this.data.daily.number,
         stone: daily.recommended_stone || daily.lucky_crystal || primaryCrystal.name || this.data.daily.stone,
-        keyword: daily.daily_keyword || daily.title || daily.theme || this.data.daily.keyword,
-        keywords: daily.keywords || this.data.daily.keywords,
-        summary: daily.summary || this.data.daily.summary,
-        actionTip: daily.action_tip || (daily.actions && daily.actions[0]) || this.data.daily.actionTip,
+        keyword: sanitizeDailyDisplay(daily.daily_keyword || daily.title || daily.theme || this.data.daily.keyword),
+        keywords: (Array.isArray(daily.keywords) ? daily.keywords : this.data.daily.keywords).map(sanitizeDailyDisplay),
+        summary: sanitizeDailyDisplay(daily.summary || this.data.daily.summary),
+        actionTip: sanitizeDailyDisplay(daily.action_tip || (daily.actions && daily.actions[0]) || this.data.daily.actionTip),
         recommendedCrystals,
         recommendedNames,
         commerceEntry: daily.commerce_entry || {},
         workbenchPayload: daily.workbench_payload || null,
         loaded: true,
-        loginHint: daily.title || daily.theme || daily.summary || '今日状态建议已更新',
+        loginHint: sanitizeDailyDisplay(daily.title || daily.theme || daily.summary || '今日状态建议已更新'),
         raw: daily
       }
     });
@@ -426,6 +455,15 @@ Page({
     } catch (error) {
       // requireLogin already shows the guide.
     }
+  },
+
+  showStatusIndexInfo() {
+    wx.showModal({
+      title: '状态指数说明',
+      content: '范围为 0–100，按日更新。指数由日期元素匹配、测算画像和你选择的近期状态按规则加权生成；86–100 为活力充足，72–85 为状态稳定，60–71 为温柔蓄力，低于 60 为慢节奏。它只用于当日搭配参考，不代表健康状况或效果承诺。',
+      showCancel: false,
+      confirmText: '知道了'
+    });
   },
 
   navigateHomeUrl(url) {
@@ -504,7 +542,7 @@ Page({
       name: primaryCrystal.name,
       tone: 'blue',
       image: ASSETS.aquamarine,
-      desc: `${primaryCrystal.reason || daily.summary || '适合今天的状态方向'}｜${daily.actionTip || ''}`,
+      desc: sanitizeDailyDisplay(`${primaryCrystal.reason || daily.summary || '适合今天的状态方向'}｜${daily.actionTip || ''}`),
       recipe: (daily.workbenchPayload && daily.workbenchPayload.bracelet_plan && daily.workbenchPayload.bracelet_plan.layout || [])
         .map(item => item.crystal_code),
       workbenchPayload: daily.workbenchPayload,
@@ -601,8 +639,8 @@ Page({
 
   noop() {},
 
-  viewShoppingCart() {
-    wx.navigateTo({ url: '/pages/inspiration-cart/inspiration-cart' });
+  viewMyPlans() {
+    wx.navigateTo({ url: '/pages/my-plans/my-plans' });
   },
 
   onSearch() {

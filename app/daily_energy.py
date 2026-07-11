@@ -782,7 +782,7 @@ class DailyEnergyCalculator:
             *context.get("keywords", []),
             ELEMENT_KEYWORDS.get(support_element, ["稳定"])[0],
             ELEMENT_KEYWORDS.get(focus_element, ["清透"])[1],
-            "轻盈" if result.get("score", 70) >= 72 else "慢修复",
+            "轻盈" if result.get("score", 70) >= 72 else "慢节奏",
             ELEMENT_KEYWORDS.get(focus_element, ["清透"])[0],
         ]
         keywords: list[str] = []
@@ -802,7 +802,7 @@ class DailyEnergyCalculator:
             return "温和上升"
         if value >= 60:
             return "稳定蓄能"
-        return "低速修复"
+        return "慢节奏"
 
     @staticmethod
     def build_season_hint(target_date: date, basis: dict[str, Any], focus_element: str, support_element: str) -> dict[str, Any]:
@@ -1093,12 +1093,12 @@ class DailyEnergyCalculator:
     @staticmethod
     def score_level(score: int) -> str:
         if score >= 86:
-            return "高能流动"
+            return "活力充足"
         if score >= 72:
-            return "稳定流动"
+            return "状态稳定"
         if score >= 60:
             return "温柔蓄能"
-        return "低速修复"
+        return "慢节奏"
 
     @staticmethod
     def clamp(value: int | float, minimum: int, maximum: int) -> int:

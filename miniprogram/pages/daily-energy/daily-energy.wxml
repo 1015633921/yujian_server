@@ -172,7 +172,7 @@
       <view class="card-title"><text class="title-icon notice">ⓘ</text>近期状态提示</view>
       <view class="season-summary">{{viewDaily.seasonHint.summary}}</view>
       <view class="season-line" wx:if="{{viewDaily.seasonHint.drainPoint}}">
-        <text>流失点</text>
+        <text>留意点</text>
         <view>{{viewDaily.seasonHint.drainPoint}}</view>
       </view>
       <view class="season-line" wx:if="{{viewDaily.seasonHint.suggestion}}">
@@ -186,6 +186,8 @@
     <view class="loading-title">正在生成今日建议</view>
     <view class="loading-sub">会结合今日状态与元素方向生成可进入 DIY 的方案</view>
   </view>
+
+  <view class="daily-disclaimer">今日建议只用于审美搭配和状态记录，不构成医疗健康建议或佩戴效果承诺。</view>
 
   <view class="daily-bottom">
     <button class="yu-button yu-button-primary bottom-primary" bindtap="generateDailyDiy">生成今日搭配方案</button>

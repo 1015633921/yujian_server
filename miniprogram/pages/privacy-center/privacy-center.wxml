@@ -1,0 +1,52 @@
+<view class="privacy-page yu-page">
+  <view class="privacy-lead">
+    <view class="lead-kicker">DATA & PRIVACY</view>
+    <view class="lead-title">你的资料如何用于搭配</view>
+    <view class="lead-desc">测算仅用于传统文化体验、审美搭配和个性化 DIY 参考，不构成命理定论、医疗健康建议或效果承诺。</view>
+  </view>
+
+  <view class="privacy-section current-section">
+    <view class="section-head">
+      <view>
+        <view class="section-title">我的数据</view>
+        <view class="section-desc">{{countsText}}</view>
+      </view>
+      <view class="section-action" bindtap="editAssessment">修改资料</view>
+    </view>
+    <view wx:if="{{loading}}" class="privacy-loading"><view class="yu-spinner"></view><text>正在读取</text></view>
+    <view wx:elif="{{errorText}}" class="privacy-error" bindtap="loadSummary">{{errorText}}，点击重试</view>
+    <view wx:elif="{{currentRows.length}}" class="current-list">
+      <view wx:for="{{currentRows}}" wx:key="label" class="current-row">
+        <view class="current-label">{{item.label}}</view>
+        <view class="current-value">{{item.value}}</view>
+      </view>
+    </view>
+    <view wx:else class="privacy-empty">登录并完成测算后，可在这里查看和管理资料。</view>
+  </view>
+
+  <view wx:for="{{disclosureGroups}}" wx:key="title" class="privacy-section disclosure-section">
+    <view class="section-head compact">
+      <view class="section-title">{{item.title}}</view>
+      <view class="section-badge">{{item.badge}}</view>
+    </view>
+    <view class="disclosure-list">
+      <view wx:for="{{item.rows}}" wx:for-item="row" wx:key="field" class="disclosure-row">
+        <view class="disclosure-field">{{row.field}}</view>
+        <view class="disclosure-purpose">{{row.purpose}}</view>
+        <view class="disclosure-retention">保存：{{row.retention}}</view>
+      </view>
+    </view>
+  </view>
+
+  <view class="privacy-section account-section">
+    <view class="section-title">管理与删除</view>
+    <view class="account-note">可选信息可以跳过，仍可使用基础 DIY。订单、支付和售后资料按履约及法律要求单独保存，不会随测算资料一起删除。</view>
+    <button class="secondary-button" bindtap="openWechatPrivacy">查看微信隐私保护指引</button>
+    <button class="secondary-button" bindtap="requestAccountDeletion">申请注销账号</button>
+    <button
+      class="danger-button"
+      disabled="{{!hasPersonalizationData || deleting}}"
+      bindtap="deletePersonalization"
+    >{{deleting ? '正在删除...' : '删除测算与画像数据'}}</button>
+  </view>
+</view>

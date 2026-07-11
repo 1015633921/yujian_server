@@ -212,10 +212,6 @@ Page({
     this.setData({ keyword: '', activeTopic: 'recommend' }, () => this.refreshFilters());
   },
 
-  toggleFilterHint() {
-    wx.showToast({ title: '可通过标签快速筛选灵感', icon: 'none' });
-  },
-
   onImageError(e) {
     const id = e.currentTarget.dataset.id;
     const allPosts = this.data.allPosts.map(item => (item.id === id ? { ...item, imageUrl: '' } : item));

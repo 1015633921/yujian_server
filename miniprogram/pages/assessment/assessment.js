@@ -7,6 +7,17 @@ const ASSESSMENT_PROFILE_KEY = 'assessmentLastProfile';
 const ASSESSMENT_RECALCULATE_KEY = 'assessmentRecalculateMode';
 const ASSESSMENT_SUPPRESS_AUTO_REPORT_ONCE_KEY = 'assessmentSuppressAutoReportOnce';
 const ENERGY_REPORT_KEY = 'energyReport';
+
+function safeStateDimension(value = '') {
+  return String(value || '当下状态')
+    .replace(/太阳神经丛/g, '行动力')
+    .replace(/海底轮/g, '稳定感')
+    .replace(/脐轮/g, '情绪流动')
+    .replace(/心轮/g, '关系感')
+    .replace(/喉轮/g, '表达感')
+    .replace(/眉心轮/g, '灵感')
+    .replace(/顶轮/g, '思考感');
+}
 const GENDER_OPTIONS = [
   { value: 'female', label: '女' },
   { value: 'male', label: '男' },
@@ -28,16 +39,16 @@ const WISH_MAPPING = {
   安定边界: '辟邪防小人/消除焦虑'
 };
 const CHAKRA_OPTIONS = [
-  { value: 'state_expression', label: '表达卡住', desc: '喉轮' },
-  { value: 'state_soft_heart', label: '关系消耗', desc: '心轮' },
-  { value: 'state_low_confidence', label: '缺少底气', desc: '太阳神经丛' },
-  { value: 'state_unsettled', label: '不够安定', desc: '海底轮' },
-  { value: 'state_low_inspiration', label: '灵感变少', desc: '眉心轮' },
-  { value: 'need_grounding', label: '想更稳定', desc: '海底轮' },
-  { value: 'need_flow', label: '想更流动', desc: '脐轮' },
-  { value: 'need_action', label: '想更行动', desc: '太阳神经丛' },
-  { value: 'need_acceptance', label: '想更柔软', desc: '心轮' },
-  { value: 'need_clarity', label: '想更清晰', desc: '喉轮' }
+  { value: 'state_expression', label: '表达卡住', desc: '表达感' },
+  { value: 'state_soft_heart', label: '关系消耗', desc: '关系感' },
+  { value: 'state_low_confidence', label: '缺少底气', desc: '行动力' },
+  { value: 'state_unsettled', label: '不够安定', desc: '稳定感' },
+  { value: 'state_low_inspiration', label: '灵感变少', desc: '灵感' },
+  { value: 'need_grounding', label: '想更稳定', desc: '稳定感' },
+  { value: 'need_flow', label: '想更流动', desc: '情绪流动' },
+  { value: 'need_action', label: '想更行动', desc: '行动力' },
+  { value: 'need_acceptance', label: '想更柔软', desc: '关系感' },
+  { value: 'need_clarity', label: '想更清晰', desc: '表达感' }
 ];
 const MOOD_PALETTES = [
   { value: 'sea_salt_blue', label: '海盐蓝白', desc: '表达 · 清澈', colors: ['#DCEFF2', '#F8F7F2', '#6D8FA3'] },
@@ -71,7 +82,7 @@ const FLOW_STEPS = [
   { key: 'basic', label: '基础', title: '基础信息', desc: '先建立基础元素参考。', badge: '必填', optional: false },
   { key: 'wish', label: '目标', title: '佩戴目标', desc: '选择这次最想被手串提醒的方向。', badge: '必填', optional: false },
   { key: 'mbti', label: '性格', title: '性格偏好', desc: 'MBTI 会辅助理解表达方式，不填写也可以继续。', badge: '可选', optional: true },
-  { key: 'state', label: '状态', title: '当下状态', desc: '用状态选项捕捉最近的身体感受和情绪倾向。', badge: '可选', optional: true },
+  { key: 'state', label: '状态', title: '当下状态', desc: '用状态选项记录近期感受和情绪倾向。', badge: '可选', optional: true },
   { key: 'palette', label: '色彩', title: '直觉色彩', desc: '凭第一眼选择最吸引你的颜色气质。', badge: '可选', optional: true },
   { key: 'review', label: '确认', title: '确认信息', desc: '确认无误后生成专属搭配报告。', badge: '生成', optional: false }
 ];
@@ -248,6 +259,10 @@ Page({
 
   openGuide() {
     wx.navigateTo({ url: '/pages/assessment-guide/assessment-guide' });
+  },
+
+  openPrivacyCenter() {
+    wx.navigateTo({ url: '/pages/privacy-center/privacy-center' });
   },
 
   hasValidReport(report) {
@@ -434,7 +449,7 @@ Page({
         result.push({
           value: option.id,
           label: option.label,
-          desc: question.title || option.chakra || '当下状态'
+          desc: safeStateDimension(question.title || option.chakra || '当下状态')
         });
       });
     });

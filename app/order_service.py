@@ -445,50 +445,51 @@ class OrderService:
         quantity = int(payload.get("quantity") or 1)
         if quantity < 1:
             raise ValueError("cart item quantity must be greater than 0")
-        cart_item_id = str(payload.get("cart_item_id") or "").strip() or f"CART{int(time.time() * 1000)}{secrets.token_hex(3).upper()}"
+        idempotency_key = str(payload.get("idempotency_key") or "").strip()[:128]
+        if idempotency_key:
+            digest = hashlib.sha256(f"{user_id}\0{idempotency_key}".encode("utf-8")).hexdigest()[:32].upper()
+            cart_item_id = f"CARTIDEM{digest}"
+        else:
+            cart_item_id = str(payload.get("cart_item_id") or "").strip() or f"CART{int(time.time() * 1000)}{secrets.token_hex(3).upper()}"
         item_type = str(payload.get("item_type") or "plan").strip()[:40]
         item_id = str(payload.get("item_id") or "").strip()
         item = payload.get("item") or {}
         timestamp = now_iso()
         with self.connect() as connection:
-            existing = connection.execute(
-                "SELECT cart_item_id FROM cart_items WHERE cart_item_id = ? AND user_id = ?",
-                (cart_item_id, user_id),
-            ).fetchone()
-            if existing:
-                connection.execute(
-                    """
-                    UPDATE cart_items SET item_type = ?, item_id = ?, item_json = ?, quantity = ?, updated_at = ?
-                    WHERE cart_item_id = ? AND user_id = ?
-                    """,
-                    (
-                        item_type,
-                        item_id,
-                        json.dumps(item, ensure_ascii=False),
-                        quantity,
-                        timestamp,
-                        cart_item_id,
-                        user_id,
-                    ),
-                )
-            else:
-                connection.execute(
-                    """
-                    INSERT INTO cart_items
-                    (cart_item_id, user_id, item_type, item_id, item_json, quantity, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        cart_item_id,
-                        user_id,
-                        item_type,
-                        item_id,
-                        json.dumps(item, ensure_ascii=False),
-                        quantity,
-                        timestamp,
-                        timestamp,
-                    ),
-                )
+            insert_keyword = "INSERT IGNORE" if use_mysql() and not self._force_sqlite else "INSERT OR IGNORE"
+            item_json = json.dumps(item, ensure_ascii=False)
+            connection.execute(
+                f"""
+                {insert_keyword} INTO cart_items
+                (cart_item_id, user_id, item_type, item_id, item_json, quantity, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    cart_item_id,
+                    user_id,
+                    item_type,
+                    item_id,
+                    item_json,
+                    quantity,
+                    timestamp,
+                    timestamp,
+                ),
+            )
+            connection.execute(
+                """
+                UPDATE cart_items SET item_type = ?, item_id = ?, item_json = ?, quantity = ?, updated_at = ?
+                WHERE cart_item_id = ? AND user_id = ?
+                """,
+                (
+                    item_type,
+                    item_id,
+                    item_json,
+                    quantity,
+                    timestamp,
+                    cart_item_id,
+                    user_id,
+                ),
+            )
         return self.get_cart_item(cart_item_id, user_id)
 
     def get_cart_item(self, cart_item_id: str, user_id: str) -> dict[str, Any]:

@@ -14,15 +14,11 @@
     <view class="studio-metrics {{countOverClass}}" bindtap="openWristSetting">
       <view class="studio-metric">
         <view class="studio-metric-label">手串颗数</view>
-        <view class="studio-metric-value">{{summary.count}}<text class="studio-metric-sub">/18 颗</text></view>
+        <view class="studio-metric-value">{{summary.count}}<text class="studio-metric-sub">/{{summary.recommendedCount}} 颗</text></view>
       </view>
       <view class="studio-metric">
-        <view class="studio-metric-label">适合腕围</view>
-        <view class="studio-metric-value">{{wristSize}}<text class="studio-metric-sub"> cm</text></view>
-      </view>
-      <view class="studio-metric">
-        <view class="studio-metric-label">当前串长</view>
-        <view class="studio-metric-value {{lengthOverClass}}">{{summary.length}}<text class="studio-metric-sub"> cm</text></view>
+        <view class="studio-metric-label">有效腕围</view>
+        <view class="studio-metric-value {{lengthOverClass}}">{{summary.currentWrist}}<text class="studio-metric-sub"> cm</text></view>
       </view>
     </view>
 
@@ -91,20 +87,20 @@
     </view>
 
     <view class="plate-tool plate-tool-left-one {{canUndo ? '' : 'disabled'}}" catchtap="undo" hover-class="plate-tool-press" aria-role="button" aria-label="撤回">
-      <view class="plate-tool-icon plate-icon-undo"></view>
+      <image class="plate-tool-icon-image plate-tool-icon-image-undo" src="/images/workspace-icons/workspace-undo.png" mode="aspectFit"></image>
     </view>
     <view class="plate-tool plate-tool-left-two" catchtap="openWristSetting" hover-class="plate-tool-press" aria-role="button" aria-label="调整腕围">
-      <view class="plate-tool-icon plate-icon-wrist"></view>
+      <image class="plate-tool-icon-image plate-tool-icon-image-wrist" src="/images/workspace-icons/workspace-wrist.png" mode="aspectFit"></image>
       <view class="plate-tool-label">腕围{{wristSize}}cm</view>
     </view>
     <view class="plate-tool plate-tool-share {{sharingDesign ? 'disabled' : ''}}" catchtap="prepareShareDesign" hover-class="plate-tool-press" aria-role="button" aria-label="分享方案">
-      <view class="plate-tool-icon plate-icon-share"></view>
+      <image class="plate-share-button-image yu-share-button-image" src="/images/workspace-icons/share-button-gold.png" mode="aspectFit"></image>
     </view>
 
     <view class="plate-tool plate-tool-right-one plate-tool-save" catchtap="saveDraft" hover-class="plate-tool-press" aria-role="button" aria-label="保存方案">
-      <view class="plate-tool-icon plate-icon-save"></view>
+      <image class="plate-tool-icon-image plate-tool-icon-image-save" src="/images/workspace-icons/workspace-save-download.png" mode="aspectFit"></image>
     </view>
-    <view class="plate-tool plate-tool-right-two {{showEnergyPanel ? 'active' : ''}}" catchtap="toggleEnergyPanel" hover-class="plate-tool-press" aria-role="button" aria-label="五行图">
+    <view class="plate-tool plate-tool-right-two {{showEnergyModal ? 'active' : ''}}" catchtap="toggleEnergyPanel" hover-class="plate-tool-press" aria-role="button" aria-label="五行图">
       <image class="plate-tool-icon plate-tool-icon-image plate-tool-icon-image-energy" src="/images/workspace-icons/workspace-energy-five-elements.png" mode="aspectFit"></image>
     </view>
     <view class="plate-tool plate-tool-right-three danger" catchtap="confirmClearDesign" hover-class="plate-tool-press" aria-role="button" aria-label="清空">
@@ -112,7 +108,7 @@
     </view>
 
     <view class="plate-random-btn {{shuffleButtonClass}}" catchtap="toggleStringMode" hover-class="plate-random-press" aria-role="button" aria-label="随机成串">
-      <view class="plate-random-icon"></view>
+      <image class="plate-random-icon-image" src="/images/workspace-icons/workspace-string-dice.png" mode="aspectFit"></image>
       <view class="plate-random-text">{{randomTitle}}</view>
     </view>
 
@@ -163,25 +159,6 @@
     </cover-view>
   </cover-view>
 
-  <cover-view wx:if="{{showEnergyPanel}}" class="energy-floating-card">
-    <cover-view class="energy-floating-head" bindtap="openEnergyModal">
-      <cover-view>
-        <cover-view class="energy-floating-title">五行占比</cover-view>
-        <cover-view class="energy-floating-sub">当前方案</cover-view>
-      </cover-view>
-      <cover-view class="energy-floating-action">详情</cover-view>
-    </cover-view>
-    <cover-view class="energy-mini-bars">
-      <cover-view wx:for="{{summary.energy}}" wx:for-index="energyIndex" wx:key="key" class="energy-mini-row {{energyIndex ? 'spaced' : ''}}">
-        <cover-view class="energy-mini-name">{{item.name}}</cover-view>
-        <cover-view class="energy-mini-track">
-          <cover-view class="energy-mini-fill" style="width:{{item.value}}%;background:{{item.color}};"></cover-view>
-        </cover-view>
-        <cover-view class="energy-mini-value">{{item.value}}%</cover-view>
-      </cover-view>
-    </cover-view>
-  </cover-view>
-
   <view class="material-drawer">
     <view class="top-tabs">
       <view wx:for="{{topTabs}}" wx:for-index="tabIndex" wx:key="key" class="top-tab {{item.className}} {{tabIndex === topTabs.length - 1 ? 'last' : ''}}" data-top="{{item.value}}" bindtap="selectTop">{{item.label}}</view>
@@ -213,7 +190,16 @@
             />
             <view wx:if="{{materialSearchKeyword}}" class="material-search-clear" catchtap="clearMaterialSearch">×</view>
           </view>
-          <view class="material-search-cart" catchtap="addDesignToCart" aria-role="button" aria-label="{{cartActionText}}">{{cartActionText}}</view>
+          <view
+            class="material-search-cart {{isAddingToCart ? 'is-loading' : ''}}"
+            catchtap="checkoutCurrentDesign"
+            aria-role="button"
+            aria-disabled="{{isAddingToCart}}"
+            aria-label="{{cartActionText}}"
+          >
+            <view wx:if="{{isAddingToCart}}" class="material-search-cart-spinner"></view>
+            <text>{{cartActionText}}</text>
+          </view>
         </view>
         <view wx:if="{{showWorkspaceGuide}}" class="workspace-guide-card">
           <view class="workspace-guide-head">
@@ -367,8 +353,11 @@
         <view wx:else class="workspace-help-list">
           <view wx:for="{{workspaceUsageGuide}}" wx:key="tag" class="workspace-help-item">
             <view class="workspace-help-tag">
-              <view class="workspace-help-icon plate-tool-icon {{item.iconClass}}"></view>
-              <view class="workspace-help-tag-text">{{item.tag}}</view>
+              <view class="workspace-help-button-preview {{item.previewClass}}">
+                <image wx:if="{{item.iconUrl}}" class="workspace-help-button-image" src="{{item.iconUrl}}" mode="aspectFit"></image>
+                <text wx:if="{{item.buttonText}}" class="workspace-help-button-text">{{item.buttonText}}</text>
+                <view wx:if="{{item.showSwatch}}" class="workspace-help-button-swatch"></view>
+              </view>
             </view>
             <view class="workspace-help-copy">
               <view class="workspace-help-title">{{item.title}}</view>
@@ -383,11 +372,23 @@
   <view wx:if="{{showEnergyModal}}" class="energy-modal-mask" bindtap="closeEnergyModal">
     <view class="energy-modal" catchtap="stopPropagation">
       <view class="energy-modal-head">
-        <view class="energy-modal-title">五行元素图</view>
+        <view class="energy-modal-copy">
+          <view class="energy-modal-title">五行能量雷达图</view>
+          <view class="energy-modal-subtitle">当前方案的元素分布</view>
+        </view>
         <view class="energy-modal-close" bindtap="closeEnergyModal">×</view>
       </view>
       <view class="energy-modal-body">
-        <image class="energy-modal-svg" src="{{energyChartSvgUrl}}" mode="widthFix"></image>
+        <view class="energy-radar-stage">
+          <image class="energy-modal-svg" src="{{energyChartSvgUrl}}" mode="widthFix"></image>
+        </view>
+        <view class="energy-modal-legend">
+          <view wx:for="{{summary.energy}}" wx:key="key" class="energy-modal-legend-item">
+            <view class="energy-modal-legend-dot" style="background:{{item.color}};"></view>
+            <text class="energy-modal-legend-name">{{item.name}}</text>
+            <text class="energy-modal-legend-value">{{item.value}}%</text>
+          </view>
+        </view>
       </view>
     </view>
   </view>
@@ -409,7 +410,10 @@
           <view class="share-sheet-card-desc">{{summary.count}} 颗 · {{wristSize}}cm · ¥{{summary.priceText}}</view>
         </view>
       </view>
-      <button class="share-sheet-primary" open-type="share">分享给好友</button>
+      <button class="share-sheet-primary" open-type="share">
+        <image class="share-sheet-primary-icon yu-share-button-image" src="/images/workspace-icons/share-button-gold.png" mode="aspectFit"></image>
+        <text>分享给好友</text>
+      </button>
       <button class="share-sheet-secondary" bindtap="closeShareSheet">继续编辑</button>
     </view>
   </view>

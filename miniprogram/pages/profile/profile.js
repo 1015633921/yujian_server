@@ -25,7 +25,7 @@ const ORDER_TABS = [
 const TAB_BAR_PAGES = ['/pages/home/home', '/pages/assessment/assessment', '/pages/workspace/workspace', '/pages/profile/profile'];
 const PROFILE_MENU_ICONS = {
   favorite: assetUrl('profile/menu-favorite.png'),
-  cart: assetUrl('profile/menu-cart.png'),
+  plans: '/images/workspace-icons/workspace-save-pastel.png',
   address: assetUrl('profile/menu-address.png'),
   help: assetUrl('profile/menu-help.png'),
   settings: assetUrl('profile/menu-settings.png'),
@@ -141,7 +141,7 @@ Page({
       draft,
       avatarChar: this.avatarChar(user, profile),
       draftCount,
-      shoppingCartCount: shoppingCart.length,
+      shoppingCartCount: shoppingCart.length + (draftCount ? 1 : 0),
       communityFavoriteCount: communityFavorites.length,
       orders: localOrders
     });
@@ -170,7 +170,7 @@ Page({
       wx.setStorageSync('diyDesignCart', shoppingCart);
       wx.setStorageSync('communityFavorites', favoriteRows);
       this.setData({
-        shoppingCartCount: shoppingCart.length,
+        shoppingCartCount: shoppingCart.length + (this.data.draftCount ? 1 : 0),
         communityFavoriteCount: favoriteRows.length
       });
     } catch (error) {
@@ -582,8 +582,8 @@ Page({
     });
   },
 
-  viewShoppingCart() {
-    wx.navigateTo({ url: '/pages/inspiration-cart/inspiration-cart' });
+  viewMyPlans() {
+    wx.navigateTo({ url: '/pages/my-plans/my-plans' });
   },
 
   viewCommunityFavorites() {
@@ -595,7 +595,11 @@ Page({
   },
 
   openSettings() {
-    this.openPrivacyContract();
+    wx.navigateTo({ url: '/pages/privacy-center/privacy-center' });
+  },
+
+  openSupportCenter() {
+    wx.navigateTo({ url: '/pages/support-center/support-center' });
   },
 
   goToPage(e) {

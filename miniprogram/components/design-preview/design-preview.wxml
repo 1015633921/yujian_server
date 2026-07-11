@@ -1,0 +1,16 @@
+<view class="design-preview tray-theme-{{trayTheme}} {{trayFailed ? 'tray-preview-failed' : ''}}">
+  <image
+    wx:if="{{trayImage && !trayFailed}}"
+    class="design-preview-tray"
+    src="{{trayImage}}"
+    mode="aspectFit"
+    binderror="onTrayImageError"
+  ></image>
+  <view class="design-preview-guide"></view>
+  <view class="design-preview-beads">
+    <view wx:for="{{renderBeads}}" wx:key="key" class="design-preview-bead" style="{{item.style}}">
+      <view class="design-preview-bead-fallback"></view>
+      <image wx:if="{{item.image_url}}" class="design-preview-bead-image" src="{{item.image_url}}" mode="aspectFill"></image>
+    </view>
+  </view>
+</view>

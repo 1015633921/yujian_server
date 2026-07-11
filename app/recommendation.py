@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 from .copy_safety import safe_display_text, safe_wish_label
 from .energy import ELEMENTS, WISH_MAPPING
 from .material_knowledge import (
@@ -14,7 +16,9 @@ from .material_knowledge import (
 from .schemas import AssessmentRequest
 
 STRINGED_COMFORT_ALLOWANCE_MM = 8
-STRINGED_LOSS_COEFFICIENT = 1.0
+MIN_RECOMMENDED_BEAD_COUNT = 12
+MAX_RECOMMENDED_BEAD_COUNT = 40
+STRINGED_LENGTH_TOLERANCE_CM = 0.5
 
 CRYSTAL_CATALOG = {
     "titanium_quartz": {
@@ -241,11 +245,17 @@ class RecommendationEngine:
                 role="点睛配珠",
                 quantity=accent_quantity,
                 bead_size_mm=request.bead_size_mm,
-                reason="作为两侧点睛珠，帮助主石与调和配珠之间形成更柔和的能量过渡。",
+                reason="作为两侧点睛珠，帮助主石与调和配珠之间形成更柔和的视觉过渡。",
                 catalog=catalog,
             ),
         ]
         layout = self.build_layout(bead_count, primary, supporting)
+        validation = self.validate_bracelet_plan(request, bead_count, layout, [primary, *supporting])
+        if not validation["is_valid"]:
+            failed_labels = "、".join(
+                check["label"] for check in validation["checks"] if not check["passed"]
+            )
+            raise ValueError(f"暂无满足{failed_labels or '当前条件'}的推荐方案，请调整珠径后重试")
         return {
             "primary": primary,
             "supporting": supporting,
@@ -256,6 +266,9 @@ class RecommendationEngine:
                 "pattern": "中心主石 + 对称点睛 + 调和配珠",
                 "items": [primary, *supporting],
                 "layout": layout,
+                "estimated_stringed_length_cm": validation["estimated_stringed_length_cm"],
+                "target_stringed_length_cm": validation["target_stringed_length_cm"],
+                "validation": validation,
             },
             "copy": self.build_copy(request, energy, primary, supporting[0], support_element),
         }
@@ -264,8 +277,139 @@ class RecommendationEngine:
     def estimate_stringed_bead_count(wrist_size_cm: float, bead_size_mm: int) -> int:
         bead_size = max(float(bead_size_mm or 8), 1)
         target_mm = max(float(wrist_size_cm or 0) * 10 + STRINGED_COMFORT_ALLOWANCE_MM, 0)
-        count = round(target_mm / bead_size + STRINGED_LOSS_COEFFICIENT)
-        return max(12, min(28, count))
+        candidates = [
+            (
+                count,
+                RecommendationEngine.estimate_stringed_length_mm([bead_size] * count),
+            )
+            for count in range(MIN_RECOMMENDED_BEAD_COUNT, MAX_RECOMMENDED_BEAD_COUNT + 1)
+        ]
+        return min(
+            candidates,
+            key=lambda item: (
+                abs(item[1] - target_mm),
+                item[1] < target_mm,
+                item[0],
+            ),
+        )[0]
+
+    @staticmethod
+    def estimate_stringed_length_mm(bead_sizes_mm: list[float]) -> float:
+        """Approximate the wearable inner circumference of a closed round-bead loop."""
+        sizes: list[float] = []
+        for raw_size in bead_sizes_mm:
+            try:
+                size = float(raw_size)
+            except (TypeError, ValueError):
+                continue
+            if math.isfinite(size) and size > 0:
+                sizes.append(size)
+        if len(sizes) < 3:
+            return 0.0
+
+        radii = [size / 2 for size in sizes]
+        contacts = [
+            radii[index] + radii[(index + 1) % len(radii)]
+            for index in range(len(radii))
+        ]
+
+        def central_angles(center_radius: float) -> list[float]:
+            return [
+                2 * math.asin(min(1.0, contact / (2 * center_radius)))
+                for contact in contacts
+            ]
+
+        lower = max(max(radii), max(contacts) / 2) * (1 + 1e-9)
+        lower_angle = sum(central_angles(lower))
+        if lower_angle < 2 * math.pi:
+            return 0.0
+
+        upper = max(lower * 2, sum(contacts))
+        while sum(central_angles(upper)) > 2 * math.pi:
+            upper *= 2
+
+        for _ in range(72):
+            midpoint = (lower + upper) / 2
+            if sum(central_angles(midpoint)) > 2 * math.pi:
+                lower = midpoint
+            else:
+                upper = midpoint
+
+        center_radius = (lower + upper) / 2
+        angles = central_angles(center_radius)
+        inner_circumference = 0.0
+        for index, radius in enumerate(radii):
+            bead_angle = (angles[index - 1] + angles[index]) / 2
+            inner_circumference += max(0.0, center_radius - radius) * bead_angle
+        return inner_circumference
+
+    @staticmethod
+    def material_is_sellable(material: dict | None) -> bool:
+        if not material:
+            return False
+        if material.get("enabled") is False:
+            return False
+        stock_status = str(
+            material.get("stock_status")
+            or (material.get("sku") or {}).get("stock_status")
+            or (material.get("ops") or {}).get("stock_status")
+            or ""
+        ).strip().lower()
+        if stock_status == "out":
+            return False
+        price = material.get("price")
+        if price in (None, ""):
+            price = (material.get("sku") or {}).get("price_per_bead")
+        try:
+            return math.isfinite(float(price)) and float(price) >= 0
+        except (TypeError, ValueError):
+            return False
+
+    @staticmethod
+    def validate_bracelet_plan(
+        request: AssessmentRequest,
+        bead_count: int,
+        layout: list[dict],
+        items: list[dict],
+    ) -> dict:
+        sizes = [
+            float(
+                item.get("string_axis_width_mm")
+                or item.get("actual_material_size_mm")
+                or item.get("bead_size_mm")
+                or request.bead_size_mm
+            )
+            for item in layout
+        ]
+        effective_length_mm = RecommendationEngine.estimate_stringed_length_mm(sizes)
+        estimated_length_cm = round(effective_length_mm / 10, 1)
+        target_length_cm = round(float(request.wrist_size_cm) + STRINGED_COMFORT_ALLOWANCE_MM / 10, 1)
+        count_valid = (
+            MIN_RECOMMENDED_BEAD_COUNT <= bead_count <= MAX_RECOMMENDED_BEAD_COUNT
+            and len(layout) == bead_count
+        )
+        length_valid = abs(estimated_length_cm - target_length_cm) <= STRINGED_LENGTH_TOLERANCE_CM
+        sellable_valid = all(item.get("material_id") and item.get("available") for item in items)
+        price_valid = all(
+            isinstance(item.get("unit_price"), (int, float))
+            and math.isfinite(float(item["unit_price"]))
+            and float(item["unit_price"]) >= 0
+            for item in items
+        )
+        checks = [
+            {"key": "bead_count", "label": "颗数上限", "passed": count_valid},
+            {"key": "string_length", "label": "腕围适配", "passed": length_valid},
+            {"key": "sellable", "label": "库存可售", "passed": sellable_valid},
+            {"key": "price", "label": "价格可计算", "passed": price_valid},
+        ]
+        return {
+            "is_valid": all(check["passed"] for check in checks),
+            "checks": checks,
+            "estimated_stringed_length_cm": estimated_length_cm,
+            "target_stringed_length_cm": target_length_cm,
+            "length_tolerance_cm": STRINGED_LENGTH_TOLERANCE_CM,
+            "max_bead_count": MAX_RECOMMENDED_BEAD_COUNT,
+        }
 
     @staticmethod
     def recommendation_context(request: AssessmentRequest, energy: dict) -> dict:
@@ -501,7 +645,19 @@ class RecommendationEngine:
         material = RecommendationEngine.resolve_material_for_code(code, bead_size_mm, crystal.get("name") or "")
         material_image_url = material.get("image_url") or material.get("thumbnail_url") or ""
         material_size = RecommendationEngine.material_size_mm(material)
+        material_params = {
+            **(crystal.get("material_params") or {}),
+            **(material.get("material_params") or {}),
+        }
+        string_axis_width_mm = material_params.get("string_axis_width_mm") or material_size or bead_size_mm
         material_id = str(material.get("id") or "")
+        unit_price = material.get("price")
+        if unit_price in (None, ""):
+            unit_price = (material.get("sku") or {}).get("price_per_bead")
+        try:
+            unit_price = float(unit_price)
+        except (TypeError, ValueError):
+            unit_price = None
         return {
             "code": code,
             "name": crystal["name"],
@@ -522,6 +678,10 @@ class RecommendationEngine:
             "sku_id": material.get("skuId") or material.get("sku_id") or "",
             "material_code": material.get("material_code") or code,
             "actual_material_size_mm": material_size or bead_size_mm,
+            "string_axis_width_mm": string_axis_width_mm,
+            "unit_price": unit_price,
+            "stock": material.get("stock"),
+            "available": RecommendationEngine.material_is_sellable(material),
             "image_url": material_image_url or (crystal.get("asset") or {}).get("thumbnail_url", ""),
             "rules": {
                 "allowed_roles": unique_list(crystal.get("allowed_roles")),
@@ -529,7 +689,7 @@ class RecommendationEngine:
                 "match_rules": unique_list(crystal.get("match_rules")),
                 "care_tags": unique_list(crystal.get("care_tags")),
             },
-            "material_params": crystal.get("material_params") or {},
+            "material_params": material_params,
         }
 
     @staticmethod
@@ -610,7 +770,12 @@ class RecommendationEngine:
         except Exception:
             return set()
         available: set[str] = set()
-        exact_materials = [item for item in materials if RecommendationEngine.material_matches_size(item, bead_size_mm)]
+        exact_materials = [
+            item
+            for item in materials
+            if RecommendationEngine.material_matches_size(item, bead_size_mm)
+            and RecommendationEngine.material_is_sellable(item)
+        ]
         for code, crystal in catalog.items():
             if any(RecommendationEngine.material_matches_catalog_entry(item, code, crystal) for item in exact_materials):
                 available.add(code)
@@ -643,11 +808,13 @@ class RecommendationEngine:
             candidates = [
                 item for item in materials
                 if RecommendationEngine.material_matches_code(item, code)
+                and RecommendationEngine.material_is_sellable(item)
             ]
             if not candidates and crystal_name:
                 candidates = [
                     item for item in materials
                     if RecommendationEngine.material_matches_name(item, crystal_name)
+                    and RecommendationEngine.material_is_sellable(item)
                 ]
             return RecommendationEngine.choose_closest_material(candidates, bead_size_mm)
         except Exception:
@@ -667,6 +834,8 @@ class RecommendationEngine:
                     "role": item["role"],
                     "color": item["color"],
                     "bead_size_mm": item.get("bead_size_mm"),
+                    "actual_material_size_mm": item.get("actual_material_size_mm"),
+                    "string_axis_width_mm": item.get("string_axis_width_mm"),
                     "preferred_bead_size_mm": item.get("preferred_bead_size_mm") or item.get("bead_size_mm"),
                     "material_id": item.get("material_id", ""),
                     "source_material_id": item.get("source_material_id", ""),

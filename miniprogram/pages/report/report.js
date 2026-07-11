@@ -22,10 +22,12 @@ const ELEMENT_NAME_ALIASES = {
   tu: '土'
 };
 const STEPS = [
-  { key: 'basic', index: 1, label: '基础信息', activeClass: 'done' },
-  { key: 'wish', index: 2, label: '佩戴目标', activeClass: 'done' },
-  { key: 'state', index: 3, label: '当下状态', activeClass: 'done' },
-  { key: 'analysis', index: 4, label: '搭配分析', activeClass: 'active' }
+  { key: 'basic', index: 1, label: '基础', activeClass: 'done' },
+  { key: 'wish', index: 2, label: '目标', activeClass: 'done' },
+  { key: 'mbti', index: 3, label: '性格', activeClass: 'done' },
+  { key: 'state', index: 4, label: '状态', activeClass: 'done' },
+  { key: 'palette', index: 5, label: '色彩', activeClass: 'done' },
+  { key: 'analysis', index: 6, label: '报告', activeClass: 'active' }
 ];
 const POSTER_WIDTH = 750;
 const POSTER_MIN_HEIGHT = 2180;
@@ -57,6 +59,17 @@ const DISPLAY_REPLACEMENTS = [
   ['健康护身', '日常平衡'],
   ['修复睡眠', '放松休息'],
   ['睡眠修复', '放松休息'],
+  ['休息修复', '放松休息'],
+  ['改善睡眠', '帮助放松'],
+  ['缓解焦虑', '舒缓压力'],
+  ['助眠', '睡前放松'],
+  ['太阳神经丛', '行动力'],
+  ['海底轮', '稳定感'],
+  ['脐轮', '情绪流动'],
+  ['心轮', '关系感'],
+  ['喉轮', '表达感'],
+  ['眉心轮', '灵感'],
+  ['顶轮', '思考感'],
   ['命盘底色', '风格底色'],
   ['日主与喜用', '基础参考'],
   ['日主', '基础点'],
@@ -91,6 +104,11 @@ const DISPLAY_REPLACEMENTS = [
   ['护身', '安定'],
   ['疗愈', '舒缓'],
   ['治疗', '舒缓'],
+  ['疗效', '搭配感受'],
+  ['功效', '搭配特点'],
+  ['上火', '节奏偏急'],
+  ['低速修复', '慢节奏'],
+  ['慢修复', '慢节奏'],
   ['净化磁场', '整理氛围'],
   ['磁场', '氛围'],
   ['净化', '清爽'],
@@ -486,10 +504,19 @@ Page({
   },
 
   scoreStatus(score) {
-    if (score >= 85) return '状态稳定';
-    if (score >= 70) return '状态良好';
-    if (score >= 55) return '可继续调和';
-    return '建议温柔调和';
+    if (score >= 85) return '比例均衡';
+    if (score >= 70) return '较为协调';
+    if (score >= 55) return '存在偏强项';
+    return '差异较明显';
+  },
+
+  showBalanceIndexInfo() {
+    wx.showModal({
+      title: '五行平衡度说明',
+      content: '范围为 0–100。计算方式为：100 −（五项元素比例中的最高值 − 最低值）× 3，最低不小于 0。数值越高只表示五项比例越接近；它不是健康评分、运势判断或佩戴效果承诺。',
+      showCancel: false,
+      confirmText: '知道了'
+    });
   },
 
   buildWishText(inputSummary) {

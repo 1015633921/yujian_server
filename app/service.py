@@ -33,11 +33,11 @@ MONTH_ENERGY_CONTEXT = {
     4: ("清明至谷雨", "土", "春土承接，适合整理关系与秩序"),
     5: ("立夏至小满", "火", "火气升腾，注意情绪消耗与睡眠节律"),
     6: ("芒种至夏至", "火", "夏季火旺，容易心神外散与精力透支"),
-    7: ("小暑至大暑", "火", "暑火最盛，注意急躁、上火与过度社交"),
+    7: ("小暑至大暑", "火", "暑火最盛，注意急躁、节奏偏急与过度社交"),
     8: ("立秋至处暑", "金", "金气初显，适合收束计划与建立边界"),
     9: ("白露至秋分", "金", "秋金清肃，适合断舍离与回到重点"),
     10: ("寒露至霜降", "土", "燥土承金，注意脾胃、焦虑与思虑过重"),
-    11: ("立冬至小雪", "水", "水气渐旺，适合沉淀、修复与储备"),
+    11: ("立冬至小雪", "水", "水气渐旺，适合沉淀、休息与储备"),
     12: ("大雪至冬至", "水", "冬水深藏，适合减少消耗、养精蓄能"),
 }
 
@@ -414,6 +414,12 @@ class AssessmentService:
 
     def history(self, user_id: str, limit: int) -> list[dict]:
         return [self.with_energy_extras(item) for item in self.repository.history(user_id, limit)]
+
+    def privacy_data_summary(self, user_id: str) -> dict:
+        return self.repository.privacy_data_summary(user_id)
+
+    def delete_personalization_data(self, user_id: str) -> dict:
+        return self.repository.delete_personalization_data(user_id)
 
     @staticmethod
     def options() -> dict:

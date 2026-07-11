@@ -43,15 +43,24 @@ function firstImageUrl(entry = {}) {
   return urls[0] || '';
 }
 
-function hasSavedPlacement(placement = {}) {
-  const x = Number(placement.looseX !== undefined ? placement.looseX : placement.x);
-  const y = Number(placement.looseY !== undefined ? placement.looseY : placement.y);
+function placementCoordinate(placement = {}, axis = 'x', preferStringed = false) {
+  const looseKey = axis === 'x' ? 'looseX' : 'looseY';
+  const stringedValue = Number(placement[axis]);
+  const looseValue = Number(placement[looseKey]);
+  if (preferStringed && Number.isFinite(stringedValue)) return stringedValue;
+  if (Number.isFinite(looseValue)) return looseValue;
+  return stringedValue;
+}
+
+function hasSavedPlacement(placement = {}, preferStringed = false) {
+  const x = placementCoordinate(placement, 'x', preferStringed);
+  const y = placementCoordinate(placement, 'y', preferStringed);
   return Number.isFinite(x) && Number.isFinite(y);
 }
 
-function savedPlacementPoint(placement = {}) {
-  const x = Number(placement.looseX !== undefined ? placement.looseX : placement.x);
-  const y = Number(placement.looseY !== undefined ? placement.looseY : placement.y);
+function savedPlacementPoint(placement = {}, preferStringed = false) {
+  const x = placementCoordinate(placement, 'x', preferStringed);
+  const y = placementCoordinate(placement, 'y', preferStringed);
   if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
   return {
     x: x + Number(placement.dx || 0),
@@ -118,7 +127,8 @@ function fitPlacementCircle(points = []) {
 }
 
 function inferPreviewSourceOrigin(placements = [], design = {}) {
-  const points = placements.map(savedPlacementPoint).filter(Boolean);
+  const preferStringed = design.isLooseMode === false;
+  const points = placements.map(item => savedPlacementPoint(item, preferStringed)).filter(Boolean);
   const fitted = fitPlacementCircle(points);
   if (fitted) return fitted;
   if (points.length) {
@@ -233,10 +243,9 @@ Page({
     design: null,
     sequence: [],
     bom: [],
-    designPreviewImage: '',
     trayPreviewImage: CHECKOUT_TRAY_IMAGES.warm,
+    trayPreviewTheme: 'warm',
     trayPreviewImageFailed: false,
-    previewBeads: [],
     amountText: '0.00',
     receiver: {
       name: '',
@@ -265,9 +274,16 @@ Page({
   },
 
   loadTrayPreviewImage() {
+    const design = wx.getStorageSync('currentDesign') || {};
     const storedTheme = wx.getStorageSync(TRAY_THEME_STORAGE_KEY);
+    const trayTheme = design.trayTheme || design.tray_theme || storedTheme || 'white';
+    const trayImage = design.trayImageUrl
+      || design.tray_image_url
+      || CHECKOUT_TRAY_IMAGES[trayTheme]
+      || CHECKOUT_TRAY_IMAGES.white;
     this.setData({
-      trayPreviewImage: CHECKOUT_TRAY_IMAGES[storedTheme] || CHECKOUT_TRAY_IMAGES.warm,
+      trayPreviewImage: trayImage,
+      trayPreviewTheme: trayTheme,
       trayPreviewImageFailed: false
     });
   },
@@ -346,29 +362,11 @@ Page({
     const designForView = { ...design, summary, displayTitle };
     this.setData({
       design: designForView,
-      designPreviewImage: this.resolveDesignPreviewImage(designForView),
       sequence,
       bom,
-      previewBeads: this.buildPreviewBeads(sequence, design.placements || [], designForView),
       amountText: this.formatAmount(amount),
       pageLoading: false
     });
-  },
-
-  resolveDesignPreviewImage(design = {}) {
-    return design.preview_image
-      || design.previewImage
-      || design.design_preview_url
-      || design.preview_url
-      || design.previewUrl
-      || design.image_url
-      || design.local_preview_image
-      || design.localPreviewImage
-      || '';
-  },
-
-  onPreviewImageError() {
-    this.setData({ designPreviewImage: '' });
   },
 
   onTrayPreviewImageError() {
@@ -479,7 +477,8 @@ Page({
     const count = Math.max(beads.length, 1);
     const sourceOrigin = inferPreviewSourceOrigin(placements, design);
     const placementScale = CHECKOUT_PREVIEW_CENTER / sourceOrigin.scaleBase;
-    const useSavedPlacements = placements.some(hasSavedPlacement);
+    const preferStringed = design.isLooseMode === false;
+    const useSavedPlacements = placements.some(item => hasSavedPlacement(item, preferStringed));
     const initialBeadSizes = beads.map((item, index) => (
       this.resolvePreviewBeadSize(item, placements[index] || item.placement || {}, count)
     ));
@@ -487,10 +486,8 @@ Page({
 
     return beads.map((item, index) => {
       const placement = placements[index] || item.placement || {};
-      const savedBaseX = placement.looseX !== undefined ? placement.looseX : placement.x;
-      const savedBaseY = placement.looseY !== undefined ? placement.looseY : placement.y;
-      const savedX = Number(savedBaseX) + Number(placement.dx || 0);
-      const savedY = Number(savedBaseY) + Number(placement.dy || 0);
+      const savedX = placementCoordinate(placement, 'x', preferStringed) + Number(placement.dx || 0);
+      const savedY = placementCoordinate(placement, 'y', preferStringed) + Number(placement.dy || 0);
       const hasSavedPosition = useSavedPlacements && Number.isFinite(savedX) && Number.isFinite(savedY);
       const beadSize = hasSavedPosition
         ? Math.max(30, Math.min(62, (initialBeadSizes[index] || 52) * placementScale))

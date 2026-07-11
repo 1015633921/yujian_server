@@ -14,27 +14,15 @@
   <view wx:elif="{{design}}" class="checkout-content">
     <view class="plan-preview-card yu-card yu-card-lg">
       <view class="plan-preview">
-        <view class="plan-preview-stage {{trayPreviewImageFailed ? 'tray-preview-failed' : ''}}">
-          <image
-            wx:if="{{trayPreviewImage}}"
-            class="plan-tray-image"
-            src="{{trayPreviewImage}}"
-            mode="aspectFit"
-            binderror="onTrayPreviewImageError"
-          ></image>
-          <view class="bracelet-mini">
-            <view class="bracelet-mini-ring"></view>
-            <view
-              wx:for="{{previewBeads}}"
-              wx:key="index"
-              class="preview-bead"
-              style="{{item.style}}"
-            >
-              <image wx:if="{{item.image_url}}" class="preview-bead-image" src="{{item.image_url}}" mode="aspectFill"></image>
-              <view wx:else class="preview-bead-dot"></view>
-            </view>
-          </view>
-        </view>
+        <design-preview
+          tray-image="{{trayPreviewImage}}"
+          tray-theme="{{trayPreviewTheme}}"
+          tray-failed="{{trayPreviewImageFailed}}"
+          sequence="{{sequence}}"
+          placements="{{design.placements}}"
+          design="{{design}}"
+          bindtrayerror="onTrayPreviewImageError"
+        ></design-preview>
       </view>
     </view>
 
@@ -53,7 +41,7 @@
             <view>{{design.summary.count}}颗</view>
           </view>
           <view class="plan-settle-item">
-            <text>串长</text>
+            <text>有效内圈</text>
             <view>{{design.summary.length}}cm</view>
           </view>
         </view>

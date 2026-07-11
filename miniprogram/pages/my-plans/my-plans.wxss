@@ -77,17 +77,18 @@ page {
 
 .plan-card {
   position: relative;
-  display: grid;
-  grid-template-columns: 172rpx 1fr;
-  gap: 20rpx;
+  display: block;
   padding: 18rpx;
   border-radius: 24rpx;
 }
 
 .plan-preview {
   position: relative;
-  width: 172rpx;
-  height: 132rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 560rpx;
   overflow: hidden;
   border-radius: 20rpx;
   background: rgba(249, 247, 242, .78);
@@ -108,48 +109,9 @@ page {
   background: rgba(249, 247, 242, .8);
 }
 
-.plan-tray-image {
-  position: absolute;
-  left: -21rpx;
-  top: -38rpx;
-  z-index: 0;
-  width: 214rpx;
-  height: 214rpx;
-  opacity: 1;
-}
-
-.preview-ring {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  z-index: 2;
-  width: 116rpx;
-  height: 96rpx;
-  transform: translate(-50%, -50%) rotate(-7deg);
-}
-
-.preview-ring::before {
-  position: absolute;
-  left: 8rpx;
-  top: -3rpx;
-  width: 96rpx;
-  height: 88rpx;
-  border: 1rpx solid rgba(255, 255, 255, .58);
-  border-radius: 50%;
-  content: "";
-}
-
-.preview-bead {
-  position: absolute;
-  left: 44rpx;
-  top: 34rpx;
-  border-radius: 50%;
-  box-shadow: 0 4rpx 10rpx rgba(20, 20, 20, .16), inset 0 0 0 1rpx rgba(255, 255, 255, .58);
-  transform-origin: 14rpx 14rpx;
-}
-
 .plan-main {
   min-width: 0;
+  margin-top: 18rpx;
 }
 
 .plan-topline {
@@ -230,7 +192,6 @@ page {
 }
 
 .saved-actions {
-  grid-column: 1 / -1;
   display: flex;
   gap: 14rpx;
   margin-top: 2rpx;
@@ -254,6 +215,12 @@ page {
 }
 
 .action-button.edit {
+  color: rgba(34, 34, 31, .82);
+  border: 1rpx solid rgba(32, 32, 31, .10);
+  background: rgba(247, 245, 240, .92);
+}
+
+.action-button.checkout {
   color: #fff;
   background: var(--yu-color-anchor-dark);
 }
@@ -354,14 +321,11 @@ page {
 
 @media (max-width: 360px) {
   .plan-card {
-    grid-template-columns: 136rpx 1fr;
-    gap: 16rpx;
     padding: 16rpx;
   }
 
   .plan-preview {
-    width: 136rpx;
-    height: 112rpx;
+    height: 512rpx;
   }
 }
 
@@ -384,6 +348,11 @@ page {
 }
 
 .action-button.edit {
+  background: rgba(247, 245, 240, .92);
+  box-shadow: none;
+}
+
+.action-button.checkout {
   background: linear-gradient(135deg, #2f322f 0%, #141614 100%);
   box-shadow: 0 10rpx 22rpx rgba(26, 28, 25, .12);
 }

@@ -136,6 +136,7 @@ class DIYDesignSaveRequest(BaseModel):
 class CartItemCreateRequest(BaseModel):
     user_id: NonEmptyString
     cart_item_id: str | None = Field(default=None, max_length=80)
+    idempotency_key: str | None = Field(default=None, max_length=128)
     item_type: str = Field(default="plan", max_length=40)
     item_id: str | None = Field(default=None, max_length=100)
     item: dict = Field(default_factory=dict)

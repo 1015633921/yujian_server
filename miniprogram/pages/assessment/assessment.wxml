@@ -24,7 +24,8 @@
     <view class="hero-kicker">{{modeCopy.kicker}}</view>
     <view class="hero-title">{{modeCopy.title}}</view>
     <view class="hero-desc">{{modeCopy.desc}}</view>
-    <view class="hero-guide-link" bindtap="openGuide">30 秒了解推荐依据</view>
+    <view class="hero-guide-link" bindtap="openGuide">查看六步推荐依据</view>
+    <view class="hero-privacy-link" bindtap="openPrivacyCenter">查看测算数据如何使用与删除</view>
   </view>
 
   <view wx:if="{{currentStepKey !== 'review'}}" class="flow-intro">

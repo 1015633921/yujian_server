@@ -107,15 +107,13 @@
 }
 
 .order-card-content {
-  display: flex;
-  align-items: stretch;
-  gap: 20rpx;
+  display: block;
   margin-top: 18rpx;
 }
 
 .order-card-copy {
-  flex: 1 1 auto;
   min-width: 0;
+  margin-top: 18rpx;
 }
 
 .order-card-content .order-time {
@@ -124,91 +122,17 @@
 
 .order-ring-preview {
   position: relative;
-  flex: 0 0 166rpx;
-  width: 166rpx;
-  height: 154rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 560rpx;
   overflow: hidden;
   border-radius: 24rpx;
   background: rgba(249, 247, 242, .78);
   box-shadow:
     inset 0 -8rpx 20rpx rgba(111, 105, 91, .08),
     0 10rpx 24rpx rgba(46, 45, 40, .06);
-}
-
-.order-tray-image {
-  position: absolute;
-  left: -22rpx;
-  top: -28rpx;
-  z-index: 0;
-  width: 210rpx;
-  height: 210rpx;
-  opacity: 1;
-}
-
-.tray-image-failed .order-tray-image {
-  display: none;
-}
-
-.tray-image-failed {
-  background:
-    radial-gradient(circle at 48% 36%, rgba(255,255,255,.98) 0 20%, rgba(255,255,255,.62) 38%, rgba(255,255,255,0) 62%),
-    radial-gradient(circle at 50% 52%, #f1eee7 0 58%, #e4ded2 100%);
-}
-
-.order-ring-plate {
-  position: absolute;
-  left: 45rpx;
-  top: 39rpx;
-  right: 45rpx;
-  bottom: 35rpx;
-  z-index: 1;
-  border: 1rpx dashed rgba(142, 125, 86, .12);
-  border-radius: 50%;
-}
-
-.order-preview-image {
-  position: relative;
-  z-index: 2;
-  display: block;
-  width: 100%;
-  height: 100%;
-  border-radius: 18rpx;
-  opacity: .92;
-}
-
-.order-ring-track {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  z-index: 2;
-  width: 104rpx;
-  height: 104rpx;
-  border: 2rpx solid rgba(83, 82, 76, .14);
-  border-radius: 50%;
-  transform: translate(-50%, -50%);
-}
-
-.order-ring-bead {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  z-index: 3;
-  margin-left: -12rpx;
-  margin-top: -12rpx;
-  overflow: hidden;
-  border: 2rpx solid rgba(255,255,255,.9);
-  border-radius: 50%;
-  background: radial-gradient(circle at 32% 24%, #fff 0 12%, #d8ddd4 18% 62%, rgba(0,0,0,.16) 100%);
-  box-shadow:
-    inset -3rpx -5rpx 9rpx rgba(30,30,30,.13),
-    0 4rpx 10rpx rgba(32,32,31,.12);
-}
-
-.order-ring-bead image {
-  display: block;
-  width: 100%;
-  height: 100%;
-  border-radius: 50%;
 }
 
 .order-price {

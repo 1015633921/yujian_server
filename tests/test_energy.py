@@ -1,6 +1,10 @@
 from datetime import date, time
+import math
+
+import pytest
 
 from app.energy import ELEMENTS, ENERGY_WEIGHTS, EnergyCalculator
+from app.copy_safety import safe_display_text
 from app.recommendation import RecommendationEngine
 from app.schemas import AssessmentRequest
 
@@ -123,8 +127,67 @@ def test_recommendation_uses_preferred_bead_size_in_items_and_layout():
 
 
 def test_stringed_bead_count_accounts_for_closed_bracelet_loss():
-    assert RecommendationEngine.estimate_stringed_bead_count(15.5, 8) == 21
-    assert RecommendationEngine.estimate_stringed_bead_count(16, 10) == 18
+    assert RecommendationEngine.estimate_stringed_bead_count(15.5, 8) == 23
+    assert RecommendationEngine.estimate_stringed_bead_count(16, 10) == 20
+
+
+def test_round_bead_inner_circumference_uses_closed_ring_geometry():
+    twenty_beads = RecommendationEngine.estimate_stringed_length_mm([8] * 20)
+    twenty_two_beads = RecommendationEngine.estimate_stringed_length_mm([8] * 22)
+    analytical = math.pi * 8 * (1 / math.sin(math.pi / 22) - 1)
+
+    assert twenty_beads == pytest.approx(135.53, abs=0.01)
+    assert twenty_two_beads == pytest.approx(151.47, abs=0.01)
+    assert twenty_two_beads == pytest.approx(analytical, abs=1e-8)
+
+
+def test_mixed_bead_inner_circumference_is_rotation_invariant():
+    sizes = [8, 8, 10, 8, 12, 8, 10, 8, 8, 8, 10, 8]
+
+    assert RecommendationEngine.estimate_stringed_length_mm(sizes) == pytest.approx(
+        RecommendationEngine.estimate_stringed_length_mm(sizes[4:] + sizes[:4]),
+        abs=1e-8,
+    )
+
+
+def test_recommendation_plan_passes_all_hard_constraints_for_16cm_8mm():
+    request = make_request(wrist_size_cm=16, bead_size_mm=8)
+    energy = EnergyCalculator().calculate(request)
+    plan = RecommendationEngine().recommend(request, energy)["bracelet_plan"]
+
+    assert plan["estimated_bead_count"] == 24
+    assert plan["estimated_stringed_length_cm"] == 16.7
+    assert plan["target_stringed_length_cm"] == 16.8
+    assert plan["validation"]["is_valid"] is True
+    assert all(check["passed"] for check in plan["validation"]["checks"])
+    assert all(item["available"] for item in plan["items"])
+    assert all(item["unit_price"] is not None for item in plan["items"])
+
+
+def test_recommendation_plan_fits_14_5cm_wrist_instead_of_under_sizing():
+    request = make_request(wrist_size_cm=14.5, bead_size_mm=8)
+    energy = EnergyCalculator().calculate(request)
+    plan = RecommendationEngine().recommend(request, energy)["bracelet_plan"]
+
+    assert plan["target_stringed_length_cm"] == 15.3
+    assert plan["estimated_stringed_length_cm"] == 15.1
+    assert plan["validation"]["is_valid"] is True
+
+
+def test_user_facing_copy_safety_removes_health_and_chakra_claim_terms():
+    text = safe_display_text("海底轮助眠功效可改善睡眠并缓解焦虑")
+
+    assert "海底轮" not in text
+    assert "助眠" not in text
+    assert "功效" not in text
+    assert "改善睡眠" not in text
+    assert "缓解焦虑" not in text
+
+
+def test_explicit_out_of_stock_material_is_not_sellable():
+    assert RecommendationEngine.material_is_sellable(
+        {"id": "sold-out", "enabled": True, "stock": 99, "stock_status": "out", "price": 10}
+    ) is False
 
 
 def test_recommendation_respects_material_role_rules_for_primary():

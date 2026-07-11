@@ -10,8 +10,22 @@ const STATUS_TITLE = {
   after: '售后退款',
   done: '已完成'
 };
-const ORDER_RING_LIMIT = 18;
-const ORDER_TRAY_IMAGE = assetUrl('workspace/tray-yustream-transparent-user-20260701-v6.webp');
+const ORDER_TRAY_IMAGES = {
+  white: assetUrl('workspace/tray-yustream-white-transparent-user-20260701.webp'),
+  warm: assetUrl('workspace/tray-yustream-transparent-user-20260701-v6.webp'),
+  black: assetUrl('workspace/tray-yustream-black-transparent-user-20260701.webp')
+};
+
+function expandBomSequence(bom = []) {
+  const sequence = [];
+  bom.forEach(item => {
+    const quantity = Math.max(1, Math.min(40, Number(item.qty || item.quantity || 1)));
+    for (let index = 0; index < quantity && sequence.length < 40; index += 1) {
+      sequence.push({ ...item });
+    }
+  });
+  return sequence;
+}
 
 Page({
   data: {
@@ -62,13 +76,24 @@ Page({
   },
 
   normalizeOrder(item) {
-    const sequence = Array.isArray(item.sequence) ? item.sequence : [];
-    const bom = Array.isArray(item.bom) ? item.bom : [];
+    const design = item.design || {};
+    const sequence = Array.isArray(item.sequence) && item.sequence.length
+      ? item.sequence
+      : (Array.isArray(design.sequence) ? design.sequence : []);
+    const bom = Array.isArray(item.bom) && item.bom.length
+      ? item.bom
+      : (Array.isArray(design.bom) ? design.bom : []);
     const rawStatus = item.rawStatus || item.raw_status || item.status;
     const paymentStatus = item.payment_status || item.paymentStatus;
     const createdAt = item.created_at || item.createdAt || '';
-    const design = item.design || {};
-    const previewImage = design.preview_image || design.previewImage || design.image_url || item.preview_image || item.previewImage || '';
+    const previewSequence = sequence.length ? sequence : expandBomSequence(bom);
+    const trayTheme = design.trayTheme || design.tray_theme || item.trayTheme || item.tray_theme || 'white';
+    const trayImage = design.trayImageUrl
+      || design.tray_image_url
+      || item.trayImageUrl
+      || item.tray_image_url
+      || ORDER_TRAY_IMAGES[trayTheme]
+      || ORDER_TRAY_IMAGES.white;
     const statusText = item.status_text
       || item.statusText
       || (/[\u4e00-\u9fff]/.test(String(item.status || '')) ? item.status : this.statusText(rawStatus));
@@ -84,13 +109,12 @@ Page({
       sequence,
       bom,
       materialCount: sequence.length || bom.reduce((sum, row) => sum + Number(row.qty || row.quantity || 1), 0),
-      previewImage,
-      trayImage: ORDER_TRAY_IMAGE,
+      previewDesign: design,
+      previewSequence,
+      previewPlacements: (design && design.placements) || item.placements || [],
+      trayTheme,
+      trayImage,
       trayImageFailed: false,
-      previewBeads: this.buildPreviewBeads(
-        sequence.length ? sequence : bom,
-        (design && design.placements) || item.placements || []
-      ),
       rawStatus,
       paymentStatus,
       logistics: item.logistics || {},
@@ -99,34 +123,6 @@ Page({
       afterSaleStatus: item.after_sale_status || '',
       refundStatus: item.refund_status || ''
     };
-  },
-
-  firstImageUrl(item = {}) {
-    const urls = (item.image_urls || item.image_pool || [])
-      .concat(item.image_url || item.image || item.cover || []);
-    return urls.find(url => typeof url === 'string' && url.trim()) || '';
-  },
-
-  buildPreviewBeads(sequence = [], placements = []) {
-    const beads = sequence.slice(0, ORDER_RING_LIMIT);
-    const count = Math.max(beads.length, 1);
-    return beads.map((item, index) => {
-      const placement = placements[index] || item.placement || {};
-      const imageUrl = this.firstImageUrl(item);
-      const src = placement.image_url || imageUrl;
-      const angle = (360 / count) * index;
-      const size = 24;
-      const radius = 46;
-      const color = item.color || '#d8ddd4';
-      const shine = item.shine || '#ffffff';
-      return {
-        key: `${item.id || item.sku || item.skuId || item.name || 'bead'}-${index}`,
-        image_url: src,
-        style: src
-          ? `width:${size}rpx;height:${size}rpx;transform:rotate(${angle}deg) translateY(-${radius}rpx) rotate(${-angle}deg);`
-          : `width:${size}rpx;height:${size}rpx;transform:rotate(${angle}deg) translateY(-${radius}rpx) rotate(${-angle}deg);background: radial-gradient(circle at 32% 24%, ${shine} 0 12%, ${color} 18% 62%, rgba(0,0,0,.18) 100%);`
-      };
-    });
   },
 
   statusKey(order) {
@@ -181,15 +177,6 @@ Page({
       ? orders
       : orders.filter(order => order.statusKey === status);
     this.setData({ filteredOrders });
-  },
-
-  onPreviewImageError(e) {
-    const id = e.currentTarget.dataset.id;
-    const orders = (this.data.orders || []).map(order => (
-      order.id === id ? { ...order, previewImage: '' } : order
-    ));
-    this.setData({ orders });
-    this.applyFilter();
   },
 
   onTrayImageError(e) {

@@ -11,6 +11,8 @@
     "pages/my-plans/my-plans",
     "pages/workspace/workspace",
     "pages/profile/profile",
+    "pages/privacy-center/privacy-center",
+    "pages/support-center/support-center",
     "pages/daily-energy/daily-energy",
     "pages/assessment/assessment",
     "pages/assessment-guide/assessment-guide",

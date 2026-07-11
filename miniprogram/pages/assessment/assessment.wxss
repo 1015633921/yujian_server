@@ -183,6 +183,15 @@
   font-weight: 760;
 }
 
+.hero-privacy-link {
+  display: inline-flex;
+  margin-top: 14rpx;
+  font-size: 22rpx;
+  line-height: 1.5;
+  color: rgba(25, 25, 25, 0.58);
+  text-decoration: underline;
+}
+
 .flow-intro {
   position: relative;
   z-index: 1;
