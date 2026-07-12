@@ -7,6 +7,7 @@ from urllib.parse import quote, urlsplit, urlunsplit
 
 from .database import connect_database, use_mysql
 from .material_knowledge import enrich_materials_with_knowledge, material_code_from_payload
+from .money import cents_to_text, stored_cents
 
 
 def material_cdn_base_url() -> str:
@@ -35,6 +36,7 @@ INTERNAL_MATERIAL_FIELDS = {
     "supplier",
     "purchase_note",
     "purchase_remark",
+    "price_cents",
 }
 
 
@@ -766,8 +768,13 @@ def normalize_db_material(row: dict, series_assets: dict[tuple[str, str, str], d
     )
     if not image_url and image_urls:
         image_url = image_urls[0]
+    try:
+        display_price = float(cents_to_text(stored_cents(row.get("price_cents"), field_name="材料价格")))
+    except ValueError:
+        display_price = float(row.get("price") or 0)
     return {
         **public_row,
+        "price": display_price,
         "material_code": row.get("material_code") or series_asset.get("material_code") or material_code_from_payload(row),
         "enabled": bool(row.get("enabled", 1)),
         "series": row.get("series") or row.get("name") or "",

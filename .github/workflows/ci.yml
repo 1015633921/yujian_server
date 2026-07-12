@@ -1,0 +1,169 @@
+name: release-quality-gate
+
+on:
+  pull_request:
+  push:
+    branches: [main, master, "codex/**"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: quality-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12.13"
+          cache: pip
+          cache-dependency-path: requirements-dev.lock
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "24.17.0"
+          cache: npm
+          cache-dependency-path: miniprogram/package-lock.json
+      - name: Install pinned toolchain and dependencies
+        run: |
+          npm install --global npm@11.13.0
+          python -m pip install --require-hashes -r requirements-dev.lock
+          npm ci --prefix miniprogram
+      - name: Validate versions and repository
+        run: |
+          python scripts/check_toolchain.py
+          python scripts/check_repository.py
+          python scripts/scan_secrets.py
+          git diff --check
+      - name: Validate source and mini-program
+        run: |
+          python -m compileall -q app scripts
+          npm run build:check --prefix miniprogram
+          npm test --prefix miniprogram
+      - name: Validate migrations and backend
+        run: |
+          python scripts/check_migrations.py --backend sqlite
+          pytest -q --ignore=tests/minium
+  security:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12.13"
+          cache: pip
+          cache-dependency-path: requirements-dev.lock
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "24.17.0"
+      - name: Install locked audit tools
+        run: |
+          npm install --global npm@11.13.0
+          python -m pip install --require-hashes -r requirements-dev.lock
+          npm ci --prefix miniprogram
+      - name: Scan source and dependencies
+        run: |
+          python scripts/scan_secrets.py
+          python scripts/check_repository.py
+          pip-audit -r requirements.lock
+          npm audit --prefix miniprogram --omit=dev --audit-level=high
+
+  container:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Validate Compose and build image
+        env:
+          APP_IMAGE: example.invalid/yujian-api@sha256:0000000000000000000000000000000000000000000000000000000000000000
+          APP_PORT: "18001"
+          APP_SLOT: blue
+          RELEASE_VERSION: v20260712-001-ci
+          ENV_FILE: config/examples/.env.test.example
+          CERTS_DIR: /tmp/yujian-certs
+          BACKEND_NETWORK: yujian-ci-backend
+        run: |
+          mkdir -p /tmp/yujian-certs
+          touch .env .env.test
+          docker compose -f compose.yaml config --quiet
+          docker compose -f compose.release.yaml config --quiet
+          docker build --build-arg RELEASE_VERSION=v20260712-001-ci --build-arg VCS_REF=${GITHUB_SHA} -t yujian-api:ci .
+
+  mysql-gates:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    services:
+      mysql:
+        image: mysql:8.0@sha256:7dcddc01f13bab2f15cde676d44d01f61fc9f99fe7785e86196dfc07d358ae2b
+        env:
+          MYSQL_ROOT_PASSWORD: ci-only-password
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -pci-only-password --silent"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=12
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12.13"
+          cache: pip
+          cache-dependency-path: requirements-dev.lock
+      - name: Install locked dependencies
+        run: python -m pip install --require-hashes -r requirements-dev.lock
+      - name: Create isolated databases
+        run: |
+          for database in p0b_test_ci p1a_test_ci p1b_test_ci p1c_test_ci p1d_test_ci; do
+            docker exec ${{ job.services.mysql.id }} mysql -uroot -pci-only-password -e "CREATE DATABASE \`${database}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
+          done
+      - name: Run P0/P1 MySQL gates
+        env:
+          RUN_P0B_MYSQL_INTEGRATION: "1"
+          P0B_MYSQL_TEST_DATABASE: p0b_test_ci
+          P0B_MYSQL_TEST_USER: root
+          P0B_MYSQL_TEST_PASSWORD: ci-only-password
+          RUN_P1A_MYSQL_INTEGRATION: "1"
+          P1A_MYSQL_TEST_DATABASE: p1a_test_ci
+          P1A_MYSQL_TEST_USER: root
+          P1A_MYSQL_TEST_PASSWORD: ci-only-password
+          RUN_P1B_MYSQL_INTEGRATION: "1"
+          P1B_MYSQL_TEST_DATABASE: p1b_test_ci
+          P1B_MYSQL_TEST_USER: root
+          P1B_MYSQL_TEST_PASSWORD: ci-only-password
+          RUN_P1C_MYSQL_INTEGRATION: "1"
+          P1C_MYSQL_TEST_DATABASE: p1c_test_ci
+          P1C_MYSQL_TEST_USER: root
+          P1C_MYSQL_TEST_PASSWORD: ci-only-password
+        run: >-
+          pytest -q
+          tests/test_p0b_mysql_concurrency.py
+          tests/test_p1a_mysql_webhooks.py
+          tests/test_p1b_mysql_reports.py
+          tests/test_p1c_mysql_runtime.py
+      - name: Validate MySQL migration round trip
+        env:
+          DATABASE_BACKEND: mysql
+          MYSQL_HOST: 127.0.0.1
+          MYSQL_PORT: "3306"
+          MYSQL_DATABASE: p1d_test_ci
+          MYSQL_USER: root
+          MYSQL_PASSWORD: ci-only-password
+          MIGRATION_OPERATOR: github-actions
+          RELEASE_VERSION: v20260712-001-ci
+        run: python scripts/check_migrations.py --backend mysql
+      - name: Verify backup and isolated restore
+        run: |
+          docker exec ${{ job.services.mysql.id }} mysqldump -uroot -pci-only-password --single-transaction p1d_test_ci | gzip -9 > /tmp/p1d_test_ci.sql.gz
+          test -s /tmp/p1d_test_ci.sql.gz
+          sha256sum /tmp/p1d_test_ci.sql.gz > /tmp/p1d_test_ci.sql.gz.sha256
+          sha256sum --check /tmp/p1d_test_ci.sql.gz.sha256
+          docker exec ${{ job.services.mysql.id }} mysql -uroot -pci-only-password -e "CREATE DATABASE p1d_restore_ci CHARACTER SET utf8mb4"
+          gzip -dc /tmp/p1d_test_ci.sql.gz | docker exec -i ${{ job.services.mysql.id }} mysql -uroot -pci-only-password p1d_restore_ci
+          test "$(docker exec ${{ job.services.mysql.id }} mysql -N -uroot -pci-only-password -e "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA='p1d_restore_ci'")" -gt 0

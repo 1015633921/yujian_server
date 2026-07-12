@@ -2,6 +2,9 @@ services:
   api:
     build:
       context: .
+      args:
+        RELEASE_VERSION: "${RELEASE_VERSION:-dev}"
+        VCS_REF: "${VCS_REF:-unknown}"
     container_name: yujian-api
     restart: unless-stopped
     ports:
@@ -14,7 +17,21 @@ services:
     environment:
       TZ: Asia/Shanghai
       APP_ENV: production
+      SERVICE_NAME: yujian-api
+      RELEASE_VERSION: "${RELEASE_VERSION:-}"
       DATABASE_BACKEND: mysql
+      ALLOW_RUNTIME_SCHEMA_MUTATION: "false"
+      COMMERCE_CHECKOUT_ENABLED: "false"
+      WECHAT_PAYMENT_ENABLED: "false"
+      WECHAT_PAY_TEST_MODE: "false"
+      REPORT_VERSIONING_V2_ENABLED: "false"
+      INVENTORY_RESERVATION_TTL_SECONDS: "900"
+      DIY_PUBLIC_SHARE_ENABLED: "false"
+      REMOTE_AVATAR_FETCH_ENABLED: "false"
+      LOGISTICS_SYNC_ENABLED: "false"
+      METRICS_ENDPOINT_ENABLED: "false"
+      ALLOW_DEV_WECHAT_LOGIN: "false"
+      TRUST_CLOUDBASE_IDENTITY_HEADERS: "false"
     networks:
       - default
       - backend
@@ -26,14 +43,14 @@ services:
         - CMD
         - python
         - -c
-        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=3)"
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 10s
 
   mysql:
-    image: mysql:8.0
+    image: mysql:8.0@sha256:7dcddc01f13bab2f15cde676d44d01f61fc9f99fe7785e86196dfc07d358ae2b
     container_name: yujian-mysql
     restart: unless-stopped
     ports:
@@ -68,6 +85,9 @@ services:
   api-test:
     build:
       context: .
+      args:
+        RELEASE_VERSION: "${RELEASE_VERSION:-dev}"
+        VCS_REF: "${VCS_REF:-unknown}"
     container_name: yujian-api-test
     restart: unless-stopped
     ports:
@@ -80,7 +100,20 @@ services:
     environment:
       TZ: Asia/Shanghai
       APP_ENV: test
+      SERVICE_NAME: yujian-api-test
+      RELEASE_VERSION: "${RELEASE_VERSION:-}"
       DATABASE_BACKEND: mysql
+      ALLOW_RUNTIME_SCHEMA_MUTATION: "false"
+      COMMERCE_CHECKOUT_ENABLED: "false"
+      WECHAT_PAYMENT_ENABLED: "false"
+      REPORT_VERSIONING_V2_ENABLED: "false"
+      INVENTORY_RESERVATION_TTL_SECONDS: "900"
+      DIY_PUBLIC_SHARE_ENABLED: "false"
+      REMOTE_AVATAR_FETCH_ENABLED: "false"
+      LOGISTICS_SYNC_ENABLED: "false"
+      ALLOW_DEV_WECHAT_LOGIN: "false"
+      TRUST_CLOUDBASE_IDENTITY_HEADERS: "false"
+      METRICS_ENDPOINT_ENABLED: "false"
     networks:
       - default
       - backend
@@ -93,11 +126,46 @@ services:
         - CMD
         - python
         - -c
-        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=3)"
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 15s
+
+  logistics-worker:
+    build:
+      context: .
+      args:
+        RELEASE_VERSION: "${RELEASE_VERSION:-dev}"
+        VCS_REF: "${VCS_REF:-unknown}"
+    container_name: yujian-logistics-worker
+    restart: unless-stopped
+    command: ["python", "-m", "app.logistics_worker"]
+    volumes:
+      - ./data:/app/data
+      - ./certs:/opt/yujian_server/certs:ro
+    env_file:
+      - .env
+    environment:
+      TZ: Asia/Shanghai
+      APP_ENV: production
+      SERVICE_NAME: yujian-logistics-worker
+      RELEASE_VERSION: "${RELEASE_VERSION:-}"
+      DATABASE_BACKEND: mysql
+      ALLOW_RUNTIME_SCHEMA_MUTATION: "false"
+      WECHAT_PAY_TEST_MODE: "false"
+      LOGISTICS_SYNC_ENABLED: "${LOGISTICS_SYNC_ENABLED:-false}"
+      LOGISTICS_SYNC_INTERVAL_SECONDS: "${LOGISTICS_SYNC_INTERVAL_SECONDS:-1800}"
+      LOGISTICS_SYNC_LEASE_SECONDS: "${LOGISTICS_SYNC_LEASE_SECONDS:-3600}"
+      LOGISTICS_SYNC_MAX_ATTEMPTS: "${LOGISTICS_SYNC_MAX_ATTEMPTS:-3}"
+      LOGISTICS_SYNC_BATCH_SIZE: "${LOGISTICS_SYNC_BATCH_SIZE:-50}"
+    networks:
+      - default
+      - backend
+    depends_on:
+      mysql:
+        condition: service_healthy
+    mem_limit: 256m
 
 networks:
   backend:

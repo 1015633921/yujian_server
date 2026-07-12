@@ -1,6 +1,6 @@
 const env = require('../config/env');
 
-const ASSET_BASE_URL = String(env.assetBaseUrl || env.testAssetBaseUrl || '').replace(/\/$/, '');
+const ASSET_BASE_URL = String(env.assetBaseUrl || '').replace(/\/$/, '');
 
 function assetUrl(path) {
   const cleanPath = String(path || '')

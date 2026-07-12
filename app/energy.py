@@ -8,6 +8,7 @@ from .fortune.chakra import calculate_chakra_profile
 from .fortune.common import ELEMENTS, empty_profile, normalized_profile
 from .fortune.mood_palette import calculate_mood_profile
 from .fortune.name_elements import analyze_name
+from .locations import CALIBRATION_VERSION, DEFAULT_TIMEZONE, LOCATION_DATA_VERSION, LOCATION_RECORDS, resolve_location
 from .schemas import AssessmentRequest
 
 ENERGY_WEIGHTS = {
@@ -66,21 +67,10 @@ WISH_MAPPING = {
     "健康护身/保持专注": ("木", "土"),
 }
 
-# Common place fallback for longitude correction. Production can replace this with geocoding.
 PLACE_COORDINATES = {
-    "北京": (116.4074, 39.9042),
-    "上海": (121.4737, 31.2304),
-    "广州": (113.2644, 23.1291),
-    "深圳": (114.0579, 22.5431),
-    "成都": (104.0665, 30.5723),
-    "四川省成都市": (104.0665, 30.5723),
-    "重庆": (106.5516, 29.5630),
-    "杭州": (120.1551, 30.2741),
-    "武汉": (114.3054, 30.5931),
-    "西安": (108.9398, 34.3416),
-    "南京": (118.7969, 32.0603),
-    "兰州": (103.8343, 36.0611),
-    "甘肃省兰州市": (103.8343, 36.0611),
+    alias: (record.longitude, record.latitude)
+    for record in LOCATION_RECORDS
+    for alias in record.aliases
 }
 
 class EnergyCalculator:
@@ -115,8 +105,30 @@ class EnergyCalculator:
         }
 
     def calculate_true_solar_time(self, request: AssessmentRequest) -> dict:
-        longitude, latitude, source = self.resolve_coordinates(request)
         local_datetime = datetime.combine(request.birthday, request.birth_time)
+        resolution = self.resolve_coordinates(request)
+        if resolution["status"] != "applied":
+            return {
+                "beijing_time": local_datetime.strftime("%Y-%m-%d %H:%M"),
+                "true_solar_time": None,
+                "calibrated_time": None,
+                "longitude": None,
+                "latitude": None,
+                "longitude_correction_minutes": None,
+                "equation_of_time_minutes": None,
+                "total_correction_minutes": None,
+                "location_source": resolution["source"],
+                "resolved_location_code": resolution.get("location_code"),
+                "timezone": DEFAULT_TIMEZONE,
+                "calibration_status": resolution["status"],
+                "calibration_source": resolution["source"],
+                "calibration_version": CALIBRATION_VERSION,
+                "location_data_version": LOCATION_DATA_VERSION,
+                "calibration_reason_code": resolution["reason_code"],
+                "true_solar_datetime": local_datetime,
+            }
+        longitude = float(resolution["longitude"])
+        latitude = float(resolution["latitude"])
         longitude_correction = (longitude - 120.0) * 4.0
         day_of_year = request.birthday.timetuple().tm_yday
         b = math.radians((360 / 365) * (day_of_year - 81))
@@ -131,18 +143,52 @@ class EnergyCalculator:
             "longitude_correction_minutes": round(longitude_correction, 2),
             "equation_of_time_minutes": round(equation_of_time, 2),
             "total_correction_minutes": round(total_correction, 2),
-            "location_source": source,
+            "location_source": resolution["source"],
+            "resolved_location_code": resolution["location_code"],
+            "timezone": DEFAULT_TIMEZONE,
+            "calibration_status": "applied",
+            "calibration_source": resolution["source"],
+            "calibration_version": CALIBRATION_VERSION,
+            "location_data_version": LOCATION_DATA_VERSION,
+            "calibration_reason_code": "location_resolved",
+            "calibrated_time": true_solar_datetime.strftime("%Y-%m-%d %H:%M"),
             "true_solar_datetime": true_solar_datetime,
         }
 
     @staticmethod
-    def resolve_coordinates(request: AssessmentRequest) -> tuple[float, float | None, str]:
+    def resolve_coordinates(request: AssessmentRequest) -> dict:
+        if request.birth_time_unknown:
+            return {
+                "status": "not_required",
+                "source": "user_declared_unknown_time",
+                "reason_code": "birth_time_unknown",
+                "location_code": None,
+            }
+        record = resolve_location(request.location_code, request.birth_place)
+        if not record:
+            return {
+                "status": "unsupported" if request.birth_place else "unavailable",
+                "source": "project_location_dataset",
+                "reason_code": "location_not_in_versioned_dataset",
+                "location_code": request.location_code,
+            }
         if request.lng is not None:
-            return request.lng, request.lat, "frontend_coordinates"
-        for place, coordinates in PLACE_COORDINATES.items():
-            if place in request.birth_place:
-                return coordinates[0], coordinates[1], "built_in_place_lookup"
-        return 120.0, None, "default_china_standard_meridian"
+            matches = abs(request.lng - record.longitude) <= 0.01 and abs(request.lat - record.latitude) <= 0.01
+            if not matches:
+                return {
+                    "status": "invalid_location",
+                    "source": "project_location_dataset",
+                    "reason_code": "client_coordinates_do_not_match_location",
+                    "location_code": record.code,
+                }
+        return {
+            "status": "applied",
+            "source": "built_in_place_lookup",
+            "reason_code": "location_resolved",
+            "location_code": record.code,
+            "longitude": record.longitude,
+            "latitude": record.latitude,
+        }
 
     @staticmethod
     def calculate_mbti_energy(mbti: str | None) -> dict[str, float]:

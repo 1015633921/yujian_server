@@ -1,0 +1,51 @@
+services:
+  api:
+    image: "${APP_IMAGE:?APP_IMAGE must be an immutable digest reference}"
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    ports:
+      - "127.0.0.1:${APP_PORT:?APP_PORT is required}:8000"
+    volumes:
+      - "${CERTS_DIR:?CERTS_DIR is required}:/opt/yujian_server/certs:ro"
+    env_file:
+      - "${ENV_FILE:?ENV_FILE is required}"
+    environment:
+      RELEASE_VERSION: "${RELEASE_VERSION:?RELEASE_VERSION is required}"
+      SERVICE_NAME: "yujian-api-${APP_SLOT:?APP_SLOT is required}"
+      ALLOW_RUNTIME_SCHEMA_MUTATION: "false"
+      WECHAT_PAY_TEST_MODE: "false"
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+
+  logistics-worker:
+    profiles: ["worker"]
+    image: "${APP_IMAGE:?APP_IMAGE must be an immutable digest reference}"
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    command: ["python", "-m", "app.logistics_worker"]
+    volumes:
+      - "${CERTS_DIR:?CERTS_DIR is required}:/opt/yujian_server/certs:ro"
+    env_file:
+      - "${ENV_FILE:?ENV_FILE is required}"
+    environment:
+      RELEASE_VERSION: "${RELEASE_VERSION:?RELEASE_VERSION is required}"
+      SERVICE_NAME: "yujian-logistics-worker"
+      ALLOW_RUNTIME_SCHEMA_MUTATION: "false"
+      WECHAT_PAY_TEST_MODE: "false"
+    networks:
+      - backend
+
+networks:
+  backend:
+    external: true
+    name: "${BACKEND_NETWORK:?BACKEND_NETWORK is required}"

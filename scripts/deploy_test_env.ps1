@@ -1,6 +1,8 @@
 param(
-  [string]$Server = "root@43.140.34.176",
-  [string]$KeyPath = "C:\Users\10156\.ssh\yujian_deploy_ed25519",
+  [Parameter(Mandatory = $true)]
+  [string]$Server,
+  [Parameter(Mandatory = $true)]
+  [string]$KeyPath,
   [string]$RemoteAppDir = "/opt/yujian_server"
 )
 

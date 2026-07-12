@@ -708,6 +708,18 @@ def refresh_all_order_logistics(authorization: str | None = Header(default=None)
     return success(order_service.refresh_active_shipments(), "运输中订单物流已同步")
 
 
+@admin_router.post(
+    "/maintenance/inventory-reservations/release-expired",
+    summary="幂等释放过期库存预占",
+)
+def release_expired_inventory_reservations(
+    limit: int = Query(default=100, ge=1, le=1000),
+    authorization: str | None = Header(default=None),
+):
+    require_admin(authorization)
+    return success(order_service.release_expired_reservations(limit=limit), "过期库存预占处理完成")
+
+
 @admin_router.get("/warehouse/overview", summary="仓库库存概览")
 def warehouse_overview(authorization: str | None = Header(default=None)):
     require_admin(authorization)

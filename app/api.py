@@ -3,20 +3,30 @@ from __future__ import annotations
 import base64
 import binascii
 import json
+import logging
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, Header, HTTPException, Query, Request, UploadFile
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from .auth_service import WechatAuthService
 from .avatar_storage import AvatarStorage
 from .daily_service import DailyEnergyService
+from .feature_flags import (
+    checkout_enabled,
+    mock_trade_enabled,
+    payment_enabled,
+    public_share_enabled,
+    report_versioning_v2_enabled,
+)
 from .admin_service import AdminService
 from .materials import list_materials
-from .order_service import OrderService
+from .order_service import OrderConflictError, OrderPriceChangedError, OrderPricingError, OrderService
+from .observability import Timer, current_request_id, log_event, metrics
 from .recommendation import RecommendationEngine
+from .report_repository import ReportConflictError, ReportVersionConflictError
 from .schemas import (
     AssessmentRequest,
     CartItemCreateRequest,
@@ -37,6 +47,13 @@ from .schemas import (
     WechatLoginRequest,
 )
 from .service import AssessmentService
+from .user_sessions import (
+    UserPrincipal,
+    private_not_found,
+    require_current_user,
+    require_owner,
+    session_service,
+)
 
 router = APIRouter(prefix="/api/v1", tags=["专属水晶分析"])
 legacy_router = APIRouter(prefix="/api", tags=["兼容接口"])
@@ -47,6 +64,7 @@ avatar_storage = AvatarStorage()
 admin_content_service = AdminService()
 order_service = OrderService()
 BEIJING_TZ = ZoneInfo("Asia/Shanghai")
+LOGGER = logging.getLogger("yujian.business")
 
 
 def success(data, message: str = "ok") -> dict:
@@ -55,6 +73,59 @@ def success(data, message: str = "ok") -> dict:
 
 def beijing_today() -> date:
     return datetime.now(BEIJING_TZ).date()
+
+
+def owned_payload(payload: BaseModel, principal: UserPrincipal):
+    require_owner(principal, getattr(payload, "user_id", None))
+    return payload.model_copy(update={"user_id": principal.user_id})
+
+
+def require_feature(enabled: bool, message: str) -> None:
+    if not enabled:
+        raise HTTPException(status_code=503, detail=message)
+
+
+def require_mock_trade_tools() -> None:
+    if not mock_trade_enabled():
+        raise HTTPException(status_code=404, detail="Not Found")
+
+
+def require_assessment_owner(assessment_id: str, principal: UserPrincipal) -> dict:
+    result = service.get(assessment_id)
+    owner_id = str(((result or {}).get("input_summary") or {}).get("user_id") or "")
+    if not result or owner_id != principal.user_id:
+        raise private_not_found()
+    return result
+
+
+def report_version_conflict(exc: Exception) -> HTTPException:
+    return HTTPException(
+        status_code=409,
+        detail={"code": "report_version_conflict", "message": str(exc)},
+    )
+
+
+def require_report_owner(
+    report_id: str,
+    principal: UserPrincipal,
+    expected_version: int | None = None,
+) -> dict:
+    try:
+        snapshot = service.report_repository.owned(report_id, principal.user_id, expected_version)
+    except ReportVersionConflictError as exc:
+        raise report_version_conflict(exc) from exc
+    if not snapshot:
+        raise private_not_found()
+    return snapshot
+
+
+def require_order_owner(order_id: str, principal: UserPrincipal) -> dict:
+    try:
+        order = order_service.get_order(order_id)
+        order_service.ensure_order_owner(order, principal.user_id)
+        return order
+    except ValueError as exc:
+        raise private_not_found() from exc
 
 
 class AvatarBase64Payload(BaseModel):
@@ -140,21 +211,34 @@ def public_community_post(post_id: str):
 
 
 @router.get("/community-favorites", summary="获取我的灵感收藏")
-def list_community_favorites(user_id: str = Query(min_length=1, max_length=100)):
-    return success(order_service.list_community_favorites(user_id))
+def list_community_favorites(
+    user_id: str | None = Query(default=None, min_length=1, max_length=100),
+    principal: UserPrincipal = Depends(require_current_user),
+):
+    require_owner(principal, user_id)
+    return success(order_service.list_community_favorites(principal.user_id))
 
 
 @router.post("/community-favorites", summary="收藏灵感")
-def save_community_favorite(payload: CommunityFavoriteSaveRequest):
+def save_community_favorite(
+    payload: CommunityFavoriteSaveRequest,
+    principal: UserPrincipal = Depends(require_current_user),
+):
     try:
-        return success(order_service.save_community_favorite(payload.model_dump(mode="json")), "灵感已收藏")
+        safe_payload = owned_payload(payload, principal)
+        return success(order_service.save_community_favorite(safe_payload.model_dump(mode="json")), "灵感已收藏")
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.delete("/community-favorites/{post_id}", summary="取消灵感收藏")
-def delete_community_favorite(post_id: str, user_id: str = Query(min_length=1, max_length=100)):
-    return success(order_service.delete_community_favorite(user_id, post_id), "已取消收藏")
+def delete_community_favorite(
+    post_id: str,
+    user_id: str | None = Query(default=None, min_length=1, max_length=100),
+    principal: UserPrincipal = Depends(require_current_user),
+):
+    require_owner(principal, user_id)
+    return success(order_service.delete_community_favorite(principal.user_id, post_id), "已取消收藏")
 
 
 @router.get("/recommendation-plans", summary="获取已发布热门推荐方案")
@@ -200,15 +284,44 @@ def public_recommendation_plan(plan_id: str):
 
 @router.post("/auth/wechat-login", summary="微信快捷登录")
 def wechat_login(payload: WechatLoginRequest, request: Request):
+    timer = Timer()
     try:
-        return success(auth_service.login(payload, request), "登录成功")
+        user = auth_service.login(payload, request)
+        session = session_service.create(user["user_id"])
+        metrics.increment("login_success_total")
+        log_event(LOGGER, "auth.login.succeeded", user_id=user["user_id"], duration_ms=timer.elapsed_ms, result="success")
+        return success(
+            {
+                "access_token": session["access_token"],
+                "token_type": session["token_type"],
+                "expires_at": session["expires_at"],
+                "user": user,
+            },
+            "登录成功",
+        )
     except ValueError as exc:
+        metrics.increment("login_failed_total", error_type=type(exc).__name__)
+        log_event(LOGGER, "auth.login.failed", level=logging.WARNING, error_type=type(exc).__name__, result="failed")
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        metrics.increment("login_failed_total", error_type=type(exc).__name__)
+        log_event(LOGGER, "auth.login.failed", level=logging.ERROR, error_type=type(exc).__name__, result="failed")
+        raise
+
+
+@router.post("/auth/logout", summary="退出当前用户会话")
+def auth_logout(principal: UserPrincipal = Depends(require_current_user)):
+    session_service.revoke(principal.session_id)
+    return success({"revoked": True}, "已退出登录")
 
 
 @router.get("/auth/profile", summary="获取当前用户资料")
-def auth_profile(user_id: str = Query(min_length=1, max_length=100)):
-    user = auth_service.get_user(user_id)
+def auth_profile(
+    user_id: str | None = Query(default=None, min_length=1, max_length=100),
+    principal: UserPrincipal = Depends(require_current_user),
+):
+    require_owner(principal, user_id)
+    user = auth_service.get_user(principal.user_id)
     if not user:
         raise HTTPException(status_code=404, detail="用户不存在")
     return success(user)
@@ -218,11 +331,13 @@ def auth_profile(user_id: str = Query(min_length=1, max_length=100)):
 async def upload_auth_avatar(
     user_id: str = Form(min_length=1, max_length=100),
     file: UploadFile = File(...),
+    principal: UserPrincipal = Depends(require_current_user),
 ):
+    require_owner(principal, user_id)
     try:
         content = await file.read()
         result = avatar_storage.upload(
-            user_id=user_id,
+            user_id=principal.user_id,
             content=content,
             content_type=file.content_type,
             filename=file.filename,
@@ -235,7 +350,11 @@ async def upload_auth_avatar(
 
 
 @router.post("/auth/avatar-base64", summary="上传 base64 用户头像到对象存储")
-def upload_auth_avatar_base64(payload: AvatarBase64Payload):
+def upload_auth_avatar_base64(
+    payload: AvatarBase64Payload,
+    principal: UserPrincipal = Depends(require_current_user),
+):
+    require_owner(principal, payload.user_id)
     content_type = payload.content_type
     content_base64 = payload.content_base64.strip()
     if content_base64.startswith("data:") and "," in content_base64:
@@ -245,7 +364,7 @@ def upload_auth_avatar_base64(payload: AvatarBase64Payload):
     try:
         content = base64.b64decode(content_base64, validate=True)
         result = avatar_storage.upload(
-            user_id=payload.user_id,
+            user_id=principal.user_id,
             content=content,
             content_type=content_type,
             filename=payload.filename,
@@ -258,25 +377,29 @@ def upload_auth_avatar_base64(payload: AvatarBase64Payload):
 
 
 @router.post("/auth/profile", summary="保存微信授权资料")
-def update_auth_profile(payload: UserProfileUpdateRequest):
+def update_auth_profile(
+    payload: UserProfileUpdateRequest,
+    principal: UserPrincipal = Depends(require_current_user),
+):
     try:
-        return success(auth_service.update_profile(payload), "资料已保存")
+        return success(auth_service.update_profile(owned_payload(payload, principal)), "资料已保存")
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/auth/phone", summary="绑定微信手机号")
-def bind_phone(payload: PhoneBindRequest):
+def bind_phone(payload: PhoneBindRequest, principal: UserPrincipal = Depends(require_current_user)):
     try:
-        return success(auth_service.bind_phone(payload), "手机号已绑定")
+        return success(auth_service.bind_phone(owned_payload(payload, principal)), "手机号已绑定")
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/diy-designs", summary="保存或更新用户 DIY 方案")
-def save_diy_design(payload: DIYDesignSaveRequest):
+def save_diy_design(payload: DIYDesignSaveRequest, principal: UserPrincipal = Depends(require_current_user)):
     try:
-        return success(order_service.save_design(payload.model_dump(mode="json")), "DIY 方案已保存")
+        safe_payload = owned_payload(payload, principal)
+        return success(order_service.save_design(safe_payload.model_dump(mode="json")), "DIY 方案已保存")
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -285,11 +408,13 @@ def save_diy_design(payload: DIYDesignSaveRequest):
 async def upload_diy_design_preview(
     user_id: str = Form(min_length=1, max_length=100),
     file: UploadFile = File(...),
+    principal: UserPrincipal = Depends(require_current_user),
 ):
+    require_owner(principal, user_id)
     try:
         content = await file.read()
         result = avatar_storage.upload_design_preview(
-            user_id=user_id,
+            user_id=principal.user_id,
             content=content,
             content_type=file.content_type,
             filename=file.filename,
@@ -303,65 +428,114 @@ async def upload_diy_design_preview(
 
 @router.get("/diy-designs", summary="获取我的 DIY 方案列表")
 def list_diy_designs(
-    user_id: str = Query(min_length=1, max_length=100),
+    user_id: str | None = Query(default=None, min_length=1, max_length=100),
     status: str | None = Query(default=None, max_length=40),
     limit: int = Query(default=50, ge=1, le=100),
+    principal: UserPrincipal = Depends(require_current_user),
 ):
-    return success(order_service.list_designs(user_id=user_id, limit=limit, status=status))
+    require_owner(principal, user_id)
+    return success(order_service.list_designs(user_id=principal.user_id, limit=limit, status=status))
 
 
-@router.get("/diy-designs/shared/{design_id}", summary="获取公开分享 DIY 方案")
-def get_shared_diy_design(design_id: str):
+@router.get("/diy-designs/shared/{share_token}", summary="通过安全令牌获取已发布 DIY 方案")
+def get_shared_diy_design(share_token: str):
+    require_feature(public_share_enabled(), "公共 DIY 分享当前未开放")
     try:
-        design = order_service.get_design(design_id)
-        design["user_id"] = ""
-        return success(design)
+        return success(order_service.get_shared_design(share_token))
     except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        raise private_not_found() from exc
+
+
+@router.post("/diy-designs/{design_id}/share", summary="发布 DIY 分享")
+def publish_diy_design(design_id: str, principal: UserPrincipal = Depends(require_current_user)):
+    require_feature(public_share_enabled(), "公共 DIY 分享当前未开放")
+    try:
+        return success(order_service.publish_design(design_id, principal.user_id), "分享已发布")
+    except ValueError as exc:
+        raise private_not_found() from exc
+
+
+@router.delete("/diy-designs/{design_id}/share", summary="撤销 DIY 分享")
+def revoke_diy_design_share(design_id: str, principal: UserPrincipal = Depends(require_current_user)):
+    require_feature(public_share_enabled(), "公共 DIY 分享当前未开放")
+    try:
+        return success(order_service.revoke_design_share(design_id, principal.user_id), "分享已撤销")
+    except ValueError as exc:
+        raise private_not_found() from exc
 
 
 @router.get("/diy-designs/{design_id}", summary="获取 DIY 方案")
-def get_diy_design(design_id: str, user_id: str = Query(min_length=1, max_length=100)):
+def get_diy_design(
+    design_id: str,
+    user_id: str | None = Query(default=None, min_length=1, max_length=100),
+    principal: UserPrincipal = Depends(require_current_user),
+):
+    require_owner(principal, user_id)
     try:
         design = order_service.get_design(design_id)
-        if design["user_id"] != user_id:
-            raise ValueError("无权查看该 DIY 方案")
+        if design["user_id"] != principal.user_id:
+            raise private_not_found()
         return success(design)
+    except HTTPException:
+        raise
     except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        raise private_not_found() from exc
 
 
 @router.delete("/diy-designs/{design_id}", summary="删除我的 DIY 方案")
-def delete_diy_design(design_id: str, user_id: str = Query(min_length=1, max_length=100)):
+def delete_diy_design(
+    design_id: str,
+    user_id: str | None = Query(default=None, min_length=1, max_length=100),
+    principal: UserPrincipal = Depends(require_current_user),
+):
+    require_owner(principal, user_id)
     try:
-        return success(order_service.delete_design(design_id, user_id), "DIY 方案已删除")
+        return success(order_service.delete_design(design_id, principal.user_id), "DIY 方案已删除")
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise private_not_found() from exc
 
 
 @router.get("/cart", summary="获取我的购物车")
-def get_cart(user_id: str = Query(min_length=1, max_length=100)):
-    return success(order_service.list_cart_items(user_id))
+def get_cart(
+    user_id: str | None = Query(default=None, min_length=1, max_length=100),
+    principal: UserPrincipal = Depends(require_current_user),
+):
+    require_owner(principal, user_id)
+    return success(order_service.list_cart_items(principal.user_id))
 
 
 @router.delete("/cart", summary="清空我的购物车")
-def clear_cart(user_id: str = Query(min_length=1, max_length=100)):
-    return success(order_service.clear_cart(user_id), "购物车已清空")
+def clear_cart(
+    user_id: str | None = Query(default=None, min_length=1, max_length=100),
+    principal: UserPrincipal = Depends(require_current_user),
+):
+    require_owner(principal, user_id)
+    return success(order_service.clear_cart(principal.user_id), "购物车已清空")
 
 
 @router.post("/cart/items", summary="加入购物车")
-def add_cart_item(payload: CartItemCreateRequest):
+def add_cart_item(payload: CartItemCreateRequest, principal: UserPrincipal = Depends(require_current_user)):
     try:
-        return success(order_service.save_cart_item(payload.model_dump(mode="json")), "已加入购物车")
+        safe_payload = owned_payload(payload, principal)
+        return success(order_service.save_cart_item(safe_payload.model_dump(mode="json")), "已加入购物车")
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.patch("/cart/items/{cart_item_id}", summary="更新购物车条目")
-def update_cart_item(cart_item_id: str, payload: CartItemUpdateRequest):
+def update_cart_item(
+    cart_item_id: str,
+    payload: CartItemUpdateRequest,
+    principal: UserPrincipal = Depends(require_current_user),
+):
     try:
+        safe_payload = owned_payload(payload, principal)
         return success(
-            order_service.update_cart_item(cart_item_id, payload.user_id, payload.model_dump(mode="json", exclude_none=True)),
+            order_service.update_cart_item(
+                cart_item_id,
+                principal.user_id,
+                safe_payload.model_dump(mode="json", exclude_none=True),
+            ),
             "购物车已更新",
         )
     except ValueError as exc:
@@ -369,30 +543,44 @@ def update_cart_item(cart_item_id: str, payload: CartItemUpdateRequest):
 
 
 @router.delete("/cart/items/{cart_item_id}", summary="删除购物车条目")
-def delete_cart_item(cart_item_id: str, user_id: str = Query(min_length=1, max_length=100)):
+def delete_cart_item(
+    cart_item_id: str,
+    user_id: str | None = Query(default=None, min_length=1, max_length=100),
+    principal: UserPrincipal = Depends(require_current_user),
+):
+    require_owner(principal, user_id)
     try:
-        return success(order_service.delete_cart_item(cart_item_id, user_id), "购物车条目已删除")
+        return success(order_service.delete_cart_item(cart_item_id, principal.user_id), "购物车条目已删除")
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/user/addresses", summary="获取我的收货地址")
-def list_user_addresses(user_id: str = Query(min_length=1, max_length=100)):
-    return success(order_service.list_addresses(user_id))
+def list_user_addresses(
+    user_id: str | None = Query(default=None, min_length=1, max_length=100),
+    principal: UserPrincipal = Depends(require_current_user),
+):
+    require_owner(principal, user_id)
+    return success(order_service.list_addresses(principal.user_id))
 
 
 @router.post("/user/addresses", summary="新增或更新收货地址")
-def save_user_address(payload: UserAddressRequest):
+def save_user_address(payload: UserAddressRequest, principal: UserPrincipal = Depends(require_current_user)):
     try:
-        return success(order_service.save_address(payload.model_dump(mode="json")), "收货地址已保存")
+        safe_payload = owned_payload(payload, principal)
+        return success(order_service.save_address(safe_payload.model_dump(mode="json")), "收货地址已保存")
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.put("/user/addresses/{address_id}", summary="更新收货地址")
-def update_user_address(address_id: str, payload: UserAddressRequest):
+def update_user_address(
+    address_id: str,
+    payload: UserAddressRequest,
+    principal: UserPrincipal = Depends(require_current_user),
+):
     try:
-        data = payload.model_dump(mode="json")
+        data = owned_payload(payload, principal).model_dump(mode="json")
         data["address_id"] = address_id
         return success(order_service.save_address(data), "收货地址已更新")
     except ValueError as exc:
@@ -400,86 +588,155 @@ def update_user_address(address_id: str, payload: UserAddressRequest):
 
 
 @router.delete("/user/addresses/{address_id}", summary="删除收货地址")
-def delete_user_address(address_id: str, user_id: str = Query(min_length=1, max_length=100)):
+def delete_user_address(
+    address_id: str,
+    user_id: str | None = Query(default=None, min_length=1, max_length=100),
+    principal: UserPrincipal = Depends(require_current_user),
+):
+    require_owner(principal, user_id)
     try:
-        return success(order_service.delete_address(address_id, user_id), "收货地址已删除")
+        return success(order_service.delete_address(address_id, principal.user_id), "收货地址已删除")
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/user/addresses/{address_id}/default", summary="设置默认收货地址")
-def set_default_user_address(address_id: str, payload: UserAddressActionRequest):
+def set_default_user_address(
+    address_id: str,
+    payload: UserAddressActionRequest,
+    principal: UserPrincipal = Depends(require_current_user),
+):
     try:
-        return success(order_service.set_default_address(address_id, payload.user_id), "默认地址已设置")
+        owned_payload(payload, principal)
+        return success(order_service.set_default_address(address_id, principal.user_id), "默认地址已设置")
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/coupons/my", summary="获取我的优惠券")
-def list_my_coupons(user_id: str = Query(min_length=1, max_length=100)):
-    return success(order_service.list_coupons(user_id))
+def list_my_coupons(
+    user_id: str | None = Query(default=None, min_length=1, max_length=100),
+    principal: UserPrincipal = Depends(require_current_user),
+):
+    require_owner(principal, user_id)
+    return success(order_service.list_coupons(principal.user_id))
 
 
 @router.get("/coupons/available", summary="获取当前订单可用优惠券")
 def list_available_coupons(
-    user_id: str = Query(min_length=1, max_length=100),
+    user_id: str | None = Query(default=None, min_length=1, max_length=100),
     amount: float = Query(default=0, ge=0),
+    principal: UserPrincipal = Depends(require_current_user),
 ):
-    return success(order_service.available_coupons(user_id, amount))
+    require_owner(principal, user_id)
+    return success(order_service.available_coupons(principal.user_id, amount))
 
 
 @router.post("/orders", summary="创建订单并发起微信支付预下单")
-def create_order(payload: OrderCreateRequest):
+def create_order(
+    payload: OrderCreateRequest,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    principal: UserPrincipal = Depends(require_current_user),
+):
+    require_feature(checkout_enabled(), "结算功能当前未开放")
+    timer = Timer()
     try:
-        return success(order_service.create_order(payload.model_dump(mode="json")), "订单已生成")
-    except ValueError as exc:
+        safe_payload = owned_payload(payload, principal)
+        data = safe_payload.model_dump(mode="json")
+        data["idempotency_key"] = idempotency_key
+        result = order_service.create_order(data)
+        metrics.increment("order_create_total", result="success")
+        log_event(LOGGER, "order.create.succeeded", user_id=principal.user_id, duration_ms=timer.elapsed_ms, result="success")
+        return success(result, "订单已生成")
+    except (OrderPriceChangedError, OrderConflictError) as exc:
+        metrics.increment("order_create_failed_total", error_type=type(exc).__name__)
+        log_event(LOGGER, "order.create.failed", level=logging.WARNING, error_type=type(exc).__name__, result="failed")
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except OrderPricingError as exc:
+        metrics.increment("order_create_failed_total", error_type=type(exc).__name__)
+        log_event(LOGGER, "order.create.failed", level=logging.WARNING, error_type=type(exc).__name__, result="failed")
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except ValueError as exc:
+        metrics.increment("order_create_failed_total", error_type=type(exc).__name__)
+        log_event(LOGGER, "order.create.failed", level=logging.WARNING, error_type=type(exc).__name__, result="failed")
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        metrics.increment("order_create_failed_total", error_type=type(exc).__name__)
+        log_event(LOGGER, "order.create.failed", level=logging.ERROR, error_type=type(exc).__name__, result="failed")
+        raise
 
 
 @router.get("/orders", summary="获取我的订单")
 def my_orders(
-    user_id: str = Query(min_length=1, max_length=100),
+    user_id: str | None = Query(default=None, min_length=1, max_length=100),
     limit: int = Query(default=50, ge=1, le=100),
+    principal: UserPrincipal = Depends(require_current_user),
 ):
-    return success(order_service.list_user_orders(user_id, limit))
+    require_owner(principal, user_id)
+    return success(order_service.list_user_orders(principal.user_id, limit))
 
 
 @router.get("/orders/{order_id}", summary="获取订单详情")
 def get_order_detail(
     order_id: str,
-    user_id: str = Query(min_length=1, max_length=100),
+    user_id: str | None = Query(default=None, min_length=1, max_length=100),
+    principal: UserPrincipal = Depends(require_current_user),
 ):
+    require_owner(principal, user_id)
     try:
         order = order_service.get_order(order_id)
-        order_service.ensure_order_owner(order, user_id)
+        order_service.ensure_order_owner(order, principal.user_id)
         return success(order)
     except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        raise private_not_found() from exc
 
 
 @router.post("/orders/{order_id}/pay", summary="继续支付订单")
-def pay_order(order_id: str, payload: OrderActionRequest):
+def pay_order(
+    order_id: str,
+    payload: OrderActionRequest,
+    principal: UserPrincipal = Depends(require_current_user),
+):
+    require_feature(checkout_enabled(), "支付功能当前未开放")
+    require_feature(payment_enabled(), "微信支付当前未开放")
+    require_order_owner(order_id, principal)
     try:
-        return success(order_service.request_payment(order_id, payload.user_id), "支付参数已生成")
+        owned_payload(payload, principal)
+        return success(order_service.request_payment(order_id, principal.user_id), "支付参数已生成")
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@router.get("/orders/{order_id}/payment-status", summary="确认订单支付状态")
+def get_order_payment_status(
+    order_id: str,
+    principal: UserPrincipal = Depends(require_current_user),
+):
+    require_order_owner(order_id, principal)
+    return success(order_service.payment_confirmation(order_id, principal.user_id))
+
+
 @router.post("/orders/{order_id}/mock-pay", summary="本地调试：模拟支付成功")
-def mock_pay_order(order_id: str, payload: OrderActionRequest):
+def mock_pay_order(order_id: str, payload: OrderActionRequest, principal: UserPrincipal = Depends(require_current_user)):
+    require_mock_trade_tools()
+    require_order_owner(order_id, principal)
     try:
-        return success(order_service.mark_paid_for_dev(order_id, payload.user_id), "已模拟支付成功")
+        owned_payload(payload, principal)
+        return success(order_service.mark_paid_for_dev(order_id, principal.user_id), "已模拟支付成功")
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/orders/{order_id}/mock-ship", summary="本地调试：模拟发货")
-def mock_ship_order(order_id: str, payload: OrderShipRequest):
+def mock_ship_order(order_id: str, payload: OrderShipRequest, principal: UserPrincipal = Depends(require_current_user)):
+    require_mock_trade_tools()
+    require_order_owner(order_id, principal)
     try:
+        owned_payload(payload, principal)
         return success(
             order_service.mark_shipped_for_dev(
                 order_id,
-                payload.user_id,
+                principal.user_id,
                 payload.carrier or "顺丰速运",
                 payload.tracking_no,
                 payload.carrier_code or "shunfeng",
@@ -492,18 +749,22 @@ def mock_ship_order(order_id: str, payload: OrderShipRequest):
 
 
 @router.post("/orders/{order_id}/confirm-receipt", summary="确认收货")
-def confirm_order_receipt(order_id: str, payload: OrderActionRequest):
+def confirm_order_receipt(order_id: str, payload: OrderActionRequest, principal: UserPrincipal = Depends(require_current_user)):
+    require_order_owner(order_id, principal)
     try:
-        return success(order_service.confirm_receipt(order_id, payload.user_id), "已确认收货")
+        owned_payload(payload, principal)
+        return success(order_service.confirm_receipt(order_id, principal.user_id), "已确认收货")
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/orders/{order_id}/cancel", summary="取消待付款订单")
-def cancel_order(order_id: str, payload: OrderActionRequest):
+def cancel_order(order_id: str, payload: OrderActionRequest, principal: UserPrincipal = Depends(require_current_user)):
+    require_order_owner(order_id, principal)
     try:
+        owned_payload(payload, principal)
         return success(
-            order_service.cancel_order(order_id, payload.user_id, payload.reason or ""),
+            order_service.cancel_order(order_id, principal.user_id, payload.reason or ""),
             "订单已取消",
         )
     except ValueError as exc:
@@ -511,10 +772,16 @@ def cancel_order(order_id: str, payload: OrderActionRequest):
 
 
 @router.put("/orders/{order_id}/receiver", summary="修改未发货订单收货信息")
-def update_order_receiver(order_id: str, payload: OrderReceiverUpdateRequest):
+def update_order_receiver(
+    order_id: str,
+    payload: OrderReceiverUpdateRequest,
+    principal: UserPrincipal = Depends(require_current_user),
+):
+    require_order_owner(order_id, principal)
     try:
+        owned_payload(payload, principal)
         return success(
-            order_service.update_order_receiver(order_id, payload.user_id, payload.receiver),
+            order_service.update_order_receiver(order_id, principal.user_id, payload.receiver),
             "收货信息已更新",
         )
     except ValueError as exc:
@@ -522,27 +789,44 @@ def update_order_receiver(order_id: str, payload: OrderReceiverUpdateRequest):
 
 
 @router.post("/orders/{order_id}/after-sale", summary="申请退换货/售后")
-def request_order_after_sale(order_id: str, payload: OrderActionRequest):
+def request_order_after_sale(
+    order_id: str,
+    payload: OrderActionRequest,
+    principal: UserPrincipal = Depends(require_current_user),
+):
+    require_order_owner(order_id, principal)
     try:
-        return success(order_service.request_after_sale(order_id, payload.user_id, payload.reason or ""), "售后申请已提交")
+        owned_payload(payload, principal)
+        return success(order_service.request_after_sale(order_id, principal.user_id, payload.reason or ""), "售后申请已提交")
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/orders/{order_id}/refund", summary="申请退款")
-def request_order_refund(order_id: str, payload: OrderRefundRequest):
+def request_order_refund(
+    order_id: str,
+    payload: OrderRefundRequest,
+    principal: UserPrincipal = Depends(require_current_user),
+):
+    require_order_owner(order_id, principal)
     try:
-        return success(order_service.request_refund(order_id, payload.user_id, payload.reason or ""), "退款申请已提交")
+        owned_payload(payload, principal)
+        return success(order_service.request_refund(order_id, principal.user_id, payload.reason or ""), "退款申请已提交")
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/orders/{order_id}/logistics", summary="查询订单物流轨迹")
-def get_order_logistics(order_id: str, user_id: str = Query(min_length=1, max_length=100)):
+def get_order_logistics(
+    order_id: str,
+    user_id: str | None = Query(default=None, min_length=1, max_length=100),
+    principal: UserPrincipal = Depends(require_current_user),
+):
+    require_owner(principal, user_id)
     try:
-        return success(order_service.get_logistics(order_id, user_id))
+        return success(order_service.get_logistics(order_id, principal.user_id))
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise private_not_found() from exc
 
 
 @router.post("/wechat-pay/notify", summary="微信支付结果回调")
@@ -552,10 +836,15 @@ async def wechat_pay_notify(request: Request):
     try:
         order_service.handle_wechat_notify(headers, body_text)
     except (ValueError, json.JSONDecodeError) as exc:
+        metrics.increment("payment_callback_total", callback_type="payment", result="failed")
+        metrics.increment("payment_callback_failed_total", callback_type="payment", error_type=type(exc).__name__)
+        log_event(LOGGER, "payment.callback.failed", level=logging.WARNING, callback_type="payment", error_type=type(exc).__name__, result="failed")
         return JSONResponse(
             status_code=400,
-            content={"code": "FAIL", "message": str(exc)},
+            content={"code": "FAIL", "message": "支付回调处理失败", "request_id": current_request_id()},
         )
+    metrics.increment("payment_callback_total", callback_type="payment", result="success")
+    log_event(LOGGER, "payment.callback.succeeded", callback_type="payment", result="success")
     return {"code": "SUCCESS", "message": "成功"}
 
 
@@ -566,35 +855,146 @@ async def wechat_pay_refund_notify(request: Request):
     try:
         order_service.handle_wechat_refund_notify(headers, body_text)
     except (ValueError, json.JSONDecodeError) as exc:
+        metrics.increment("payment_callback_total", callback_type="refund", result="failed")
+        metrics.increment("payment_callback_failed_total", callback_type="refund", error_type=type(exc).__name__)
+        log_event(LOGGER, "payment.callback.failed", level=logging.WARNING, callback_type="refund", error_type=type(exc).__name__, result="failed")
         return JSONResponse(
             status_code=400,
-            content={"code": "FAIL", "message": str(exc)},
+            content={"code": "FAIL", "message": "退款回调处理失败", "request_id": current_request_id()},
         )
+    metrics.increment("payment_callback_total", callback_type="refund", result="success")
+    log_event(LOGGER, "payment.callback.succeeded", callback_type="refund", result="success")
     return {"code": "SUCCESS", "message": "成功"}
 
 
 @router.post("/assessment/calculate", summary="计算专属水晶与手串方案")
-def calculate_assessment(payload: AssessmentRequest):
-    result, cache_hit = service.calculate(payload)
+def calculate_assessment(payload: AssessmentRequest, principal: UserPrincipal = Depends(require_current_user)):
+    safe_payload = owned_payload(payload, principal)
+    result, cache_hit = service.calculate(safe_payload)
     message = "读取已有分析结果" if cache_hit else "分析完成"
     return success({**result, "cache_hit": cache_hit}, message)
 
 
 @router.post("/assessment/energy", summary="第一步：生成五行元素画像")
-def calculate_energy(payload: AssessmentRequest, background_tasks: BackgroundTasks):
-    result, cache_hit = service.calculate_energy(payload)
+def calculate_energy(
+    payload: AssessmentRequest,
+    background_tasks: BackgroundTasks,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    principal: UserPrincipal = Depends(require_current_user),
+):
+    safe_payload = owned_payload(payload, principal)
+    timer = Timer()
+    if report_versioning_v2_enabled():
+        try:
+            result, replay = service.calculate_energy_v2(safe_payload, idempotency_key or "")
+        except ReportConflictError as exc:
+            metrics.increment("report_generate_failed_total", error_type=type(exc).__name__)
+            raise HTTPException(
+                status_code=409,
+                detail={"code": exc.code, "message": str(exc)},
+            ) from exc
+        except ValueError as exc:
+            metrics.increment("report_generate_failed_total", error_type=type(exc).__name__)
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except Exception as exc:
+            metrics.increment("report_generate_failed_total", error_type=type(exc).__name__)
+            log_event(LOGGER, "report.generate.failed", level=logging.ERROR, error_type=type(exc).__name__, result="failed")
+            raise
+        metrics.increment("report_generate_total", result="replay" if replay else "created")
+        metrics.observe("report_generate_duration", timer.elapsed_ms, version="v2")
+        log_event(LOGGER, "report.generate.succeeded", user_id=principal.user_id, duration_ms=timer.elapsed_ms, result="replay" if replay else "created")
+        return success(
+            {**result, "idempotent_replay": replay},
+            "读取已有报告" if replay else "元素分析完成",
+        )
+    try:
+        result, cache_hit = service.calculate_energy(safe_payload)
+    except Exception as exc:
+        metrics.increment("report_generate_failed_total", error_type=type(exc).__name__)
+        log_event(LOGGER, "report.generate.failed", level=logging.ERROR, error_type=type(exc).__name__, result="failed")
+        raise
     background_tasks.add_task(
         service.pre_generate_diy_recommendation,
         result["assessment_id"],
-        payload.wrist_size_cm,
-        payload.bead_size_mm,
+        safe_payload.wrist_size_cm,
+        safe_payload.bead_size_mm,
     )
     message = "读取已有元素画像" if cache_hit else "元素分析完成"
+    metrics.increment("report_generate_total", result="cache" if cache_hit else "created", version="legacy")
+    metrics.observe("report_generate_duration", timer.elapsed_ms, version="legacy")
+    log_event(LOGGER, "report.generate.succeeded", user_id=principal.user_id, duration_ms=timer.elapsed_ms, result="cache" if cache_hit else "created")
     return success({**result, "cache_hit": cache_hit}, message)
 
 
+@router.get("/reports/{report_id}", summary="按明确版本获取不可变搭配报告")
+def report_detail(
+    report_id: str,
+    report_version: int = Query(ge=1),
+    principal: UserPrincipal = Depends(require_current_user),
+):
+    require_feature(report_versioning_v2_enabled(), "报告版本功能当前未开放")
+    snapshot = require_report_owner(report_id, principal, report_version)
+    log_event(LOGGER, "report.read.succeeded", user_id=principal.user_id, result="success", report_version=report_version)
+    return success(service.report_repository.detail_dto(snapshot))
+
+
+@router.get("/reports/{report_id}/basis", summary="获取指定版本的私有测算依据")
+def report_basis(
+    report_id: str,
+    report_version: int = Query(ge=1),
+    principal: UserPrincipal = Depends(require_current_user),
+):
+    require_feature(report_versioning_v2_enabled(), "报告版本功能当前未开放")
+    snapshot = require_report_owner(report_id, principal, report_version)
+    log_event(LOGGER, "report.basis.read.succeeded", user_id=principal.user_id, result="success", report_version=report_version)
+    return success(service.report_repository.basis_dto(snapshot))
+
+
+@router.get("/reports/{report_id}/poster", summary="获取指定版本的脱敏海报数据")
+def report_poster(
+    report_id: str,
+    report_version: int = Query(ge=1),
+    principal: UserPrincipal = Depends(require_current_user),
+):
+    require_feature(report_versioning_v2_enabled(), "报告版本功能当前未开放")
+    try:
+        snapshot = require_report_owner(report_id, principal, report_version)
+        result = service.report_repository.poster_dto(snapshot)
+        metrics.increment("poster_generate_total", result="success")
+        log_event(LOGGER, "poster.payload.succeeded", user_id=principal.user_id, result="success", report_version=report_version)
+        return success(result)
+    except Exception as exc:
+        metrics.increment("poster_failed_total", error_type=type(exc).__name__)
+        log_event(LOGGER, "poster.payload.failed", level=logging.WARNING, error_type=type(exc).__name__, result="failed")
+        raise
+
+
+@router.post("/reports/{report_id}/diy-recommendation", summary="基于指定报告版本生成 DIY 推荐")
+def report_diy_recommendation(
+    report_id: str,
+    payload: DIYRecommendationRequest,
+    principal: UserPrincipal = Depends(require_current_user),
+):
+    require_feature(report_versioning_v2_enabled(), "报告版本功能当前未开放")
+    if payload.report_id and payload.report_id != report_id:
+        raise report_version_conflict(ReportVersionConflictError("请求中的 report_id 不一致"))
+    try:
+        result = service.create_diy_recommendation_v2(report_id, principal.user_id, payload)
+    except ReportVersionConflictError as exc:
+        raise report_version_conflict(exc) from exc
+    if not result:
+        raise private_not_found()
+    message = "读取已有手串方案" if result.get("recommendation_cache_hit") else "专属手串已生成"
+    return success(result, message)
+
+
 @router.post("/assessment/{assessment_id}/diy-recommendation", summary="第二步：填写腕围并生成 DIY 推荐")
-def create_diy_recommendation(assessment_id: str, payload: DIYRecommendationRequest):
+def create_diy_recommendation(
+    assessment_id: str,
+    payload: DIYRecommendationRequest,
+    principal: UserPrincipal = Depends(require_current_user),
+):
+    require_assessment_owner(assessment_id, principal)
     try:
         result = service.create_diy_recommendation(assessment_id, payload)
     except ValueError as exc:
@@ -606,35 +1006,45 @@ def create_diy_recommendation(assessment_id: str, payload: DIYRecommendationRequ
 
 
 @legacy_router.post("/crystal/assessment/", summary="兼容旧小程序路径的专属水晶分析")
-def legacy_calculate_assessment(payload: AssessmentRequest):
-    result, cache_hit = service.calculate(payload)
+def legacy_calculate_assessment(
+    payload: AssessmentRequest,
+    principal: UserPrincipal = Depends(require_current_user),
+):
+    result, cache_hit = service.calculate(owned_payload(payload, principal))
     return success({**result, "cache_hit": cache_hit}, "分析完成")
 
 
 @router.get("/assessment/history", summary="获取用户历史分析")
 def assessment_history(
-    user_id: str = Query(min_length=1, max_length=64),
+    user_id: str | None = Query(default=None, min_length=1, max_length=64),
     limit: int = Query(default=20, ge=1, le=100),
+    principal: UserPrincipal = Depends(require_current_user),
 ):
-    return success(service.history(user_id, limit))
+    require_owner(principal, user_id)
+    return success(service.history(principal.user_id, limit))
 
 
 @router.get("/privacy/data-summary", summary="查看我的测算与画像数据摘要")
-def privacy_data_summary(user_id: str = Query(min_length=1, max_length=100)):
-    return success(service.privacy_data_summary(user_id))
+def privacy_data_summary(
+    user_id: str | None = Query(default=None, min_length=1, max_length=100),
+    principal: UserPrincipal = Depends(require_current_user),
+):
+    require_owner(principal, user_id)
+    return success(service.privacy_data_summary(principal.user_id))
 
 
 @router.delete("/privacy/personalization-data", summary="删除我的测算、画像与每日状态数据")
-def delete_personalization_data(user_id: str = Query(min_length=1, max_length=100)):
-    return success(service.delete_personalization_data(user_id), "测算与画像数据已删除")
+def delete_personalization_data(
+    user_id: str | None = Query(default=None, min_length=1, max_length=100),
+    principal: UserPrincipal = Depends(require_current_user),
+):
+    require_owner(principal, user_id)
+    return success(service.delete_personalization_data(principal.user_id), "测算与画像数据已删除")
 
 
 @router.get("/assessment/{assessment_id}", summary="获取分析详情")
-def assessment_detail(assessment_id: str):
-    result = service.get(assessment_id)
-    if not result:
-        raise HTTPException(status_code=404, detail="分析结果不存在")
-    return success(result)
+def assessment_detail(assessment_id: str, principal: UserPrincipal = Depends(require_current_user)):
+    return success(require_assessment_owner(assessment_id, principal))
 
 
 def parse_key_list(values: list[str] | None) -> list[str]:
@@ -654,15 +1064,17 @@ def daily_energy_options():
 
 @router.get("/daily-energy/today", summary="获取今日搭配建议内容")
 def today_daily_energy(
-    user_id: str = Query(min_length=1, max_length=100),
+    user_id: str | None = Query(default=None, min_length=1, max_length=100),
     initial_wish: str | None = Query(default=None, max_length=100),
     status_tags: list[str] | None = Query(default=None),
     scene_key: str | None = Query(default=None, max_length=80),
     goal_keys: list[str] | None = Query(default=None),
     force_recalculate: bool = Query(default=False),
+    principal: UserPrincipal = Depends(require_current_user),
 ):
+    require_owner(principal, user_id)
     result, cache_hit = daily_service.get_or_calculate(
-        user_id=user_id,
+        user_id=principal.user_id,
         target_date=beijing_today(),
         initial_wish=initial_wish,
         status_tags=parse_key_list(status_tags),
@@ -677,22 +1089,28 @@ def today_daily_energy(
 def daily_energy_check_in(
     payload: DailyCheckInRequest,
     checkin_date: date | None = Query(default=None),
+    principal: UserPrincipal = Depends(require_current_user),
 ):
-    return success(daily_service.check_in(payload, checkin_date or beijing_today()), "签到成功")
+    return success(
+        daily_service.check_in(owned_payload(payload, principal), checkin_date or beijing_today()),
+        "签到成功",
+    )
 
 
 @router.get("/daily-energy/{energy_date}", summary="获取指定日期搭配建议")
 def dated_daily_energy(
     energy_date: date,
-    user_id: str = Query(min_length=1, max_length=100),
+    user_id: str | None = Query(default=None, min_length=1, max_length=100),
     initial_wish: str | None = Query(default=None, max_length=100),
     status_tags: list[str] | None = Query(default=None),
     scene_key: str | None = Query(default=None, max_length=80),
     goal_keys: list[str] | None = Query(default=None),
     force_recalculate: bool = Query(default=False),
+    principal: UserPrincipal = Depends(require_current_user),
 ):
+    require_owner(principal, user_id)
     result, cache_hit = daily_service.get_or_calculate(
-        user_id=user_id,
+        user_id=principal.user_id,
         target_date=energy_date,
         initial_wish=initial_wish,
         status_tags=parse_key_list(status_tags),

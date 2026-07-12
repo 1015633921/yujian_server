@@ -1,7 +1,7 @@
 const auth = require('../../utils/auth');
 const { effectiveWristText } = require('../../utils/designSummary');
 const env = require('../../config/env');
-const { createOrder, mockPayOrder, getMaterials } = require('../../utils/api');
+const { createOrder, getOrder, getOrderPaymentStatus, mockPayOrder, getMaterials } = require('../../utils/api');
 const { assetUrl } = require('../../utils/assets');
 
 const MATERIALS = {
@@ -25,6 +25,10 @@ const MATERIALS = {
 };
 
 const ADDRESS_KEY = 'checkoutReceiver';
+
+function createCheckoutIdempotencyKey() {
+  return `checkout-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+}
 const TRAY_THEME_STORAGE_KEY = 'workspaceTrayThemeV1';
 const CHECKOUT_PREVIEW_STAGE_SIZE = 560;
 const CHECKOUT_PREVIEW_CENTER = CHECKOUT_PREVIEW_STAGE_SIZE / 2;
@@ -261,6 +265,7 @@ Page({
     addressError: '',
     remark: '',
     submitting: false,
+    paymentConfirming: false,
     pageLoading: true
   },
 
@@ -272,6 +277,10 @@ Page({
 
   onReady() {
     wx.hideLoading();
+  },
+
+  onUnload() {
+    this.stopPaymentConfirmation();
   },
 
   loadTrayPreviewImage() {
@@ -679,6 +688,7 @@ Page({
     this.setData({ submitting: true });
     wx.showLoading({ title: '生成订单' });
     try {
+      const idempotencyKey = createCheckoutIdempotencyKey();
       const result = await createOrder({
         user_id: user.user_id,
         design_id: this.data.design.designId || this.data.design.design_id || '',
@@ -687,15 +697,49 @@ Page({
         design: this.data.design,
         sequence: this.data.sequence,
         bom: this.data.bom
-      });
+      }, { idempotencyKey });
       this.cacheOrder(result.order);
       wx.hideLoading();
 
       const payment = result.payment || {};
       if (payment.available && payment.pay_params) {
-        await this.requestWechatPayment(payment.pay_params);
-        wx.showToast({ title: '支付完成', icon: 'success' });
-        this.goSuccess(result.order.order_id);
+        let clientPaymentUnknown = false;
+        try {
+          await this.requestWechatPayment(payment.pay_params);
+        } catch (paymentError) {
+          const cancelled = String(paymentError && paymentError.errMsg || '').includes('cancel');
+          if (cancelled) {
+            wx.showToast({ title: '已取消支付', icon: 'none' });
+            return;
+          }
+          clientPaymentUnknown = true;
+        }
+        this.setData({ paymentConfirming: true });
+        wx.showLoading({ title: '正在确认支付结果' });
+        const confirmation = await this.confirmPaymentResult(result.order.order_id, user.user_id);
+        wx.hideLoading();
+        this.setData({ paymentConfirming: false });
+        if (confirmation.state === 'paid') {
+          const confirmedOrder = await getOrder(result.order.order_id, user.user_id).catch(() => null);
+          if (confirmedOrder) this.cacheOrder(confirmedOrder);
+          wx.showToast({ title: '支付成功', icon: 'success' });
+          this.goSuccess(result.order.order_id);
+          return;
+        }
+        if (confirmation.state === 'account_changed') return;
+        wx.showModal({
+          title: confirmation.state === 'terminal'
+            ? '支付未完成'
+            : (clientPaymentUnknown ? '支付状态待确认' : '支付结果确认中'),
+          content: confirmation.state === 'terminal'
+            ? '订单未支付成功，请返回订单详情查看当前状态。'
+            : (clientPaymentUnknown
+              ? '客户端未能确认支付结果，服务端也暂未收到最终状态。可稍后在订单列表查看。'
+              : '服务端尚未确认支付结果，可稍后在订单列表查看。'),
+          showCancel: false,
+          confirmText: '查看订单',
+          success: () => this.goOrderDetail(result.order.order_id)
+        });
         return;
       }
 
@@ -724,7 +768,16 @@ Page({
 
   handleSubmitError(error) {
     const message = error && error.message ? error.message : '下单失败';
-    if (message.includes('珠材价格已更新') || message.includes('已下架或无库存')) {
+    if (message.includes('价格已更新')) {
+      wx.showModal({
+        title: '价格已更新，请确认',
+        content: '商品价格已发生变化，本次支付已阻止。请返回确认最新价格后重新结算。',
+        showCancel: false,
+        confirmText: '我知道了'
+      });
+      return;
+    }
+    if (message.includes('SKU') || message.includes('已下架') || message.includes('库存不足')) {
       wx.showModal({
         title: '珠材信息已更新',
         content: message,
@@ -761,6 +814,47 @@ Page({
     return new Promise((resolve, reject) => {
       wx.requestPayment({ ...payParams, success: resolve, fail: reject });
     });
+  },
+
+  stopPaymentConfirmation() {
+    this._paymentPollToken = (this._paymentPollToken || 0) + 1;
+    if (this._paymentPollTimer) clearTimeout(this._paymentPollTimer);
+    if (this._paymentPollResolve) this._paymentPollResolve(false);
+    this._paymentPollTimer = null;
+    this._paymentPollResolve = null;
+  },
+
+  waitForPaymentPoll(delay, token) {
+    return new Promise(resolve => {
+      this._paymentPollResolve = resolve;
+      this._paymentPollTimer = setTimeout(() => {
+        this._paymentPollTimer = null;
+        this._paymentPollResolve = null;
+        resolve(this._paymentPollToken === token);
+      }, delay);
+    });
+  },
+
+  async confirmPaymentResult(orderId, userId) {
+    this.stopPaymentConfirmation();
+    const token = this._paymentPollToken;
+    const delays = [0, 800, 1500, 2500, 4000, 6000];
+    for (const delay of delays) {
+      if (delay && !await this.waitForPaymentPoll(delay, token)) return { state: 'stopped' };
+      const currentUser = auth.getStoredUser();
+      if (!currentUser || currentUser.user_id !== userId) {
+        this.stopPaymentConfirmation();
+        return { state: 'account_changed' };
+      }
+      try {
+        const status = await getOrderPaymentStatus(orderId, { silent: true });
+        if (status.paid) return { state: 'paid', status };
+        if (status.terminal) return { state: 'terminal', status };
+      } catch (error) {
+        if (this._paymentPollToken !== token) return { state: 'stopped' };
+      }
+    }
+    return { state: 'pending' };
   },
 
   cacheOrder(order) {

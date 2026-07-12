@@ -1,5 +1,6 @@
 const { calculateEnergy, getAssessmentOptions } = require('../../utils/api');
 const auth = require('../../utils/auth');
+const reportCache = require('../../utils/reportCache');
 const { CHAKRA_OPTIONS, MOOD_PALETTES } = require('../../utils/assessmentOptions');
 
 const DEFAULT_WISH = '情绪平衡';
@@ -107,6 +108,11 @@ const REGION_OPTIONS = [
 ];
 const REGION_PROVINCES = REGION_OPTIONS.map(item => item.province);
 const DEFAULT_BIRTH_REGION = ['上海市', '上海市'];
+
+function createReportIdempotencyKey() {
+  const random = Math.random().toString(36).slice(2, 12);
+  return `report-${Date.now().toString(36)}-${random}`;
+}
 
 function findBirthRegionSelection(region = [], birthPlace = '') {
   const values = Array.isArray(region)
@@ -738,6 +744,7 @@ Page({
   },
 
   async startAssessment() {
+    if (this.data.submitting) return;
     let user;
     try {
       user = await auth.requireLogin('登录后才能保存分析结果和生成每日搭配建议。');
@@ -764,6 +771,7 @@ Page({
       name: form.name.trim(),
       birthday: form.birthDate,
       birth_time: form.birthTimeUnknown || !form.birthTime ? '12:00' : form.birthTime,
+      birth_time_unknown: Boolean(form.birthTimeUnknown || !form.birthTime),
       birth_place: form.birthPlace || '中国',
       mbti: form.mbti || null,
       core_wishes: coreWishes,
@@ -776,10 +784,12 @@ Page({
     this.setData({ submitting: true });
     wx.showLoading({ title: '正在生成分析' });
     try {
-      const report = await calculateEnergy(payload);
+      const idempotencyKey = createReportIdempotencyKey();
+      const report = await calculateEnergy(payload, { idempotencyKey });
       this.persistLastProfile(form);
       wx.removeStorageSync(ASSESSMENT_DRAFT_KEY);
-      wx.setStorageSync(ENERGY_REPORT_KEY, report);
+      const isVersioned = reportCache.saveReport(user.user_id, report);
+      if (!isVersioned) wx.setStorageSync(ENERGY_REPORT_KEY, report);
       wx.removeStorageSync(ASSESSMENT_RECALCULATE_KEY);
       wx.setStorageSync('energyProfile', {
         name: report.input_summary.name,
@@ -788,7 +798,10 @@ Page({
         wish: report.input_summary.core_wishes.join(' / '),
         luckyStone: '等待生成专属手串'
       });
-      wx.navigateTo({ url: '/pages/report/report' });
+      const reportUrl = isVersioned
+        ? `/pages/report/report?report_id=${encodeURIComponent(report.report_id)}&report_version=${report.report_version}`
+        : '/pages/report/report';
+      wx.navigateTo({ url: reportUrl });
     } catch (error) {
       wx.showToast({ title: error.message || '分析失败，请稍后重试', icon: 'none' });
     } finally {

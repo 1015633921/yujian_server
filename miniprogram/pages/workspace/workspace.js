@@ -3,6 +3,7 @@ const {
   getMaterials,
   saveDIYDesign,
   getSharedDIYDesign,
+  publishDIYDesign,
   uploadDesignPreview
 } = require('../../utils/api');
 const { assetUrl } = require('../../utils/assets');
@@ -113,16 +114,17 @@ const DESIGN_NAME_MODAL_HINT = '给这条手串起个名字，方便后续在我
 const WORKSPACE_DEBUG_LOGS = false;
 const WORKSPACE_SOUND_URLS = {
   collisionSoft: assetUrl('sounds/bead-duang-soft-quick.wav'),
-  collision: assetUrl('sounds/bead-duang-quick.wav'),
-  collisionBright: assetUrl('sounds/bead-duang-bright-quick.wav'),
   shuffle: assetUrl('sounds/string-shuffle.wav')
 };
 const WORKSPACE_SOUND_POOL_SIZE = {
-  collisionSoft: 3,
-  collision: 4,
-  collisionBright: 4,
+  collisionSoft: 1,
   shuffle: 2
 };
+const WORKSPACE_SOUND_VOLUME = {
+  collisionSoft: 0.17,
+  shuffle: 0.18
+};
+const TRAY_IMPACT_FEEDBACK_MIN_SPEED = 1.05;
 const WRIST_RULER_MIN = 10;
 const WRIST_RULER_MAX = 25;
 const WRIST_RULER_STEP = 0.1;
@@ -643,7 +645,7 @@ Page({
     showShareSheet: false,
     sharingDesign: false,
     sharedDesignLoading: false,
-    shareDesignId: '',
+    shareToken: '',
     shareDesignTitle: '宇涧水晶 DIY 手串方案',
     sharePreviewImage: '',
     sourceContext: null,
@@ -686,7 +688,7 @@ Page({
     this.pendingBackendRecommendation = false;
     this.pendingRecommendedRecipe = false;
     this.pendingSharedDesign = null;
-    this.pendingSharedDesignId = '';
+    this.pendingShareToken = '';
     this.materialPayloadReady = false;
     this.useServerMaterialPagination = true;
     this.materialPageState = { page: 0, pageSize: MATERIAL_PAGE_SIZE, total: 0, hasMore: false, key: '' };
@@ -700,11 +702,11 @@ Page({
     this.deferNonCriticalWorkspaceTasks();
     this.categoriesByTop = {};
     this.seriesByCategory = {};
-    const sharedDesignId = this.getSharedDesignIdFromQuery(query);
+    const shareToken = this.getShareTokenFromQuery(query);
     if (wx.showShareMenu) wx.showShareMenu({ menus: ['shareAppMessage'] });
-    if (sharedDesignId) {
-      this.pendingSharedDesignId = sharedDesignId;
-      this.loadSharedDesign(sharedDesignId);
+    if (shareToken) {
+      this.pendingShareToken = shareToken;
+      this.loadSharedDesign(shareToken);
     } else if (query.preset === 'backend-recommended') {
       this.pendingBackendRecommendation = true;
       this.applyBackendRecommendation();
@@ -764,8 +766,8 @@ Page({
     }, this.isLowPerformanceDevice ? 520 : 260);
   },
 
-  getSharedDesignIdFromQuery(query = {}) {
-    const raw = query.shareDesignId || query.share_design_id || query.sharedDesignId || '';
+  getShareTokenFromQuery(query = {}) {
+    const raw = query.shareToken || query.share_token || '';
     if (!raw) return '';
     try {
       return decodeURIComponent(String(raw)).trim();
@@ -774,13 +776,13 @@ Page({
     }
   },
 
-  async loadSharedDesign(designId) {
-    if (!designId) return false;
+  async loadSharedDesign(shareToken) {
+    if (!shareToken) return false;
     this.setData({ sharedDesignLoading: true });
     try {
-      const sharedDesign = await getSharedDIYDesign(designId, { silent: true, timeout: 10000 });
+      const sharedDesign = await getSharedDIYDesign(shareToken, { silent: true, timeout: 10000 });
       this.pendingSharedDesign = sharedDesign;
-      this.pendingSharedDesignId = sharedDesign.design_id || designId;
+      this.pendingShareToken = shareToken;
       if (this.materialPayloadReady) {
         const applied = await this.ensurePendingMaterialDetails({ silent: true, keepPendingOnEmpty: true });
         if (applied) return true;
@@ -790,7 +792,7 @@ Page({
     } catch (error) {
       logWorkspaceWarning('load shared DIY design failed:', error);
       this.pendingSharedDesign = null;
-      this.pendingSharedDesignId = '';
+      this.pendingShareToken = '';
       this.setData({ sharedDesignLoading: false });
       wx.showToast({ title: '分享方案暂时无法打开', icon: 'none' });
       this.loadDraft();
@@ -821,14 +823,14 @@ Page({
       source: 'shared_design',
       source_label: '分享方案',
       title: (summary && summary.name) || '好友分享方案',
-      design_id: sharedDesign.design_id || design.designId || design.design_id || ''
+      design_id: ''
     };
     return {
       ...design,
-      designId: sharedDesign.design_id || design.designId || design.design_id || '',
-      design_id: sharedDesign.design_id || design.design_id || design.designId || '',
-      userId: sharedDesign.user_id || design.userId || design.user_id || '',
-      user_id: sharedDesign.user_id || design.user_id || design.userId || '',
+      designId: '',
+      design_id: '',
+      userId: '',
+      user_id: '',
       selected,
       placements,
       attachedPendants,
@@ -851,7 +853,7 @@ Page({
     if (!selected.length) {
       if (!options.keepPendingOnEmpty) {
         this.pendingSharedDesign = null;
-        this.pendingSharedDesignId = '';
+        this.pendingShareToken = '';
       }
       this.setData({ sharedDesignLoading: false });
       if (!options.silent) wx.showToast({ title: '分享方案缺少可用珠材', icon: 'none' });
@@ -870,7 +872,8 @@ Page({
       isSharedDesign: true
     };
     this.pendingSharedDesign = null;
-    this.pendingSharedDesignId = '';
+    const activeShareToken = this.pendingShareToken || '';
+    this.pendingShareToken = '';
     this.sourceContext = sourceContext;
     wx.setStorageSync('currentDesign', draft);
     wx.setStorageSync('workspaceWristConfirmed', true);
@@ -894,7 +897,7 @@ Page({
       draggingBeadIndex: -1,
       dragDeleteArmed: false,
       sharedDesignLoading: false,
-      shareDesignId: normalized.designId || '',
+      shareToken: activeShareToken,
       shareDesignTitle: this.buildShareDesignTitle(draft),
       sharePreviewImage: draft.preview_image || draft.previewImage || draft.image_url || ''
     });
@@ -1162,8 +1165,11 @@ Page({
     const preferredDrawerTop = preferredRandomButtonTop + randomButtonHeight + actionDrawerGap;
     const idealDrawerHeight = viewportRpx - topChrome - preferredDrawerTop;
     const adaptiveDrawerMax = Math.max(drawerPreferredMax, idealDrawerHeight);
-    const drawerHeight = Math.round(clamp(idealDrawerHeight, drawerMin, adaptiveDrawerMax));
-    const drawerTopInCanvas = Math.max(360, viewportRpx - topChrome - drawerHeight);
+    const baseDrawerHeight = Math.round(clamp(idealDrawerHeight, drawerMin, adaptiveDrawerMax));
+    const drawerTopInCanvas = Math.max(360, viewportRpx - topChrome - baseDrawerHeight);
+    const safeBottom = clamp(Number(bottomInsetRpx) || 0, 0, 88);
+    const drawerLift = Math.round(lerp(64, 96, heightRoom));
+    const drawerHeight = baseDrawerHeight + drawerLift + safeBottom;
     const railWidth = 90;
     const railSide = Math.round(lerp(10, 14, widthRoom));
     const railGap = Math.round(lerp(14, 18, layoutRoom));
@@ -1298,11 +1304,11 @@ Page({
         `--workspace-random-top:${randomButtonTop}rpx`,
         `--workspace-random-width:${randomButtonWidth}rpx`,
         `--workspace-random-height:${randomButtonHeight}rpx`,
-        `--workspace-tool-bottom:${drawerHeight + toolGap}rpx`,
+        `--workspace-tool-bottom:${baseDrawerHeight + toolGap}rpx`,
         `--workspace-tool-height:${toolHeight}rpx`,
         `--workspace-tool-gap:${toolGap}rpx`,
         `--workspace-stage-tool-gap:${stageToolGap}rpx`,
-        `--workspace-safe-bottom:${bottomInsetRpx}rpx`
+        `--workspace-safe-bottom:${safeBottom}rpx`
       ].join(';')
     };
   },
@@ -3027,7 +3033,7 @@ Page({
       walls.push(wall);
     }
     Composite.add(engine.world, walls);
-    this.bindPhysicsCollisionSound(engine);
+    this.bindPhysicsCollisionHandlers(engine);
     this.physicsEngine = engine;
     this.physicsBodies = [];
   },
@@ -3042,10 +3048,11 @@ Page({
     if (!wx.createInnerAudioContext || this.audioPlayersReady) return;
     const createPlayer = (src, name) => {
       const audio = wx.createInnerAudioContext();
-      audio.obeyMuteSwitch = false;
+      audio.obeyMuteSwitch = true;
       audio.autoplay = false;
       audio.loop = false;
       audio.startTime = 0;
+      audio.volume = WORKSPACE_SOUND_VOLUME[name] || 0.18;
       audio.src = src;
       audio.__playing = false;
       if (audio.onCanplay) {
@@ -3109,18 +3116,23 @@ Page({
     return pool[cursor % pool.length];
   },
 
-  playSoundEffect(name, throttleMs = 0) {
+  playSoundEffect(name, throttleMs = 0, options = {}) {
     if (!this.soundEnabled) return;
     this.ensureAudioPlayers();
     const audio = this.pickAudioPlayer(name);
     if (!audio) return;
     const now = Date.now();
-    const lastAt = Number(this.lastSoundAt[name] || 0);
+    const throttleKey = options.throttleKey || name;
+    const lastAt = Number(this.lastSoundAt[throttleKey] || 0);
     if (throttleMs && now - lastAt < throttleMs) return;
-    this.lastSoundAt[name] = now;
+    this.lastSoundAt[throttleKey] = now;
     try {
       if (audio.__playing && audio.stop) audio.stop();
       audio.startTime = 0;
+      const requestedVolume = Number(options.volume);
+      audio.volume = Number.isFinite(requestedVolume)
+        ? Math.max(0, Math.min(1, requestedVolume))
+        : (WORKSPACE_SOUND_VOLUME[name] || 0.18);
       audio.__playing = true;
       audio.play();
     } catch (error) {
@@ -3129,7 +3141,20 @@ Page({
     }
   },
 
-  bindPhysicsCollisionSound(engine) {
+  playMaterialLandingSound(physicsOptions = {}) {
+    const velocity = physicsOptions.velocity || {};
+    const speed = Math.sqrt(
+      (Number(velocity.x) || 0) ** 2 +
+      (Number(velocity.y) || 0) ** 2
+    );
+    const speedRoom = Math.max(1, BILLIARD_LAUNCH_MAX_SPEED * BILLIARD_LAUNCH_SPEED_SCALE);
+    const strength = Math.max(0, Math.min(1, speed / speedRoom));
+    this.playSoundEffect('collisionSoft', 0, {
+      volume: 0.15 + strength * 0.05
+    });
+  },
+
+  bindPhysicsCollisionHandlers(engine) {
     if (!engine || !Events) return;
     if (this.physicsCollisionBoundEngine === engine) return;
     this.physicsCollisionBoundEngine = engine;
@@ -3148,33 +3173,29 @@ Page({
         const bodyA = pair.bodyA;
         const bodyB = pair.bodyB;
         if (!bodyA || !bodyB) return;
-        const plugA = bodyA.plugin || {};
-        const plugB = bodyB.plugin || {};
-        const beadA = plugA.materialId && plugA.designIndex != null;
-        const beadB = plugB.materialId && plugB.designIndex != null;
-        if (!beadA && !beadB) return;
+        const beadBody = this.isWorkspaceBeadBody(bodyA) && this.isTrayWallBody(bodyB)
+          ? bodyA
+          : (this.isWorkspaceBeadBody(bodyB) && this.isTrayWallBody(bodyA) ? bodyB : null);
+        if (!beadBody) return;
+        const beadVelocity = beadBody.velocity || { x: 0, y: 0 };
         const relSpeed = Math.sqrt(
-          (bodyA.velocity.x - bodyB.velocity.x) ** 2 +
-          (bodyA.velocity.y - bodyB.velocity.y) ** 2
+          (Number(beadVelocity.x) || 0) ** 2 +
+          (Number(beadVelocity.y) || 0) ** 2
         );
         if (relSpeed > maxRelSpeed) {
           maxRelSpeed = relSpeed;
           impactVector = {
-            x: bodyA.velocity.x - bodyB.velocity.x,
-            y: bodyA.velocity.y - bodyB.velocity.y
+            x: Number(beadVelocity.x) || 0,
+            y: Number(beadVelocity.y) || 0
           };
         }
       });
-      if (maxRelSpeed <= 0.9) return;
+      if (maxRelSpeed <= TRAY_IMPACT_FEEDBACK_MIN_SPEED) return;
       const now = Date.now();
       if (!this.lastTrayImpactAt || now - this.lastTrayImpactAt > 90) {
         this.lastTrayImpactAt = now;
         this.triggerTrayImpactFeedback(impactVector || { x: 1, y: 0 });
       }
-      const soundName = maxRelSpeed > 2.4
-        ? 'collisionBright'
-        : (maxRelSpeed > 1.45 ? 'collision' : 'collisionSoft');
-      if (this.soundEnabled) this.playSoundEffect(soundName, 40);
     });
   },
 
@@ -3445,7 +3466,6 @@ Page({
       this.stringingStartedAt = Date.now();
       this.physicsStillFrames = 0;
     }
-    this.playSoundEffect('collisionBright', 0);
     this.scheduleCanvasRender(true);
   },
 
@@ -6695,7 +6715,7 @@ Page({
 
   promptInitialWristSize() {
     if (wx.getStorageSync('workspaceWristConfirmed')) return;
-    if (this.pendingSharedDesign || this.pendingSharedDesignId || this.pendingBackendRecommendation || this.pendingRecommendedRecipe) return;
+    if (this.pendingSharedDesign || this.pendingShareToken || this.pendingBackendRecommendation || this.pendingRecommendedRecipe) return;
     const workspacePreset = wx.getStorageSync('workspacePreset');
     if (workspacePreset === 'backend-recommended' || workspacePreset === 'recommended') return;
     this.openWristSetting();
@@ -7301,6 +7321,7 @@ Page({
       this.showMaterialQueueToast('吊坠功能暂未开放');
       return;
     }
+    this.ensureAudioPlayers();
     let currentMaterial = material;
     if (this.canUseHydratedMaterialImagePool(material)) {
       currentMaterial = await this.ensureMaterialImagePool(material);
@@ -7566,6 +7587,7 @@ Page({
       dragDeleteArmed: false
     });
     this.recalculate({ persistDelay: 520 });
+    this.playMaterialLandingSound(physicsOptions);
     wx.nextTick(() => {
       if (previousCount === 0 || !this.physicsEngine || !wasLooseMode) {
         this.stopPhysics();
@@ -9335,9 +9357,9 @@ Page({
     return true;
   },
 
-  buildSharePath(designId) {
-    return designId
-      ? `/pages/workspace/workspace?shareDesignId=${encodeURIComponent(designId)}`
+  buildSharePath(shareToken) {
+    return shareToken
+      ? `/pages/workspace/workspace?shareToken=${encodeURIComponent(shareToken)}`
       : '/pages/workspace/workspace';
   },
 
@@ -9370,10 +9392,13 @@ Page({
         wx.showToast({ title: '方案保存后才能分享', icon: 'none' });
         return;
       }
+      const published = await publishDIYDesign(designId, { silent: true, timeout: 10000 });
+      const shareToken = published && published.share_token;
+      if (!shareToken) throw new Error('分享令牌生成失败');
       this.hideWorkspaceCanvasForOverlay();
       this.setData({
         showShareSheet: true,
-        shareDesignId: designId,
+        shareToken,
         shareDesignTitle: this.buildShareDesignTitle(current),
         sharePreviewImage: current.preview_image || current.previewImage || current.image_url || current.local_preview_image || ''
       });
@@ -9393,22 +9418,22 @@ Page({
 
   onShareAppMessage() {
     const current = wx.getStorageSync('currentDesign') || {};
-    const designId = this.data.shareDesignId || current.designId || current.design_id || '';
+    const shareToken = this.data.shareToken || '';
     const imageUrl = this.data.sharePreviewImage || current.preview_image || current.previewImage || current.image_url || '';
     return {
-      title: designId ? this.buildShareDesignTitle(current) : '打开宇涧水晶 DIY 工作台',
-      path: this.buildSharePath(designId),
+      title: shareToken ? this.buildShareDesignTitle(current) : '打开宇涧水晶 DIY 工作台',
+      path: this.buildSharePath(shareToken),
       imageUrl
     };
   },
 
   onShareTimeline() {
     const current = wx.getStorageSync('currentDesign') || {};
-    const designId = this.data.shareDesignId || current.designId || current.design_id || '';
+    const shareToken = this.data.shareToken || '';
     const imageUrl = this.data.sharePreviewImage || current.preview_image || current.previewImage || current.image_url || '';
     return {
-      title: designId ? this.buildShareDesignTitle(current) : '宇涧水晶 DIY 工作台',
-      query: designId ? `shareDesignId=${encodeURIComponent(designId)}` : '',
+      title: shareToken ? this.buildShareDesignTitle(current) : '宇涧水晶 DIY 工作台',
+      query: shareToken ? `shareToken=${encodeURIComponent(shareToken)}` : '',
       imageUrl
     };
   },

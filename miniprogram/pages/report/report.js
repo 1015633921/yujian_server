@@ -1,4 +1,12 @@
-const { createDIYRecommendation } = require('../../utils/api');
+const {
+  createDIYRecommendation,
+  createReportDIYRecommendation,
+  getReport,
+  getReportBasis,
+  getReportPoster
+} = require('../../utils/api');
+const auth = require('../../utils/auth');
+const reportCache = require('../../utils/reportCache');
 
 const ELEMENT_META = {
   木: { key: 'wood', color: '#548B62', softColor: 'rgba(84,139,98,.12)' },
@@ -15,7 +23,7 @@ const ELEMENT_STYLE_GUIDANCE = {
     colors: '青绿、雾蓝、米白',
     texture: '清透、自然、轻盈',
     structure: '线条舒展、适当留白、疏密有序',
-    reduce: '过多同类绿色和过于松散的结构'
+    reduce: '过多同类绿色、过于松散的结构'
   },
   火: {
     keyword: '明亮有活力',
@@ -24,7 +32,7 @@ const ELEMENT_STYLE_GUIDANCE = {
     colors: '暖红、蜜橙、柔金',
     texture: '明亮、温润、有光泽',
     structure: '重点明确、节奏利落、适量点缀',
-    reduce: '大面积高饱和暖色和过强的视觉对比'
+    reduce: '大面积高饱和暖色、过强视觉对比'
   },
   土: {
     keyword: '沉稳可靠',
@@ -33,16 +41,16 @@ const ELEMENT_STYLE_GUIDANCE = {
     colors: '米白、浅黄、暖棕',
     texture: '温润、柔和、有质感',
     structure: '圆润线条、重心稳定、排列有序',
-    reduce: '大面积黄棕和过度密集的排列'
+    reduce: '大面积黄棕、过密排列与厚重堆叠'
   },
   金: {
     keyword: '利落克制',
     character: '偏利落、克制，有秩序感',
     focus: '清晰与秩序感',
-    colors: '白色、银灰、透明色',
+    colors: '白色、银灰、冷调浅色',
     texture: '通透、干净、细腻',
     structure: '轮廓清晰、比例规整、少量留白',
-    reduce: '过多冷白灰和过于规整的重复'
+    reduce: '过多冷白灰、过于规整的重复'
   },
   水: {
     keyword: '安静细腻',
@@ -51,7 +59,7 @@ const ELEMENT_STYLE_GUIDANCE = {
     colors: '雾蓝、月光白、浅灰蓝',
     texture: '清透、柔和、有流动光泽',
     structure: '圆润过渡、层次柔和、节奏舒缓',
-    reduce: '大面积深色和过于沉静的组合'
+    reduce: '大面积深色、过度沉静的组合'
   }
 };
 const COLOR_FAMILY_LABELS = {
@@ -71,7 +79,7 @@ const COLOR_FAMILY_LABELS = {
   earth: '大地色'
 };
 const TRANSPARENCY_LABELS = {
-  transparent: '清透',
+  transparent: '无色通透',
   semi_transparent: '半透明',
   translucent: '温润通透',
   opaque: '沉稳不透'
@@ -108,6 +116,26 @@ const MBTI_DIMENSION_LABELS = {
   J: '计划有序',
   P: '弹性自由'
 };
+const MOOD_COLOR_LABELS = {
+  '#DCEFF2': '海盐浅蓝',
+  '#F8F7F2': '柔白',
+  '#6D8FA3': '灰雾蓝',
+  '#F0B7C3': '玫瑰粉',
+  '#DDEAD7': '雾感浅绿',
+  '#7EA27E': '花园绿',
+  '#F1C75B': '日光金',
+  '#E9924E': '蜜橙',
+  '#FFF1C8': '奶油浅黄',
+  '#DDD7EF': '薰衣草紫',
+  '#F7F5F0': '月光白',
+  '#8177B4': '柔雾紫',
+  '#8E3F35': '深砖红',
+  '#B9835A': '暖棕',
+  '#E8D8C7': '沙雾米',
+  '#1F2225': '镜面黑',
+  '#C8A95B': '柔金',
+  '#F5F2EA': '暖白'
+};
 const STEPS = [
   { key: 'basic', index: 1, label: '基础', activeClass: 'done' },
   { key: 'wish', index: 2, label: '目标', activeClass: 'done' },
@@ -128,11 +156,57 @@ const ASSESSMENT_RECALCULATE_KEY = 'assessmentRecalculateMode';
 const ASSESSMENT_SUPPRESS_AUTO_REPORT_ONCE_KEY = 'assessmentSuppressAutoReportOnce';
 const ASSESSMENT_REQUESTED_STEP_KEY = 'assessmentRequestedStep';
 const ASSESSMENT_REPORT_SEED_KEY = 'assessmentReportSeed';
+const REPORT_BASIS_VIEW_KEY = 'reportBasisView';
+
+const LOWEST_ELEMENT_EFFECT = {
+  木: '容易显得偏厚重',
+  火: '容易显得不够明快',
+  土: '容易显得承托感不足',
+  金: '容易显得边界不够清晰',
+  水: '容易显得流动感不足'
+};
+
+const ADJUSTMENT_ACTIONS = {
+  木: '提升轻盈舒展',
+  火: '增加明亮活力',
+  土: '加强稳定承托',
+  金: '建立清晰秩序',
+  水: '增加柔和流动'
+};
+
+const STEM_ELEMENTS = {
+  甲: '木',
+  乙: '木',
+  丙: '火',
+  丁: '火',
+  戊: '土',
+  己: '土',
+  庚: '金',
+  辛: '金',
+  壬: '水',
+  癸: '水'
+};
+
+const BAZI_STRENGTH_DISPLAY = {
+  身强: { label: '偏强', description: '整体稳定感较明显' },
+  偏强: { label: '偏强', description: '整体稳定感较明显' },
+  身弱: { label: '偏弱', description: '更适合通过搭配增加承托感' },
+  偏弱: { label: '偏弱', description: '更适合通过搭配增加承托感' },
+  中和: { label: '较均衡', description: '整体结构相对协调' },
+  平和: { label: '较均衡', description: '整体结构相对协调' }
+};
 
 function safeText(value, fallback = '') {
   if (value === null || value === undefined) return fallback;
   const text = String(value).trim();
   return text || fallback;
+}
+
+function formatReportTimestamp(value) {
+  const text = safeText(value);
+  if (!text) return '';
+  const match = text.match(/^(\d{4})-(\d{2})-(\d{2})[T\s](\d{2}):(\d{2})/);
+  return match ? `${match[1]}-${match[2]}-${match[3]} ${match[4]}:${match[5]}` : text;
 }
 
 function uniqueTextValues(values = []) {
@@ -231,6 +305,24 @@ function sanitizeDisplayText(value, fallback = '') {
   DISPLAY_REPLACEMENTS.forEach(([from, to]) => {
     text = text.split(from).join(to);
   });
+  return text;
+}
+
+function softenSeasonalText(value, fallback = '') {
+  let text = sanitizeDisplayText(value, fallback);
+  const replacements = [
+    ['暑火最盛，注意急躁、节奏偏急与过度社交', '近期节奏可能更快，可留意急躁、安排过满或社交消耗'],
+    ['暑火最盛', '近期节奏可能更快'],
+    ['过度社交', '社交消耗'],
+    ['容易', '可能'],
+    ['不宜', '可避免']
+  ];
+  replacements.forEach(([from, to]) => {
+    text = text.split(from).join(to);
+  });
+  if (text.startsWith('注意') && !text.startsWith('注意力')) {
+    text = `可留意${text.slice(2)}`;
+  }
   return text;
 }
 
@@ -539,21 +631,87 @@ Page({
     posterGenerating: false,
     posterPath: '',
     posterSaving: false,
-    showPosterModal: false,
-    showDetails: false
+    showPosterModal: false
   },
 
-  onLoad() {
-    const report = wx.getStorageSync('energyReport');
-    if (report) {
-      const inputSummary = report.input_summary || {};
-      const savedBeadSize = Number(wx.getStorageSync('recommendedBeadSize'));
-      this.setData({
-        report,
-        viewReport: this.buildViewReport(report),
-        avatarChar: safeText(inputSummary.name, '宇').slice(0, 1),
-        beadSize: this.data.beadSizeOptions.includes(savedBeadSize) ? savedBeadSize : 8
-      });
+  onLoad(options = {}) {
+    const reportId = safeText(options.report_id);
+    const reportVersion = Number(options.report_version);
+    this.requestedReportRef = reportId && Number.isInteger(reportVersion) && reportVersion > 0
+      ? { reportId, reportVersion }
+      : null;
+    this.syncReportFromStorage();
+    if (this.requestedReportRef) this.loadRequestedReport();
+  },
+
+  onShow() {
+    this.syncReportFromStorage();
+  },
+
+  syncReportFromStorage() {
+    const storedUser = auth.getStoredUser() || {};
+    const storedUserId = safeText(storedUser.user_id);
+    const requestedRef = this.requestedReportRef || reportCache.getActiveRef(storedUserId);
+    const versionedReport = requestedRef
+      ? reportCache.loadReport(storedUserId, requestedRef.reportId, requestedRef.reportVersion)
+      : null;
+    const report = versionedReport
+      || (this.requestedReportRef ? null : wx.getStorageSync('energyReport'));
+    if (!report) {
+      this.posterArtifact = null;
+      if (this.data.report) this.setData({ report: null, viewReport: null, posterPath: '', showPosterModal: false });
+      return;
+    }
+    const isVersioned = Boolean(report.report_id && report.report_version);
+    const reportUserId = safeText(report.input_summary && report.input_summary.user_id);
+    if (!storedUserId || (!isVersioned && (!reportUserId || storedUserId !== reportUserId))) {
+      this.posterArtifact = null;
+      ['energyReport', 'energyProfile', REPORT_BASIS_VIEW_KEY].forEach(key => wx.removeStorageSync(key));
+      if (this.data.report) this.setData({ report: null, viewReport: null, posterPath: '', showPosterModal: false });
+      return;
+    }
+    const current = this.data.report || {};
+    const sameReport = isVersioned
+      ? safeText(current.report_id) === safeText(report.report_id)
+        && Number(current.report_version) === Number(report.report_version)
+      : safeText(current.assessment_id) === safeText(report.assessment_id)
+        && safeText(current.created_at) === safeText(report.created_at);
+    if (sameReport) return;
+    this.posterArtifact = null;
+    const context = report.report_context || {};
+    const inputSummary = report.input_summary || {
+      name: context.name_initial || '',
+      core_wishes: context.core_wishes || [],
+      mbti: (report.mbti_analysis || {}).type || null,
+      chakra_answers: context.has_chakra_input ? ['snapshot'] : [],
+      mood_palette_id: context.has_mood_input ? 'snapshot' : null
+    };
+    const savedBeadSize = Number(wx.getStorageSync('recommendedBeadSize'));
+    this.setData({
+      report,
+      viewReport: this.buildViewReport(report),
+      avatarChar: safeText(inputSummary.name, '宇').slice(0, 1),
+      beadSize: this.data.beadSizeOptions.includes(savedBeadSize) ? savedBeadSize : 8,
+      posterPath: '',
+      showPosterModal: false
+    });
+  },
+
+  async loadRequestedReport() {
+    const user = auth.getStoredUser() || {};
+    const userId = safeText(user.user_id);
+    const ref = this.requestedReportRef;
+    if (!userId || !ref) return;
+    try {
+      const report = await getReport(ref.reportId, ref.reportVersion, { silent: true });
+      if (!this.requestedReportRef
+        || this.requestedReportRef.reportId !== ref.reportId
+        || this.requestedReportRef.reportVersion !== ref.reportVersion) return;
+      reportCache.saveReport(userId, report);
+      this.syncReportFromStorage();
+    } catch (error) {
+      if (error && error.statusCode === 409) reportCache.removeReport(userId, ref.reportId, ref.reportVersion);
+      wx.showToast({ title: error.message || '报告加载失败', icon: 'none' });
     }
   },
 
@@ -568,12 +726,24 @@ Page({
 
   buildViewReport(report) {
     const profile = normalizeEnergyProfile(report);
-    const rawElements = ELEMENT_ORDER.map(name => ({
-      ...ELEMENT_META[name],
-      name,
-      rawValue: Math.max(0, Number(profile[name]) || 0)
-    }));
-    const displayPercentages = normalizeDisplayPercentages(rawElements);
+    const projection = report.report_projection || {};
+    const projectionByName = {};
+    (projection.elements || []).forEach(item => { projectionByName[item.name] = item; });
+    const rawElements = ELEMENT_ORDER.map(name => {
+      const projected = projectionByName[name] || {};
+      return {
+        ...ELEMENT_META[name],
+        name,
+        rawValue: Math.max(0, Number(projected.raw_value !== undefined ? projected.raw_value : profile[name]) || 0),
+        serverPercent: Number(projected.percent),
+        serverRank: Number(projected.rank)
+      };
+    });
+    const hasServerPercentages = rawElements.every(item => Number.isFinite(item.serverPercent))
+      && rawElements.reduce((sum, item) => sum + item.serverPercent, 0) === 100;
+    const displayPercentages = hasServerPercentages
+      ? rawElements.map(item => item.serverPercent)
+      : normalizeDisplayPercentages(rawElements);
     const elements = rawElements.map((item, index) => {
       const percent = displayPercentages[index];
       return {
@@ -583,10 +753,24 @@ Page({
         width: `${Math.min(100, percent)}%`
       };
     });
-    const score = this.normalizeScore(report.interpretation && report.interpretation.balance_index);
-    const sortedElements = elements.slice().sort((a, b) => b.percent - a.percent);
+    const score = this.normalizeScore(
+      projection.balance && projection.balance.score !== undefined
+        ? projection.balance.score
+        : report.interpretation && report.interpretation.balance_index
+    );
+    const sortedElements = elements.slice().sort((a, b) => {
+      if (Number.isFinite(a.serverRank) && Number.isFinite(b.serverRank)) return a.serverRank - b.serverRank;
+      return b.percent - a.percent || ELEMENT_ORDER.indexOf(a.name) - ELEMENT_ORDER.indexOf(b.name);
+    });
     const styleAnswer = this.buildStyleAnswer(report, sortedElements);
-    const inputSummary = report.input_summary || {};
+    const context = report.report_context || {};
+    const inputSummary = report.input_summary || {
+      name: context.name_initial || '',
+      core_wishes: context.core_wishes || [],
+      mbti: (report.mbti_analysis || {}).type || null,
+      chakra_answers: context.has_chakra_input ? ['snapshot'] : [],
+      mood_palette_id: context.has_mood_input ? 'snapshot' : null
+    };
     const chakraAnalysis = report.chakra_analysis || {};
     const moodAnalysis = report.mood_analysis || {};
     const mbti = this.buildMbtiView(report);
@@ -595,20 +779,30 @@ Page({
       || (chakraAnalysis.primary_chakra && chakraAnalysis.primary_chakra !== 'none')
     );
     const hasMoodInput = Boolean(inputSummary.mood_palette_id || moodAnalysis.palette_id);
+    const solarTime = report.solar_time || {};
     return {
+      assessmentId: safeText(report.assessment_id),
+      createdAt: safeText(report.created_at),
+      generatedAtText: formatReportTimestamp(report.created_at),
       title: sanitizeDisplayText((report.interpretation && report.interpretation.headline) || '你的元素比例参考已生成'),
       mbti,
-      wish: this.buildWishText(report.input_summary || {}),
+      wish: this.buildWishText(inputSummary),
       summary: this.buildSummary(report),
       strongest: report.strongest_element,
       weakest: report.weakest_element,
       balanceIndex: score,
       score,
-      statusText: this.scoreStatus(score),
+      statusText: safeText(projection.balance && projection.balance.label, this.scoreStatus(score)),
       balanceExplanation: this.buildBalanceExplanation(score, sortedElements),
+      balanceStrategyNote: '调节策略由元素关系综合判断，不等同于简单补足最低元素。',
       styleAnswer,
       keyElements: styleAnswer.keyElements,
-      trueSolarTime: report.solar_time && report.solar_time.true_solar_time ? report.solar_time.true_solar_time : '已按出生地校准',
+      trueSolarTime: report.calibration_status === 'applied' ? (solarTime.true_solar_time || '') : '',
+      trueSolarTimeLabel: report.calibration_status === 'applied' && solarTime.true_solar_time ? '校准后时间' : '未完成地点校准',
+      hasTrueSolarTime: report.calibration_status === 'applied' && Boolean(solarTime.true_solar_time),
+      trueSolarTimeDescription: report.calibration_status === 'applied' && solarTime.true_solar_time
+        ? '按出生地点与日期校准'
+        : '当前地点不在已验证坐标数据中，本次未显示校准时间',
       keywords: this.buildKeywordTags(report.energy_keywords),
       seasonal: this.buildSeasonalEnergy(report.seasonal_energy, report),
       bazi: this.buildBaziView(report.bazi_basis || {}),
@@ -635,16 +829,16 @@ Page({
   },
 
   scoreStatus(score) {
-    if (score >= 85) return '比例较接近';
-    if (score >= 70) return '有轻微侧重';
-    if (score >= 55) return '侧重较明显';
-    return '侧重非常鲜明';
+    if (score >= 85) return '分布接近';
+    if (score >= 70) return '轻微侧重';
+    if (score >= 55) return '侧重明显';
+    return '倾向明显';
   },
 
   showBalanceIndexInfo() {
     wx.showModal({
-      title: '元素平衡度说明',
-      content: '范围为 0–100。85–100 表示比例较接近，70–84 表示有轻微侧重，55–69 表示侧重较明显，0–54 表示侧重非常鲜明。分数只反映五项比例的接近程度，不代表好坏、健康状态或佩戴效果。',
+      title: '元素分布均衡度说明',
+      content: '均衡度仅表示五种元素的分布差异。数值越低，代表元素越集中；数值越高，代表分布越接近。它不代表性格、运势、健康或方案质量的好坏。调节策略会综合元素关系判断，不等同于简单补足最低元素。',
       showCancel: false,
       confirmText: '知道了'
     });
@@ -664,11 +858,6 @@ Page({
     const recommendedElements = usefulElements.length ? usefulElements : [lowest.name];
     const recommendedElement = recommendedElements[0];
     const recommendedGuide = ELEMENT_STYLE_GUIDANCE[recommendedElement] || ELEMENT_STYLE_GUIDANCE[lowest.name] || ELEMENT_STYLE_GUIDANCE.木;
-    const strategy = sanitizeDisplayText(
-      report.recommendation_strategy
-      || (report.bazi_basis && report.bazi_basis.strategy)
-      || ''
-    ).replace(/[。！？；]+$/, '');
     const plan = report.bracelet_plan || {};
     const planItems = Array.isArray(plan.items) && plan.items.length
       ? plan.items.filter(Boolean)
@@ -676,52 +865,66 @@ Page({
     const materialNames = uniqueTextValues(planItems.map(item => item.name));
     const colorLabels = uniqueTextValues(planItems.reduce((values, item) => values.concat(
       Array.isArray(item.color_families)
-        ? item.color_families.map(color => COLOR_FAMILY_LABELS[color] || color)
+        ? item.color_families
+          .filter(color => color !== 'clear')
+          .map(color => COLOR_FAMILY_LABELS[color] || color)
         : []
     ), [])).slice(0, 4);
     const textureLabels = uniqueTextValues(planItems.reduce((values, item) => {
       const params = item.material_params || {};
       const itemValues = [TRANSPARENCY_LABELS[params.transparency_level]];
+      if (Array.isArray(item.color_families) && item.color_families.includes('clear')) {
+        itemValues.push('无色通透');
+      }
       (Array.isArray(params.texture_features) ? params.texture_features : []).forEach(feature => {
         itemValues.push(TEXTURE_FEATURE_LABELS[feature] || '天然纹理');
       });
       return values.concat(itemValues);
     }, [])).slice(0, 4);
-    const recommendationLogic = planItems.map(item => {
-      const role = safeText(item.role, '配珠');
-      if (role.includes('主石')) return `${safeText(item.name)}承接当前佩戴目标`;
-      if (role.includes('调和')) return `${safeText(item.name)}负责整体调和`;
-      if (role.includes('点睛')) return `${safeText(item.name)}完成视觉过渡`;
-      return `${safeText(item.name)}作为${role}`;
-    }).filter(Boolean).join('，');
-    const recommendationReasons = uniqueTextValues(planItems.map(item => sanitizeDisplayText(item.reason || '')));
     const hasPlan = materialNames.length > 0;
     const recommendedElementsText = recommendedElements.join(' / ');
+    const adjustmentRoles = usefulElements.length
+      ? ['主要调整', '辅助调整', '少量点缀']
+      : ['建议元素'];
+    const adjustmentElements = recommendedElements.slice(0, 3).map((name, index) => {
+      const guidance = ELEMENT_STYLE_GUIDANCE[name] || ELEMENT_STYLE_GUIDANCE.木;
+      return {
+        name,
+        role: adjustmentRoles[index] || '辅助调整',
+        focus: guidance.focus,
+        description: `增加${guidance.focus}`,
+        color: (ELEMENT_META[name] || {}).color || 'var(--yu-color-text-regular)'
+      };
+    });
+    const strategySummary = this.buildAdjustmentSummary(adjustmentElements);
+    const strategyOrder = this.buildAdjustmentOrder(adjustmentElements);
+    const summaryLead = `${primary.name}元素占比较高，整体${primaryGuide.keyword}；${lowest.name}元素相对较低，${LOWEST_ELEMENT_EFFECT[lowest.name] || '需要适度调和'}。`;
+    const summaryAdvice = `建议${strategySummary}。`;
     return {
       adviceTitle: hasPlan ? '你的真实方案建议' : '你的元素风格建议',
       headline: `${primaryGuide.keyword}，适合加入${recommendedGuide.focus}`,
-      summary: `${primary.name}、${secondary.name}元素占比较高，整体气质${primaryGuide.character}；${lowest.name}元素比例相对较低。搭配建议优先参考${recommendedElementsText}元素${strategy ? `：${strategy}` : `，让整体更有${recommendedGuide.focus}`}。${hasPlan ? `真实方案会以${materialNames.join('、')}完成这组方向。` : ''}`,
+      summary: `${summaryLead}${summaryAdvice}`,
+      summaryLead,
+      summaryAdvice,
       keyElements: [
-        { label: '主要倾向', value: `${primary.name} ${primary.percent}%`, color: primary.color },
-        { label: '次要倾向', value: `${secondary.name} ${secondary.percent}%`, color: secondary.color },
-        { label: '比例较低', value: `${lowest.name} ${lowest.percent}%`, color: lowest.color }
+        this.buildKeyElement('主导元素', primary),
+        this.buildKeyElement('次高元素', secondary),
+        this.buildKeyElement('最低元素', lowest)
       ],
       recommendedElementsText,
+      adjustmentElements,
       recommendationBasisLabel: usefulElements.length ? '搭配建议参考' : '比例调和参考',
       advice: [
-        { label: hasPlan ? '实际配色' : '色彩方向', value: colorLabels.length ? colorLabels.join('、') : recommendedGuide.colors, tone: 'color' },
-        { label: hasPlan ? '实际材质' : '质感方向', value: materialNames.length ? materialNames.join('、') : recommendedGuide.texture, tone: 'texture' },
-        { label: hasPlan ? '实际结构' : '结构方向', value: safeText(plan.pattern, recommendedGuide.structure), tone: 'structure' },
+        { label: '推荐色彩', value: colorLabels.length ? colorLabels.join('、') : recommendedGuide.colors, tone: 'color' },
+        { label: '推荐质感', value: textureLabels.length ? textureLabels.join('、') : recommendedGuide.texture, tone: 'texture' },
+        { label: '结构方向', value: safeText(plan.pattern, recommendedGuide.structure), tone: 'structure' },
         {
-          label: hasPlan ? '搭配逻辑' : '搭配提醒',
-          value: recommendationLogic || strategy || `加入${recommendedGuide.focus}，同时控制${primaryGuide.reduce}。`,
+          label: '尽量避免',
+          value: primaryGuide.reduce,
           tone: 'caution'
         }
       ],
-      evidenceTitle: hasPlan ? `为什么推荐${materialNames.slice(0, 2).join('与')}？` : `为什么建议参考${recommendedElementsText}元素？`,
-      evidence: recommendationReasons.length
-        ? recommendationReasons.slice(0, 2).join('')
-        : `你的${lowest.name}元素占比为 ${lowest.percent}%，在五种元素中相对较低；结合基础测算，搭配建议参考${recommendedElementsText}元素。${strategy || `可从${recommendedGuide.colors}等方向入手，让视觉气质更有${recommendedGuide.focus}。`}`,
+      evidence: `推荐顺序由元素关系与佩戴目标综合得出：${strategyOrder}，并非简单补足占比最低的元素。`,
       source: hasPlan ? 'recommendation' : 'element-fallback',
       recommendationSource: usefulElements.length ? 'backend' : 'ratio-fallback',
       materialNames,
@@ -730,11 +933,42 @@ Page({
     };
   },
 
+  buildAdjustmentSummary(elements = []) {
+    if (!elements.length) return '围绕整体比例做温和调整';
+    const [primary, secondary, accent] = elements;
+    const parts = [`以${primary.name}${ADJUSTMENT_ACTIONS[primary.name] || primary.description}`];
+    if (secondary) parts.push(`以${secondary.name}${ADJUSTMENT_ACTIONS[secondary.name] || secondary.description}`);
+    if (accent) parts.push(`再用少量${accent.name}${ADJUSTMENT_ACTIONS[accent.name] || accent.description}`);
+    return parts.join('，');
+  },
+
+  buildAdjustmentOrder(elements = []) {
+    if (!elements.length) return '围绕整体比例温和调整';
+    if (elements.length === 1) return `参考${elements[0].name}元素`;
+    if (elements.length === 2) return `以${elements[0].name}为主、${elements[1].name}为辅`;
+    return `以${elements[0].name}为主、${elements[1].name}为辅、${elements[2].name}作少量点缀`;
+  },
+
+  buildKeyElement(label, element = {}) {
+    const percent = Math.max(0, Math.min(100, Math.round(Number(element.percent) || 0)));
+    let status = '适中';
+    if (percent >= 25) status = '偏高';
+    if (percent <= 15) status = '偏低';
+    return {
+      label,
+      name: safeText(element.name, '未定'),
+      percent,
+      status,
+      value: `${safeText(element.name, '未定')} ${percent}%`,
+      color: element.color || 'var(--yu-color-text-regular)'
+    };
+  },
+
   buildBalanceExplanation(score, sortedElements = []) {
-    const primary = sortedElements[0] || { name: '优势' };
-    const secondary = sortedElements[1] || primary;
-    const supplement = sortedElements[sortedElements.length - 1] || { name: '可调和' };
-    return `满分 100，数值只表示五项比例的接近程度。当前${primary.name}、${secondary.name}占比较高，${supplement.name}相对较少，会优先影响配色和材质方向。`;
+    if (score >= 85) return '五种元素分布较接近，搭配时可优先保持整体协调。';
+    if (score >= 70) return '五种元素略有侧重，搭配时做少量调和即可。';
+    if (score >= 55) return '五种元素已有明显侧重，搭配会通过色彩、材质和结构适度调和。';
+    return '五种元素分布差异较大，搭配会重点通过色彩、材质和结构进行调和。';
   },
 
   buildMissingInputText(hasChakraInput, hasMoodInput) {
@@ -776,8 +1010,21 @@ Page({
     }).filter(item => item.label);
   },
 
-  toggleDetails() {
-    this.setData({ showDetails: !this.data.showDetails });
+  openReportBasis() {
+    if (!this.data.viewReport) return;
+    const report = this.data.report || {};
+    if (report.report_id && report.report_version) {
+      wx.navigateTo({
+        url: `/pages/report-basis/report-basis?report_id=${encodeURIComponent(report.report_id)}&report_version=${report.report_version}`
+      });
+      return;
+    }
+    wx.setStorageSync(REPORT_BASIS_VIEW_KEY, {
+      assessmentId: safeText(report.assessment_id),
+      createdAt: safeText(report.created_at),
+      viewReport: this.data.viewReport
+    });
+    wx.navigateTo({ url: '/pages/report-basis/report-basis' });
   },
 
   buildSeasonalEnergy(seasonal, report) {
@@ -786,11 +1033,11 @@ Page({
         ...seasonal,
         title: sanitizeDisplayText(seasonal.title || '近期状态提示'),
         period: sanitizeDisplayText(seasonal.period || '近期参考'),
-        seasonal_copy: sanitizeDisplayText(seasonal.seasonal_copy || ''),
-        notice: sanitizeDisplayText(seasonal.notice || ''),
-        drain_point: sanitizeDisplayText(seasonal.drain_point || ''),
-        suggestion: sanitizeDisplayText(seasonal.suggestion || ''),
-        summary: sanitizeDisplayText(seasonal.summary || '')
+        seasonal_copy: softenSeasonalText(seasonal.seasonal_copy || ''),
+        notice: softenSeasonalText(seasonal.notice || ''),
+        drain_point: softenSeasonalText(seasonal.drain_point || ''),
+        suggestion: softenSeasonalText(seasonal.suggestion || ''),
+        summary: softenSeasonalText(seasonal.summary || '')
       };
     }
     const strongest = report.strongest_element || '优势';
@@ -810,10 +1057,21 @@ Page({
   buildBaziView(bazi) {
     const pillars = bazi.pillars || {};
     const useful = Array.isArray(bazi.useful_elements) ? bazi.useful_elements.join(' / ') : '';
+    const rawDayMaster = safeText(bazi.day_master);
+    const dayMasterStem = rawDayMaster.slice(0, 1);
+    const dayMasterElement = STEM_ELEMENTS[dayMasterStem] || '';
+    const professionalStrength = sanitizeDisplayText(bazi.day_master_strength || '');
+    const strengthDisplay = BAZI_STRENGTH_DISPLAY[professionalStrength] || {
+      label: professionalStrength || '已生成',
+      description: professionalStrength ? '作为基础结构的专业参考' : '已形成基础结构参考'
+    };
     return {
       pillarsText: [pillars.year, pillars.month, pillars.day, pillars.time].filter(Boolean).join(' · '),
-      dayMaster: bazi.day_master ? `${bazi.day_master}元素参考` : '',
-      strength: sanitizeDisplayText(bazi.day_master_strength || ''),
+      dayMaster: rawDayMaster ? `${dayMasterStem}${dayMasterElement}` : '',
+      dayMasterDescription: dayMasterElement ? `以${dayMasterElement}元素作为基础结构参考` : '用于形成基础结构参考',
+      strength: strengthDisplay.label,
+      strengthDescription: strengthDisplay.description,
+      professionalStrength,
       usefulText: useful,
       strategy: sanitizeDisplayText(bazi.strategy || '')
     };
@@ -830,11 +1088,18 @@ Page({
   },
 
   buildMoodView(mood) {
+    const name = mood.name || '未选择';
+    const colors = Array.isArray(mood.colors) ? mood.colors : [];
     return {
-      name: mood.name || '未选择',
+      name,
       subtitle: mood.subtitle || '未选择直觉色彩',
       summary: sanitizeDisplayText(mood.summary || '未选择色彩时，系统不额外偏向某一组情绪色。'),
-      colors: Array.isArray(mood.colors) ? mood.colors : []
+      colors,
+      colorSwatches: colors.map((value, index) => ({
+        id: `${index}-${value}`,
+        value,
+        label: MOOD_COLOR_LABELS[safeText(value).toUpperCase()] || `${name}配色 ${index + 1}`
+      }))
     };
   },
 
@@ -888,10 +1153,7 @@ Page({
         analysis.summary
         || `${type} 的偏好线索更接近${keywords.join('、')}，搭配上可参考${fallbackPreference}的表达。`
       ),
-      influence: sanitizeDisplayText(
-        analysis.influence
-        || '以 8/100 的辅助权重参与，用于微调材质气质与推荐排序，不单独决定结果。'
-      )
+      influence: '用于微调材质气质、排列偏好与推荐排序，不单独决定元素结论或最终方案。'
     };
   },
 
@@ -1134,11 +1396,18 @@ Page({
     wx.showLoading({ title: '正在读取方案' });
     try {
       wx.setStorageSync('recommendedBeadSize', this.data.beadSize);
-      const result = await createDIYRecommendation(this.data.report.assessment_id, {
-        wrist_size_cm: wristSize,
-        bead_size_mm: this.data.beadSize
-      });
-      wx.setStorageSync('energyReport', result);
+      const currentReport = this.data.report || {};
+      const result = currentReport.report_id && currentReport.report_version
+        ? await createReportDIYRecommendation(
+          currentReport.report_id,
+          currentReport.report_version,
+          { wrist_size_cm: wristSize, bead_size_mm: this.data.beadSize }
+        )
+        : await createDIYRecommendation(currentReport.assessment_id, {
+          wrist_size_cm: wristSize,
+          bead_size_mm: this.data.beadSize
+        });
+      if (!currentReport.report_id) wx.setStorageSync('energyReport', result);
       wx.setStorageSync('recommendedWristSize', wristSize);
       wx.setStorageSync('workspaceWristConfirmed', true);
       wx.setStorageSync('diyWorkbenchPayload', result.workbench_payload);
@@ -1158,18 +1427,86 @@ Page({
 
   async shareReport() {
     if (!this.data.report || this.data.posterGenerating) return;
-    this.setData({ posterGenerating: true });
+    const sourceReport = this.data.report;
+    const sourceIdentity = sourceReport.report_id
+      ? `${sourceReport.report_id}:v${sourceReport.report_version}`
+      : safeText(sourceReport.assessment_id);
+    this.posterArtifact = null;
+    this.setData({ posterGenerating: true, posterPath: '', showPosterModal: false });
     wx.showLoading({ title: '正在生成海报' });
     try {
+      if (sourceReport.report_id && sourceReport.report_version) {
+        const posterPayload = await getReportPoster(
+          sourceReport.report_id,
+          sourceReport.report_version,
+          { silent: true }
+        );
+        this.posterPayloadHash = posterPayload.sanitized_payload_hash || '';
+        this.posterRenderView = this.buildPosterRenderView(posterPayload);
+      } else {
+        this.posterRenderView = null;
+      }
       const posterPath = await this.generateReportPoster();
+      const currentReport = this.data.report || {};
+      const currentIdentity = currentReport.report_id
+        ? `${currentReport.report_id}:v${currentReport.report_version}`
+        : safeText(currentReport.assessment_id);
+      if (sourceIdentity !== currentIdentity) {
+        throw new Error('报告已更新，请重新生成海报');
+      }
+      this.posterArtifact = {
+        path: posterPath,
+        reportId: sourceReport.report_id || '',
+        reportVersion: Number(sourceReport.report_version) || 0,
+        sanitizedPayloadHash: this.posterPayloadHash || ''
+      };
       this.setData({ posterPath, showPosterModal: true });
     } catch (error) {
       console.warn('generate report poster failed:', error);
       wx.showToast({ title: error.message || '海报生成失败', icon: 'none' });
     } finally {
+      this.posterRenderView = null;
+      this.posterPayloadHash = '';
       wx.hideLoading();
       this.setData({ posterGenerating: false });
     }
+  },
+
+  buildPosterRenderView(payload = {}) {
+    const conclusion = payload.core_conclusion || {};
+    const guidance = payload.style_guidance || {};
+    const balance = payload.balance || {};
+    const elements = (payload.elements || []).map(item => ({
+      ...ELEMENT_META[item.name],
+      name: item.name,
+      percent: Number(item.percent) || 0
+    }));
+    const adjustmentElements = (payload.adjustment_strategy || []).map(item => ({
+      ...ELEMENT_META[item.element],
+      name: item.element,
+      role: item.role,
+      description: ADJUSTMENT_ACTIONS[item.element] || '用于调和整体搭配'
+    }));
+    const advice = [
+      { label: '推荐色彩', value: guidance.recommended_colors || '', tone: 'normal' },
+      { label: '推荐质感', value: guidance.recommended_texture || '', tone: 'normal' },
+      { label: '结构方向', value: guidance.structure_direction || '', tone: 'normal' },
+      { label: '尽量避免', value: guidance.reduce || '', tone: 'caution' }
+    ].filter(item => item.value);
+    return {
+      score: Number(balance.score) || 0,
+      statusText: safeText(balance.label, '元素分布'),
+      elements,
+      keywords: payload.keywords || [],
+      styleAnswer: {
+        headline: safeText(conclusion.title, '找到适合你的搭配方向'),
+        summary: safeText(conclusion.summary, '你的元素比例已经生成，适合继续有序调和。'),
+        adviceTitle: '你的元素风格建议',
+        advice,
+        evidence: '推荐顺序由当前报告快照中的元素关系综合得出。',
+        adjustmentElements
+      }
+    };
   },
 
   closePosterModal() {
@@ -1178,6 +1515,10 @@ Page({
 
   previewPoster() {
     if (!this.data.posterPath) return;
+    if (!this.isPosterArtifactCurrent()) {
+      wx.showToast({ title: '报告已更新，请重新生成海报', icon: 'none' });
+      return;
+    }
     wx.previewImage({
       current: this.data.posterPath,
       urls: [this.data.posterPath]
@@ -1186,6 +1527,10 @@ Page({
 
   savePosterImage() {
     if (!this.data.posterPath || this.data.posterSaving || this.photoAlbumPermissionPending) return;
+    if (!this.isPosterArtifactCurrent()) {
+      wx.showToast({ title: '报告已更新，请重新生成海报', icon: 'none' });
+      return;
+    }
     this.photoAlbumPermissionPending = true;
     this.ensurePhotoAlbumPermission()
       .then(() => {
@@ -1290,6 +1635,10 @@ Page({
   },
 
   savePosterToAlbum() {
+    if (!this.isPosterArtifactCurrent()) {
+      wx.showToast({ title: '报告已更新，请重新生成海报', icon: 'none' });
+      return;
+    }
     if (!wx.saveImageToPhotosAlbum) {
       wx.showModal({
         title: '当前微信版本不支持',
@@ -1333,6 +1682,16 @@ Page({
     });
   },
 
+  isPosterArtifactCurrent() {
+    const report = this.data.report || {};
+    if (!report.report_id) return Boolean(this.data.posterPath);
+    const artifact = this.posterArtifact || {};
+    return artifact.path === this.data.posterPath
+      && artifact.reportId === report.report_id
+      && Number(artifact.reportVersion) === Number(report.report_version)
+      && Boolean(artifact.sanitizedPayloadHash);
+  },
+
   isPhotoAlbumAuthError(message = '') {
     const text = String(message).toLowerCase();
     return text.includes('auth deny')
@@ -1343,21 +1702,34 @@ Page({
       || text.includes('deny');
   },
 
-  restartAssessment() {
-    wx.setStorageSync(ASSESSMENT_RECALCULATE_KEY, true);
-    wx.switchTab({ url: '/pages/assessment/assessment' });
+  async restartAssessment() {
+    await this.prepareAssessmentSeed('basic');
   },
 
-  supplementAssessment() {
+  async supplementAssessment() {
+    await this.prepareAssessmentSeed('state');
+  },
+
+  async prepareAssessmentSeed(step) {
     const report = this.data.report || {};
-    if (report.input_summary) {
+    let inputSummary = report.input_summary || null;
+    if (report.report_id && report.report_version) {
+      try {
+        const basis = await getReportBasis(report.report_id, report.report_version, { silent: true });
+        inputSummary = basis.input_snapshot || null;
+      } catch (error) {
+        wx.showToast({ title: error.message || '读取报告输入失败', icon: 'none' });
+        return;
+      }
+    }
+    if (inputSummary) {
       wx.setStorageSync(ASSESSMENT_REPORT_SEED_KEY, {
-        input_summary: report.input_summary,
+        input_summary: inputSummary,
         created_at: report.created_at || ''
       });
     }
     wx.setStorageSync(ASSESSMENT_RECALCULATE_KEY, true);
-    wx.setStorageSync(ASSESSMENT_REQUESTED_STEP_KEY, 'state');
+    wx.setStorageSync(ASSESSMENT_REQUESTED_STEP_KEY, step);
     wx.switchTab({ url: '/pages/assessment/assessment' });
   },
 
@@ -1423,11 +1795,8 @@ Page({
   drawReportPoster(state) {
     let ctx = state.ctx;
     const report = this.data.report || {};
-    const view = this.data.viewReport || this.buildViewReport(report);
-    const input = report.input_summary || {};
-    const name = safeText(input.name, '你');
-    const mainTitle = `${name}的搭配答案`;
-    const wishText = safeText(view.wish, '保持稳定与清透');
+    const view = this.posterRenderView || this.data.viewReport || this.buildViewReport(report);
+    const mainTitle = '你的搭配答案';
     const styleAnswer = view.styleAnswer || {};
     const summaryText = sanitizeDisplayText(styleAnswer.summary || view.summary, '你的元素比例已经生成，适合以温和的方式继续调和。');
     const styleHeadline = safeText(styleAnswer.headline, '找到适合你的搭配方向');
@@ -1447,12 +1816,18 @@ Page({
       text: item.value,
       accent: item.tone === 'caution' ? '#C83B3D' : '#365C9C'
     }));
-    const recommendRows = (view.recommendationReasons || []).map(item => ({
-      label: `${item.index} ${item.title}`,
-      text: item.desc,
-      meta: item.meta,
-      accent: '#9D7A3F'
-    }));
+    const recommendRows = [
+      {
+        label: '策略说明',
+        text: styleAnswer.evidence,
+        accent: '#9D7A3F'
+      },
+      ...(styleAnswer.adjustmentElements || []).map(item => ({
+        label: `${item.name} · ${item.role}`,
+        text: item.description,
+        accent: '#9D7A3F'
+      }))
+    ].filter(item => item.text);
 
     ctx.font = '700 24px "PingFang SC", "Microsoft YaHei", sans-serif';
     const tagHeight = measurePosterTags(ctx, view.keywords || [], contentX, 0, contentWidth);
@@ -1497,7 +1872,7 @@ Page({
     drawWrappedText(ctx, mainTitle, contentX, 206, 336, 54, 2);
     ctx.fillStyle = '#64615B';
     ctx.font = '500 24px "PingFang SC", "Microsoft YaHei", sans-serif';
-    drawWrappedText(ctx, `目标：${sanitizeDisplayText(wishText)}`, contentX, 320, 340, 34, 2);
+    drawWrappedText(ctx, '仅展示搭配结论，不包含个人测算输入', contentX, 320, 340, 34, 2);
     ctx.fillStyle = '#647C70';
     ctx.font = '800 21px "PingFang SC", "Microsoft YaHei", sans-serif';
     ctx.fillText('搭配方向', contentX, 408);

@@ -1,5 +1,51 @@
 const env = require('../config/env');
 
+const ACCESS_TOKEN_KEY = 'accessToken';
+
+function createRequestId() {
+  const random = Math.random().toString(36).slice(2, 10);
+  return `wx_${Date.now().toString(36)}_${random}`;
+}
+
+function isPublicPath(path) {
+  const cleanPath = String(path || '').split('?')[0];
+  return cleanPath === '/health'
+    || cleanPath === '/api/v1/auth/wechat-login'
+    || cleanPath === '/api/v1/assessment/options'
+    || cleanPath === '/api/v1/crystals/catalog'
+    || cleanPath === '/api/v1/materials'
+    || cleanPath === '/api/v1/content-blocks'
+    || cleanPath === '/api/v1/home-banners'
+    || cleanPath === '/api/v1/community-posts'
+    || cleanPath.indexOf('/api/v1/community-posts/') === 0
+    || cleanPath === '/api/v1/recommendation-plans'
+    || cleanPath.indexOf('/api/v1/recommendation-plans/') === 0
+    || cleanPath === '/api/v1/daily-energy/options'
+    || cleanPath.indexOf('/api/v1/diy-designs/shared/') === 0;
+}
+
+function requestHeaders(path, options = {}) {
+  const headers = { 'content-type': 'application/json', ...(options.header || {}) };
+  headers['X-Request-ID'] = options.requestId || createRequestId();
+  const needsAuth = options.auth !== false && !isPublicPath(path);
+  const token = needsAuth ? wx.getStorageSync(ACCESS_TOKEN_KEY) : '';
+  if (token) headers.Authorization = `Bearer ${token}`;
+  return headers;
+}
+
+function isSafeRetryMethod(method) {
+  return String(method || 'GET').toUpperCase() === 'GET';
+}
+
+function handleUnauthorized(path, options, method) {
+  const needsAuth = options.auth !== false && !isPublicPath(path);
+  if (!needsAuth) return Promise.reject(null);
+  const auth = require('./auth');
+  if (auth.clearPrivateCaches) auth.clearPrivateCaches();
+  if (options.authRetried || !isSafeRetryMethod(method)) return Promise.reject(null);
+  return auth.handleUnauthorized().then(() => request(path, { ...options, authRetried: true }));
+}
+
 function getPlatform() {
   if (wx.getDeviceInfo) {
     const deviceInfo = wx.getDeviceInfo();
@@ -41,8 +87,7 @@ function buildRequestError(path, method, message) {
 
 function logRequestFailure(label, payload, options = {}) {
   const data = {
-    path: payload.path,
-    url: payload.url,
+    path: String(payload.path || '').split('?')[0],
     method: payload.method,
     statusCode: payload.statusCode,
     message: payload.message
@@ -55,11 +100,12 @@ function logRequestFailure(label, payload, options = {}) {
 }
 
 function request(path, options = {}) {
+  const tracedOptions = options.requestId ? options : { ...options, requestId: createRequestId() };
   if (env.useAnyService && wx.cloud && wx.cloud.callContainer) {
-    return requestByAnyService(path, options);
+    return requestByAnyService(path, tracedOptions);
   }
 
-  return requestByUrl(path, options);
+  return requestByUrl(path, tracedOptions);
 }
 
 function requestByAnyService(path, options = {}) {
@@ -69,21 +115,34 @@ function requestByAnyService(path, options = {}) {
     method,
     data: options.data || {},
     header: {
-      ...(options.header || {}),
+      ...requestHeaders(path, options),
       'Content-Type': 'application/json',
       'X-WX-SERVICE': 'tcbanyservice',
       'X-AnyService-Name': env.anyServiceName
     },
     timeout: options.timeout || 10000
   }).then((res) => unwrapResponse(res.statusCode, res.data)).catch((error) => {
-    const accountInfo = wx.getAccountInfoSync ? wx.getAccountInfoSync() : {};
+    if (error && error.statusCode === 401) {
+      return handleUnauthorized(path, options, method).catch((retryError) => {
+        if (retryError) throw retryError;
+        throw error;
+      });
+    }
+    if (error && Number.isFinite(Number(error.statusCode))) {
+      logRequestFailure('AnyService response failed:', {
+        path,
+        method,
+        statusCode: error.statusCode,
+        message: error.message || 'response_unwrap_failed'
+      }, options);
+      throw error;
+    }
     const message = getErrorMessage(error);
     logRequestFailure('AnyService request failed:', {
       path,
       method,
       environment: env.cloudEnvId,
       service: env.anyServiceName,
-      appId: accountInfo.miniProgram && accountInfo.miniProgram.appId,
       message
     }, options);
     throw buildRequestError(path, method, message);
@@ -98,12 +157,18 @@ function requestByUrl(path, options = {}) {
       url,
       method,
       data: options.data || {},
-      header: { 'content-type': 'application/json', ...(options.header || {}) },
+      header: requestHeaders(path, options),
       timeout: options.timeout || 10000,
       success(res) {
         try {
           resolve(unwrapResponse(res.statusCode, res.data));
         } catch (error) {
+          if (error && error.statusCode === 401) {
+            handleUnauthorized(path, options, method).then(resolve).catch((retryError) => {
+              reject(retryError || error);
+            });
+            return;
+          }
           logRequestFailure('api response failed:', {
             path,
             url,
@@ -141,11 +206,36 @@ function unwrapResponse(statusCode, body) {
     return body.data;
   }
 
-  throw new Error((body && (body.message || body.detail)) || `请求失败 (${statusCode})`);
+  const detail = body && body.detail;
+  const message = body && body.message
+    ? body.message
+    : (detail && typeof detail === 'object' ? detail.message : detail);
+  const error = new Error(message || `请求失败 (${statusCode})`);
+  error.statusCode = statusCode;
+  if (detail && typeof detail === 'object' && detail.code) error.code = detail.code;
+  throw error;
+}
+
+function clearSessionOnUnauthorized(error) {
+  if (!error || error.statusCode !== 401) return;
+  const auth = require('./auth');
+  if (auth.clearPrivateCaches) auth.clearPrivateCaches();
 }
 
 function calculateEnergy(payload, options = {}) {
-  return request('/api/v1/assessment/energy', { ...options, method: 'POST', data: payload });
+  const idempotencyKey = String(options.idempotencyKey || '').trim();
+  const execute = () => request('/api/v1/assessment/energy', {
+    ...options,
+    method: 'POST',
+    data: payload,
+    header: { ...(options.header || {}), 'Idempotency-Key': idempotencyKey }
+  });
+  return execute().catch(error => {
+    if (!options.networkRetried && isTimeoutMessage(error && (error.rawMessage || error.message))) {
+      return calculateEnergy(payload, { ...options, idempotencyKey, networkRetried: true });
+    }
+    throw error;
+  });
 }
 
 function getAssessmentOptions(options = {}) {
@@ -171,8 +261,41 @@ function createDIYRecommendation(assessmentId, payload, options = {}) {
   return request(`/api/v1/assessment/${assessmentId}/diy-recommendation`, { ...options, method: 'POST', data: payload });
 }
 
+function getReport(reportId, reportVersion, options = {}) {
+  return request(`/api/v1/reports/${encodeURIComponent(reportId)}?report_version=${encodeURIComponent(reportVersion)}`, options);
+}
+
+function getReportBasis(reportId, reportVersion, options = {}) {
+  return request(`/api/v1/reports/${encodeURIComponent(reportId)}/basis?report_version=${encodeURIComponent(reportVersion)}`, options);
+}
+
+function getReportPoster(reportId, reportVersion, options = {}) {
+  return request(`/api/v1/reports/${encodeURIComponent(reportId)}/poster?report_version=${encodeURIComponent(reportVersion)}`, options);
+}
+
+function createReportDIYRecommendation(reportId, reportVersion, payload, options = {}) {
+  return request(`/api/v1/reports/${encodeURIComponent(reportId)}/diy-recommendation`, {
+    ...options,
+    method: 'POST',
+    data: {
+      ...payload,
+      report_id: reportId,
+      expected_report_version: Number(reportVersion)
+    }
+  });
+}
+
 function wechatLogin(payload, options = {}) {
-  return request('/api/v1/auth/wechat-login', { ...options, method: 'POST', data: payload });
+  return request('/api/v1/auth/wechat-login', { ...options, auth: false, method: 'POST', data: payload });
+}
+
+function logoutSession(token, options = {}) {
+  return request('/api/v1/auth/logout', {
+    ...options,
+    auth: false,
+    method: 'POST',
+    header: { ...(options.header || {}), Authorization: `Bearer ${token}` }
+  });
 }
 
 function getUserProfile(userId, options = {}) {
@@ -246,12 +369,14 @@ function uploadAvatar(filePath, userId) {
       filePath,
       name: 'file',
       formData: { user_id: userId },
+      header: requestHeaders('/api/v1/auth/avatar'),
       timeout: 15000,
       success(res) {
         try {
           const body = typeof res.data === 'string' ? JSON.parse(res.data) : res.data;
           resolve(unwrapResponse(res.statusCode, body));
         } catch (error) {
+          clearSessionOnUnauthorized(error);
           logRequestFailure('avatar upload response failed:', {
             path: '/api/v1/auth/avatar',
             url,
@@ -289,12 +414,14 @@ function uploadDesignPreview(filePath, userId) {
       filePath,
       name: 'file',
       formData: { user_id: userId },
+      header: requestHeaders('/api/v1/diy-designs/preview'),
       timeout: 15000,
       success(res) {
         try {
           const body = typeof res.data === 'string' ? JSON.parse(res.data) : res.data;
           resolve(unwrapResponse(res.statusCode, body));
         } catch (error) {
+          clearSessionOnUnauthorized(error);
           logRequestFailure('design preview upload response failed:', {
             path: '/api/v1/diy-designs/preview',
             url,
@@ -423,16 +550,41 @@ function getRecommendationPlan(planId, options = {}) {
   return request(`/api/v1/recommendation-plans/${encodeURIComponent(planId)}`, options);
 }
 
-function createOrder(payload) {
-  return request('/api/v1/orders', { method: 'POST', data: payload });
+function createOrder(payload, options = {}) {
+  const idempotencyKey = String(options.idempotencyKey || '').trim();
+  const execute = () => request('/api/v1/orders', {
+    method: 'POST',
+    data: payload,
+    header: { 'Idempotency-Key': idempotencyKey }
+  });
+  return execute().catch((error) => {
+    if (!options.networkRetried && isTimeoutMessage(error && (error.rawMessage || error.message))) {
+      return createOrder(payload, { ...options, idempotencyKey, networkRetried: true });
+    }
+    throw error;
+  });
 }
 
 function saveDIYDesign(payload) {
   return request('/api/v1/diy-designs', { method: 'POST', data: payload });
 }
 
-function getSharedDIYDesign(designId, options = {}) {
-  return request(`/api/v1/diy-designs/shared/${encodeURIComponent(designId)}`, options);
+function getSharedDIYDesign(shareToken, options = {}) {
+  return request(`/api/v1/diy-designs/shared/${encodeURIComponent(shareToken)}`, { ...options, auth: false });
+}
+
+function publishDIYDesign(designId, options = {}) {
+  return request(`/api/v1/diy-designs/${encodeURIComponent(designId)}/share`, {
+    ...options,
+    method: 'POST'
+  });
+}
+
+function revokeDIYDesignShare(designId, options = {}) {
+  return request(`/api/v1/diy-designs/${encodeURIComponent(designId)}/share`, {
+    ...options,
+    method: 'DELETE'
+  });
 }
 
 function getCartItems(userId, options = {}) {
@@ -480,6 +632,13 @@ function getOrder(orderId, userId) {
   return request(
     `/api/v1/orders/${encodeURIComponent(orderId)}?user_id=${encodeURIComponent(userId)}`
   );
+}
+
+function getOrderPaymentStatus(orderId, options = {}) {
+  return request(`/api/v1/orders/${encodeURIComponent(orderId)}/payment-status`, {
+    silent: options.silent !== false,
+    timeout: options.timeout || 8000
+  });
 }
 
 function payOrder(orderId, userId) {
@@ -557,7 +716,12 @@ module.exports = {
   getPrivacyDataSummary,
   deletePersonalizationData,
   createDIYRecommendation,
+  getReport,
+  getReportBasis,
+  getReportPoster,
+  createReportDIYRecommendation,
   wechatLogin,
+  logoutSession,
   getUserProfile,
   saveUserProfile,
   uploadAvatar,
@@ -577,6 +741,8 @@ module.exports = {
   getRecommendationPlan,
   saveDIYDesign,
   getSharedDIYDesign,
+  publishDIYDesign,
+  revokeDIYDesignShare,
   getCartItems,
   saveCartItem,
   updateCartItem,
@@ -585,6 +751,7 @@ module.exports = {
   createOrder,
   getOrders,
   getOrder,
+  getOrderPaymentStatus,
   payOrder,
   mockPayOrder,
   mockShipOrder,

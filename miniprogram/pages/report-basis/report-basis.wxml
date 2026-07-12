@@ -1,0 +1,192 @@
+<view class="basis-page yu-page" wx:if="{{viewReport}}">
+  <view class="basis-head">
+    <view class="basis-kicker">REPORT BASIS</view>
+    <view class="basis-title">测算依据</view>
+    <view class="basis-intro">这里展示本次搭配使用的输入与影响方式，不重复最终搭配结论。</view>
+    <view class="basis-privacy-note">
+      <view class="basis-privacy-mark">隐私保护</view>
+      <text>本页用于查看个人测算输入，生成或分享海报时默认隐藏这些内容。</text>
+    </view>
+  </view>
+
+  <view class="basis-section">
+    <view class="basis-section-head">
+      <view class="basis-index">01</view>
+      <view>
+        <view class="basis-section-title-line">
+          <view class="basis-section-title">出生信息与基础结构</view>
+          <view class="private-pill">个人输入</view>
+        </view>
+        <view class="basis-section-subtitle">用于形成基础元素结构</view>
+      </view>
+    </view>
+    <view class="basis-professional-row">
+      <text>专业排盘</text>
+      <view>{{viewReport.bazi.pillarsText || '已按出生地时间校准'}}</view>
+    </view>
+    <view class="basis-facts">
+      <view class="basis-fact">
+        <text>核心元素参考</text>
+        <view>{{viewReport.bazi.dayMaster || '已生成'}}</view>
+        <text class="basis-fact-note">{{viewReport.bazi.dayMasterDescription}}</text>
+      </view>
+      <view class="basis-fact">
+        <text>结构倾向</text>
+        <view>{{viewReport.bazi.strength || '中和'}}</view>
+        <text class="basis-fact-note">{{viewReport.bazi.strengthDescription}}</text>
+      </view>
+      <view class="basis-fact basis-time-fact">
+        <text>{{viewReport.trueSolarTimeLabel}}</text>
+        <view>{{viewReport.trueSolarTime}}</view>
+        <view class="basis-time-explain">
+          <text class="basis-fact-note">{{viewReport.trueSolarTimeDescription}}</text>
+          <view wx:if="{{viewReport.hasTrueSolarTime}}" class="basis-time-help yu-pressable" catchtap="showSolarTimeInfo" aria-role="button" aria-label="查看校准后时间说明">?</view>
+        </view>
+      </view>
+    </view>
+  </view>
+
+  <view class="basis-section" wx:if="{{viewReport.hasMbtiInput}}">
+    <view class="basis-section-head">
+      <view class="basis-index">02</view>
+      <view>
+        <view class="basis-section-title">MBTI 偏好影响</view>
+        <view class="basis-section-subtitle">辅助参考，用于表达方式与排列偏好</view>
+      </view>
+    </view>
+    <view class="mbti-summary-line">
+      <view class="mbti-type">{{viewReport.mbti.type}}</view>
+      <view class="basis-pill">辅助参考</view>
+    </view>
+    <view class="basis-copy">偏好{{mbtiKeywordText}}。</view>
+    <view class="basis-note">{{viewReport.mbti.influence}}</view>
+  </view>
+
+  <view class="basis-section">
+    <view class="basis-section-head">
+      <view class="basis-index">03</view>
+      <view>
+        <view class="basis-section-title">当下状态与直觉色彩</view>
+        <view class="basis-section-subtitle">影响本次色彩与氛围建议</view>
+      </view>
+    </view>
+    <block wx:if="{{viewReport.hasLiveInput}}">
+      <view class="basis-info-row" wx:if="{{viewReport.hasChakraInput}}">
+        <view class="basis-info-label">当前状态</view>
+        <view class="basis-info-content">
+          <view>{{viewReport.chakra.name}}</view>
+          <text>{{viewReport.chakra.summary}}</text>
+        </view>
+      </view>
+      <view class="basis-info-row" wx:if="{{viewReport.hasMoodInput}}">
+        <view class="basis-info-label">直觉色彩</view>
+        <view class="basis-info-content">
+          <view>{{viewReport.mood.name}}</view>
+          <text>{{viewReport.mood.summary}}</text>
+          <view class="color-swatches" wx:if="{{viewReport.mood.colorSwatches.length}}" aria-label="{{viewReport.mood.name}}配色">
+            <view wx:for="{{viewReport.mood.colorSwatches}}" wx:key="id" class="color-swatch-item" aria-label="{{item.label}}">
+              <view class="color-swatch" style="background: {{item.value}};"></view>
+              <text>{{item.label}}</text>
+            </view>
+          </view>
+        </view>
+      </view>
+    </block>
+    <view class="basis-empty-line" wx:else>未补充本项，本次按中性信息处理。</view>
+  </view>
+
+  <view class="basis-section" wx:if="{{viewReport.zodiac.name}}">
+    <view class="basis-section-head">
+      <view class="basis-index">04</view>
+      <view>
+        <view class="basis-section-title">星座气质参考</view>
+        <view class="basis-section-subtitle">辅助参考，用于气质表达</view>
+      </view>
+    </view>
+    <view class="zodiac-line">
+      <view class="basis-emphasis">{{viewReport.zodiac.name}}</view>
+      <view class="basis-pill">{{viewReport.zodiac.element}} · {{viewReport.zodiac.modality}}</view>
+    </view>
+    <view class="basis-copy">{{viewReport.zodiac.summary}}</view>
+    <view class="basis-note" wx:if="{{viewReport.zodiac.suggestion}}">{{viewReport.zodiac.suggestion}}</view>
+  </view>
+
+  <view class="basis-section" wx:if="{{viewReport.keywords.length}}">
+    <view class="basis-section-head">
+      <view class="basis-index">05</view>
+      <view>
+        <view class="basis-section-title">搭配关键词</view>
+        <view class="basis-section-subtitle">概括本次方案的表达方向</view>
+      </view>
+    </view>
+    <view class="keyword-tags">
+      <view wx:for="{{viewReport.keywords}}" wx:key="label" class="keyword-tag">
+        <text>{{item.label}}</text>
+        <view wx:if="{{item.source}}">{{item.source}}</view>
+      </view>
+    </view>
+  </view>
+
+  <view class="basis-section">
+    <view class="basis-section-head">
+      <view class="basis-index">06</view>
+      <view>
+        <view class="basis-section-title">近期状态提示</view>
+        <view class="basis-section-subtitle">辅助参考，用于近期节奏</view>
+      </view>
+    </view>
+    <view class="season-heading">
+      <view class="basis-emphasis">{{viewReport.seasonal.period}}</view>
+      <view class="season-pill">{{viewReport.seasonal.seasonal_element}}元素参考</view>
+    </view>
+    <view class="basis-copy">{{viewReport.seasonal.seasonal_copy}}</view>
+    <view class="basis-info-row compact">
+      <view class="basis-info-label">留意点</view>
+      <view class="basis-info-content"><text>{{viewReport.seasonal.drain_point}}</text></view>
+    </view>
+    <view class="basis-info-row compact">
+      <view class="basis-info-label">建议</view>
+      <view class="basis-info-content"><text>{{viewReport.seasonal.suggestion}}</text></view>
+    </view>
+  </view>
+
+  <view class="basis-section generation-section">
+    <view class="basis-section-head">
+      <view class="basis-index">07</view>
+      <view>
+        <view class="basis-section-title">方案生成逻辑</view>
+        <view class="basis-section-subtitle">只说明参与信息，不重复最终结论</view>
+      </view>
+    </view>
+    <view class="basis-copy">{{inputSummaryText}}</view>
+    <view class="basis-note">{{generationLogicText}}</view>
+  </view>
+
+  <view class="basis-report-meta" wx:if="{{generatedAtText}}">
+    <text>本次报告生成于</text>
+    <view>{{generatedAtText}}</view>
+  </view>
+
+  <view
+    class="basis-edit-entry yu-pressable"
+    bindtap="restartAssessment"
+    aria-role="button"
+    aria-label="信息有误，重新填写"
+  >
+    <view>
+      <view class="basis-edit-title">信息有误？重新填写</view>
+      <text>保留当前内容，修改后重新生成搭配报告</text>
+    </view>
+    <view class="basis-edit-arrow">›</view>
+  </view>
+
+  <view class="experience-note">
+    本分析仅用于传统文化体验、审美搭配与个性化 DIY 参考，不构成命理定论、医疗健康建议或效果承诺。
+  </view>
+</view>
+
+<view class="basis-empty yu-page" wx:else>
+  <view class="basis-empty-title">{{emptyTitle}}</view>
+  <view class="basis-empty-copy">{{emptyCopy}}</view>
+  <button class="yu-button yu-button-primary basis-empty-button" bindtap="goBack">返回搭配报告</button>
+</view>

@@ -3,9 +3,13 @@ import pytest
 from uuid import uuid4
 
 from app.main import app
+from app.api import order_service as api_order_service
+from app.migrations.runner import upgrade
+from app.money import money_to_cents
 from app.order_service import OrderService, generate_numeric_order_no, now_iso
 from app.repository import AssessmentRepository
 from app.service import AssessmentService, DIY_RECOMMENDATION_CACHE_VERSION
+from app.user_sessions import session_service
 
 client = TestClient(app)
 
@@ -20,6 +24,56 @@ PAYLOAD = {
     "wrist_size_cm": 15.5,
     "bead_size_mm": 8,
 }
+
+
+def auth_headers(user_id: str) -> dict[str, str]:
+    session = session_service.create(user_id)
+    return {"Authorization": f"Bearer {session['access_token']}"}
+
+
+def migrate_order_integrity(db_path) -> None:
+    from app.admin_service import AdminService
+
+    AdminService(db_path)
+    OrderService(db_path)
+    upgrade("sqlite", db_path)
+
+
+def seed_simple_order_sku(service: OrderService, sku_id: str = "test-order-sku", price: str = "18.00", stock: int = 100) -> str:
+    timestamp = now_iso()
+    with service.connect() as connection:
+        existing = connection.execute("SELECT id FROM managed_materials WHERE id = ?", (sku_id,)).fetchone()
+        if not existing:
+            connection.execute(
+                """
+                INSERT INTO managed_materials
+                (id, skuId, top, category, series, material_code, grade, name, effect,
+                 element, price, price_cents, size, weight, cost_price, safety_stock, supplier_name,
+                 purchase_note, color, shine, image_path, image_url, image_urls_json,
+                 stock, reserved_stock, enabled, sort_order, created_at, updated_at)
+                VALUES (?, ?, 'bead', 'test', 'Test Series', ?, '', '测试珠子', '', '水', ?, ?,
+                        8, 1, 0, 0, '', '', '#fff', '#fff', '', '', '[]', ?, 0, 1, 0, ?, ?)
+                """,
+                (sku_id, sku_id, sku_id, price, money_to_cents(price, field_name="测试价格"), stock, timestamp, timestamp),
+            )
+    return sku_id
+
+
+def create_test_order(service: OrderService, payload: dict, price: str | None = None):
+    migrate_order_integrity(service.db_path)
+    first_item = (payload.get("sequence") or [{}])[0]
+    price = price or str(first_item.get("price") or "18.00")
+    sku_id = seed_simple_order_sku(service, price=price)
+    secure_payload = {**payload, "idempotency_key": payload.get("idempotency_key") or f"test-{uuid4().hex}"}
+    secure_payload["sequence"] = [
+        {
+            **item,
+            "id": item.get("id") or sku_id,
+            "price": item.get("price", price),
+        }
+        for item in secure_payload.get("sequence") or []
+    ]
+    return service.create_order(secure_payload)
 
 
 def ensure_material_taxonomy(service, category: str, series: str, top: str = "bead") -> None:
@@ -846,12 +900,14 @@ def test_order_rejects_stale_material_price(tmp_path):
             "enabled": True,
         }
     )
+    migrate_order_integrity(db_path)
     service = OrderService(db_path)
     service.get_user = lambda _user_id: None
 
-    with pytest.raises(ValueError, match="珠材价格已更新"):
+    with pytest.raises(ValueError, match="价格已更新"):
         service.create_order(
             {
+                "idempotency_key": f"stale-price-{uuid4().hex}",
                 "user_id": "price-check-user",
                 "receiver": {
                     "name": "Test User",
@@ -865,7 +921,7 @@ def test_order_rejects_stale_material_price(tmp_path):
         )
 
 
-def test_order_repairs_legacy_zero_price_without_snapshot(tmp_path, monkeypatch):
+def test_order_rejects_legacy_zero_price_without_snapshot(tmp_path, monkeypatch):
     from app.admin_service import AdminService
 
     monkeypatch.setenv("WECHAT_PAY_TEST_MODE", "false")
@@ -888,26 +944,25 @@ def test_order_repairs_legacy_zero_price_without_snapshot(tmp_path, monkeypatch)
             "enabled": True,
         }
     )
+    migrate_order_integrity(db_path)
     service = OrderService(db_path)
     service.get_user = lambda _user_id: None
 
-    result = service.create_order(
-        {
-            "user_id": "legacy-zero-user",
-            "receiver": {
-                "name": "Test User",
-                "phone": "13800000000",
-                "address": "Test Address",
-            },
-            "design": {"summary": {"price": 0}},
-            "sequence": [{"id": saved["id"], "sku": saved["skuId"], "name": saved["name"], "price": 0}],
-            "bom": [],
-        }
-    )
-    order = result["order"]
-
-    assert order["total_amount"] == 0.01
-    assert order["sequence"][0]["price"] == 0.01
+    with pytest.raises(ValueError, match="价格已更新"):
+        service.create_order(
+            {
+                "idempotency_key": f"zero-price-{uuid4().hex}",
+                "user_id": "legacy-zero-user",
+                "receiver": {
+                    "name": "Test User",
+                    "phone": "13800000000",
+                    "address": "Test Address",
+                },
+                "design": {"summary": {"price": 0}},
+                "sequence": [{"id": saved["id"], "sku": saved["skuId"], "name": saved["name"], "price": 0}],
+                "bom": [],
+            }
+        )
 
 
 def test_order_uses_current_material_price_snapshot(tmp_path, monkeypatch):
@@ -933,10 +988,12 @@ def test_order_uses_current_material_price_snapshot(tmp_path, monkeypatch):
             "enabled": True,
         }
     )
+    migrate_order_integrity(db_path)
     service = OrderService(db_path)
     service.get_user = lambda _user_id: None
     result = service.create_order(
         {
+            "idempotency_key": f"current-price-{uuid4().hex}",
             "user_id": "current-price-user",
             "receiver": {
                 "name": "Test User",
@@ -949,7 +1006,7 @@ def test_order_uses_current_material_price_snapshot(tmp_path, monkeypatch):
         }
     )
 
-    assert result["order"]["total_amount"] == 3.5
+    assert result["order"]["total_amount"] == "3.50"
     assert result["order"]["bom"][0]["qty"] == 1
 
 
@@ -983,10 +1040,12 @@ def test_order_material_snapshot_survives_material_update_and_delete(tmp_path, m
             ],
         }
     )
+    migrate_order_integrity(db_path)
     service = OrderService(db_path)
     service.get_user = lambda _user_id: None
     result = service.create_order(
         {
+            "idempotency_key": f"snapshot-{uuid4().hex}",
             "user_id": "snapshot-user",
             "receiver": {
                 "name": "Test User",
@@ -999,6 +1058,7 @@ def test_order_material_snapshot_survives_material_update_and_delete(tmp_path, m
         }
     )
     order_id = result["order"]["order_id"]
+    service.cancel_order(order_id, "snapshot-user", "释放测试预占后验证快照")
 
     admin.save_material(
         {
@@ -1023,20 +1083,20 @@ def test_order_material_snapshot_survives_material_update_and_delete(tmp_path, m
     for order in (user_order, admin_order):
         item = order["sequence"][0]
         bom = order["bom"][0]
-        assert order["total_amount"] == 8.8
+        assert order["total_amount"] == "8.80"
         assert item["name"] == "Original Snapshot Bead"
         assert item["category"] == "original-category"
         assert item["series"] == "Original Series"
         assert item["effect"] == "original effect"
         assert item["element"] == "water"
-        assert item["price"] == 8.8
+        assert item["price"] == "8.80"
         assert item["image_url"].endswith("/original.png")
         assert item["image_urls"] == [
             "https://cdn-test.yustream.cn/materials/beads/original.png",
             "https://cdn-test.yustream.cn/materials/beads/original-side.png",
         ]
         assert bom["name"] == "Original Snapshot Bead"
-        assert bom["price"] == 8.8
+        assert bom["price"] == "8.80"
 
 
 def test_generated_order_numbers_are_numeric_fixed_length_and_unique():
@@ -1049,7 +1109,7 @@ def test_generated_order_numbers_are_numeric_fixed_length_and_unique():
 def test_created_order_uses_same_numeric_id_for_payment_trade_no(tmp_path):
     service = OrderService(tmp_path / "orders.db")
     service.get_user = lambda _user_id: None
-    result = service.create_order(
+    result = create_test_order(service,
         {
             "user_id": "numeric-order-user",
             "receiver": {
@@ -1069,11 +1129,11 @@ def test_created_order_uses_same_numeric_id_for_payment_trade_no(tmp_path):
     assert order["out_trade_no"] == order["order_id"]
 
 
-def test_wechat_pay_test_mode_forces_one_cent(tmp_path, monkeypatch):
+def test_wechat_pay_test_mode_does_not_override_server_price(tmp_path, monkeypatch):
     monkeypatch.setenv("WECHAT_PAY_TEST_MODE", "true")
     service = OrderService(tmp_path / "orders-test-pay.db")
     service.get_user = lambda _user_id: None
-    result = service.create_order(
+    result = create_test_order(service,
         {
             "user_id": "one-cent-user",
             "receiver": {
@@ -1087,8 +1147,8 @@ def test_wechat_pay_test_mode_forces_one_cent(tmp_path, monkeypatch):
         }
     )
 
-    assert result["order"]["total_amount"] == 0.01
-    assert result["order"]["total_fee"] == 1
+    assert result["order"]["total_amount"] == "999.00"
+    assert result["order"]["total_fee"] == 99900
 
 
 def test_wechat_login_profile_and_phone_flow_without_secret(monkeypatch):
@@ -1103,11 +1163,13 @@ def test_wechat_login_profile_and_phone_flow_without_secret(monkeypatch):
     monkeypatch.setenv("ALLOW_MANUAL_PHONE_BIND", "true")
     login_code = f"unit-test-login-code-{uuid4()}"
     login = client.post("/api/v1/auth/wechat-login", json={"code": login_code})
-    user = login.json()["data"]
+    session = login.json()["data"]
+    user = session["user"]
+    headers = {"Authorization": f"Bearer {session['access_token']}"}
 
     assert login.status_code == 200
     assert user["user_id"].isdigit()
-    assert user["openid"].startswith("dev_")
+    assert "openid" not in user
     assert user["has_profile"] is False
 
     profile = client.post(
@@ -1118,6 +1180,7 @@ def test_wechat_login_profile_and_phone_flow_without_secret(monkeypatch):
             "avatar_url": "https://example.com/avatar.png",
             "gender": "1",
         },
+        headers=headers,
     )
     updated = profile.json()["data"]
 
@@ -1128,13 +1191,14 @@ def test_wechat_login_profile_and_phone_flow_without_secret(monkeypatch):
     phone = client.post(
         "/api/v1/auth/phone",
         json={"user_id": user["user_id"], "phone_number": "13800000000"},
+        headers=headers,
     )
 
     assert phone.status_code == 200
     assert phone.json()["data"]["has_phone"] is True
 
     repeat = client.post("/api/v1/auth/wechat-login", json={"code": login_code})
-    repeat_user = repeat.json()["data"]
+    repeat_user = repeat.json()["data"]["user"]
 
     assert repeat.status_code == 200
     assert repeat_user["user_id"] == user["user_id"]
@@ -1277,11 +1341,13 @@ def test_manual_phone_binding_is_disabled_by_default(monkeypatch):
     monkeypatch.setattr(auth_service, "app_id", None)
     monkeypatch.setattr(auth_service, "app_secret", None)
     login = client.post("/api/v1/auth/wechat-login", json={"code": f"manual-phone-{uuid4()}"})
-    user = login.json()["data"]
+    session = login.json()["data"]
+    user = session["user"]
 
     response = client.post(
         "/api/v1/auth/phone",
         json={"user_id": user["user_id"], "phone_number": "13800000000"},
+        headers={"Authorization": f"Bearer {session['access_token']}"},
     )
 
     assert response.status_code == 400
@@ -1291,7 +1357,7 @@ def test_manual_phone_binding_is_disabled_by_default(monkeypatch):
 def test_order_detail_checks_owner(tmp_path):
     service = OrderService(tmp_path / "order-detail.db")
     service.get_user = lambda _user_id: None
-    result = service.create_order(
+    result = create_test_order(service,
         {
             "user_id": "detail-owner",
             "receiver": {"name": "测试用户", "phone": "13800000000", "address": "测试地址"},
@@ -1314,7 +1380,7 @@ def test_order_detail_checks_owner(tmp_path):
 def test_pending_order_can_be_cancelled(tmp_path):
     service = OrderService(tmp_path / "order-cancel.db")
     service.get_user = lambda _user_id: None
-    result = service.create_order(
+    result = create_test_order(service,
         {
             "user_id": "cancel-owner",
             "receiver": {"name": "测试用户", "phone": "13800000000", "address": "测试地址"},
@@ -1339,7 +1405,7 @@ def test_order_receiver_can_only_change_before_shipping(tmp_path, monkeypatch):
     monkeypatch.setenv("WECHAT_PAY_TEST_MODE", "true")
     service = OrderService(tmp_path / "order-receiver.db")
     service.get_user = lambda _user_id: None
-    result = service.create_order(
+    result = create_test_order(service,
         {
             "user_id": "receiver-owner",
             "receiver": {"name": "测试用户", "phone": "13800000000", "address": "旧地址"},
@@ -1378,7 +1444,7 @@ def test_admin_approval_submits_wechat_refund_and_marks_order_refunded(tmp_path,
     monkeypatch.setenv("WECHAT_PAY_TEST_MODE", "true")
     service = OrderService(tmp_path / "order-refund.db")
     service.get_user = lambda _user_id: None
-    result = service.create_order(
+    result = create_test_order(service,
         {
             "user_id": "refund-owner",
             "receiver": {"name": "测试用户", "phone": "13800000000", "address": "测试地址"},
@@ -1429,7 +1495,7 @@ def test_wechat_refund_notify_marks_processing_order_refunded(tmp_path, monkeypa
     monkeypatch.setenv("WECHAT_PAY_TEST_MODE", "true")
     service = OrderService(tmp_path / "order-refund-notify.db")
     service.get_user = lambda _user_id: None
-    result = service.create_order(
+    result = create_test_order(service,
         {
             "user_id": "refund-notify-owner",
             "receiver": {"name": "测试用户", "phone": "13800000000", "address": "测试地址"},
@@ -1449,7 +1515,7 @@ def test_wechat_refund_notify_marks_processing_order_refunded(tmp_path, monkeypa
     refund_result = {
         "mchid": "1746874094",
         "out_trade_no": paid["out_trade_no"],
-        "transaction_id": "wx-transaction-001",
+        "transaction_id": paid["payment"]["transaction_id"],
         "out_refund_no": requested["refund"]["out_refund_no"] if requested["refund"].get("out_refund_no") else f"RF{order_id}",
         "refund_id": "wx-refund-001",
         "refund_status": "SUCCESS",
@@ -1472,7 +1538,7 @@ def test_wechat_refund_notify_marks_processing_order_refunded(tmp_path, monkeypa
             "wechatpay-nonce": "nonce",
             "wechatpay-signature": "signature",
         },
-        '{"resource":{"ciphertext":"mock"}}',
+        '{"id":"refund-event-001","event_type":"REFUND.SUCCESS","resource":{"ciphertext":"mock"}}',
     )
     updated = service.get_order(order_id)
 
@@ -1487,7 +1553,7 @@ def test_sync_wechat_refund_accepts_query_status_field(tmp_path, monkeypatch):
     monkeypatch.setenv("WECHAT_PAY_TEST_MODE", "true")
     service = OrderService(tmp_path / "order-refund-sync-status.db")
     service.get_user = lambda _user_id: None
-    result = service.create_order(
+    result = create_test_order(service,
         {
             "user_id": "refund-sync-owner",
             "receiver": {"name": "测试用户", "phone": "13800000000", "address": "测试地址"},
@@ -1512,7 +1578,7 @@ def test_sync_wechat_refund_accepts_query_status_field(tmp_path, monkeypatch):
         lambda out_refund_no, config: {
             "mchid": "1746874094",
             "out_trade_no": paid["out_trade_no"],
-            "transaction_id": "wx-transaction-001",
+            "transaction_id": paid["payment"]["transaction_id"],
             "out_refund_no": out_refund_no,
             "refund_id": "wx-refund-sync-001",
             "status": "SUCCESS",
@@ -1538,7 +1604,7 @@ def test_mock_payment_is_disabled_outside_test_mode(tmp_path, monkeypatch):
     monkeypatch.delenv("WECHAT_PAY_TEST_MODE", raising=False)
     service = OrderService(tmp_path / "mock-disabled.db")
     service.get_user = lambda _user_id: None
-    result = service.create_order(
+    result = create_test_order(service,
         {
             "user_id": "mock-disabled-user",
             "receiver": {"name": "测试用户", "phone": "13800000000", "address": "测试地址"},
@@ -1554,6 +1620,43 @@ def test_mock_payment_is_disabled_outside_test_mode(tmp_path, monkeypatch):
         assert "禁用模拟支付" in str(exc)
     else:
         raise AssertionError("production mode must reject mock payment")
+
+
+def test_mock_trade_service_is_disabled_in_production_even_when_test_mode_is_true(tmp_path, monkeypatch):
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("WECHAT_PAY_TEST_MODE", "true")
+    service = OrderService(tmp_path / "mock-production-disabled.db")
+
+    with pytest.raises(ValueError, match="禁用模拟支付"):
+        service.mark_paid_for_dev("missing-order", "mock-production-user")
+    with pytest.raises(ValueError, match="禁用模拟发货"):
+        service.mark_shipped_for_dev("missing-order", "mock-production-user")
+
+
+def test_mock_trade_api_is_not_reachable_in_production(monkeypatch):
+    user_id = "mock-production-api-user"
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("WECHAT_PAY_TEST_MODE", "true")
+
+    def unexpected_call(*_args, **_kwargs):
+        raise AssertionError("production request reached mock trade service")
+
+    monkeypatch.setattr(api_order_service, "mark_paid_for_dev", unexpected_call)
+    monkeypatch.setattr(api_order_service, "mark_shipped_for_dev", unexpected_call)
+    headers = auth_headers(user_id)
+    pay = client.post(
+        "/api/v1/orders/missing-order/mock-pay",
+        json={"user_id": user_id},
+        headers=headers,
+    )
+    ship = client.post(
+        "/api/v1/orders/missing-order/mock-ship",
+        json={"user_id": user_id},
+        headers=headers,
+    )
+
+    assert pay.status_code == 404
+    assert ship.status_code == 404
 
 
 def test_diy_design_list_and_delete(tmp_path):
@@ -1575,27 +1678,72 @@ def test_diy_design_list_and_delete(tmp_path):
     assert service.list_designs("design-user") == []
 
 
-def test_shared_diy_design_endpoint_allows_view_without_owner_user_id(tmp_path, monkeypatch):
+def test_diy_share_requires_published_token_and_revocation_invalidates_it(tmp_path, monkeypatch):
     from app import api as api_module
+    from app.migrations.runner import upgrade
 
-    service = OrderService(tmp_path / "shared-design.db")
+    db_path = tmp_path / "shared-design.db"
+    from app.admin_service import AdminService
+
+    AdminService(db_path)
+    service = OrderService(db_path)
+    upgrade("sqlite", db_path)
     saved = service.save_design(
         {
             "user_id": "share-owner",
-            "design": {"selected": ["clearQuartz8"], "summary": {"price": 128}},
-            "sequence": [{"id": "clearQuartz8", "name": "白水晶", "size": 8}],
+            "design": {
+                "selected": ["clearQuartz8"],
+                "summary": {"price": 128},
+                "sourceContext": {"birthday": "1990-01-01"},
+            },
+            "sequence": [
+                {
+                    "id": "clearQuartz8",
+                    "name": "白水晶",
+                    "size": 8,
+                    "price": 128,
+                    "placement": {"x": 1, "y": 2, "internal_price": 128},
+                }
+            ],
         }
     )
     monkeypatch.setattr(api_module, "order_service", service)
+    monkeypatch.setenv("DIY_PUBLIC_SHARE_ENABLED", "true")
+    owner_headers = auth_headers("share-owner")
+    viewer_headers = auth_headers("viewer")
 
-    private_response = client.get(f"/api/v1/diy-designs/{saved['design_id']}?user_id=viewer")
-    shared_response = client.get(f"/api/v1/diy-designs/shared/{saved['design_id']}")
+    private_response = client.get(
+        f"/api/v1/diy-designs/{saved['design_id']}?user_id=viewer",
+        headers=viewer_headers,
+    )
+    guessed_response = client.get(f"/api/v1/diy-designs/shared/{saved['design_id']}")
+    published = client.post(f"/api/v1/diy-designs/{saved['design_id']}/share", headers=owner_headers)
+    token = published.json()["data"]["share_token"]
+    shared_response = client.get(f"/api/v1/diy-designs/shared/{token}")
 
     assert private_response.status_code == 404
+    assert guessed_response.status_code == 404
+    assert published.status_code == 200
     assert shared_response.status_code == 200
-    assert shared_response.json()["data"]["user_id"] == ""
-    assert shared_response.json()["data"]["design"]["selected"] == ["clearQuartz8"]
-    assert shared_response.json()["data"]["sequence"][0]["name"] == "白水晶"
+    public_data = shared_response.json()["data"]
+    assert public_data["design"]["selected"] == ["clearQuartz8"]
+    assert public_data["sequence"][0]["name"] == "白水晶"
+    assert "user_id" not in public_data
+    assert "design_id" not in public_data
+    assert "summary" not in public_data["design"]
+    assert "sourceContext" not in public_data["design"]
+    assert "price" not in public_data["sequence"][0]
+    assert "internal_price" not in public_data["sequence"][0]["placement"]
+
+    revoked = client.delete(f"/api/v1/diy-designs/{saved['design_id']}/share", headers=owner_headers)
+    assert revoked.status_code == 200
+    assert client.get(f"/api/v1/diy-designs/shared/{token}").status_code == 404
+
+    republished = client.post(f"/api/v1/diy-designs/{saved['design_id']}/share", headers=owner_headers)
+    new_token = republished.json()["data"]["share_token"]
+    assert new_token != token
+    assert client.get(f"/api/v1/diy-designs/shared/{token}").status_code == 404
+    assert client.get(f"/api/v1/diy-designs/shared/{new_token}").status_code == 200
 
 
 def test_cart_items_can_be_created_updated_and_cleared(tmp_path):
@@ -1762,7 +1910,11 @@ def test_available_coupons_filter_by_status_amount_and_expiry(tmp_path):
 
 
 def test_calculate_returns_ui_ready_result():
-    response = client.post("/api/v1/assessment/calculate", json={**PAYLOAD, "force_recalculate": True})
+    response = client.post(
+        "/api/v1/assessment/calculate",
+        json={**PAYLOAD, "force_recalculate": True},
+        headers=auth_headers(PAYLOAD["user_id"]),
+    )
     data = response.json()["data"]
 
     assert response.status_code == 200
@@ -1779,9 +1931,11 @@ def test_calculate_returns_ui_ready_result():
 
 
 def test_two_step_energy_to_diy_workbench_flow():
+    headers = auth_headers(PAYLOAD["user_id"])
     energy_response = client.post(
         "/api/v1/assessment/energy",
         json={**PAYLOAD, "force_recalculate": True},
+        headers=headers,
     )
     energy_data = energy_response.json()["data"]
 
@@ -1795,6 +1949,7 @@ def test_two_step_energy_to_diy_workbench_flow():
     recommendation_response = client.post(
         f"/api/v1/assessment/{energy_data['assessment_id']}/diy-recommendation",
         json={"wrist_size_cm": 16.5, "bead_size_mm": 8},
+        headers=headers,
     )
     recommendation_data = recommendation_response.json()["data"]
 
@@ -1809,21 +1964,25 @@ def test_two_step_energy_to_diy_workbench_flow():
 
 
 def test_energy_background_prefetch_is_reused_by_matching_recommendation():
+    user_id = f"prefetch-{uuid4().hex}"
+    headers = auth_headers(user_id)
     energy_response = client.post(
         "/api/v1/assessment/energy",
         json={
             **PAYLOAD,
-            "user_id": f"prefetch-{uuid4().hex}",
+            "user_id": user_id,
             "wrist_size_cm": 16,
             "bead_size_mm": 8,
             "force_recalculate": True,
         },
+        headers=headers,
     )
     energy_data = energy_response.json()["data"]
 
     recommendation_response = client.post(
         f"/api/v1/assessment/{energy_data['assessment_id']}/diy-recommendation",
         json={"wrist_size_cm": 16, "bead_size_mm": 8},
+        headers=headers,
     )
     recommendation_data = recommendation_response.json()["data"]
 
@@ -1835,25 +1994,30 @@ def test_energy_background_prefetch_is_reused_by_matching_recommendation():
 
 
 def test_recommendation_cache_is_isolated_by_wrist_size():
+    user_id = f"prefetch-size-{uuid4().hex}"
+    headers = auth_headers(user_id)
     energy_response = client.post(
         "/api/v1/assessment/energy",
         json={
             **PAYLOAD,
-            "user_id": f"prefetch-size-{uuid4().hex}",
+            "user_id": user_id,
             "wrist_size_cm": 16,
             "bead_size_mm": 8,
             "force_recalculate": True,
         },
+        headers=headers,
     )
     assessment_id = energy_response.json()["data"]["assessment_id"]
 
     first = client.post(
         f"/api/v1/assessment/{assessment_id}/diy-recommendation",
         json={"wrist_size_cm": 16.7, "bead_size_mm": 8},
+        headers=headers,
     ).json()["data"]
     second = client.post(
         f"/api/v1/assessment/{assessment_id}/diy-recommendation",
         json={"wrist_size_cm": 16.7, "bead_size_mm": 8},
+        headers=headers,
     ).json()["data"]
 
     assert first["recommendation_cache_hit"] is False
@@ -1916,14 +2080,15 @@ def test_privacy_summary_and_personalization_deletion(tmp_path, monkeypatch):
         timestamp,
     )
 
-    summary_response = client.get("/api/v1/privacy/data-summary?user_id=privacy-user")
+    headers = auth_headers("privacy-user")
+    summary_response = client.get("/api/v1/privacy/data-summary?user_id=privacy-user", headers=headers)
     assert summary_response.status_code == 200
     summary = summary_response.json()["data"]
     assert summary["latest_input"]["birth_place"] == "重庆市"
     assert summary["counts"]["assessments"] == 1
     assert summary["counts"]["daily_checkins"] == 1
 
-    delete_response = client.delete("/api/v1/privacy/personalization-data?user_id=privacy-user")
+    delete_response = client.delete("/api/v1/privacy/personalization-data?user_id=privacy-user", headers=headers)
     assert delete_response.status_code == 200
     assert delete_response.json()["data"]["deleted"] is True
     assert repository.history("privacy-user") == []
@@ -1938,7 +2103,11 @@ def test_privacy_summary_and_personalization_deletion(tmp_path, monkeypatch):
 
 
 def test_invalid_mbti_is_rejected():
-    response = client.post("/api/v1/assessment/calculate", json={**PAYLOAD, "mbti": "NOPE"})
+    response = client.post(
+        "/api/v1/assessment/calculate",
+        json={**PAYLOAD, "mbti": "NOPE"},
+        headers=auth_headers(PAYLOAD["user_id"]),
+    )
     assert response.status_code == 422
     assert response.json()["code"] == 422
 
@@ -1959,6 +2128,7 @@ def test_optional_mbti_and_three_core_wishes_are_accepted():
             "mood_palette_id": "sea_salt_blue",
             "force_recalculate": True,
         },
+        headers=auth_headers(PAYLOAD["user_id"]),
     )
 
     assert response.status_code == 200
@@ -1982,6 +2152,7 @@ def test_more_than_three_core_wishes_are_rejected():
                 "健康护身/保持专注",
             ],
         },
+        headers=auth_headers(PAYLOAD["user_id"]),
     )
 
     assert response.status_code == 422
@@ -1989,8 +2160,9 @@ def test_more_than_three_core_wishes_are_rejected():
 
 def test_first_time_user_gets_starter_daily_energy_and_same_day_is_cached():
     user_id = "daily-starter-user-v3"
-    first = client.get(f"/api/v1/daily-energy/today?user_id={user_id}&force_recalculate=true")
-    second = client.get(f"/api/v1/daily-energy/today?user_id={user_id}")
+    headers = auth_headers(user_id)
+    first = client.get(f"/api/v1/daily-energy/today?user_id={user_id}&force_recalculate=true", headers=headers)
+    second = client.get(f"/api/v1/daily-energy/today?user_id={user_id}", headers=headers)
 
     assert first.status_code == 200
     assert first.json()["data"]["mode"] == "starter"
@@ -2009,11 +2181,13 @@ def test_first_time_user_gets_starter_daily_energy_and_same_day_is_cached():
 
 def test_assessed_user_gets_personalized_daily_energy():
     user_id = "daily-personalized-user"
+    headers = auth_headers(user_id)
     client.post(
         "/api/v1/assessment/energy",
         json={**PAYLOAD, "user_id": user_id, "force_recalculate": True},
+        headers=headers,
     )
-    response = client.get(f"/api/v1/daily-energy/today?user_id={user_id}&force_recalculate=true")
+    response = client.get(f"/api/v1/daily-energy/today?user_id={user_id}&force_recalculate=true", headers=headers)
     data = response.json()["data"]
 
     assert response.status_code == 200
@@ -2027,14 +2201,17 @@ def test_assessed_user_gets_personalized_daily_energy():
 
 def test_daily_options_and_live_tags_are_used_on_recalculation():
     user_id = "daily-checkin-user"
+    headers = auth_headers(user_id)
     options = client.get("/api/v1/daily-energy/options")
     checkin = client.post(
         "/api/v1/daily-energy/check-in?checkin_date=2026-06-04",
         json={"user_id": user_id, "mood": 5, "sleep": 5, "stress": 1},
+        headers=headers,
     )
     response = client.get(
         f"/api/v1/daily-energy/2026-06-04?user_id={user_id}"
-        "&status_tags=money&scene_key=deadline&goal_keys=wealth&force_recalculate=true"
+        "&status_tags=money&scene_key=deadline&goal_keys=wealth&force_recalculate=true",
+        headers=headers,
     )
 
     assert options.status_code == 200

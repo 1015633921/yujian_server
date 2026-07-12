@@ -13,6 +13,7 @@ from .material_knowledge import (
     merge_taxonomy,
     unique_list,
 )
+from .material_options import element_label
 from .schemas import AssessmentRequest
 
 STRINGED_COMFORT_ALLOWANCE_MM = 8
@@ -171,6 +172,13 @@ PRIMARY_POOLS = {
     "健康护身/保持专注": ["green_phantom", "clear_quartz"],
 }
 
+CORE_WISH_TAGS = {
+    "招财进宝/事业腾飞": {"wealth", "career"},
+    "正缘桃花/人际和合": {"love", "relationship"},
+    "辟邪防小人/消除焦虑": {"protection", "calm"},
+    "健康护身/保持专注": {"health", "focus"},
+}
+
 ELEMENT_LANGUAGE = {
     "金": "建立边界与清晰决断",
     "木": "唤醒生长感与持续行动",
@@ -193,7 +201,14 @@ class RecommendationEngine:
 
     @staticmethod
     def primary_pools(catalog: dict | None = None) -> dict[str, list[str]]:
-        return build_primary_pools(PRIMARY_POOLS, catalog or RecommendationEngine.catalog())
+        catalog = catalog or RecommendationEngine.catalog()
+        pools = build_primary_pools(PRIMARY_POOLS, catalog)
+        for wish, wish_tags in CORE_WISH_TAGS.items():
+            pool = pools.setdefault(wish, [])
+            for code, crystal in catalog.items():
+                if set(unique_list(crystal.get("wish_pools"))) & wish_tags and code not in pool:
+                    pool.append(code)
+        return pools
 
     def recommend(self, request: AssessmentRequest, energy: dict) -> dict:
         final = energy["final"]
@@ -416,11 +431,14 @@ class RecommendationEngine:
         chakra = energy.get("chakra_analysis") or {}
         mood = energy.get("mood_analysis") or {}
         mbti = energy.get("mbti_analysis") or {}
+        wish_tags = set(request.core_wishes)
+        for wish in request.core_wishes:
+            wish_tags.update(CORE_WISH_TAGS.get(wish, set()))
         return {
             "useful_elements": set(energy.get("useful_elements") or []),
             "wish_elements": set(WISH_MAPPING[request.primary_core_wish]),
             "mbti_elements": set(mbti.get("top_elements") or []) if mbti.get("selected") else set(),
-            "wish_tags": {request.primary_core_wish, *request.core_wishes},
+            "wish_tags": wish_tags,
             "chakras": set(chakra.get("chakras") or []),
             "color_families": set(chakra.get("color_families") or []) | set(mood.get("color_families") or []),
             "mood_tags": set(chakra.get("mood_tags") or []) | set(mood.get("mood_tags") or []),
@@ -471,30 +489,42 @@ class RecommendationEngine:
         primary_pools: dict[str, list[str]],
         available_codes: set[str] | None = None,
     ) -> list[str]:
-        support_candidates = [
+        role_candidates = [
             code
             for code, crystal in catalog.items()
             if code != primary_code
-            and not (crystal_elements(code, crystal) & excluded)
             and RecommendationEngine.role_allowed(crystal, "support")
-            and "avoid_dense" not in RecommendationEngine.rule_list(crystal, "match_rules")
             and not RecommendationEngine.conflicts_with(code, crystal, {primary_code}, catalog)
         ]
-        available_support_candidates = [
-            code for code in support_candidates if not available_codes or code in available_codes
+        strict_candidates = [
+            code
+            for code in role_candidates
+            if not (crystal_elements(code, catalog[code]) & excluded)
+            and "avoid_dense" not in RecommendationEngine.rule_list(catalog[code], "match_rules")
         ]
-        if available_support_candidates:
-            support_candidates = available_support_candidates
-        if not support_candidates:
-            support_candidates = [
+        support_candidates = strict_candidates
+        if available_codes:
+            available_strict = [code for code in strict_candidates if code in available_codes]
+            available_relaxed = [
+                code
+                for code in role_candidates
+                if code in available_codes
+                and element_label(catalog[code].get("element")) not in excluded
+                and "avoid_dense" not in RecommendationEngine.rule_list(catalog[code], "match_rules")
+            ]
+            available_role_candidates = [code for code in role_candidates if code in available_codes]
+            available_fallback = [
                 code
                 for code, crystal in catalog.items()
                 if code != primary_code
-                and RecommendationEngine.role_allowed(crystal, "support")
+                and code in available_codes
                 and not RecommendationEngine.conflicts_with(code, crystal, {primary_code}, catalog)
             ]
+            support_candidates = (
+                available_strict or available_relaxed or available_role_candidates or available_fallback
+            )
         if not support_candidates:
-            support_candidates = [code for code in catalog if code != primary_code]
+            support_candidates = role_candidates or [code for code in catalog if code != primary_code]
         first = max(
             support_candidates,
             key=lambda code: RecommendationEngine.score_crystal(
@@ -515,20 +545,20 @@ class RecommendationEngine:
             and RecommendationEngine.role_allowed(crystal, "accent")
             and not RecommendationEngine.conflicts_with(code, crystal, {primary_code, first}, catalog)
         ]
-        available_accent_candidates = [
-            code for code in accent_candidates if not available_codes or code in available_codes
-        ]
-        if available_accent_candidates:
-            accent_candidates = available_accent_candidates
-        if not accent_candidates:
-            accent_candidates = [
+        if available_codes:
+            available_accent_candidates = [code for code in accent_candidates if code in available_codes]
+            available_relaxed_accents = [
                 code
                 for code, crystal in catalog.items()
                 if code not in {primary_code, first}
+                and code in available_codes
                 and not RecommendationEngine.conflicts_with(code, crystal, {primary_code, first}, catalog)
             ]
+            accent_candidates = available_accent_candidates or available_relaxed_accents
         if not accent_candidates:
-            accent_candidates = [code for code in catalog if code not in {primary_code, first}]
+            accent_candidates = [first] if available_codes else [
+                code for code in catalog if code not in {primary_code, first}
+            ]
         accent = max(
             accent_candidates,
             key=lambda code: RecommendationEngine.score_crystal(
@@ -561,7 +591,7 @@ class RecommendationEngine:
         score += 12 * len(elements & context["wish_elements"])
         score += 4 * len(elements & context.get("mbti_elements", set()))
         score += 18 if target_element and target_element in elements else 0
-        score += 18 if request.primary_core_wish in taxonomy.get("wish_tags", []) else 0
+        score += 18 if set(taxonomy.get("wish_tags", [])) & context["wish_tags"] else 0
         score += 8 * len(set(taxonomy.get("chakras", [])) & context["chakras"])
         score += 3 * len(set(taxonomy.get("color_families", [])) & context["color_families"])
         score += 3 * len(set(taxonomy.get("mood_tags", [])) & context["mood_tags"])
@@ -572,7 +602,7 @@ class RecommendationEngine:
             score += 2 * len(set(taxonomy.get("color_families", [])) & context["color_families"])
             score += 2 * len(set(taxonomy.get("visual_tags", [])) & context["visual_tags"])
         score += RecommendationEngine.rule_score(crystal, role)
-        score += float((energy.get("final") or {}).get(crystal["element"], 0)) / 20
+        score += float((energy.get("final") or {}).get(element_label(crystal["element"]), 0)) / 20
         return score
 
     @staticmethod

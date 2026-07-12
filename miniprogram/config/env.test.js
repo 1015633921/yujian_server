@@ -6,10 +6,6 @@ module.exports = {
   fallbackBaseUrl: 'https://api.yustream.cn/test-api',
   deviceBaseUrl: 'https://api.yustream.cn/test-api',
   assetBaseUrl: 'https://cdn-test.yustream.cn/miniprogram/assets',
-  productionBaseUrl: 'https://api.yustream.cn',
-  testBaseUrl: 'https://api.yustream.cn/test-api',
-  productionAssetBaseUrl: 'https://cdn-prod.yustream.cn/miniprogram/assets',
-  testAssetBaseUrl: 'https://cdn-test.yustream.cn/miniprogram/assets',
   useTestApi: true,
   isLocalApi: false
 };

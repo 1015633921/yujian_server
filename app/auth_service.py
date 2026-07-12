@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import secrets
 import time
@@ -9,12 +10,17 @@ from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
+from urllib.error import URLError
 
 from fastapi import Request as FastAPIRequest
 
 from .avatar_storage import AvatarStorage
 from .repository import AssessmentRepository
 from .schemas import PhoneBindRequest, UserProfileUpdateRequest, WechatLoginRequest
+from .observability import current_request_id, log_event, metrics
+
+
+LOGGER = logging.getLogger("yujian.external")
 
 
 class WechatAuthService:
@@ -122,6 +128,10 @@ class WechatAuthService:
         return self.public_user(user) if user else None
 
     def identity_from_headers(self, request: FastAPIRequest) -> dict[str, str]:
+        if str(os.getenv("TRUST_CLOUDBASE_IDENTITY_HEADERS", "false")).lower() not in {
+            "1", "true", "yes", "on",
+        }:
+            return {}
         openid = request.headers.get("x-wx-openid")
         appid = request.headers.get("x-wx-appid")
         unionid = request.headers.get("x-wx-unionid")
@@ -153,6 +163,10 @@ class WechatAuthService:
                 "source": "wechat",
             }
 
+        if str(os.getenv("ALLOW_DEV_WECHAT_LOGIN", "false")).lower() not in {
+            "1", "true", "yes", "on",
+        }:
+            raise ValueError("微信登录服务尚未配置")
         seed = code or f"anonymous:{time.time_ns()}"
         digest = hashlib.sha256(seed.encode("utf-8")).hexdigest()[:24]
         return {
@@ -213,22 +227,36 @@ class WechatAuthService:
     @staticmethod
     def get_json(url: str, method: str = "GET", body: dict | None = None) -> dict[str, Any]:
         data = None if body is None else json.dumps(body).encode("utf-8")
-        request = Request(url, data=data, method=method, headers={"Content-Type": "application/json"})
-        with urlopen(request, timeout=8) as response:
-            return json.loads(response.read().decode("utf-8"))
+        request = Request(
+            url,
+            data=data,
+            method=method,
+            headers={"Content-Type": "application/json", "X-Request-ID": current_request_id()},
+        )
+        try:
+            with urlopen(request, timeout=8) as response:
+                return json.loads(response.read().decode("utf-8"))
+        except (URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
+            metrics.increment("external_service_failed_total", service="wechat_auth", error_type=type(exc).__name__)
+            log_event(
+                LOGGER,
+                "external.wechat_auth.failed",
+                level=logging.WARNING,
+                service="wechat_auth",
+                error_type=type(exc).__name__,
+                result="failed",
+            )
+            raise ValueError("微信服务暂时不可用") from exc
 
     @staticmethod
     def public_user(user: dict[str, Any]) -> dict[str, Any]:
         return {
             "user_id": user["user_id"],
-            "openid": user.get("openid"),
             "nickname": user.get("nickname"),
             "avatar_url": user.get("avatar_url"),
             "gender": user.get("gender"),
-            "phone_number": user.get("phone_number"),
             "has_profile": bool(user.get("nickname") or user.get("avatar_url")),
             "has_phone": bool(user.get("phone_number")),
-            "source": user.get("source"),
         }
 
     @staticmethod

@@ -4,6 +4,8 @@ import hashlib
 import re
 from datetime import datetime
 
+from .money import money_to_cents
+
 
 OFFICIAL_BEAD_TSV = """
 黑晶石	黑晶石
@@ -248,9 +250,9 @@ def ensure_official_bead_catalog(connection) -> int:
         connection.execute(
             """
             INSERT INTO managed_materials
-            (id, skuId, top, category, series, grade, name, effect, element, price, size, weight, color, shine,
+            (id, skuId, top, category, series, grade, name, effect, element, price, price_cents, size, weight, color, shine,
              image_path, image_url, enabled, sort_order, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 item["id"],
@@ -263,6 +265,7 @@ def ensure_official_bead_catalog(connection) -> int:
                 item["effect"],
                 item["element"],
                 item["price"],
+                money_to_cents(item["price"], field_name="材料价格"),
                 item["size"],
                 item["weight"],
                 item["color"],

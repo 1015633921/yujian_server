@@ -2,6 +2,7 @@ const auth = require('../../utils/auth');
 const env = require('../../config/env');
 const {
   getOrder,
+  getOrderPaymentStatus,
   payOrder,
   mockPayOrder,
   mockShipOrder,
@@ -65,6 +66,7 @@ Page({
     isLocalApi: env.isLocalApi,
     logisticsDetail: null,
     loading: false,
+    paymentConfirming: false,
     showAllMaterials: false,
     showLogisticsModal: false
   },
@@ -77,14 +79,20 @@ Page({
     this.loadOrder();
   },
 
+  onUnload() {
+    this.stopPaymentConfirmation();
+  },
+
   async loadOrder(options = {}) {
     if (!this.data.id || this.data.loading) return null;
     this.setData({ loading: true });
+    let activeUserId = '';
     try {
       let user = auth.getStoredUser();
       if (!user || !user.user_id) {
         user = await auth.silentLogin();
       }
+      activeUserId = user.user_id;
       const row = await getOrder(this.data.id, user.user_id);
       const order = this.normalizeOrder(row);
       this.updateOrderCache(order);
@@ -95,7 +103,9 @@ Page({
       return order;
     } catch (error) {
       const orders = wx.getStorageSync('orders') || [];
-      const cachedOrder = orders.find(item => item.id === this.data.id) || null;
+      const currentUser = auth.getStoredUser();
+      const currentUserId = activeUserId || (currentUser && currentUser.user_id) || '';
+      const cachedOrder = orders.find(item => item.id === this.data.id && item.userId === currentUserId) || null;
       const order = cachedOrder ? this.normalizeOrder(cachedOrder) : null;
       this.setData({
         order,
@@ -128,6 +138,7 @@ Page({
     const refundStatus = item.refund_status || item.refundStatus || '';
     const actionState = this.buildFooterActions({
       statusKey,
+      paymentStatus,
       logisticsCard,
       afterSaleStatus,
       refundStatus
@@ -145,6 +156,7 @@ Page({
 
     return {
       id: item.order_id || item.id || this.data.id,
+      userId: item.user_id || item.userId || '',
       outTradeNo: item.out_trade_no || item.outTradeNo || '',
       createdAt: item.created_at || item.createdAt || '',
       createdAtText: this.formatDateTime(item.created_at || item.createdAt || ''),
@@ -183,16 +195,17 @@ Page({
     };
   },
 
-  buildFooterActions({ statusKey, logisticsCard, afterSaleStatus, refundStatus }) {
+  buildFooterActions({ statusKey, paymentStatus, logisticsCard, afterSaleStatus, refundStatus }) {
     const activeAfterSaleValues = ['requested', 'processing', 'approved', 'after_sale', 'refund_requested', 'refunding'];
     const hasActiveAfterSale = statusKey === 'after'
       || activeAfterSaleValues.includes(afterSaleStatus)
       || activeAfterSaleValues.includes(refundStatus);
-    const canCancel = statusKey === 'pay';
+    const paymentInProgress = paymentStatus === 'processing';
+    const canCancel = statusKey === 'pay' && !paymentInProgress;
     const canRefund = ['ship', 'receive'].includes(statusKey) && !hasActiveAfterSale;
     const canAfterSale = ['receive', 'done'].includes(statusKey) && !hasActiveAfterSale;
     const canViewLogistics = Boolean(logisticsCard && logisticsCard.show);
-    const canPay = statusKey === 'pay';
+    const canPay = statusKey === 'pay' && !paymentInProgress;
     const canMockShip = statusKey === 'ship' && this.data.isLocalApi;
     const canReceive = statusKey === 'receive' && !hasActiveAfterSale;
     const hasSecondaryAction = canCancel || canRefund || canAfterSale;
@@ -508,20 +521,47 @@ Page({
   },
 
   async continuePay(orderId, userId) {
+    if (this._paymentActionRunning) return;
+    this._paymentActionRunning = true;
+    this.setData({ paymentConfirming: false });
     wx.showLoading({ title: '准备支付' });
     try {
       const result = await payOrder(orderId, userId);
       const payment = result.payment || {};
       wx.hideLoading();
       if (payment.available && payment.pay_params) {
-        await new Promise((resolve, reject) => wx.requestPayment({ ...payment.pay_params, success: resolve, fail: reject }));
-        wx.showLoading({ title: '确认支付结果' });
-        const paid = await this.waitForPaidStatus();
+        let clientPaymentUnknown = false;
+        try {
+          await new Promise((resolve, reject) => wx.requestPayment({ ...payment.pay_params, success: resolve, fail: reject }));
+        } catch (paymentError) {
+          const cancelled = String(paymentError && paymentError.errMsg || '').includes('cancel');
+          if (cancelled) {
+            wx.showToast({ title: '已取消支付', icon: 'none' });
+            return;
+          }
+          clientPaymentUnknown = true;
+        }
+        this.setData({ paymentConfirming: true });
+        wx.showLoading({ title: '正在确认支付结果' });
+        const confirmation = await this.confirmPaymentResult(orderId, userId);
         wx.hideLoading();
-        wx.showToast({
-          title: paid ? '支付成功' : '支付结果确认中',
-          icon: paid ? 'success' : 'none'
-        });
+        this.setData({ paymentConfirming: false });
+        if (confirmation.state === 'paid') {
+          await this.loadOrder({ silent: true });
+          wx.showToast({ title: '支付成功', icon: 'success' });
+        } else if (confirmation.state === 'pending') {
+          wx.showModal({
+            title: clientPaymentUnknown ? '支付状态待确认' : '支付结果确认中',
+            content: clientPaymentUnknown
+              ? '客户端未能确认支付结果，服务端也暂未收到最终状态。可稍后在订单列表查看。'
+              : '服务端尚未确认支付结果，可稍后在订单列表查看。',
+            showCancel: false,
+            confirmText: '我知道了'
+          });
+        } else if (confirmation.state === 'terminal') {
+          await this.loadOrder({ silent: true });
+          wx.showToast({ title: '支付未完成', icon: 'none' });
+        }
         return;
       }
       if (this.data.isLocalApi) {
@@ -539,18 +579,51 @@ Page({
     } catch (error) {
       wx.hideLoading();
       wx.showToast({ title: error.message || '支付失败', icon: 'none' });
+    } finally {
+      this._paymentActionRunning = false;
+      this.setData({ paymentConfirming: false });
     }
   },
 
-  async waitForPaidStatus() {
-    for (let attempt = 0; attempt < 6; attempt += 1) {
-      if (attempt > 0) {
-        await new Promise(resolve => setTimeout(resolve, 1000));
+  stopPaymentConfirmation() {
+    this._paymentPollToken = (this._paymentPollToken || 0) + 1;
+    if (this._paymentPollTimer) clearTimeout(this._paymentPollTimer);
+    if (this._paymentPollResolve) this._paymentPollResolve(false);
+    this._paymentPollTimer = null;
+    this._paymentPollResolve = null;
+  },
+
+  waitForPaymentPoll(delay, token) {
+    return new Promise(resolve => {
+      this._paymentPollResolve = resolve;
+      this._paymentPollTimer = setTimeout(() => {
+        this._paymentPollTimer = null;
+        this._paymentPollResolve = null;
+        resolve(this._paymentPollToken === token);
+      }, delay);
+    });
+  },
+
+  async confirmPaymentResult(orderId, userId) {
+    this.stopPaymentConfirmation();
+    const token = this._paymentPollToken;
+    const delays = [0, 800, 1500, 2500, 4000, 6000];
+    for (const delay of delays) {
+      if (delay && !await this.waitForPaymentPoll(delay, token)) return { state: 'stopped' };
+      const currentUser = auth.getStoredUser();
+      if (!currentUser || currentUser.user_id !== userId) {
+        this.stopPaymentConfirmation();
+        return { state: 'account_changed' };
       }
-      const order = await this.loadOrder({ silent: true });
-      if (order && order.paymentStatus === 'paid') return true;
+      try {
+        const status = await getOrderPaymentStatus(orderId, { silent: true });
+        if (status.paid) return { state: 'paid', status };
+        if (status.terminal) return { state: 'terminal', status };
+      } catch (error) {
+        if (this._paymentPollToken !== token) return { state: 'stopped' };
+      }
     }
-    return false;
+    return { state: 'pending' };
   },
 
   async runOrderAction(action, title) {

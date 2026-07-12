@@ -2,7 +2,39 @@ const api = require('./api');
 
 const USER_KEY = 'currentUser';
 const USER_ID_KEY = 'userId';
+const ACCESS_TOKEN_KEY = 'accessToken';
+const ACCESS_TOKEN_EXPIRES_AT_KEY = 'accessTokenExpiresAt';
 const AUTH_DEBUG_LOGS = false;
+let refreshPromise = null;
+
+const PRIVATE_CACHE_KEYS = [
+  USER_KEY,
+  USER_ID_KEY,
+  ACCESS_TOKEN_KEY,
+  ACCESS_TOKEN_EXPIRES_AT_KEY,
+  'orders',
+  'communityFavorites',
+  'diyDesignCart',
+  'inspirationCart',
+  'checkoutAddress',
+  'userAddresses',
+  'currentDesign',
+  'workspaceHistory',
+  'assessmentDraft',
+  'assessmentLastProfile',
+  'assessmentRecalculateMode',
+  'assessmentSuppressAutoReportOnce',
+  'assessmentRequestedStep',
+  'assessmentReportSeed',
+  'energyReport',
+  'energyProfile',
+  'reportBasisView',
+  'todayDailyEnergy',
+  'todayDailyEnergyRefreshDate',
+  'recommendedWristSize',
+  'workspaceWristConfirmed',
+  'diyWorkbenchPayload'
+];
 
 function logAuthWarning(...args) {
   if (AUTH_DEBUG_LOGS) console.warn(...args);
@@ -15,17 +47,21 @@ function getStoredUser() {
 function getUserId() {
   const user = getStoredUser();
   const userId = (user && user.user_id) || wx.getStorageSync(USER_ID_KEY) || '';
-  return String(userId).startsWith('dev_') ? '' : userId;
+  return userId;
+}
+
+function getAccessToken() {
+  return wx.getStorageSync(ACCESS_TOKEN_KEY) || '';
+}
+
+function hasUsableSession() {
+  const token = getAccessToken();
+  const expiresAt = Date.parse(wx.getStorageSync(ACCESS_TOKEN_EXPIRES_AT_KEY) || '');
+  return !!token && Number.isFinite(expiresAt) && expiresAt > Date.now() + 30000;
 }
 
 function isRealWechatUser(user) {
-  return !!(
-    user
-    && user.user_id
-    && user.openid
-    && !String(user.user_id).startsWith('dev_')
-    && !String(user.openid).startsWith('dev_')
-  );
+  return !!(user && user.user_id && hasUsableSession());
 }
 
 function saveUser(user) {
@@ -34,6 +70,15 @@ function saveUser(user) {
   wx.setStorageSync(USER_ID_KEY, user.user_id);
   getApp().globalData.userInfo = user;
   return user;
+}
+
+function saveSession(session) {
+  if (!session || !session.access_token || !session.expires_at || !session.user) {
+    throw new Error('登录响应缺少有效会话');
+  }
+  wx.setStorageSync(ACCESS_TOKEN_KEY, session.access_token);
+  wx.setStorageSync(ACCESS_TOKEN_EXPIRES_AT_KEY, session.expires_at);
+  return saveUser(session.user);
 }
 
 function isLocalAvatarPath(value) {
@@ -49,19 +94,26 @@ function isLocalAvatarPath(value) {
   );
 }
 
-function logout() {
-  wx.removeStorageSync(USER_KEY);
-  wx.removeStorageSync(USER_ID_KEY);
-  wx.removeStorageSync('orders');
-  wx.removeStorageSync('communityFavorites');
-  wx.removeStorageSync('diyDesignCart');
-  wx.removeStorageSync('inspirationCart');
+function clearPrivateCaches() {
+  try {
+    require('./reportCache').clearAllReportCaches();
+  } catch (error) {
+    // Legacy clients may not have versioned report cache entries.
+  }
+  PRIVATE_CACHE_KEYS.forEach(key => wx.removeStorageSync(key));
   try {
     const app = getApp();
     if (app && app.globalData) app.globalData.userInfo = null;
   } catch (error) {
     // The local login state has already been cleared.
   }
+}
+
+function logout() {
+  const token = getAccessToken();
+  clearPrivateCaches();
+  if (!token) return Promise.resolve();
+  return api.logoutSession(token, { silent: true, showModal: false }).catch(() => undefined);
 }
 
 function wxLoginCode() {
@@ -81,18 +133,21 @@ function wxLoginCode() {
 
 async function silentLogin() {
   const cached = getStoredUser();
-  const storedUserId = wx.getStorageSync(USER_ID_KEY) || '';
   if (isRealWechatUser(cached)) return cached;
-  if (
-    (cached && String(cached.user_id || '').startsWith('dev_'))
-    || String(storedUserId).startsWith('dev_')
-  ) {
-    wx.removeStorageSync(USER_KEY);
-    wx.removeStorageSync(USER_ID_KEY);
-  }
+  clearPrivateCaches();
   const code = await wxLoginCode();
-  const user = await api.wechatLogin({ code }, { silent: true, timeout: 8000 });
-  return saveUser(user);
+  const session = await api.wechatLogin({ code }, { silent: true, timeout: 8000 });
+  return saveSession(session);
+}
+
+function handleUnauthorized() {
+  clearPrivateCaches();
+  if (!refreshPromise) {
+    refreshPromise = silentLogin().finally(() => {
+      refreshPromise = null;
+    });
+  }
+  return refreshPromise;
 }
 
 async function loginWithWechatProfile() {
@@ -176,6 +231,10 @@ module.exports = {
   getStoredUser,
   getUserId,
   saveUser,
+  getAccessToken,
+  hasUsableSession,
+  clearPrivateCaches,
+  handleUnauthorized,
   logout,
   silentLogin,
   loginWithWechatProfile,

@@ -5,7 +5,8 @@ import pytest
 
 from app.energy import ELEMENTS, ENERGY_WEIGHTS, EnergyCalculator
 from app.copy_safety import safe_display_text
-from app.recommendation import RecommendationEngine
+from app.material_knowledge import crystal_elements
+from app.recommendation import CORE_WISH_TAGS, RecommendationEngine
 from app.schemas import AssessmentRequest
 
 
@@ -140,10 +141,51 @@ def test_recommendation_primary_follows_wish_and_support_avoids_primary_elements
     recommendation = RecommendationEngine().recommend(request, energy)
     primary = recommendation["primary"]
 
-    assert primary["code"] in {"titanium_quartz", "citrine", "gold_rutilated_quartz", "sunstone"}
+    catalog = RecommendationEngine.catalog()
+    primary_tags = set(catalog[primary["code"]].get("wish_pools") or [])
+    assert primary["code"] in RecommendationEngine.primary_pools(catalog)[request.primary_core_wish]
+    assert primary_tags & CORE_WISH_TAGS[request.primary_core_wish]
+    assert primary["element"] in ELEMENTS
     excluded = {primary["element"], *primary["secondary_elements"]}
     assert recommendation["supporting"][0]["element"] not in excluded
     assert len(recommendation["bracelet_plan"]["layout"]) == recommendation["bracelet_plan"]["estimated_bead_count"]
+
+
+def test_material_knowledge_keys_are_normalized_before_recommendation_scoring():
+    request = make_request(core_wish="招财进宝/事业腾飞")
+    energy = EnergyCalculator().calculate(request)
+    context = RecommendationEngine.recommendation_context(request, energy)
+    catalog = {
+        "citrine": {
+            "name": "黄水晶",
+            "element": "earth",
+            "secondary_elements": ["metal", "fire"],
+            "color": "#E4B83F",
+            "effects": ["财富与行动"],
+            "wish_pools": ["wealth", "career"],
+        },
+        "green_phantom": {
+            "name": "绿幽灵",
+            "element": "wood",
+            "secondary_elements": ["earth"],
+            "color": "#4A825F",
+            "effects": ["生长与专注"],
+            "wish_pools": ["career", "wealth", "focus"],
+            "match_rules": ["best_as_primary"],
+        },
+    }
+    pools = RecommendationEngine.primary_pools(catalog)
+
+    citrine_score = RecommendationEngine.score_crystal(
+        "citrine", request, energy, context, "primary", catalog=catalog, primary_pools=pools
+    )
+    green_score = RecommendationEngine.score_crystal(
+        "green_phantom", request, energy, context, "primary", catalog=catalog, primary_pools=pools
+    )
+
+    assert {"金", "土", "火"}.issuperset(crystal_elements("citrine", catalog["citrine"]))
+    assert {"wealth", "career"}.issubset(context["wish_tags"])
+    assert citrine_score > green_score
 
 
 def test_recommendation_uses_preferred_bead_size_in_items_and_layout():
@@ -323,6 +365,62 @@ def test_recommendation_filters_conflict_and_dense_support_rules():
 
     assert support == "valid_support"
     assert accent == "accent_stone"
+
+
+def test_support_fallback_keeps_available_materials_when_secondary_elements_overlap():
+    request = make_request(core_wish="招财进宝/事业腾飞")
+    energy = EnergyCalculator().calculate(request)
+    context = RecommendationEngine.recommendation_context(request, energy)
+    catalog = {
+        "primary_stone": {
+            "name": "主石",
+            "element": "土",
+            "secondary_elements": ["金", "火"],
+            "color": "#f0e0c0",
+            "effects": ["事业"],
+            "allowed_roles": ["primary"],
+        },
+        "available_water": {
+            "name": "可售水系辅石",
+            "element": "水",
+            "secondary_elements": ["金"],
+            "color": "#88bbff",
+            "effects": ["沟通"],
+            "allowed_roles": ["support", "accent"],
+        },
+        "unavailable_wood": {
+            "name": "无库存木系辅石",
+            "element": "木",
+            "secondary_elements": [],
+            "color": "#88aa88",
+            "effects": ["生长"],
+            "allowed_roles": ["support"],
+        },
+        "available_accent": {
+            "name": "可售点睛石",
+            "element": "水",
+            "secondary_elements": [],
+            "color": "#dddddd",
+            "effects": ["过渡"],
+            "allowed_roles": ["accent"],
+        },
+    }
+    pools = {request.primary_core_wish: ["primary_stone"]}
+
+    support, accent = RecommendationEngine.select_supporting(
+        "水",
+        {"土", "金", "火"},
+        "primary_stone",
+        request,
+        energy,
+        context,
+        catalog,
+        pools,
+        {"primary_stone", "available_water", "available_accent"},
+    )
+
+    assert support == "available_water"
+    assert accent == "available_accent"
 
 
 def test_every_element_is_present():

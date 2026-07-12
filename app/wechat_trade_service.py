@@ -1,13 +1,19 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import quote
 from urllib.request import Request, urlopen
+from urllib.error import URLError
 
 from .repository import DB_PATH
+from .observability import current_request_id, log_event, metrics
+
+
+LOGGER = logging.getLogger("yujian.external")
 
 
 def load_local_env() -> None:
@@ -240,9 +246,29 @@ class WechatTradeService:
     @staticmethod
     def request_json(method: str, url: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
         data = None if body is None else json.dumps(body, ensure_ascii=False).encode("utf-8")
-        request = Request(url, data=data, method=method, headers={"Content-Type": "application/json; charset=utf-8"})
-        with urlopen(request, timeout=12) as response:
-            return json.loads(response.read().decode("utf-8"))
+        request = Request(
+            url,
+            data=data,
+            method=method,
+            headers={
+                "Content-Type": "application/json; charset=utf-8",
+                "X-Request-ID": current_request_id(),
+            },
+        )
+        try:
+            with urlopen(request, timeout=12) as response:
+                return json.loads(response.read().decode("utf-8"))
+        except (URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
+            metrics.increment("external_service_failed_total", service="wechat_trade", error_type=type(exc).__name__)
+            log_event(
+                LOGGER,
+                "external.wechat_trade.failed",
+                level=logging.WARNING,
+                service="wechat_trade",
+                error_type=type(exc).__name__,
+                result="failed",
+            )
+            raise ValueError("微信交易管理服务暂时不可用") from exc
 
     @staticmethod
     def ensure_success(data: dict[str, Any], prefix: str) -> None:

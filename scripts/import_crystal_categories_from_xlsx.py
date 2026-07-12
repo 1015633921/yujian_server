@@ -19,6 +19,7 @@ if str(ROOT) not in sys.path:
 from app.admin_service import AdminService
 from app.material_knowledge import knowledge_to_db_item
 from app.materials import invalidate_material_cache
+from app.money import money_to_cents
 
 
 BEAD_SIZES = tuple(range(8, 16))
@@ -350,10 +351,10 @@ def write_records(materials: list[dict[str, Any]], knowledge_by_code: dict[str, 
             connection.execute(
                 """
                 INSERT INTO managed_materials
-                (id, skuId, top, category, series, material_code, grade, name, effect, element, price, size, weight,
+                (id, skuId, top, category, series, material_code, grade, name, effect, element, price, price_cents, size, weight,
                  cost_price, safety_stock, supplier_name, purchase_note, color, shine, image_path, image_url,
                  image_urls_json, stock, enabled, sort_order, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     item["id"],
@@ -367,6 +368,7 @@ def write_records(materials: list[dict[str, Any]], knowledge_by_code: dict[str, 
                     item["effect"],
                     item["element"],
                     item["price"],
+                    money_to_cents(item["price"], field_name="材料价格"),
                     item["size"],
                     item["weight"],
                     item["cost_price"],

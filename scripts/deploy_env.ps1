@@ -1,12 +1,19 @@
 param(
   [ValidateSet("test", "prod")]
   [string]$Env = "test",
-  [string]$Server = "root@43.140.34.176",
-  [string]$KeyPath = "C:\Users\10156\.ssh\yujian_deploy_ed25519",
+  [string]$Server = "",
+  [string]$KeyPath = "",
   [string]$RemoteAppDir = "/opt/yujian_server"
 )
 
 $ErrorActionPreference = "Stop"
+
+if ([string]::IsNullOrWhiteSpace($Server) -or [string]::IsNullOrWhiteSpace($KeyPath)) {
+  throw "Legacy deployment requires explicit -Server and -KeyPath values. Prefer scripts/release/*."
+}
+if ($Env -eq "prod" -and $env:ALLOW_LEGACY_INPLACE_DEPLOY -ne "1") {
+  throw "Legacy in-place production deployment is blocked. Use immutable release deployment."
+}
 
 $Root = Split-Path -Parent $PSScriptRoot
 $Service = if ($Env -eq "prod") { "api" } else { "api-test" }

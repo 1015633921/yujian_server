@@ -1395,7 +1395,8 @@ button::after {
 
 .drawer-body {
   display: flex;
-  height: calc(100% - 88rpx);
+  min-height: 0;
+  height: calc(100% - 88rpx - var(--workspace-safe-bottom));
 }
 
 .category-rail {

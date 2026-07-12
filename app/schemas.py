@@ -25,13 +25,15 @@ NonEmptyString = Annotated[str, StringConstraints(strip_whitespace=True, min_len
 
 
 class AssessmentRequest(BaseModel):
-    model_config = ConfigDict(str_strip_whitespace=True, use_enum_values=True)
+    model_config = ConfigDict(str_strip_whitespace=True, use_enum_values=True, extra="forbid")
 
     user_id: str | None = Field(default=None, max_length=64, description="小程序用户 ID/OpenID")
     name: NonEmptyString
     birthday: date
     birth_time: time
+    birth_time_unknown: bool = False
     birth_place: NonEmptyString
+    location_code: str | None = Field(default=None, max_length=80)
     lng: float | None = Field(default=None, ge=-180, le=180, description="出生地经度")
     lat: float | None = Field(default=None, ge=-90, le=90, description="出生地纬度")
     mbti: str | None = None
@@ -79,6 +81,8 @@ class AssessmentRequest(BaseModel):
 class DIYRecommendationRequest(BaseModel):
     wrist_size_cm: float = Field(ge=10, le=30, description="手腕周长，单位厘米")
     bead_size_mm: int = Field(default=8, ge=4, le=20, description="偏好珠径，单位毫米")
+    report_id: str | None = Field(default=None, max_length=100)
+    expected_report_version: int | None = Field(default=None, ge=1)
 
 
 class DailyCheckInRequest(BaseModel):
@@ -210,13 +214,21 @@ class EnergyBreakdown(BaseModel):
 
 class SolarTimeInfo(BaseModel):
     beijing_time: str
-    true_solar_time: str
-    longitude: float
-    latitude: float | None
-    longitude_correction_minutes: float
-    equation_of_time_minutes: float
-    total_correction_minutes: float
+    true_solar_time: str | None = None
+    calibrated_time: str | None = None
+    longitude: float | None = None
+    latitude: float | None = None
+    longitude_correction_minutes: float | None = None
+    equation_of_time_minutes: float | None = None
+    total_correction_minutes: float | None = None
     location_source: str
+    resolved_location_code: str | None = None
+    timezone: str = "Asia/Shanghai"
+    calibration_status: str = "legacy_unknown"
+    calibration_source: str = "legacy_unknown"
+    calibration_version: str = "legacy_unknown"
+    location_data_version: str = "legacy_unknown"
+    calibration_reason_code: str = "metadata_not_available"
 
 
 class CrystalItem(BaseModel):

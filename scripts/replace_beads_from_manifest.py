@@ -5,9 +5,16 @@ import hashlib
 import json
 import shutil
 import sqlite3
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from app.money import money_to_cents
 
 
 SIZES = tuple(range(8, 16))
@@ -72,6 +79,7 @@ def main() -> None:
                     profile["effect"],
                     profile["element"],
                     estimate_price(size),
+                    money_to_cents(estimate_price(size), field_name="材料价格"),
                     size,
                     round((size / 8) ** 3 * 1.2, 2),
                     profile["color"],
@@ -91,9 +99,9 @@ def main() -> None:
         connection.executemany(
             """
             INSERT INTO managed_materials
-            (id, skuId, top, category, series, grade, name, effect, element, price, size, weight,
+            (id, skuId, top, category, series, grade, name, effect, element, price, price_cents, size, weight,
              color, shine, image_path, image_url, enabled, sort_order, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             rows,
         )

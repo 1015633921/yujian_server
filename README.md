@@ -23,6 +23,24 @@ pip install -r requirements-dev.txt
 
 - Swagger 接口文档：`http://127.0.0.1:8000/docs`
 - 健康检查：`http://127.0.0.1:8000/health`
+- 存活检查：`http://127.0.0.1:8000/health/live`
+- 就绪检查：`http://127.0.0.1:8000/health/ready`
+
+## 运行进程与观测
+
+FastAPI 进程只处理 HTTP，不再启动物流线程。物流同步必须作为独立进程运行：
+
+```bash
+LOGISTICS_SYNC_ENABLED=true python -m app.logistics_worker
+```
+
+多个物流进程通过 `runtime_task_leases` 数据库租约竞争，同一调度窗口只有一个执行者。
+`LOGISTICS_SYNC_ENABLED` 默认 `false`；启用前必须执行 P1-C 迁移并通过 MySQL 租约门禁。
+
+每个 HTTP 请求带 `X-Request-ID`，应用日志使用 JSON 格式且不记录 Token、OpenID、手机号、
+地址或请求体。`/internal/metrics` 默认关闭；开启时还必须配置独立的
+`METRICS_ACCESS_TOKEN`。详细运行策略见 `docs/release/20-runtime-current.md` 至
+`docs/release/27-p1c-change-summary.md`。
 
 ## 专属水晶测算接口
 
@@ -129,6 +147,17 @@ POST /api/v1/assessment/{assessment_id}/diy-recommendation
 `workbench_payload` 作为工作台初始化数据。该数据已包含主石、配珠、每颗珠子的排列位置、
 推荐文案、腕围和珠径，同时标记为可编辑。
 
+### 报告版本 V2（默认关闭）
+
+`REPORT_VERSIONING_V2_ENABLED` 缺失或为 `false` 时继续使用旧流程。开启前必须先执行
+`20260712_04_p1b_report_snapshots` 迁移并通过 `docs/release/14-p1b-migration-runbook.md`
+中的 MySQL 门禁。V2 要求生成报告时提供 `Idempotency-Key`，并以服务端返回的
+`report_id + report_version` 读取报告、测算依据、脱敏海报数据和 DIY 推荐。
+
+项目内地点数据目前只覆盖 11 个已有可信城市。未命中的地点不会再静默使用东经 120°，
+而是返回 `unsupported` 并隐藏校准后时间。在获得合法、完整、版本化的地点数据前，不得
+宣称支持全国地点校准，也不得在生产开启报告 V2。
+
 ### 测算历史与详情
 
 ```text
@@ -178,8 +207,26 @@ pytest -q
 - 接入腾讯地图或高德地图地理编码，替换内置出生地坐标
 - 接入正式八字历法库，替换 Mock 八字分布
 - 将水晶图鉴迁移到商品数据库，并补充图片、SKU、库存和价格
-- 微信登录后从服务端令牌获取用户身份，不直接信任前端 `user_id`
+- 继续轮换、审计服务端用户会话，并完善多设备会话管理
 - 增加支付回调、库存锁定、内容审核与对象存储上传
+
+## 用户会话与安全迁移
+
+微信登录接口返回服务端 `access_token`、`expires_at` 和最小用户 DTO。所有用户私有接口要求：
+
+```http
+Authorization: Bearer <access_token>
+```
+
+请求中的 `user_id` 仅用于旧数据模型的一致性校验，不具有认证意义。数据库先执行显式安全迁移，应用启动不会自动创建会话表：
+
+```bash
+.venv_codex/bin/python -m app.migrations.runner upgrade --backend sqlite
+```
+
+完整安全迁移步骤见 `docs/release/03-p0a-migration-runbook.md`。订单完整性迁移与库存预占运维步骤见 `docs/release/05-p0b-migration-runbook.md`。支付事件迁移与补偿步骤见 `docs/release/06-p1a-migration-runbook.md`。结算、微信支付、公共 DIY 分享、远程头像抓取和物流同步默认关闭。
+
+创建订单要求请求头 `Idempotency-Key`。订单金额只使用服务端 SKU 价格，以整数分保存在 `total_fee`；客户端价格仅用于发现展示价变化。库存预占默认 15 分钟过期，可通过 `INVENTORY_RESERVATION_TTL_SECONDS` 调整。过期释放由外部调度调用管理员维护接口，不在 Uvicorn worker 内启动线程。
 
 ## 临时公网测试
 
@@ -198,13 +245,14 @@ pytest -q
 首次登录、尚未完成专属测算的用户也可以直接获取每日内容：
 
 ```text
-GET /api/v1/daily-energy/today?user_id=wx-openid-001
+GET /api/v1/daily-energy/today
+Authorization: Bearer <access_token>
 ```
 
 首次用户返回 `mode: starter`，内容由以下部分构成：
 
 - 通用当日五行：70%
-- `user_id + 日期` 稳定因子：20%
+- 当前用户 ID 与日期的稳定因子：20%
 - 可选初始愿望：10%
 
 同一用户同一天再次请求时直接读取数据库，返回 `cache_hit: true`，不会因刷新发生变化。
@@ -234,6 +282,6 @@ POST /api/v1/daily-energy/check-in
 查看指定日期或强制重新计算：
 
 ```text
-GET /api/v1/daily-energy/2026-06-04?user_id=wx-openid-001
-GET /api/v1/daily-energy/today?user_id=wx-openid-001&force_recalculate=true
+GET /api/v1/daily-energy/2026-06-04
+GET /api/v1/daily-energy/today?force_recalculate=true
 ```

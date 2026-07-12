@@ -6,6 +6,7 @@ import logging
 import math
 import uuid
 from datetime import datetime
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from .energy import ELEMENTS, ENERGY_WEIGHTS, EnergyCalculator, MBTI_MAPPING, PLACE_COORDINATES, WISH_MAPPING
@@ -15,6 +16,9 @@ from .fortune.zodiac import calculate_zodiac_analysis
 from .copy_safety import safe_display_text
 from .recommendation import RecommendationEngine, interpretation
 from .repository import AssessmentRepository
+from .report_repository import ReportConflictError, ReportRepository
+from .reporting import REPORT_ALGORITHM_VERSION, REPORT_SCHEMA_VERSION, sanitized_output_snapshot, stable_hash
+from .observability import log_event, safe_exception_frames
 from .schemas import AssessmentRequest, DIYRecommendationRequest
 
 CHINA_TZ = ZoneInfo("Asia/Shanghai")
@@ -62,10 +66,11 @@ ELEMENT_SEASON_ADVICE = {
 
 
 class AssessmentService:
-    def __init__(self):
+    def __init__(self, db_path: Path | None = None):
         self.energy_calculator = EnergyCalculator()
         self.recommendation_engine = RecommendationEngine()
-        self.repository = AssessmentRepository()
+        self.repository = AssessmentRepository(db_path) if db_path is not None else AssessmentRepository()
+        self.report_repository = ReportRepository(db_path) if db_path is not None else ReportRepository()
 
     def calculate(self, request: AssessmentRequest) -> tuple[dict, bool]:
         fingerprint = self.fingerprint(request)
@@ -139,11 +144,16 @@ class AssessmentService:
             if existing:
                 return self.with_energy_extras(existing), True
 
+        result = self._build_energy_result(request)
+        self.repository.save(result, fingerprint)
+        return result, False
+
+    def _build_energy_result(self, request: AssessmentRequest) -> dict:
         energy = self.energy_calculator.calculate(request)
         energy_keywords = self.energy_keywords(energy["final"], energy["strongest"], energy["weakest"], request.core_wishes)
         seasonal_energy = self.seasonal_energy_prompt(energy["final"], energy["strongest"], energy["weakest"])
         zodiac_analysis = calculate_zodiac_analysis(request.birthday, energy["strongest"], energy["weakest"])
-        result = {
+        return {
             "assessment_id": uuid.uuid4().hex,
             "created_at": datetime.now(CHINA_TZ).isoformat(),
             "status": "energy_ready",
@@ -178,8 +188,46 @@ class AssessmentService:
             },
             "disclaimer": "本分析仅用于传统文化体验、审美搭配与个性化 DIY 推荐，不构成命理判断、医疗健康建议或效果承诺。",
         }
-        self.repository.save(result, fingerprint)
-        return result, False
+    def calculate_energy_v2(self, request: AssessmentRequest, idempotency_key: str) -> tuple[dict, bool]:
+        if not request.user_id:
+            raise ValueError("报告必须绑定当前用户")
+        key = self.report_repository.normalize_key(idempotency_key)
+        input_snapshot = self.input_summary(request, include_wrist=False)
+        source_input_hash = stable_hash(input_snapshot)
+        existing_request = self.report_repository.get_request(request.user_id, key)
+        if existing_request:
+            if existing_request["source_input_hash"] != source_input_hash:
+                raise ReportConflictError("同一 Idempotency-Key 不能用于不同的测算输入")
+            if existing_request["status"] != "completed" or not existing_request.get("report_id"):
+                raise ReportConflictError("报告正在生成，请使用原请求稍后重试")
+            snapshot = self.report_repository.get(str(existing_request["report_id"]))
+            if not snapshot:
+                raise ReportConflictError("幂等记录缺少对应报告，请稍后重试")
+            return self.report_repository.detail_dto(snapshot), True
+        result = self._build_energy_result(request)
+        solar_time = result.get("solar_time") or {}
+        result["algorithm_version"] = REPORT_ALGORITHM_VERSION
+        result["schema_version"] = REPORT_SCHEMA_VERSION
+        result["calibration_version"] = solar_time.get("calibration_version") or "legacy_unknown"
+        result["calibration_status"] = solar_time.get("calibration_status") or "legacy_unknown"
+        output_snapshot = sanitized_output_snapshot(result, input_snapshot)
+        snapshot, replay = self.report_repository.create_snapshot(
+            user_id=request.user_id,
+            idempotency_key=key,
+            source_input_hash=source_input_hash,
+            fingerprint=self.energy_fingerprint(request),
+            input_snapshot=input_snapshot,
+            output_snapshot=output_snapshot,
+            assessment_id=result["assessment_id"],
+            created_at=result["created_at"],
+            algorithm_version=REPORT_ALGORITHM_VERSION,
+            schema_version=REPORT_SCHEMA_VERSION,
+            calibration_version=result["calibration_version"],
+            calibration_status=result["calibration_status"],
+            calibration_source=solar_time.get("calibration_source") or "unknown",
+            calibration_reason_code=solar_time.get("calibration_reason_code") or "unknown",
+        )
+        return self.report_repository.detail_dto(snapshot), replay
 
     def create_diy_recommendation(
         self,
@@ -211,6 +259,91 @@ class AssessmentService:
         self.repository.update(result)
         return {**self.with_energy_extras(result), "recommendation_cache_hit": False}
 
+    def create_diy_recommendation_v2(
+        self,
+        report_id: str,
+        user_id: str,
+        payload: DIYRecommendationRequest,
+    ) -> dict | None:
+        snapshot = self.report_repository.owned(report_id, user_id, payload.expected_report_version)
+        if not snapshot:
+            return None
+        cached = self.repository.get_cached_recommendation(
+            snapshot["assessment_id"],
+            payload.wrist_size_cm,
+            payload.bead_size_mm,
+            DIY_RECOMMENDATION_CACHE_VERSION,
+            report_id=report_id,
+            report_version=int(snapshot["report_version"]),
+        )
+        if cached:
+            return {**cached, "recommendation_cache_hit": True}
+
+        input_snapshot = snapshot["input_snapshot"]
+        output_snapshot = snapshot["output_snapshot"]
+        request = AssessmentRequest.model_validate(
+            {
+                **input_snapshot,
+                "wrist_size_cm": payload.wrist_size_cm,
+                "bead_size_mm": payload.bead_size_mm,
+            }
+        )
+        energy = {
+            "final": output_snapshot["final_energy_profile"],
+            "breakdown": output_snapshot["energy_breakdown"],
+            "solar_time": output_snapshot.get("solar_time") or {},
+            "bazi_basis": output_snapshot.get("bazi_basis") or {},
+            "mbti_analysis": output_snapshot.get("mbti_analysis") or {},
+            "chakra_analysis": output_snapshot.get("chakra_analysis") or {},
+            "mood_analysis": output_snapshot.get("mood_analysis") or {},
+            "useful_elements": output_snapshot.get("useful_elements") or [],
+            "recommendation_strategy": output_snapshot.get("recommendation_strategy") or "",
+            "strongest": output_snapshot["strongest_element"],
+            "weakest": output_snapshot["weakest_element"],
+        }
+        recommendation = self.recommendation_engine.recommend(request, energy)
+        workbench_payload = {
+            "source": "report_snapshot",
+            "assessment_id": snapshot["assessment_id"],
+            "report_id": report_id,
+            "report_version": int(snapshot["report_version"]),
+            "name": f"{request.name}的专属搭配手串",
+            "core_wish": request.primary_core_wish,
+            "core_wishes": request.core_wishes,
+            "wrist_size_cm": payload.wrist_size_cm,
+            "bead_size_mm": payload.bead_size_mm,
+            "primary_crystal": recommendation["primary"],
+            "supporting_crystals": recommendation["supporting"],
+            "bracelet_plan": recommendation["bracelet_plan"],
+            "recommendation_copy": recommendation["copy"],
+            "editable": True,
+            "save_api": "/api/diy-plans/save/",
+        }
+        result = {
+            "status": "diy_ready",
+            "assessment_id": snapshot["assessment_id"],
+            "report_id": report_id,
+            "report_version": int(snapshot["report_version"]),
+            "source_algorithm_version": snapshot["algorithm_version"],
+            "primary_crystal": recommendation["primary"],
+            "supporting_crystals": recommendation["supporting"],
+            "bracelet_plan": recommendation["bracelet_plan"],
+            "recommendation_copy": recommendation["copy"],
+            "workbench_payload": workbench_payload,
+        }
+        timestamp = datetime.now(CHINA_TZ).isoformat()
+        self.repository.save_cached_recommendation(
+            snapshot["assessment_id"],
+            payload.wrist_size_cm,
+            payload.bead_size_mm,
+            DIY_RECOMMENDATION_CACHE_VERSION,
+            result,
+            timestamp,
+            report_id=report_id,
+            report_version=int(snapshot["report_version"]),
+        )
+        return {**result, "recommendation_cache_hit": False}
+
     def pre_generate_diy_recommendation(
         self,
         assessment_id: str,
@@ -223,8 +356,16 @@ class AssessmentService:
                 wrist_size_cm,
                 bead_size_mm,
             )
-        except Exception:
-            LOGGER.exception("DIY recommendation pre-generation failed for %s", assessment_id)
+        except Exception as exc:
+            log_event(
+                LOGGER,
+                "report.recommendation_pre_generate.failed",
+                level=logging.ERROR,
+                assessment_id_hash=hashlib.sha256(assessment_id.encode("utf-8")).hexdigest()[:16],
+                error_type=type(exc).__name__,
+                stack=safe_exception_frames(exc),
+                result="failed",
+            )
             return False
 
     def _pre_generate_diy_recommendation(
@@ -363,7 +504,9 @@ class AssessmentService:
             "name": request.name,
             "birthday": request.birthday.isoformat(),
             "birth_time": request.birth_time.strftime("%H:%M"),
+            "birth_time_unknown": request.birth_time_unknown,
             "birth_place": request.birth_place,
+            "location_code": request.location_code,
             "lng": request.lng,
             "lat": request.lat,
             "mbti": request.mbti,

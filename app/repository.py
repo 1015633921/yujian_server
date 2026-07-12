@@ -171,20 +171,27 @@ class AssessmentRepository:
         wrist_size_cm: float,
         bead_size_mm: int,
         algorithm_version: str,
+        report_id: str | None = None,
+        report_version: int | None = None,
     ) -> dict[str, Any] | None:
+        version_clause = ""
+        values: list[Any] = [
+            assessment_id,
+            self.recommendation_wrist_key(wrist_size_cm),
+            int(bead_size_mm),
+            algorithm_version,
+        ]
+        if report_id is not None:
+            version_clause = " AND report_id = ? AND report_version = ?"
+            values.extend([report_id, int(report_version or 0)])
         with self.connect() as connection:
             row = connection.execute(
-                """
+                f"""
                 SELECT result_json FROM assessment_recommendations
                 WHERE assessment_id = ? AND wrist_size_tenths = ?
-                  AND bead_size_mm = ? AND algorithm_version = ?
+                  AND bead_size_mm = ? AND algorithm_version = ?{version_clause}
                 """,
-                (
-                    assessment_id,
-                    self.recommendation_wrist_key(wrist_size_cm),
-                    int(bead_size_mm),
-                    algorithm_version,
-                ),
+                values,
             ).fetchone()
         return json.loads(row["result_json"]) if row else None
 
@@ -196,7 +203,45 @@ class AssessmentRepository:
         algorithm_version: str,
         result: dict[str, Any],
         timestamp: str,
+        report_id: str | None = None,
+        report_version: int | None = None,
     ) -> None:
+        if report_id is not None:
+            if use_mysql() and not self._force_sqlite:
+                sql = """
+                    INSERT INTO assessment_recommendations
+                    (assessment_id, wrist_size_tenths, bead_size_mm, algorithm_version,
+                     result_json, created_at, updated_at, report_id, report_version)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON DUPLICATE KEY UPDATE result_json=VALUES(result_json), updated_at=VALUES(updated_at),
+                                            report_id=VALUES(report_id), report_version=VALUES(report_version)
+                """
+            else:
+                sql = """
+                    INSERT INTO assessment_recommendations
+                    (assessment_id, wrist_size_tenths, bead_size_mm, algorithm_version,
+                     result_json, created_at, updated_at, report_id, report_version)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(assessment_id, wrist_size_tenths, bead_size_mm, algorithm_version)
+                    DO UPDATE SET result_json=excluded.result_json, updated_at=excluded.updated_at,
+                                  report_id=excluded.report_id, report_version=excluded.report_version
+                """
+            with self._lock, self.connect() as connection:
+                connection.execute(
+                    sql,
+                    (
+                        assessment_id,
+                        self.recommendation_wrist_key(wrist_size_cm),
+                        int(bead_size_mm),
+                        algorithm_version,
+                        json.dumps(result, ensure_ascii=False),
+                        timestamp,
+                        timestamp,
+                        report_id,
+                        int(report_version or 0),
+                    ),
+                )
+            return
         if use_mysql() and not self._force_sqlite:
             sql = """
                 INSERT INTO assessment_recommendations
@@ -264,6 +309,12 @@ class AssessmentRepository:
                 "SELECT COUNT(*) AS total FROM daily_checkins WHERE user_id = ?",
                 (user_id,),
             ).fetchone()
+            report_row = None
+            if self.table_exists(connection, "report_snapshots"):
+                report_row = connection.execute(
+                    "SELECT COUNT(*) AS total FROM report_snapshots WHERE user_id = ?",
+                    (user_id,),
+                ).fetchone()
         latest = self.latest_for_user(user_id)
         user = self.get_user(user_id)
         return {
@@ -281,6 +332,7 @@ class AssessmentRepository:
             },
             "counts": {
                 "assessments": int((assessment_row or {})["total"] or 0),
+                "reports": int((report_row or {"total": 0})["total"] or 0),
                 "daily_energies": int((daily_row or {})["total"] or 0),
                 "daily_checkins": int((checkin_row or {})["total"] or 0),
             },
@@ -289,6 +341,22 @@ class AssessmentRepository:
     def delete_personalization_data(self, user_id: str) -> dict[str, Any]:
         summary = self.privacy_data_summary(user_id)
         with self._lock, self.connect() as connection:
+            if self.table_exists(connection, "report_snapshots"):
+                connection.execute(
+                    """
+                    DELETE FROM assessment_recommendations
+                    WHERE report_id IN (
+                        SELECT report_id FROM report_snapshots WHERE user_id = ?
+                    )
+                    """,
+                    (user_id,),
+                )
+            if self.table_exists(connection, "report_generation_requests"):
+                connection.execute("DELETE FROM report_generation_requests WHERE user_id = ?", (user_id,))
+            if self.table_exists(connection, "report_snapshots"):
+                connection.execute("DELETE FROM report_snapshots WHERE user_id = ?", (user_id,))
+            if self.table_exists(connection, "report_version_counters"):
+                connection.execute("DELETE FROM report_version_counters WHERE user_id = ?", (user_id,))
             connection.execute(
                 """
                 DELETE FROM assessment_recommendations
@@ -519,6 +587,9 @@ class AssessmentRepository:
                 raise ValueError("new user_id already exists")
             for table in (
                 "energy_assessments",
+                "report_snapshots",
+                "report_generation_requests",
+                "report_version_counters",
                 "daily_energies",
                 "daily_checkins",
                 "orders",

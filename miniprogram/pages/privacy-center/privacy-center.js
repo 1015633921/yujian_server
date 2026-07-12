@@ -146,12 +146,17 @@ Page({
             'assessmentLastProfile',
             'assessmentRecalculateMode',
             'assessmentSuppressAutoReportOnce',
+            'assessmentRequestedStep',
+            'assessmentReportSeed',
             'energyReport',
             'energyProfile',
+            'reportBasisView',
             'todayDailyEnergy',
             'todayDailyEnergyRefreshDate',
             'recommendedRecipe',
-            'recommendedWristSize'
+            'recommendedWristSize',
+            'workspaceWristConfirmed',
+            'diyWorkbenchPayload'
           ].forEach(key => wx.removeStorageSync(key));
           wx.showToast({ title: '测算与画像数据已删除', icon: 'success' });
           await this.loadSummary();

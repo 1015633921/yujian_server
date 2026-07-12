@@ -10,6 +10,11 @@ App({
       wx.cloud.init(cloudOptions);
     }
 
+    const storedSessionUser = auth.getStoredUser && auth.getStoredUser();
+    if (storedSessionUser && !auth.hasUsableSession()) {
+      auth.clearPrivateCaches();
+    }
+
     if (!wx.getStorageSync('energyProfile')) {
       wx.setStorageSync('energyProfile', {
         name: '新朋友',
@@ -30,9 +35,7 @@ App({
       if (
         !storedUser
         || !storedUser.user_id
-        || !storedUser.openid
-        || String(storedUser.user_id).startsWith('dev_')
-        || String(storedUser.openid).startsWith('dev_')
+        || !auth.hasUsableSession()
       ) return;
       auth.silentLogin().catch((error) => {
         console.warn('silent login skipped:', error.message || error);

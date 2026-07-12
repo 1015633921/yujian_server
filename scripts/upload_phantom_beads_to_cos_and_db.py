@@ -15,6 +15,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from app.database import connect_database, use_mysql
+from app.money import money_to_cents
 from app.repository import DB_PATH
 
 
@@ -237,6 +238,7 @@ def upsert_materials(payload: dict[str, dict[str, object]]) -> None:
                     """,
                     ("bead", item.series, size),
                 ).fetchone()
+                price = estimate_price(item.base_price, size)
                 row = (
                     sku_id,
                     "bead",
@@ -246,7 +248,8 @@ def upsert_materials(payload: dict[str, dict[str, object]]) -> None:
                     item.series,
                     item.effect,
                     item.element,
-                    estimate_price(item.base_price, size),
+                    price,
+                    money_to_cents(price, field_name="材料价格"),
                     float(size),
                     round((size / 8) ** 3 * 1.2, 2),
                     item.color,
@@ -265,7 +268,7 @@ def upsert_materials(payload: dict[str, dict[str, object]]) -> None:
                         """
                         UPDATE managed_materials
                         SET skuId=?, top=?, category=?, series=?, grade=?, name=?, effect=?, element=?,
-                            price=?, size=?, weight=?, color=?, shine=?, image_path=?, image_url=?,
+                            price=?, price_cents=?, size=?, weight=?, color=?, shine=?, image_path=?, image_url=?,
                             image_urls_json=?, stock=?, enabled=?, sort_order=?, updated_at=?
                         WHERE id=?
                         """,
@@ -275,10 +278,10 @@ def upsert_materials(payload: dict[str, dict[str, object]]) -> None:
                     connection.execute(
                         """
                         INSERT INTO managed_materials
-                        (id, skuId, top, category, series, grade, name, effect, element, price, size,
+                        (id, skuId, top, category, series, grade, name, effect, element, price, price_cents, size,
                          weight, color, shine, image_path, image_url, image_urls_json, stock, enabled,
                          sort_order, created_at, updated_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (material_id, *row[:-1], now, row[-1]),
                     )

@@ -1,0 +1,46 @@
+name: build-release-candidate
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_version:
+        description: "Immutable version such as v20260712-001"
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    environment: release-candidate
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12.13"
+      - name: Validate release version and repository
+        env:
+          RELEASE_VERSION: ${{ inputs.release_version }}
+        run: |
+          [[ "${RELEASE_VERSION}" =~ ^v[0-9]{8}-[0-9]{3}(-[a-z0-9.-]+)?$ ]]
+          python scripts/check_repository.py
+          python scripts/scan_secrets.py
+          git diff --check
+      - name: Require a successful quality gate for this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          successful_runs="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${GITHUB_SHA}&status=success" --jq '.workflow_runs | length')"
+          test "${successful_runs}" -gt 0
+      - name: Authenticate to GHCR
+        run: echo "${{ github.token }}" | docker login ghcr.io --username "${{ github.actor }}" --password-stdin
+      - name: Build and push unique release image
+        env:
+          RELEASE_VERSION: ${{ inputs.release_version }}
+          IMAGE_REPOSITORY: ghcr.io/${{ github.repository }}/api
+          VCS_REF: ${{ github.sha }}
+        run: scripts/release/build_image.sh --push

@@ -346,9 +346,7 @@ Page({
     if (
       !storedUser
       || !storedUser.user_id
-      || !storedUser.openid
-      || String(storedUser.user_id).startsWith('dev_')
-      || String(storedUser.openid).startsWith('dev_')
+      || !auth.hasUsableSession()
     ) return;
     this.dailyAutoRefreshing = true;
     try {

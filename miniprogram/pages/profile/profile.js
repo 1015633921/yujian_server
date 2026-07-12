@@ -311,7 +311,7 @@ Page({
       confirmColor: '#C65B55',
       success: result => {
         if (!result.confirm) return;
-        auth.logout();
+        auth.logout().catch(() => undefined);
         this.setData({
           user: null,
           isLoggedIn: false,

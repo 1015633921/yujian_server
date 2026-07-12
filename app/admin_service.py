@@ -23,6 +23,7 @@ from .materials import (
     material_url_from_path,
     normalize_material_image_url,
 )
+from .money import cents_to_text, money_to_cents, stored_cents
 from .material_knowledge import (
     enrich_material_with_knowledge,
     enrich_materials_with_knowledge,
@@ -42,7 +43,7 @@ from .material_options import (
     stable_key,
 )
 from .repository import DB_PATH
-from .database import connect_database, integrity_errors, use_mysql
+from .database import connect_database, integrity_errors, runtime_schema_mutation_allowed, use_mysql
 from .wechat_trade_service import WechatTradeService
 
 
@@ -185,6 +186,8 @@ class AdminService:
 
     def init_db(self) -> None:
         if use_mysql() and not self._force_sqlite:
+            if not runtime_schema_mutation_allowed():
+                return
             with self.connect() as connection:
                 self._ensure_admin_security_schema(connection)
                 count = connection.execute("SELECT COUNT(*) AS c FROM managed_materials").fetchone()["c"]
@@ -252,6 +255,7 @@ class AdminService:
                     effect TEXT NOT NULL,
                     element TEXT NOT NULL,
                     price REAL NOT NULL,
+                    price_cents INTEGER,
                     size REAL NOT NULL,
                     weight REAL NOT NULL,
                     cost_price REAL NOT NULL DEFAULT 0,
@@ -422,9 +426,9 @@ class AdminService:
             connection.execute(
                 """
                 INSERT INTO managed_materials
-                (id, skuId, top, category, series, material_code, grade, name, effect, element, price, size, weight, color, shine,
+                (id, skuId, top, category, series, material_code, grade, name, effect, element, price, price_cents, size, weight, color, shine,
                  image_path, image_url, image_urls_json, enabled, sort_order, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
                 """,
                 (
                     item["id"],
@@ -438,6 +442,7 @@ class AdminService:
                     item["effect"],
                     item["element"],
                     item["price"],
+                    money_to_cents(item["price"], field_name="材料价格"),
                     item["size"],
                     item["weight"],
                     item["color"],
@@ -1847,9 +1852,9 @@ class AdminService:
             connection.execute(
                 """
                 INSERT INTO managed_materials
-                (id, skuId, top, category, series, material_code, grade, name, effect, element, price, size, weight, color, shine,
+                (id, skuId, top, category, series, material_code, grade, name, effect, element, price, price_cents, size, weight, color, shine,
                  image_path, image_url, enabled, sort_order, created_at, updated_at)
-                VALUES (?, ?, 'bead', ?, ?, ?, ?, ?, '清爽与干净感', '金', ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
+                VALUES (?, ?, 'bead', ?, ?, ?, ?, ?, '清爽与干净感', '金', ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
                 """,
                 (
                     item_id,
@@ -1860,6 +1865,7 @@ class AdminService:
                     grade,
                     series,
                     price,
+                    money_to_cents(price, field_name="材料价格"),
                     size,
                     weight,
                     color,
@@ -3944,8 +3950,14 @@ class AdminService:
         stock = int(float(row.get("stock") or 0))
         safety_stock = int(float(row.get("safety_stock") or 0))
         stock_status = "out" if stock <= 0 else "low" if safety_stock > 0 and stock <= safety_stock else "normal"
+        try:
+            price_cents = stored_cents(row.get("price_cents"), field_name="材料价格")
+            display_price = float(cents_to_text(price_cents))
+        except ValueError:
+            display_price = float(row.get("price") or 0)
         material = {
             **row,
+            "price": display_price,
             "material_code": material_code,
             "enabled": bool(row.get("enabled", 1)),
             "series": row.get("series") or row.get("name") or "",
@@ -3958,7 +3970,7 @@ class AdminService:
         }
         result = enrich_material_with_knowledge(material, connection)
         cost_price = float(row.get("cost_price") or 0)
-        price = float((result.get("sku") or {}).get("price_per_bead") or row.get("price") or 0)
+        price = float((result.get("sku") or {}).get("price_per_bead") or display_price)
         ops = {
             "cost_price": cost_price,
             "safety_stock": safety_stock,
@@ -4279,6 +4291,8 @@ class AdminService:
         return self.get_order(order_id)
 
     def public_order(self, row: dict[str, Any]) -> dict[str, Any]:
+        total_fee = int(row.get("total_fee") or 0)
+        total_amount = f"{total_fee // 100}.{total_fee % 100:02d}"
         return {
             "order_id": row["order_id"],
             "out_trade_no": row.get("out_trade_no") or row["order_id"],
@@ -4288,8 +4302,8 @@ class AdminService:
             "status": row["status"],
             "status_text": self.order_status_text(row["status"]),
             "payment_status": row["payment_status"],
-            "total_amount": row["total_amount"],
-            "total_fee": row.get("total_fee"),
+            "total_amount": total_amount,
+            "total_fee": total_fee,
             "currency": row.get("currency") or "CNY",
             "receiver": self.loads(row["receiver_json"], {}),
             "design": self.loads(row["design_json"], {}),
@@ -4872,36 +4886,49 @@ class AdminService:
             existing = connection.execute("SELECT * FROM managed_materials WHERE id = ?", (item_id,)).fetchone()
             before = dict(existing) if existing else None
             if existing:
-                connection.execute(
+                reserved_stock = int(dict(existing).get("reserved_stock") or 0)
+                if int(item["stock"]) < reserved_stock:
+                    raise ValueError(f"库存不能低于已预占数量 {reserved_stock}")
+                cursor = connection.execute(
                     """
                     UPDATE managed_materials SET
-                    skuId=?, top=?, category=?, series=?, material_code=?, grade=?, name=?, effect=?, element=?, price=?, size=?, weight=?,
+                    skuId=?, top=?, category=?, series=?, material_code=?, grade=?, name=?, effect=?, element=?, price=?, price_cents=?, size=?, weight=?,
                     cost_price=?, safety_stock=?, supplier_name=?, purchase_note=?,
                     color=?, shine=?, image_path=?, image_url=?, image_urls_json=?, stock=?, enabled=?, sort_order=?, updated_at=?
-                    WHERE id=?
+                    WHERE id=? AND reserved_stock <= ?
                     """,
                     (
                         item["skuId"], item["top"], item["category"], item["series"], item["material_code"], item["grade"],
                         item["name"], item["effect"], item["element"],
-                        item["price"], item["size"], item["weight"], item["cost_price"], item["safety_stock"],
+                        item["price"], item["price_cents"], item["size"], item["weight"], item["cost_price"], item["safety_stock"],
                         item["supplier_name"], item["purchase_note"], item["color"], item["shine"],
                         item.get("image_path", ""), item.get("image_url", ""), item["image_urls_json"], item["stock"], item["enabled"],
-                        item["sort_order"], timestamp, item_id,
+                        item["sort_order"], timestamp, item_id, item["stock"],
                     ),
                 )
+                current = connection.execute(
+                    "SELECT stock, reserved_stock FROM managed_materials WHERE id = ?",
+                    (item_id,),
+                ).fetchone()
+                if (
+                    not current
+                    or int(current["stock"]) != int(item["stock"])
+                    or int(current["reserved_stock"] or 0) > int(item["stock"])
+                ):
+                    raise ValueError("库存不能低于已预占数量")
             else:
                 connection.execute(
                     """
                     INSERT INTO managed_materials
-                    (id, skuId, top, category, series, material_code, grade, name, effect, element, price, size, weight, color, shine,
+                    (id, skuId, top, category, series, material_code, grade, name, effect, element, price, price_cents, size, weight, color, shine,
                      cost_price, safety_stock, supplier_name, purchase_note, image_path, image_url, image_urls_json, stock, enabled,
                      sort_order, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         item["id"], item["skuId"], item["top"], item["category"], item["series"], item["material_code"], item["grade"],
                         item["name"], item["effect"],
-                        item["element"], item["price"], item["size"], item["weight"], item["color"], item["shine"],
+                        item["element"], item["price"], item["price_cents"], item["size"], item["weight"], item["color"], item["shine"],
                         item["cost_price"], item["safety_stock"], item["supplier_name"], item["purchase_note"],
                         item.get("image_path", ""), item.get("image_url", ""), item["image_urls_json"], item["stock"], item["enabled"],
                         item["sort_order"], timestamp, timestamp,
@@ -5017,6 +5044,10 @@ class AdminService:
         enabled = 1 if payload.get("enabled", True) and stock > 0 else 0
         raw_sku_id = str(payload.get("skuId") or "").strip()
         sku_id = raw_sku_id if raw_sku_id.isdigit() else self.generate_material_sku(payload)
+        raw_price = payload.get("price_per_bead")
+        if raw_price in (None, ""):
+            raw_price = payload.get("price")
+        price_cents = money_to_cents(raw_price, field_name="单颗售价")
         return {
             "id": str(payload["id"]).strip(),
             "skuId": sku_id,
@@ -5028,7 +5059,8 @@ class AdminService:
             "name": str(payload["name"]).strip(),
             "effect": effect_text,
             "element": primary_element,
-            "price": float(payload.get("price_per_bead") or payload.get("price") or 0),
+            "price": cents_to_text(price_cents),
+            "price_cents": price_cents,
             "size": float(payload.get("size_mm") or payload.get("size") or 8),
             "weight": float(payload.get("weight_g") or payload.get("weight") or 1),
             "cost_price": max(0, float(payload.get("cost_price") or payload.get("cost") or 0)),
@@ -5058,7 +5090,14 @@ class AdminService:
         with self.connect() as connection:
             row = connection.execute("SELECT * FROM managed_materials WHERE id = ?", (material_id,)).fetchone()
             before = dict(row) if row else None
-            connection.execute("DELETE FROM managed_materials WHERE id = ?", (material_id,))
+            if before and int(before.get("reserved_stock") or 0) > 0:
+                raise ValueError("SKU 存在未完成库存预占，不能删除")
+            cursor = connection.execute(
+                "DELETE FROM managed_materials WHERE id = ? AND reserved_stock = 0",
+                (material_id,),
+            )
+            if before and cursor.rowcount != 1:
+                raise ValueError("SKU 存在未完成库存预占，不能删除")
             if before:
                 self.record_material_audit(connection, action="delete", before=before, actor=actor)
         invalidate_material_cache()
@@ -5094,19 +5133,37 @@ class AdminService:
                     [timestamp, *clean_ids],
                 )
             elif action == "price":
-                price = float(value)
-                if price < 0:
-                    raise ValueError("价格不能小于 0")
+                price_cents = money_to_cents(value, field_name="价格")
+                price = cents_to_text(price_cents)
                 cursor = connection.execute(
-                    f"UPDATE managed_materials SET price=?, updated_at=? WHERE id IN ({placeholders})",
-                    [price, timestamp, *clean_ids],
+                    f"UPDATE managed_materials SET price=?, price_cents=?, updated_at=? WHERE id IN ({placeholders})",
+                    [price, price_cents, timestamp, *clean_ids],
                 )
             elif action == "stock":
                 stock = max(0, int(float(value)))
+                blocked = [
+                    row for row in before_rows
+                    if stock < int(row.get("reserved_stock") or 0)
+                ]
+                if blocked:
+                    raise ValueError("库存不能低于已预占数量")
                 cursor = connection.execute(
-                    f"UPDATE managed_materials SET stock=?, enabled=CASE WHEN ? > 0 THEN enabled ELSE 0 END, updated_at=? WHERE id IN ({placeholders})",
-                    [stock, stock, timestamp, *clean_ids],
+                    f"UPDATE managed_materials SET stock=?, enabled=CASE WHEN ? > 0 THEN enabled ELSE 0 END, updated_at=? "
+                    f"WHERE id IN ({placeholders}) AND reserved_stock <= ?",
+                    [stock, stock, timestamp, *clean_ids, stock],
                 )
+                current_rows = connection.execute(
+                    f"SELECT id, stock, reserved_stock FROM managed_materials WHERE id IN ({placeholders})",
+                    clean_ids,
+                ).fetchall()
+                current_by_id = {row["id"]: row for row in current_rows}
+                if any(
+                    row["id"] not in current_by_id
+                    or int(current_by_id[row["id"]]["stock"]) != stock
+                    or int(current_by_id[row["id"]]["reserved_stock"] or 0) > stock
+                    for row in before_rows
+                ):
+                    raise ValueError("库存不能低于已预占数量")
             elif action == "safety_stock":
                 safety_stock = max(0, int(float(value)))
                 cursor = connection.execute(
@@ -5114,10 +5171,14 @@ class AdminService:
                     [safety_stock, timestamp, *clean_ids],
                 )
             elif action == "delete":
+                if any(int(row.get("reserved_stock") or 0) > 0 for row in before_rows):
+                    raise ValueError("SKU 存在未完成库存预占，不能删除")
                 cursor = connection.execute(
-                    f"DELETE FROM managed_materials WHERE id IN ({placeholders})",
+                    f"DELETE FROM managed_materials WHERE id IN ({placeholders}) AND reserved_stock = 0",
                     clean_ids,
                 )
+                if cursor.rowcount != len(before_rows):
+                    raise ValueError("SKU 存在未完成库存预占，不能删除")
             else:
                 raise ValueError("不支持的批量操作")
             affected = cursor.rowcount if cursor.rowcount is not None else len(clean_ids)

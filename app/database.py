@@ -8,7 +8,9 @@ from pathlib import Path
 from typing import Any
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-DEFAULT_SQLITE_PATH = BASE_DIR / "data" / "yujian_fastapi.db"
+DEFAULT_SQLITE_PATH = Path(
+    os.getenv("SQLITE_DATABASE_PATH") or BASE_DIR / "data" / "yujian_fastapi.db"
+)
 
 _schema_lock = threading.Lock()
 _schema_ready: set[str] = set()
@@ -16,6 +18,13 @@ _schema_ready: set[str] = set()
 
 def use_mysql() -> bool:
     return os.getenv("DATABASE_BACKEND", "sqlite").lower() == "mysql"
+
+
+def runtime_schema_mutation_allowed() -> bool:
+    value = os.getenv("ALLOW_RUNTIME_SCHEMA_MUTATION")
+    if value is not None:
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return os.getenv("APP_ENV", "development").lower() not in {"test", "production"}
 
 
 def integrity_errors():
@@ -73,7 +82,8 @@ def connect_database(db_path: Path | str | None = None):
         connection = sqlite3.connect(path, check_same_thread=False)
         connection.row_factory = sqlite3.Row
         return connection
-    ensure_mysql_schema()
+    if runtime_schema_mutation_allowed():
+        ensure_mysql_schema()
     return MySQLConnection()
 
 
@@ -154,7 +164,7 @@ MYSQL_SCHEMA = [
       category VARCHAR(100) NOT NULL, series VARCHAR(160) NOT NULL DEFAULT '',
       material_code VARCHAR(160) NOT NULL DEFAULT '',
       grade VARCHAR(40) NOT NULL DEFAULT '', name VARCHAR(160) NOT NULL, effect VARCHAR(255) NOT NULL,
-      element VARCHAR(20) NOT NULL, price DOUBLE NOT NULL, size DOUBLE NOT NULL, weight DOUBLE NOT NULL,
+      element VARCHAR(20) NOT NULL, price DECIMAL(12,2) NOT NULL, price_cents BIGINT, size DOUBLE NOT NULL, weight DOUBLE NOT NULL,
       cost_price DOUBLE NOT NULL DEFAULT 0, safety_stock INT NOT NULL DEFAULT 0,
       supplier_name VARCHAR(255) NOT NULL DEFAULT '', purchase_note TEXT,
       color VARCHAR(40) NOT NULL, shine VARCHAR(40) NOT NULL, image_path VARCHAR(1000),

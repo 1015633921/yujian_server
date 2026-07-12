@@ -19,6 +19,7 @@ if str(ROOT) not in sys.path:
 
 from app.database import connect_database, use_mysql
 from app.material_knowledge import material_code_from_payload
+from app.money import money_to_cents
 from app.repository import DB_PATH
 
 
@@ -451,10 +452,10 @@ def insert_material_row(connection, group: AssetGroup, meta: dict, size: int, of
     connection.execute(
         """
         INSERT INTO managed_materials
-        (id, skuId, top, category, series, material_code, grade, name, effect, element, price, size, weight, color, shine,
+        (id, skuId, top, category, series, material_code, grade, name, effect, element, price, price_cents, size, weight, color, shine,
          cost_price, safety_stock, supplier_name, purchase_note, image_path, image_url, image_urls_json, stock, enabled,
          sort_order, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             deterministic_id(group, size),
@@ -468,6 +469,7 @@ def insert_material_row(connection, group: AssetGroup, meta: dict, size: int, of
             meta["effect"],
             meta["element"],
             meta["price"],
+            money_to_cents(meta["price"], field_name="材料价格"),
             float(size),
             0 if group.top != "bead" else round((size / 8) ** 3 * 1.2, 2),
             meta["color"],

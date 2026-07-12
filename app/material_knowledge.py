@@ -8,6 +8,7 @@ from typing import Any
 from .database import connect_database
 from .fortune.crystal_taxonomy import taxonomy_for
 from .material_options import (
+    element_label,
     normalize_chakra_list,
     normalize_care_tag_list,
     normalize_color_family,
@@ -724,11 +725,12 @@ def merge_taxonomy(code: str, crystal: dict[str, Any]) -> dict[str, Any]:
 
 def crystal_elements(code: str, crystal: dict[str, Any]) -> set[str]:
     taxonomy = merge_taxonomy(code, crystal)
-    return {
+    raw_elements = {
         crystal.get("element") or crystal.get("primary_element") or "",
         *unique_list(crystal.get("secondary_elements")),
         *unique_list(taxonomy.get("elements")),
     } - {""}
+    return {element_label(value) for value in raw_elements if element_label(value)}
 
 
 def build_recommendation_catalog(base_catalog: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
@@ -747,9 +749,13 @@ def build_recommendation_catalog(base_catalog: dict[str, dict[str, Any]]) -> dic
         base.update(
             {
                 "name": knowledge.get("name") or base.get("name") or code,
-                "element": knowledge.get("primary_element") or base.get("element") or "",
+                "element": element_label(knowledge.get("primary_element") or base.get("element") or ""),
                 "secondary_elements": unique_list(
-                    knowledge.get("secondary_elements") or base.get("secondary_elements")
+                    [
+                        element_label(value)
+                        for value in (knowledge.get("secondary_elements") or base.get("secondary_elements") or [])
+                        if element_label(value)
+                    ]
                 ),
                 "color": base.get("color") or "#dfe3e5",
                 "effects": unique_list(knowledge.get("effects") or base.get("effects")),
