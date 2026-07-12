@@ -70,6 +70,88 @@ test('backend recommendation uses its descriptive payload name for the fresh dra
   assert.equal(importedDraft.name, '小羽的专属搭配手串');
 });
 
+test('backend recommendation recalculates only after selected beads reach page data', () => {
+  const page = loadPage('miniprogram/pages/workspace/workspace.js');
+  const payload = {
+    name: '测试推荐手串',
+    wrist_size_cm: 16,
+    bracelet_plan: {
+      title: '',
+      layout: [{ crystal_code: 'clear_quartz' }]
+    }
+  };
+  let pendingSetData = null;
+  let countSeenByRecalculate = -1;
+  const instance = Object.assign({}, page, {
+    data: { ...page.data, selected: [], placements: [], wristSize: 16 },
+    materialPayloadReady: true,
+    buildBackendRecommendationSelected: () => ['clearQuartz8'],
+    findMaterialById: id => ({ id, size: 8, size_mm: 8, type: 'bead' }),
+    resetWorkspaceRuntime() {},
+    pushHistory() {},
+    normalizePlacements: selected => selected.map(id => ({ id })),
+    replaceCurrentDesignWithImportedDraft() {},
+    setData(patch, callback) {
+      pendingSetData = { patch, callback };
+    },
+    recalculate() {
+      countSeenByRecalculate = this.data.selected.length;
+    }
+  });
+  global.wx = {
+    getStorageSync(key) {
+      if (key === 'diyWorkbenchPayload') return payload;
+      return '';
+    },
+    setStorageSync() {},
+    showToast() {}
+  };
+
+  const applied = instance.applyBackendRecommendation({ silent: true });
+
+  assert.equal(applied, true);
+  assert.equal(countSeenByRecalculate, -1);
+  assert.ok(pendingSetData);
+  Object.assign(instance.data, pendingSetData.patch);
+  pendingSetData.callback();
+  assert.ok(instance.data.selected.length > 0);
+  assert.equal(countSeenByRecalculate, instance.data.selected.length);
+});
+
+test('workspace falls back to DOM beads when canvas rendering fails', () => {
+  const page = loadPage('miniprogram/pages/workspace/workspace.js');
+  let fallbackReason = '';
+  let restoreCount = 0;
+  const instance = Object.assign({}, page, {
+    data: { ...page.data, selected: ['clearQuartz8'] },
+    materialPayloadReady: true,
+    braceletCanvasState: {
+      width: 320,
+      height: 320,
+      ctx: {
+        clearRect() {},
+        save() {},
+        translate() {},
+        restore() {
+          restoreCount += 1;
+        }
+      }
+    },
+    getCanvasImpactOffset: () => ({ x: 0, y: 0 }),
+    drawCanvasBeadSprites() {
+      throw new Error('offscreen canvas draw failed');
+    },
+    switchToDomRendererFallback(reason) {
+      fallbackReason = reason;
+    }
+  });
+
+  instance.renderBraceletCanvas();
+
+  assert.equal(restoreCount, 1);
+  assert.equal(fallbackReason, 'bracelet canvas render failed');
+});
+
 test('assessment prefetches the last confirmed size and report reads the cached plan', () => {
   const assessmentJs = fs.readFileSync(
     path.resolve(__dirname, '../../miniprogram/pages/assessment/assessment.js'),

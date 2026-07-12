@@ -2824,8 +2824,7 @@ Page({
       draggingBeadIndex: -1,
       dragDeleteArmed: false,
       sourceContext
-    });
-    this.recalculate();
+    }, () => this.recalculate());
     return true;
   },
 
@@ -2889,8 +2888,7 @@ Page({
       draggingBeadIndex: -1,
       dragDeleteArmed: false,
       sourceContext
-    });
-    this.recalculate();
+    }, () => this.recalculate());
     if (!options.silent) wx.showToast({ title: '已载入专属推荐', icon: 'success' });
     return true;
   },
@@ -3733,13 +3731,32 @@ Page({
     ctx.clearRect(0, 0, state.width, state.height);
     const impactOffset = this.getCanvasImpactOffset();
     ctx.save();
-    ctx.translate(impactOffset.x, impactOffset.y);
-    const renderedSignature = this.drawCanvasBeadSprites(ctx, spriteContext, sceneSnapshot);
-    ctx.restore();
-    this.clearEnergyPanelCanvasOverlap(ctx, state);
-    if (!this.canvasImpact) {
-      this.lastBraceletCanvasRenderSignature = sceneSignature || renderedSignature || this.buildCanvasEmptySceneSignature();
-      this.lastBraceletCanvasRenderSnapshot = this.latestCanvasDrawSnapshot || sceneSnapshot || null;
+    let restored = false;
+    try {
+      ctx.translate(impactOffset.x, impactOffset.y);
+      const renderedSignature = this.drawCanvasBeadSprites(ctx, spriteContext, sceneSnapshot);
+      ctx.restore();
+      restored = true;
+      const renderedSnapshot = this.latestCanvasDrawSnapshot || sceneSnapshot || null;
+      const renderedSpriteCount = renderedSnapshot
+        ? (renderedSnapshot.normalSprites || []).length + (renderedSnapshot.overlaySprites || []).length
+        : 0;
+      if (this.materialPayloadReady && this.data.selected.length && !renderedSpriteCount) {
+        throw new Error('canvas bead sprites unavailable');
+      }
+      this.clearEnergyPanelCanvasOverlap(ctx, state);
+      if (!this.canvasImpact) {
+        this.lastBraceletCanvasRenderSignature = sceneSignature || renderedSignature || this.buildCanvasEmptySceneSignature();
+        this.lastBraceletCanvasRenderSnapshot = renderedSnapshot;
+      }
+    } catch (error) {
+      if (!restored) {
+        try {
+          ctx.restore();
+        } catch (restoreError) {}
+      }
+      logWorkspaceWarning('workspace canvas render failed:', error);
+      this.switchToDomRendererFallback('bracelet canvas render failed');
     }
   },
 
