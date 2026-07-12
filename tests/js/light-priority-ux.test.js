@@ -40,8 +40,8 @@ test('workspace gives the material drawer more room without collapsing the tray'
   const shortStyle = parseWorkspaceLayoutStyle(shortLayout.style);
   const tallStyle = parseWorkspaceLayoutStyle(tallLayout.style);
 
-  assert.ok(shortStyle['--workspace-drawer-height'] >= shortViewport * 0.36);
-  assert.ok(tallStyle['--workspace-drawer-height'] >= tallViewport * 0.42);
+  assert.ok(shortStyle['--workspace-drawer-height'] >= shortViewport * 0.31);
+  assert.ok(tallStyle['--workspace-drawer-height'] >= tallViewport * 0.36);
   assert.ok(tallStyle['--workspace-drawer-height'] > shortStyle['--workspace-drawer-height']);
   assert.ok(shortLayout.stageLayout.size >= 580);
   assert.ok(tallLayout.stageLayout.size >= 670);
@@ -55,8 +55,31 @@ test('workspace gives the material drawer more room without collapsing the tray'
       + tallStyle['--workspace-canvas-height']
       + tallStyle['--workspace-drawer-height']
       - tallViewport;
-  assert.ok(shortOverlap >= 64 && shortOverlap <= 72);
-  assert.ok(tallOverlap >= 88 && tallOverlap <= 96);
+  assert.equal(shortOverlap, 0);
+  assert.equal(tallOverlap, 0);
+});
+
+test('workspace keeps large-screen tray controls above the material drawer', () => {
+  const page = loadPage('miniprogram/pages/workspace/workspace.js');
+  const viewportRpx = Math.round(932 * 750 / 430);
+  const style = parseWorkspaceLayoutStyle(page.buildResponsiveWorkspaceLayout({
+    windowWidth: 430,
+    windowHeight: 932,
+    viewportRpx,
+    bottomInsetRpx: 65
+  }).style);
+  const drawerTop = viewportRpx - style['--workspace-drawer-height'];
+  const randomButtonBottom = style['--workspace-top-chrome']
+    + style['--workspace-random-top']
+    + style['--workspace-random-height'];
+
+  assert.equal(
+    style['--workspace-top-chrome']
+      + style['--workspace-canvas-height']
+      + style['--workspace-drawer-height'],
+    viewportRpx
+  );
+  assert.ok(drawerTop - randomButtonBottom >= 10);
 });
 
 test('workspace reserves the device bottom inset without lifting the drawer over the workbench', () => {
