@@ -7,6 +7,8 @@ const ASSESSMENT_DRAFT_KEY = 'assessmentDraft';
 const ASSESSMENT_PROFILE_KEY = 'assessmentLastProfile';
 const ASSESSMENT_RECALCULATE_KEY = 'assessmentRecalculateMode';
 const ASSESSMENT_SUPPRESS_AUTO_REPORT_ONCE_KEY = 'assessmentSuppressAutoReportOnce';
+const ASSESSMENT_REQUESTED_STEP_KEY = 'assessmentRequestedStep';
+const ASSESSMENT_REPORT_SEED_KEY = 'assessmentReportSeed';
 const ENERGY_REPORT_KEY = 'energyReport';
 
 function safeStateDimension(value = '') {
@@ -214,8 +216,20 @@ Page({
     }
     const storedMode = wx.getStorageSync('customMode') || {};
     const modeId = storedMode.id || 'wuxing';
-    this.setData({ modeCopy: MODE_COPY[modeId] || MODE_COPY.wuxing });
-    this.openExistingReportIfNeeded();
+    const requestedStep = String(wx.getStorageSync(ASSESSMENT_REQUESTED_STEP_KEY) || '');
+    this.setData({ modeCopy: MODE_COPY[modeId] || MODE_COPY.wuxing }, () => {
+      if (requestedStep) {
+        wx.removeStorageSync(ASSESSMENT_REQUESTED_STEP_KEY);
+        const requestedIndex = FLOW_STEPS.findIndex(step => step.key === requestedStep);
+        const reportSeed = wx.getStorageSync(ASSESSMENT_REPORT_SEED_KEY) || {};
+        wx.removeStorageSync(ASSESSMENT_REPORT_SEED_KEY);
+        this.applyReportSeed(reportSeed, () => {
+          if (requestedIndex >= 0) this.goToStep(requestedIndex);
+        });
+        return;
+      }
+      this.openExistingReportIfNeeded();
+    });
   },
 
   onHide() {
@@ -391,6 +405,62 @@ Page({
     return form;
   },
 
+  mapReportWishes(coreWishes = [], currentWishes = []) {
+    const rawWishes = Array.isArray(coreWishes) ? coreWishes.filter(Boolean) : [];
+    const current = Array.isArray(currentWishes) ? currentWishes.filter(wish => WISHES.includes(wish)) : [];
+    const mapped = [];
+    rawWishes.forEach(rawWish => {
+      if (WISHES.includes(rawWish)) {
+        mapped.push(rawWish);
+        return;
+      }
+      const currentMatch = current.find(wish => WISH_MAPPING[wish] === rawWish);
+      const fallbackMatch = WISHES.find(wish => WISH_MAPPING[wish] === rawWish);
+      if (currentMatch || fallbackMatch) mapped.push(currentMatch || fallbackMatch);
+    });
+    return Array.from(new Set(mapped.length ? mapped : current));
+  },
+
+  applyReportSeed(seed = {}, done = () => {}) {
+    const input = seed.input_summary || seed;
+    if (!input || typeof input !== 'object' || !Object.keys(input).length) {
+      done();
+      return;
+    }
+    const form = { ...this.data.form };
+    if (input.name) form.name = input.name;
+    if (input.birthday) form.birthDate = input.birthday;
+    if (input.mbti) form.mbti = input.mbti;
+    form.wishes = this.mapReportWishes(
+      input.core_wishes || (input.core_wish ? [input.core_wish] : []),
+      form.wishes
+    );
+    if (Array.isArray(input.chakra_answers)) form.chakraAnswers = input.chakra_answers.slice();
+    if (Object.prototype.hasOwnProperty.call(input, 'mood_palette_id')) {
+      form.moodPaletteId = input.mood_palette_id || '';
+    }
+    const lastProfile = wx.getStorageSync(ASSESSMENT_PROFILE_KEY) || {};
+    const matchesLastProfile = lastProfile.name === input.name
+      && lastProfile.birthDate === input.birthday;
+    if (input.birth_time) {
+      const preserveUnknownTime = matchesLastProfile && lastProfile.birthTimeUnknown === true;
+      form.birthTime = preserveUnknownTime ? '' : input.birth_time;
+      form.birthTimeUnknown = preserveUnknownTime;
+    }
+    const pickerState = buildBirthRegionPickerState(
+      input.birth_place ? [input.birth_place] : form.birthRegion,
+      input.birth_place || form.birthPlace
+    );
+    form.birthRegion = pickerState.birthRegion;
+    form.birthPlace = pickerState.birthPlace;
+    this.setData({
+      form,
+      birthRegionColumns: pickerState.birthRegionColumns,
+      birthRegionIndex: pickerState.birthRegionIndex,
+      birthTimeLabel: form.birthTimeUnknown || !form.birthTime ? '未知' : form.birthTime
+    }, done);
+  },
+
   normalizeBirthRegion(region, birthPlace = '') {
     return buildBirthRegionPickerState(region, birthPlace).birthRegion;
   },
@@ -414,6 +484,9 @@ Page({
       birthPlace: form.birthPlace || '',
       birthRegion: this.normalizeBirthRegion(form.birthRegion, form.birthPlace),
       mbti: form.mbti || '',
+      wishes: Array.isArray(form.wishes) ? form.wishes.slice() : [],
+      chakraAnswers: Array.isArray(form.chakraAnswers) ? form.chakraAnswers.slice() : [],
+      moodPaletteId: form.moodPaletteId || '',
       updatedAt: Date.now()
     });
   },

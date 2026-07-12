@@ -7,6 +7,83 @@ const ELEMENT_META = {
   金: { key: 'metal', color: '#9B9FA3', softColor: 'rgba(155,159,163,.14)' },
   水: { key: 'water', color: '#4E7893', softColor: 'rgba(78,120,147,.12)' }
 };
+const ELEMENT_STYLE_GUIDANCE = {
+  木: {
+    keyword: '清新舒展',
+    character: '偏清新、舒展，有生长感',
+    focus: '轻盈与生长感',
+    colors: '青绿、雾蓝、米白',
+    texture: '清透、自然、轻盈',
+    structure: '线条舒展、适当留白、疏密有序',
+    reduce: '过多同类绿色和过于松散的结构'
+  },
+  火: {
+    keyword: '明亮有活力',
+    character: '偏明亮、直接，有行动感',
+    focus: '明亮与行动感',
+    colors: '暖红、蜜橙、柔金',
+    texture: '明亮、温润、有光泽',
+    structure: '重点明确、节奏利落、适量点缀',
+    reduce: '大面积高饱和暖色和过强的视觉对比'
+  },
+  土: {
+    keyword: '沉稳可靠',
+    character: '偏沉稳、包容，有分量感',
+    focus: '稳定与承托感',
+    colors: '米白、浅黄、暖棕',
+    texture: '温润、柔和、有质感',
+    structure: '圆润线条、重心稳定、排列有序',
+    reduce: '大面积黄棕和过度密集的排列'
+  },
+  金: {
+    keyword: '利落克制',
+    character: '偏利落、克制，有秩序感',
+    focus: '清晰与秩序感',
+    colors: '白色、银灰、透明色',
+    texture: '通透、干净、细腻',
+    structure: '轮廓清晰、比例规整、少量留白',
+    reduce: '过多冷白灰和过于规整的重复'
+  },
+  水: {
+    keyword: '安静细腻',
+    character: '偏安静、细腻，有流动感',
+    focus: '柔和与流动感',
+    colors: '雾蓝、月光白、浅灰蓝',
+    texture: '清透、柔和、有流动光泽',
+    structure: '圆润过渡、层次柔和、节奏舒缓',
+    reduce: '大面积深色和过于沉静的组合'
+  }
+};
+const COLOR_FAMILY_LABELS = {
+  clear: '透明',
+  white: '米白',
+  gray: '浅灰',
+  black: '黑色',
+  green: '青绿',
+  blue: '雾蓝',
+  purple: '柔紫',
+  pink: '柔粉',
+  red: '暖红',
+  orange: '蜜橙',
+  yellow: '浅黄',
+  gold: '柔金',
+  brown: '暖棕',
+  earth: '大地色'
+};
+const TRANSPARENCY_LABELS = {
+  transparent: '清透',
+  semi_transparent: '半透明',
+  translucent: '温润通透',
+  opaque: '沉稳不透'
+};
+const TEXTURE_FEATURE_LABELS = {
+  clean: '净透',
+  cloud: '柔雾',
+  mineral_inclusion: '天然包体',
+  texture: '天然纹理',
+  color_band: '色带层次',
+  sparkling: '细闪光泽'
+};
 const ELEMENT_ORDER = ['木', '火', '土', '金', '水'];
 const API_ELEMENT_ORDER = ['金', '木', '水', '火', '土'];
 const ELEMENT_NAME_ALIASES = {
@@ -39,11 +116,32 @@ const WRIST_RULER_STEP = 0.1;
 const WRIST_RULER_TICK_RPX = 22;
 const ASSESSMENT_RECALCULATE_KEY = 'assessmentRecalculateMode';
 const ASSESSMENT_SUPPRESS_AUTO_REPORT_ONCE_KEY = 'assessmentSuppressAutoReportOnce';
+const ASSESSMENT_REQUESTED_STEP_KEY = 'assessmentRequestedStep';
+const ASSESSMENT_REPORT_SEED_KEY = 'assessmentReportSeed';
 
 function safeText(value, fallback = '') {
   if (value === null || value === undefined) return fallback;
   const text = String(value).trim();
   return text || fallback;
+}
+
+function uniqueTextValues(values = []) {
+  return Array.from(new Set((values || []).map(value => safeText(value)).filter(Boolean)));
+}
+
+function normalizeDisplayPercentages(items = []) {
+  const total = (items || []).reduce((sum, item) => sum + Math.max(0, Number(item.rawValue) || 0), 0);
+  if (total <= 0) return (items || []).map(() => 0);
+  const exact = items.map(item => Math.max(0, Number(item.rawValue) || 0) / total * 100);
+  const percentages = exact.map(value => Math.floor(value));
+  let remaining = 100 - percentages.reduce((sum, value) => sum + value, 0);
+  const allocationOrder = exact
+    .map((value, index) => ({ index, remainder: value - Math.floor(value) }))
+    .sort((a, b) => b.remainder - a.remainder || a.index - b.index);
+  for (let cursor = 0; cursor < remaining; cursor += 1) {
+    percentages[allocationOrder[cursor % allocationOrder.length].index] += 1;
+  }
+  return percentages;
 }
 
 const DISPLAY_REPLACEMENTS = [
@@ -431,7 +529,8 @@ Page({
     posterGenerating: false,
     posterPath: '',
     posterSaving: false,
-    showPosterModal: false
+    showPosterModal: false,
+    showDetails: false
   },
 
   onLoad() {
@@ -464,9 +563,9 @@ Page({
       name,
       rawValue: Math.max(0, Number(profile[name]) || 0)
     }));
-    const total = rawElements.reduce((sum, item) => sum + item.rawValue, 0) || 1;
-    const elements = rawElements.map(item => {
-      const percent = Math.round((item.rawValue / total) * 100);
+    const displayPercentages = normalizeDisplayPercentages(rawElements);
+    const elements = rawElements.map((item, index) => {
+      const percent = displayPercentages[index];
       return {
         ...item,
         value: item.rawValue.toFixed(2),
@@ -475,6 +574,16 @@ Page({
       };
     });
     const score = this.normalizeScore(report.interpretation && report.interpretation.balance_index);
+    const sortedElements = elements.slice().sort((a, b) => b.percent - a.percent);
+    const styleAnswer = this.buildStyleAnswer(report, sortedElements);
+    const inputSummary = report.input_summary || {};
+    const chakraAnalysis = report.chakra_analysis || {};
+    const moodAnalysis = report.mood_analysis || {};
+    const hasChakraInput = Boolean(
+      (Array.isArray(inputSummary.chakra_answers) && inputSummary.chakra_answers.length)
+      || (chakraAnalysis.primary_chakra && chakraAnalysis.primary_chakra !== 'none')
+    );
+    const hasMoodInput = Boolean(inputSummary.mood_palette_id || moodAnalysis.palette_id);
     return {
       title: sanitizeDisplayText((report.interpretation && report.interpretation.headline) || '你的元素比例参考已生成'),
       mbti: (report.input_summary && report.input_summary.mbti) || '未填写 MBTI',
@@ -485,6 +594,9 @@ Page({
       balanceIndex: score,
       score,
       statusText: this.scoreStatus(score),
+      balanceExplanation: this.buildBalanceExplanation(score, sortedElements),
+      styleAnswer,
+      keyElements: styleAnswer.keyElements,
       trueSolarTime: report.solar_time && report.solar_time.true_solar_time ? report.solar_time.true_solar_time : '已按出生地校准',
       keywords: this.buildKeywordTags(report.energy_keywords),
       seasonal: this.buildSeasonalEnergy(report.seasonal_energy, report),
@@ -492,6 +604,11 @@ Page({
       chakra: this.buildChakraView(report.chakra_analysis || {}),
       mood: this.buildMoodView(report.mood_analysis || {}),
       zodiac: this.buildZodiacView(report.zodiac_analysis || {}),
+      hasChakraInput,
+      hasMoodInput,
+      hasLiveInput: hasChakraInput || hasMoodInput,
+      needsMoreInput: !hasChakraInput || !hasMoodInput,
+      missingInputText: this.buildMissingInputText(hasChakraInput, hasMoodInput),
       recommendationStrategy: sanitizeDisplayText(report.recommendation_strategy || ''),
       recommendationReasons: this.buildRecommendationReasons(report, elements),
       elements,
@@ -506,19 +623,113 @@ Page({
   },
 
   scoreStatus(score) {
-    if (score >= 85) return '比例均衡';
-    if (score >= 70) return '较为协调';
-    if (score >= 55) return '存在偏强项';
-    return '差异较明显';
+    if (score >= 85) return '比例较接近';
+    if (score >= 70) return '有轻微侧重';
+    if (score >= 55) return '侧重较明显';
+    return '侧重非常鲜明';
   },
 
   showBalanceIndexInfo() {
     wx.showModal({
-      title: '五行平衡度说明',
-      content: '范围为 0–100。计算方式为：100 −（五项元素比例中的最高值 − 最低值）× 3，最低不小于 0。数值越高只表示五项比例越接近；它不是健康评分、运势判断或佩戴效果承诺。',
+      title: '元素平衡度说明',
+      content: '范围为 0–100。85–100 表示比例较接近，70–84 表示有轻微侧重，55–69 表示侧重较明显，0–54 表示侧重非常鲜明。分数只反映五项比例的接近程度，不代表好坏、健康状态或佩戴效果。',
       showCancel: false,
       confirmText: '知道了'
     });
+  },
+
+  buildStyleAnswer(report = {}, sortedElements = []) {
+    const primary = sortedElements[0] || { name: '土', percent: 0, ...ELEMENT_META.土 };
+    const secondary = sortedElements[1] || primary;
+    const lowest = sortedElements[sortedElements.length - 1] || primary;
+    const primaryGuide = ELEMENT_STYLE_GUIDANCE[primary.name] || ELEMENT_STYLE_GUIDANCE.土;
+    const rawUsefulElements = Array.isArray(report.useful_elements) && report.useful_elements.length
+      ? report.useful_elements
+      : ((report.bazi_basis && Array.isArray(report.bazi_basis.useful_elements))
+        ? report.bazi_basis.useful_elements
+        : []);
+    const usefulElements = uniqueTextValues(rawUsefulElements.map(normalizeElementName)).filter(name => ELEMENT_META[name]);
+    const recommendedElements = usefulElements.length ? usefulElements : [lowest.name];
+    const recommendedElement = recommendedElements[0];
+    const recommendedGuide = ELEMENT_STYLE_GUIDANCE[recommendedElement] || ELEMENT_STYLE_GUIDANCE[lowest.name] || ELEMENT_STYLE_GUIDANCE.木;
+    const strategy = sanitizeDisplayText(
+      report.recommendation_strategy
+      || (report.bazi_basis && report.bazi_basis.strategy)
+      || ''
+    ).replace(/[。！？；]+$/, '');
+    const plan = report.bracelet_plan || {};
+    const planItems = Array.isArray(plan.items) && plan.items.length
+      ? plan.items.filter(Boolean)
+      : [report.primary_crystal, ...(Array.isArray(report.supporting_crystals) ? report.supporting_crystals : [])].filter(Boolean);
+    const materialNames = uniqueTextValues(planItems.map(item => item.name));
+    const colorLabels = uniqueTextValues(planItems.reduce((values, item) => values.concat(
+      Array.isArray(item.color_families)
+        ? item.color_families.map(color => COLOR_FAMILY_LABELS[color] || color)
+        : []
+    ), [])).slice(0, 4);
+    const textureLabels = uniqueTextValues(planItems.reduce((values, item) => {
+      const params = item.material_params || {};
+      const itemValues = [TRANSPARENCY_LABELS[params.transparency_level]];
+      (Array.isArray(params.texture_features) ? params.texture_features : []).forEach(feature => {
+        itemValues.push(TEXTURE_FEATURE_LABELS[feature] || '天然纹理');
+      });
+      return values.concat(itemValues);
+    }, [])).slice(0, 4);
+    const recommendationLogic = planItems.map(item => {
+      const role = safeText(item.role, '配珠');
+      if (role.includes('主石')) return `${safeText(item.name)}承接当前佩戴目标`;
+      if (role.includes('调和')) return `${safeText(item.name)}负责整体调和`;
+      if (role.includes('点睛')) return `${safeText(item.name)}完成视觉过渡`;
+      return `${safeText(item.name)}作为${role}`;
+    }).filter(Boolean).join('，');
+    const recommendationReasons = uniqueTextValues(planItems.map(item => sanitizeDisplayText(item.reason || '')));
+    const hasPlan = materialNames.length > 0;
+    const recommendedElementsText = recommendedElements.join(' / ');
+    return {
+      adviceTitle: hasPlan ? '你的真实方案建议' : '你的元素风格建议',
+      headline: `${primaryGuide.keyword}，适合加入${recommendedGuide.focus}`,
+      summary: `${primary.name}、${secondary.name}元素占比较高，整体气质${primaryGuide.character}；${lowest.name}元素比例相对较低。搭配建议优先参考${recommendedElementsText}元素${strategy ? `：${strategy}` : `，让整体更有${recommendedGuide.focus}`}。${hasPlan ? `真实方案会以${materialNames.join('、')}完成这组方向。` : ''}`,
+      keyElements: [
+        { label: '主要倾向', value: `${primary.name} ${primary.percent}%`, color: primary.color },
+        { label: '次要倾向', value: `${secondary.name} ${secondary.percent}%`, color: secondary.color },
+        { label: '比例较低', value: `${lowest.name} ${lowest.percent}%`, color: lowest.color }
+      ],
+      recommendedElementsText,
+      recommendationBasisLabel: usefulElements.length ? '搭配建议参考' : '比例调和参考',
+      advice: [
+        { label: hasPlan ? '实际配色' : '色彩方向', value: colorLabels.length ? colorLabels.join('、') : recommendedGuide.colors, tone: 'color' },
+        { label: hasPlan ? '实际材质' : '质感方向', value: materialNames.length ? materialNames.join('、') : recommendedGuide.texture, tone: 'texture' },
+        { label: hasPlan ? '实际结构' : '结构方向', value: safeText(plan.pattern, recommendedGuide.structure), tone: 'structure' },
+        {
+          label: hasPlan ? '搭配逻辑' : '搭配提醒',
+          value: recommendationLogic || strategy || `加入${recommendedGuide.focus}，同时控制${primaryGuide.reduce}。`,
+          tone: 'caution'
+        }
+      ],
+      evidenceTitle: hasPlan ? `为什么推荐${materialNames.slice(0, 2).join('与')}？` : `为什么建议参考${recommendedElementsText}元素？`,
+      evidence: recommendationReasons.length
+        ? recommendationReasons.slice(0, 2).join('')
+        : `你的${lowest.name}元素占比为 ${lowest.percent}%，在五种元素中相对较低；结合基础测算，搭配建议参考${recommendedElementsText}元素。${strategy || `可从${recommendedGuide.colors}等方向入手，让视觉气质更有${recommendedGuide.focus}。`}`,
+      source: hasPlan ? 'recommendation' : 'element-fallback',
+      recommendationSource: usefulElements.length ? 'backend' : 'ratio-fallback',
+      materialNames,
+      colorLabels,
+      textureLabels
+    };
+  },
+
+  buildBalanceExplanation(score, sortedElements = []) {
+    const primary = sortedElements[0] || { name: '优势' };
+    const secondary = sortedElements[1] || primary;
+    const supplement = sortedElements[sortedElements.length - 1] || { name: '可调和' };
+    return `满分 100，数值只表示五项比例的接近程度。当前${primary.name}、${secondary.name}占比较高，${supplement.name}相对较少，会优先影响配色和材质方向。`;
+  },
+
+  buildMissingInputText(hasChakraInput, hasMoodInput) {
+    if (!hasChakraInput && !hasMoodInput) return '尚未补充当下状态和直觉色彩，当前建议按中性信息生成。';
+    if (!hasChakraInput) return '尚未补充当下状态，当前建议按中性状态生成。';
+    if (!hasMoodInput) return '尚未补充直觉色彩，当前建议未额外偏向某组颜色。';
+    return '';
   },
 
   buildWishText(inputSummary) {
@@ -537,12 +748,24 @@ Page({
     const list = Array.isArray(keywords) ? keywords : [];
     return list.map(item => {
       if (typeof item === 'string') return { label: sanitizeDisplayText(item), source: '搭配标签' };
+      const source = sanitizeDisplayText(item.source || '搭配标签');
+      const poeticLabel = sanitizeDisplayText(item.label || '');
+      const element = normalizeElementName(item.element);
+      const guidance = ELEMENT_STYLE_GUIDANCE[element];
+      const label = guidance
+        ? (source.includes('调和') ? `增加${guidance.focus}` : guidance.keyword)
+        : poeticLabel;
       return {
-        label: sanitizeDisplayText(item.label || ''),
-        source: sanitizeDisplayText(item.source || '搭配标签'),
-        element: item.element || ''
+        label,
+        poeticLabel: poeticLabel && poeticLabel !== label ? poeticLabel : '',
+        source,
+        element
       };
     }).filter(item => item.label);
+  },
+
+  toggleDetails() {
+    this.setData({ showDetails: !this.data.showDetails });
   },
 
   buildSeasonalEnergy(seasonal, report) {
@@ -632,6 +855,8 @@ Page({
     const weakest = safeText(report.weakest_element, '可调和');
     const chakra = report.chakra_analysis || {};
     const mood = report.mood_analysis || {};
+    const chakraName = sanitizeDisplayText(chakra.primary_chakra_name || '');
+    const moodName = sanitizeDisplayText(mood.name || '');
     const topElements = (elements || [])
       .slice()
       .sort((a, b) => (Number(b.percent) || 0) - (Number(a.percent) || 0))
@@ -645,12 +870,12 @@ Page({
       ? `你选择了「${wishes.slice(0, 2).map(item => sanitizeDisplayText(item)).join('、')}」，材料筛选会更偏向这个佩戴目标和场景。`
       : '未填写目标时，系统会先以元素比例和佩戴舒适度作为主要推荐依据。';
     const stateParts = [
-      chakra.primary_chakra_name ? `状态线索偏向「${sanitizeDisplayText(chakra.primary_chakra_name)}」` : '',
-      mood.name ? `直觉色彩选择「${mood.name}」` : ''
+      chakraName && chakraName !== '未选择' ? `状态线索偏向「${chakraName}」` : '',
+      moodName && moodName !== '未选择' ? `直觉色彩选择「${moodName}」` : ''
     ].filter(Boolean);
     const stateDesc = stateParts.length
       ? `${stateParts.join('，')}，会影响辅助珠的颜色、寓意标签和排序权重。`
-      : '未选择当下状态时，推荐会保持中性，不额外放大某一类颜色或情绪标签。';
+      : '尚未补充当下状态和直觉色彩，本次方案按中性信息生成，不额外偏向某一类颜色。';
 
     return [
       {
@@ -669,7 +894,7 @@ Page({
         index: '03',
         title: '当下状态',
         desc: stateDesc,
-        meta: '状态线索 / 直觉色彩'
+        meta: stateParts.length ? '状态线索 / 直觉色彩' : '当前按中性信息处理'
       }
     ];
   },
@@ -1046,6 +1271,19 @@ Page({
     wx.switchTab({ url: '/pages/assessment/assessment' });
   },
 
+  supplementAssessment() {
+    const report = this.data.report || {};
+    if (report.input_summary) {
+      wx.setStorageSync(ASSESSMENT_REPORT_SEED_KEY, {
+        input_summary: report.input_summary,
+        created_at: report.created_at || ''
+      });
+    }
+    wx.setStorageSync(ASSESSMENT_RECALCULATE_KEY, true);
+    wx.setStorageSync(ASSESSMENT_REQUESTED_STEP_KEY, 'state');
+    wx.switchTab({ url: '/pages/assessment/assessment' });
+  },
+
   ensurePosterCanvas() {
     if (this.posterCanvasState) return Promise.resolve(this.posterCanvasState);
     return new Promise((resolve, reject) => {
@@ -1111,18 +1349,12 @@ Page({
     const view = this.data.viewReport || this.buildViewReport(report);
     const input = report.input_summary || {};
     const name = safeText(input.name, '你');
-    const seasonal = view.seasonal || {};
-    const mainTitle = `${name}的元素搭配报告`;
+    const mainTitle = `${name}的搭配答案`;
     const wishText = safeText(view.wish, '保持稳定与清透');
-    const summaryText = sanitizeDisplayText(view.summary, '你的元素比例已经生成，适合以温和的方式继续调和。');
-    const suggestion = safeText(seasonal.suggestion || seasonal.summary, '保持规律作息，把注意力放回最重要的一件事。');
+    const styleAnswer = view.styleAnswer || {};
+    const summaryText = sanitizeDisplayText(styleAnswer.summary || view.summary, '你的元素比例已经生成，适合以温和的方式继续调和。');
+    const styleHeadline = safeText(styleAnswer.headline, '找到适合你的搭配方向');
     const elements = view.elements || [];
-    const strongest = safeText(view.strongest, '优势');
-    const weakest = safeText(view.weakest, '可调和');
-    const bazi = view.bazi || {};
-    const chakra = view.chakra || {};
-    const mood = view.mood || {};
-    const zodiac = view.zodiac || {};
     const cardX = 44;
     const cardWidth = 662;
     const contentX = 76;
@@ -1133,52 +1365,11 @@ Page({
     const elementHeight = 302;
     const keywordY = elementY + elementHeight + 26;
 
-    const baziDetail = [
-      bazi.dayMaster ? `基础点：${bazi.dayMaster}` : '',
-      bazi.strength ? `状态：${sanitizeDisplayText(bazi.strength)}` : '',
-      bazi.usefulText ? `搭配参考：${bazi.usefulText}` : ''
-    ].filter(Boolean).join(' · ');
-    const baziRows = [
-      { label: '参考', text: bazi.pillarsText || view.trueSolarTime || '已按出生地时间校准', color: '#20201F' },
-      { label: '基础参考', text: baziDetail || '系统已结合出生信息完成元素底色分析。' },
-      { label: '推荐策略', text: bazi.strategy || view.recommendationStrategy || '系统会结合元素比例、佩戴目标和佩戴舒适度生成推荐方案。' }
-    ];
-    const liveRows = [
-      {
-        label: '状态线索',
-        text: `${safeText(chakra.name, '未选择')}｜${sanitizeDisplayText(chakra.summary, '系统按中性状态参与计算。')}`,
-        accent: '#647C70'
-      },
-      {
-        label: '直觉色彩',
-        text: `${safeText(mood.name, '未选择')}｜${sanitizeDisplayText(mood.summary, '未选择色彩时，系统不额外偏向某一组情绪色。')}`,
-        accent: '#8B82B3'
-      }
-    ];
-    const zodiacRows = zodiac.name ? [
-      {
-        label: '星座气质',
-        text: `${safeText(zodiac.name)} · ${safeText(zodiac.element, '星座气质')} · ${safeText(zodiac.modality, '节奏')}`,
-        meta: safeText(zodiac.keywordText, ''),
-        accent: '#9D7A3F'
-      },
-      {
-        label: '元素参照',
-        text: sanitizeDisplayText(zodiac.wuxingHint, '星座气质会作为元素报告外的性格侧写参考。'),
-        accent: '#9D7A3F'
-      },
-      {
-        label: '调和建议',
-        text: sanitizeDisplayText(zodiac.suggestion, zodiac.integration || '保持温和节奏，让优势被看见，也给可调和元素留出空间。'),
-        accent: '#9D7A3F'
-      }
-    ] : [];
-    const seasonalRows = [
-      { label: '周期', text: `${sanitizeDisplayText(seasonal.period, '近期参考')} · ${safeText(seasonal.seasonal_element, strongest)}元素参考` },
-      { label: '状态提示', text: sanitizeDisplayText(seasonal.seasonal_copy || seasonal.notice, '当下适合观察自己的状态节奏。') },
-      { label: '留意点', text: sanitizeDisplayText(seasonal.drain_point, `${weakest}元素适合慢慢调和，不宜一次调整太多。`) },
-      { label: '调和建议', text: suggestion, accent: '#365C9C' }
-    ];
+    const adviceRows = (styleAnswer.advice || []).map(item => ({
+      label: item.label,
+      text: item.value,
+      accent: item.tone === 'caution' ? '#C83B3D' : '#365C9C'
+    }));
     const recommendRows = (view.recommendationReasons || []).map(item => ({
       label: `${item.index} ${item.title}`,
       text: item.desc,
@@ -1190,22 +1381,13 @@ Page({
     const tagHeight = measurePosterTags(ctx, view.keywords || [], contentX, 0, contentWidth);
     ctx.font = '500 22px "PingFang SC", "Microsoft YaHei", sans-serif';
     const summaryHeight = measureWrappedText(ctx, summaryText, contentWidth, 32);
-    const keywordHeight = Math.max(252, 30 + 36 + 18 + tagHeight + 18 + summaryHeight + 32);
-    const baziHeight = measurePosterTextCard(ctx, baziRows, cardWidth, { minHeight: 190 });
-    const liveHeight = measurePosterTextCard(ctx, liveRows, cardWidth, { minHeight: 230 });
-    const zodiacHeight = zodiacRows.length ? measurePosterTextCard(ctx, zodiacRows, cardWidth, { minHeight: 220 }) : 0;
-    const seasonalHeight = measurePosterTextCard(ctx, seasonalRows, cardWidth, { minHeight: 270 });
+    const keywordHeight = Math.max(280, 30 + 36 + 18 + tagHeight + 18 + summaryHeight + 32);
+    const adviceHeight = measurePosterTextCard(ctx, adviceRows, cardWidth, { minHeight: 300 });
     const recommendHeight = measurePosterTextCard(ctx, recommendRows, cardWidth, { minHeight: 300 });
 
     let cursorY = keywordY + keywordHeight + 26;
-    const baziY = cursorY;
-    cursorY += baziHeight + 26;
-    const liveY = cursorY;
-    cursorY += liveHeight + 26;
-    const zodiacY = cursorY;
-    if (zodiacRows.length) cursorY += zodiacHeight + 26;
-    const seasonalY = cursorY;
-    cursorY += seasonalHeight + 26;
+    const adviceY = cursorY;
+    cursorY += adviceHeight + 26;
     const recommendY = cursorY;
     cursorY += recommendHeight + 30;
     const footerY = cursorY;
@@ -1239,15 +1421,12 @@ Page({
     ctx.fillStyle = '#64615B';
     ctx.font = '500 24px "PingFang SC", "Microsoft YaHei", sans-serif';
     drawWrappedText(ctx, `目标：${sanitizeDisplayText(wishText)}`, contentX, 320, 340, 34, 2);
-    ctx.fillStyle = '#8B8881';
-    ctx.font = '600 22px "PingFang SC", "Microsoft YaHei", sans-serif';
-    ctx.fillText(`MBTI：${safeText(view.mbti, '未填写')}`, contentX, 420);
-    ctx.fillText(
-      zodiac.name ? `星座：${safeText(zodiac.name)} · ${safeText(zodiac.element, '星座气质')}` : `偏强 ${strongest} · 可调和 ${weakest}`,
-      contentX,
-      456
-    );
-    if (zodiac.name) ctx.fillText(`偏强 ${strongest} · 可调和 ${weakest}`, contentX, 492);
+    ctx.fillStyle = '#647C70';
+    ctx.font = '800 21px "PingFang SC", "Microsoft YaHei", sans-serif';
+    ctx.fillText('搭配方向', contentX, 408);
+    ctx.fillStyle = '#20201F';
+    ctx.font = '750 25px "PingFang SC", "Microsoft YaHei", sans-serif';
+    drawWrappedText(ctx, styleHeadline, contentX, 444, 340, 34, 2);
 
     drawElementRing(ctx, elements, 560, 296, 96, 24);
     fillRoundRect(ctx, 494, 230, 132, 132, 66, '#FBFAF7');
@@ -1271,18 +1450,13 @@ Page({
     strokeRoundRect(ctx, cardX, keywordY, cardWidth, keywordHeight, 28, '#E5E2DC', 1);
     ctx.fillStyle = '#20201F';
     ctx.font = '800 30px "PingFang SC", "Microsoft YaHei", sans-serif';
-    ctx.fillText('专属关键词', contentX, keywordY + 58);
+    ctx.fillText('核心搭配结论', contentX, keywordY + 58);
     const afterTagsY = drawPosterTags(ctx, view.keywords || [], contentX, keywordY + 80, contentWidth);
     ctx.fillStyle = '#64615B';
     ctx.font = '500 22px "PingFang SC", "Microsoft YaHei", sans-serif';
     drawWrappedText(ctx, summaryText, contentX, afterTagsY + 14, contentWidth, 32);
 
-    drawPosterTextCard(ctx, '风格底色', baziRows, cardX, baziY, cardWidth, { minHeight: 190, accent: '#365C9C' });
-    drawPosterTextCard(ctx, '当下状态', liveRows, cardX, liveY, cardWidth, { minHeight: 230, accent: '#647C70' });
-    if (zodiacRows.length) {
-      drawPosterTextCard(ctx, '星座气质', zodiacRows, cardX, zodiacY, cardWidth, { minHeight: 220, accent: '#9D7A3F' });
-    }
-    drawPosterTextCard(ctx, '近期状态提示', seasonalRows, cardX, seasonalY, cardWidth, { minHeight: 270, accent: '#365C9C' });
+    drawPosterTextCard(ctx, safeText(styleAnswer.adviceTitle, '元素风格建议'), adviceRows, cardX, adviceY, cardWidth, { minHeight: 300, accent: '#365C9C' });
     drawPosterTextCard(ctx, '推荐依据', recommendRows, cardX, recommendY, cardWidth, { minHeight: 300, accent: '#9D7A3F' });
 
     fillRoundRect(ctx, cardX, footerY, cardWidth, 92, 24, '#20201F');

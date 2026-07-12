@@ -42,27 +42,19 @@ function estimateInnerCircumferenceMm(itemsOrSizes = []) {
 
 function recommendBeadCount(itemsOrSizes = [], wristSizeCm = 16, options = {}) {
   const sizes = normalizeBeadSizes(itemsOrSizes);
-  const averageSize = sizes.length
-    ? sizes.reduce((sum, size) => sum + size, 0) / sizes.length
-    : Number(options.defaultBeadSizeMm || 8);
+  const sourceSizes = sizes.length ? sizes : [Number(options.defaultBeadSizeMm || 8)];
   const allowanceMm = Number(options.allowanceMm || 0);
   const minCount = Math.max(3, Number(options.minCount || 3));
   const maxCount = Math.max(minCount, Number(options.maxCount || minCount));
   const targetMm = Math.max(0, Number(wristSizeCm || 0) * 10 + allowanceMm);
-  let best = { count: minCount, difference: Number.POSITIVE_INFINITY, isShort: true };
+  const startCount = Math.min(maxCount, Math.max(minCount, sourceSizes.length));
 
-  for (let count = minCount; count <= maxCount; count += 1) {
-    const innerLength = estimateInnerCircumferenceMm(Array(count).fill(averageSize));
-    const difference = Math.abs(innerLength - targetMm);
-    const isShort = innerLength < targetMm;
-    if (
-      difference < best.difference - 1e-6
-      || (Math.abs(difference - best.difference) <= 1e-6 && best.isShort && !isShort)
-    ) {
-      best = { count, difference, isShort };
-    }
+  for (let count = startCount; count <= maxCount; count += 1) {
+    const candidateSizes = expandSequenceToCount(sourceSizes, count);
+    const innerLength = estimateInnerCircumferenceMm(candidateSizes);
+    if (innerLength >= targetMm - 1e-6) return count;
   }
-  return best.count;
+  return maxCount;
 }
 
 function expandSequenceToCount(sequence = [], targetCount = 0) {

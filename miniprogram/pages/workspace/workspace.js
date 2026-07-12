@@ -63,6 +63,10 @@ const BILLIARD_LINEAR_DAMPING = 0.984;
 const BILLIARD_ANGULAR_DAMPING = 0.58;
 const BILLIARD_LAUNCH_MIN_SPEED = 58.0;
 const BILLIARD_LAUNCH_MAX_SPEED = 86.0;
+const BILLIARD_LAUNCH_SOFT_MIN_SPEED = 46.0;
+const BILLIARD_LAUNCH_STRENGTH_MIN = 0.72;
+const BILLIARD_LAUNCH_STRENGTH_MAX = 1.18;
+const BILLIARD_LAUNCH_SPEED_SCALE = 0.8;
 const BILLIARD_LAUNCH_RANDOM_X_RPX = 0;
 const BILLIARD_LAUNCH_AIM_RANDOM_X_RPX = 0;
 const TRAY_BOUNDARY_PADDING_RPX = 8;
@@ -91,6 +95,7 @@ const MATERIAL_ELEMENT_KEY_CACHE_LIMIT = 520;
 const MATERIAL_PRELOAD_RECORD_LIMIT = 360;
 const MATERIAL_FLIGHT_MIN_DURATION = 18;
 const MATERIAL_FLIGHT_SPEED_PX_PER_MS = 36;
+const MATERIAL_FLIGHT_DURATION_SCALE = 1.25;
 const MATERIAL_FLIGHT_REAL_DURATION = 42;
 const MATERIAL_FLIGHT_DEV_DURATION = 38;
 const MATERIAL_FLIGHT_LOW_PERF_DURATION = 58;
@@ -7152,12 +7157,13 @@ Page({
       ? MATERIAL_FLIGHT_LOW_PERF_DURATION
       : (this.isRealDevice ? MATERIAL_FLIGHT_REAL_DURATION : MATERIAL_FLIGHT_DEV_DURATION);
     const points = [startX, startY, endX, endY].map(Number);
-    if (!points.every(Number.isFinite)) return maxDuration;
+    if (!points.every(Number.isFinite)) return Math.round(maxDuration * MATERIAL_FLIGHT_DURATION_SCALE);
     const distance = Math.sqrt((points[2] - points[0]) ** 2 + (points[3] - points[1]) ** 2);
-    return Math.round(Math.max(
+    const duration = Math.max(
       MATERIAL_FLIGHT_MIN_DURATION,
       Math.min(maxDuration, distance / MATERIAL_FLIGHT_SPEED_PX_PER_MS)
-    ));
+    );
+    return Math.round(duration * MATERIAL_FLIGHT_DURATION_SCALE);
   },
 
   resolveMaterialLaunchPhysics({
@@ -7225,10 +7231,16 @@ Page({
       distance = Math.sqrt(dx * dx + dy * dy) || 1;
     }
     const baseSpeed = BILLIARD_LAUNCH_MIN_SPEED + Math.min(distance, 640) / 640 * 18 + Math.min(activeCount, 10) * 0.8;
-    const speed = Math.max(
-      BILLIARD_LAUNCH_MIN_SPEED,
-      Math.min(this.isLowPerformanceDevice ? BILLIARD_LAUNCH_MAX_SPEED - 1.2 : BILLIARD_LAUNCH_MAX_SPEED, baseSpeed)
+    const launchStrength = BILLIARD_LAUNCH_STRENGTH_MIN
+      + Math.random() * (BILLIARD_LAUNCH_STRENGTH_MAX - BILLIARD_LAUNCH_STRENGTH_MIN);
+    const variedSpeed = Math.max(
+      BILLIARD_LAUNCH_SOFT_MIN_SPEED,
+      Math.min(
+        this.isLowPerformanceDevice ? BILLIARD_LAUNCH_MAX_SPEED - 1.2 : BILLIARD_LAUNCH_MAX_SPEED,
+        baseSpeed * launchStrength
+      )
     );
+    const speed = variedSpeed * BILLIARD_LAUNCH_SPEED_SCALE;
     const velocity = {
       x: dx / distance * speed,
       y: dy / distance * speed

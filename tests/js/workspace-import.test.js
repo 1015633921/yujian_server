@@ -16,14 +16,15 @@ test('backend recommendation expands evenly to the requested wrist count', () =>
     maxCount: 40
   });
   const expanded = expandSequenceToCount(source, targetCount);
+  const effectiveWristCm = estimateInnerCircumferenceMm(Array(expanded.length).fill(8)) / 10 - 0.8;
 
-  assert.equal(targetCount, 24);
-  assert.equal(expanded.length, 24);
+  assert.equal(targetCount, 25);
+  assert.equal(expanded.length, 25);
   source.forEach(id => assert.ok(expanded.includes(id)));
-  assert.ok(Math.abs(estimateInnerCircumferenceMm(Array(expanded.length).fill(8)) - 168) < 1);
+  assert.ok(effectiveWristCm >= 16);
 });
 
-test('community recipe stops at the closest wrist count instead of overshooting', () => {
+test('community recipe rounds up so the effective wrist size is never undersized', () => {
   const recipe = ['clearQuartz8', 'moonstone8'];
   const targetCount = recommendBeadCount([8, 8], 16, {
     allowanceMm: 8,
@@ -31,9 +32,10 @@ test('community recipe stops at the closest wrist count instead of overshooting'
     maxCount: 40
   });
   const selected = expandSequenceToCount(recipe, targetCount);
+  const effectiveWristCm = estimateInnerCircumferenceMm(Array(selected.length).fill(8)) / 10 - 0.8;
 
-  assert.equal(selected.length, 24);
-  assert.ok(Math.abs(estimateInnerCircumferenceMm(Array(selected.length).fill(8)) - 168) < 1);
+  assert.equal(selected.length, 25);
+  assert.ok(effectiveWristCm >= 16);
 });
 
 test('new imports start with a fresh design identity and the source title', () => {

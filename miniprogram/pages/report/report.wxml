@@ -1,190 +1,223 @@
 <view class="result-page yu-page" wx:if="{{report}}">
-  <view class="result-stepper">
-    <view
-      wx:for="{{steps}}"
-      wx:key="key"
-      class="step-item {{item.activeClass}}"
-    >
-      <view class="step-dot">{{item.index}}</view>
-      <view class="step-label">{{item.label}}</view>
-    </view>
-  </view>
-
   <view class="result-head">
     <view>
-      <view class="result-title">你的元素比例参考</view>
-      <view class="result-subtitle">根据出生信息与当前佩戴目标生成</view>
+      <view class="result-kicker">专属搭配报告</view>
+      <view class="result-title">你的搭配方向</view>
+      <view class="result-subtitle">先看结论，再了解测算依据</view>
     </view>
     <view class="nav-share result-share yu-pressable" bindtap="shareReport">
       <image class="nav-share-image yu-share-button-image" src="/images/workspace-icons/share-button-gold.png" mode="aspectFit"></image>
     </view>
   </view>
 
-  <view class="energy-stage">
-    <view
-      wx:for="{{viewReport.elements}}"
-      wx:key="key"
-      class="element-orbit element-{{item.key}}"
-    >
-      <view class="element-name">{{item.name}}</view>
-      <view class="element-percent">{{item.percent}}%</view>
+  <view class="answer-hero">
+    <view class="section-kicker">核心结论</view>
+    <view class="answer-title">{{viewReport.styleAnswer.headline}}</view>
+    <view class="answer-summary">{{viewReport.styleAnswer.summary}}</view>
+
+    <view class="key-element-grid">
+      <view wx:for="{{viewReport.keyElements}}" wx:key="label" class="key-element-item">
+        <view class="key-element-label">{{item.label}}</view>
+        <view class="key-element-value" style="color: {{item.color}};">{{item.value}}</view>
+      </view>
+    </view>
+    <view class="recommendation-reference">
+      <text>{{viewReport.styleAnswer.recommendationBasisLabel}}</text>
+      <text class="recommendation-reference-value">{{viewReport.styleAnswer.recommendedElementsText}}</text>
     </view>
 
-    <view class="energy-ring-wrap" bindtap="showBalanceIndexInfo" aria-role="button" aria-label="查看五行平衡度说明">
-      <view class="energy-ring" style="background: {{viewReport.ringGradient}};">
-        <view class="energy-ring-inner">
-          <view class="energy-label">五行平衡度 <text class="score-help">?</text></view>
-          <view class="energy-score">{{viewReport.score}}</view>
-          <view class="energy-status">{{viewReport.statusText}}</view>
+    <view class="balance-answer yu-pressable" bindtap="showBalanceIndexInfo" aria-role="button" aria-label="查看元素平衡度说明">
+      <view class="balance-answer-head">
+        <view class="balance-answer-label">元素平衡度</view>
+        <view class="balance-answer-score">{{viewReport.score}}<text>/100</text></view>
+        <view class="balance-answer-status">{{viewReport.statusText}}</view>
+        <view class="balance-answer-help">?</view>
+      </view>
+      <view class="balance-answer-copy">{{viewReport.balanceExplanation}}</view>
+    </view>
+  </view>
+
+  <view class="advice-section">
+    <view class="section-kicker">搭配答案</view>
+    <view class="section-title">{{viewReport.styleAnswer.adviceTitle}}</view>
+    <view class="advice-list">
+      <view wx:for="{{viewReport.styleAnswer.advice}}" wx:key="label" class="advice-row advice-{{item.tone}}">
+        <view class="advice-label">{{item.label}}</view>
+        <view class="advice-value">{{item.value}}</view>
+      </view>
+    </view>
+  </view>
+
+  <view wx:if="{{viewReport.needsMoreInput}}" class="state-prompt yu-pressable" bindtap="supplementAssessment" aria-role="button" aria-label="补充当前状态和直觉色彩">
+    <view class="state-prompt-mark">+</view>
+    <view class="state-prompt-copy">
+      <view class="state-prompt-title">补充当前状态，让建议更贴近你</view>
+      <view class="state-prompt-desc">{{viewReport.missingInputText}}</view>
+    </view>
+    <view class="state-prompt-action">去补充 →</view>
+  </view>
+
+  <view class="recommend-band yu-pressable" bindtap="openWristModal" aria-role="button" aria-label="生成我的手串方案">
+    <view class="recommend-band-kicker">下一步</view>
+    <view class="recommend-band-title">把搭配答案变成一条手串</view>
+    <view class="recommend-band-copy">输入腕围后，系统将结合测算结果、佩戴目标和珠径生成真实可编辑方案。</view>
+    <view class="recommend-band-action">生成我的手串方案 <text>→</text></view>
+  </view>
+
+  <view class="why-section">
+    <view class="section-kicker">推荐依据</view>
+    <view class="section-title">{{viewReport.styleAnswer.evidenceTitle}}</view>
+    <view class="why-summary">{{viewReport.styleAnswer.evidence}}</view>
+
+    <view class="energy-stage">
+      <view
+        wx:for="{{viewReport.elements}}"
+        wx:key="key"
+        class="element-orbit element-{{item.key}}"
+      >
+        <view class="element-name">{{item.name}}</view>
+        <view class="element-percent">{{item.percent}}%</view>
+      </view>
+
+      <view class="energy-ring-wrap" bindtap="showBalanceIndexInfo" aria-role="button" aria-label="查看元素平衡度说明">
+        <view class="energy-ring" style="background: {{viewReport.ringGradient}};">
+          <view class="energy-ring-inner">
+            <view class="energy-label">元素平衡度 <text class="score-help">?</text></view>
+            <view class="energy-score">{{viewReport.score}}</view>
+            <view class="energy-status">{{viewReport.statusText}}</view>
+          </view>
         </view>
       </view>
     </view>
   </view>
 
-  <view class="summary-card yu-card yu-card-lg">
-    <view class="summary-head">
+  <view class="details-section">
+    <view class="details-toggle yu-pressable" bindtap="toggleDetails" aria-role="button" aria-label="{{showDetails ? '收起更多测算依据' : '展开更多测算依据'}}">
       <view>
-        <view class="summary-title">搭配解读</view>
-        <view class="summary-meta">偏强 {{viewReport.strongest}} · 可调和 {{viewReport.weakest}}</view>
+        <view class="section-kicker">可选阅读</view>
+        <view class="details-title">更多测算依据</view>
+        <view class="details-subtitle">出生信息、星座、状态、关键词与近期参考</view>
       </view>
-      <view class="balance-badge" bindtap="showBalanceIndexInfo">平衡度 {{viewReport.score}} ?</view>
+      <view class="details-toggle-icon">{{showDetails ? '−' : '+'}}</view>
     </view>
-    <view class="summary-copy">{{viewReport.summary}}</view>
-  </view>
 
-  <view class="bazi-card yu-card">
-    <view class="card-title">风格底色</view>
-    <view class="bazi-pillars">{{viewReport.bazi.pillarsText || '已按出生地时间校准'}}</view>
-    <view class="bazi-grid">
-      <view>
-        <text>基础点</text>
-        <view>{{viewReport.bazi.dayMaster || '已生成'}}</view>
+    <view wx:if="{{showDetails}}" class="details-content">
+      <view class="detail-block bazi-card">
+        <view class="card-title">基础测算依据</view>
+        <view class="bazi-pillars">{{viewReport.bazi.pillarsText || '已按出生地时间校准'}}</view>
+        <view class="bazi-grid">
+          <view>
+            <text>主要倾向</text>
+            <view>{{viewReport.bazi.dayMaster || '已生成'}}</view>
+          </view>
+          <view>
+            <text>倾向程度</text>
+            <view>{{viewReport.bazi.strength || '中和'}}</view>
+          </view>
+          <view>
+            <text>建议补充</text>
+            <view>{{viewReport.bazi.usefulText || '调和'}}</view>
+          </view>
+        </view>
+        <view class="bazi-strategy">{{viewReport.bazi.strategy || viewReport.recommendationStrategy}}</view>
       </view>
-      <view>
-        <text>状态</text>
-        <view>{{viewReport.bazi.strength || '中和'}}</view>
-      </view>
-      <view>
-        <text>参考</text>
-        <view>{{viewReport.bazi.usefulText || '调和'}}</view>
-      </view>
-    </view>
-    <view class="bazi-strategy">{{viewReport.bazi.strategy || viewReport.recommendationStrategy}}</view>
-  </view>
 
-  <view class="live-card yu-card">
-    <view class="card-title">当下状态</view>
-    <view class="live-block">
-      <view class="live-label">状态线索</view>
-      <view class="live-title">{{viewReport.chakra.name}}</view>
-      <view class="live-copy">{{viewReport.chakra.summary}}</view>
-      <view class="live-colors" wx:if="{{viewReport.chakra.colors.length}}">
-        <view wx:for="{{viewReport.chakra.colors}}" wx:key="*this" class="live-color" style="background: {{item}};"></view>
+      <view class="detail-block live-card" wx:if="{{viewReport.hasLiveInput}}">
+        <view class="card-title">你补充的当下信息</view>
+        <view class="live-block" wx:if="{{viewReport.hasChakraInput}}">
+          <view class="live-label">当下状态</view>
+          <view class="live-title">{{viewReport.chakra.name}}</view>
+          <view class="live-copy">{{viewReport.chakra.summary}}</view>
+          <view class="live-colors" wx:if="{{viewReport.chakra.colors.length}}">
+            <view wx:for="{{viewReport.chakra.colors}}" wx:key="*this" class="live-color" style="background: {{item}};"></view>
+          </view>
+        </view>
+        <view class="live-block" wx:if="{{viewReport.hasMoodInput}}">
+          <view class="live-label">直觉色彩</view>
+          <view class="live-title">{{viewReport.mood.name}}</view>
+          <view class="live-copy">{{viewReport.mood.summary}}</view>
+          <view class="live-colors" wx:if="{{viewReport.mood.colors.length}}">
+            <view wx:for="{{viewReport.mood.colors}}" wx:key="*this" class="live-color" style="background: {{item}};"></view>
+          </view>
+        </view>
       </view>
-    </view>
-    <view class="live-block">
-      <view class="live-label">直觉色彩</view>
-      <view class="live-title">{{viewReport.mood.name}}</view>
-      <view class="live-copy">{{viewReport.mood.summary}}</view>
-      <view class="live-colors" wx:if="{{viewReport.mood.colors.length}}">
-        <view wx:for="{{viewReport.mood.colors}}" wx:key="*this" class="live-color" style="background: {{item}};"></view>
-      </view>
-    </view>
-  </view>
 
-  <view class="zodiac-card yu-card" wx:if="{{viewReport.zodiac.name}}">
-    <view class="zodiac-head">
-      <view>
-        <view class="card-title">星座气质参考</view>
-        <view class="zodiac-meta">{{viewReport.zodiac.dateRange}} · {{viewReport.zodiac.element}} · {{viewReport.zodiac.modality}}</view>
+      <view class="detail-block zodiac-card" wx:if="{{viewReport.zodiac.name}}">
+        <view class="zodiac-head">
+          <view>
+            <view class="card-title">星座气质参考</view>
+            <view class="zodiac-meta">{{viewReport.zodiac.dateRange}} · {{viewReport.zodiac.element}} · {{viewReport.zodiac.modality}}</view>
+          </view>
+          <view class="zodiac-mark">{{viewReport.zodiac.name}}</view>
+        </view>
+        <view class="zodiac-summary">{{viewReport.zodiac.summary}}</view>
+        <view class="zodiac-tags" wx:if="{{viewReport.zodiac.keywords.length}}">
+          <view wx:for="{{viewReport.zodiac.keywords}}" wx:key="*this" class="zodiac-tag">{{item}}</view>
+        </view>
+        <view class="zodiac-line">
+          <text>元素参照</text>
+          <view>{{viewReport.zodiac.wuxingHint}}</view>
+        </view>
+        <view class="zodiac-line">
+          <text>搭配建议</text>
+          <view>{{viewReport.zodiac.suggestion}}</view>
+        </view>
       </view>
-      <view class="zodiac-mark">{{viewReport.zodiac.name}}</view>
-    </view>
-    <view class="zodiac-summary">{{viewReport.zodiac.summary}}</view>
-    <view class="zodiac-tags" wx:if="{{viewReport.zodiac.keywords.length}}">
-      <view wx:for="{{viewReport.zodiac.keywords}}" wx:key="*this" class="zodiac-tag">{{item}}</view>
-    </view>
-    <view class="zodiac-line">
-      <text>元素参照</text>
-      <view>{{viewReport.zodiac.wuxingHint}}</view>
-    </view>
-    <view class="zodiac-line">
-      <text>调和建议</text>
-      <view>{{viewReport.zodiac.suggestion}}</view>
-    </view>
-  </view>
 
-  <view class="keyword-card yu-card">
-    <view class="card-title">搭配关键词</view>
-    <view class="keyword-desc">提炼属于你的禅意 / 国风气质标签</view>
-    <view class="keyword-list">
-      <view wx:for="{{viewReport.keywords}}" wx:key="label" class="keyword-tag">
-        <text>{{item.label}}</text>
-        <view>{{item.source}}</view>
+      <view class="detail-block keyword-card">
+        <view class="card-title">搭配关键词</view>
+        <view class="keyword-desc">这些词用于概括整条手串的气质方向</view>
+        <view class="keyword-list">
+          <view wx:for="{{viewReport.keywords}}" wx:key="label" class="keyword-tag">
+            <text>{{item.label}}</text>
+            <view>{{item.poeticLabel ? item.poeticLabel + ' · ' : ''}}{{item.source}}</view>
+          </view>
+        </view>
       </view>
-    </view>
-  </view>
 
-  <view class="season-card yu-card">
-    <view class="season-head">
-      <view>
-        <view class="card-title">近期状态提示</view>
-        <view class="season-meta">{{viewReport.seasonal.period}} · {{viewReport.seasonal.seasonal_element}}元素参考</view>
+      <view class="detail-block season-card">
+        <view class="season-head">
+          <view>
+            <view class="card-title">近期状态提示</view>
+            <view class="season-meta">{{viewReport.seasonal.period}} · {{viewReport.seasonal.seasonal_element}}元素参考</view>
+          </view>
+          <view class="season-mark">{{viewReport.seasonal.seasonal_element}}</view>
+        </view>
+        <view class="season-copy">{{viewReport.seasonal.seasonal_copy}}</view>
+        <view class="season-line">
+          <text>留意点</text>
+          <view>{{viewReport.seasonal.drain_point}}</view>
+        </view>
+        <view class="season-line">
+          <text>搭配建议</text>
+          <view>{{viewReport.seasonal.suggestion}}</view>
+        </view>
       </view>
-      <view class="season-mark">{{viewReport.seasonal.seasonal_element}}</view>
-    </view>
-    <view class="season-copy">{{viewReport.seasonal.seasonal_copy}}</view>
-    <view class="season-line">
-      <text>留意点</text>
-      <view>{{viewReport.seasonal.drain_point}}</view>
-    </view>
-    <view class="season-line">
-      <text>调和建议</text>
-      <view>{{viewReport.seasonal.suggestion}}</view>
-    </view>
-  </view>
 
-  <view class="element-card yu-card">
-    <view class="card-title">元素占比</view>
-    <view wx:for="{{viewReport.elements}}" wx:key="key" class="element-row">
-      <view class="element-pill" style="background: {{item.softColor}}; color: {{item.color}};">{{item.name}}</view>
-      <view class="element-track">
-        <view class="element-fill" style="width: {{item.width}}; background: {{item.color}};"></view>
-      </view>
-      <view class="element-value">{{item.percent}}%</view>
-    </view>
-  </view>
-
-  <view class="why-recommend-card yu-card">
-    <view class="card-title">后续方案如何匹配</view>
-    <view class="why-recommend-desc">系统会把风格底色、佩戴目标和当下状态折算成材料筛选权重，用于下一步生成可编辑的 DIY 手串方案。</view>
-    <view class="why-recommend-list">
-      <view wx:for="{{viewReport.recommendationReasons}}" wx:key="index" class="why-recommend-row">
-        <view class="why-recommend-index">{{item.index}}</view>
-        <view class="why-recommend-copy">
-          <view class="why-recommend-title">{{item.title}}</view>
-          <view class="why-recommend-text">{{item.desc}}</view>
-          <view class="why-recommend-meta">{{item.meta}}</view>
+      <view class="detail-block why-recommend-card">
+        <view class="card-title">方案还参考了什么</view>
+        <view class="why-recommend-desc">佩戴目标和已填写的当下信息会继续影响材料颜色、角色与排序。</view>
+        <view class="why-recommend-list">
+          <view wx:for="{{viewReport.recommendationReasons}}" wx:key="index" class="why-recommend-row">
+            <view class="why-recommend-index">{{item.index}}</view>
+            <view class="why-recommend-copy">
+              <view class="why-recommend-title">{{item.title}}</view>
+              <view class="why-recommend-text">{{item.desc}}</view>
+              <view class="why-recommend-meta">{{item.meta}}</view>
+            </view>
+          </view>
         </view>
       </view>
     </view>
   </view>
 
-  <view class="poster-entry yu-card yu-pressable" bindtap="shareReport">
+  <view class="poster-entry yu-card yu-pressable" bindtap="shareReport" aria-role="button" aria-label="生成专属报告海报">
     <view>
-      <view class="poster-kicker">REPORT POSTER</view>
+      <view class="poster-kicker">搭配报告</view>
       <view class="poster-title">生成专属报告海报</view>
       <view class="poster-copy">把你的元素比例、关键词和搭配建议做成宇涧专属海报，方便保存和分享。</view>
     </view>
     <view class="poster-icon">{{posterGenerating ? '…' : '海报'}}</view>
-  </view>
-
-  <view class="recommend-entry yu-card yu-pressable" bindtap="openWristModal">
-    <view>
-      <view class="recommend-title">下一步生成手串方案</view>
-      <view class="recommend-copy">输入手腕围度后，系统会结合元素比例、佩戴目标和珠径偏好生成可继续编辑的 DIY 方案。</view>
-    </view>
-    <view class="recommend-icon">→</view>
   </view>
 
   <view class="result-disclaimer">本分析仅用于传统文化体验、审美搭配与个性化 DIY 参考，不构成命理定论、医疗健康建议或效果承诺。</view>
