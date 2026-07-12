@@ -1354,6 +1354,36 @@ def test_manual_phone_binding_is_disabled_by_default(monkeypatch):
     assert "仅支持微信授权手机号" in response.json()["detail"]
 
 
+def test_authenticated_profile_accepts_a_manual_contact_phone(monkeypatch):
+    monkeypatch.delenv("ALLOW_MANUAL_PHONE_BIND", raising=False)
+    login = client.post("/api/v1/auth/wechat-login", json={"code": f"profile-phone-{uuid4()}"})
+    session = login.json()["data"]
+    user = session["user"]
+    headers = {"Authorization": f"Bearer {session['access_token']}"}
+
+    response = client.post(
+        "/api/v1/auth/profile",
+        json={
+            "user_id": user["user_id"],
+            "nickname": "联系号码用户",
+            "phone_number": "13800000000",
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["phone_number"] == "13800000000"
+    assert response.json()["data"]["has_phone"] is True
+
+    invalid = client.post(
+        "/api/v1/auth/profile",
+        json={"user_id": user["user_id"], "phone_number": "123"},
+        headers=headers,
+    )
+    assert invalid.status_code == 400
+    assert "11 位手机号" in invalid.json()["detail"]
+
+
 def test_order_detail_checks_owner(tmp_path):
     service = OrderService(tmp_path / "order-detail.db")
     service.get_user = lambda _user_id: None

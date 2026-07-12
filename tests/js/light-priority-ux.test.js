@@ -59,6 +59,22 @@ test('workspace gives the material drawer more room without collapsing the tray'
   assert.equal(tallOverlap, 0);
 });
 
+test('profile exposes manual phone input and keeps WeChat phone shortcut visible', () => {
+  const profileWxml = fs.readFileSync(
+    path.resolve(__dirname, '../../miniprogram/pages/profile/profile.wxml'),
+    'utf8'
+  );
+  const profileSource = fs.readFileSync(
+    path.resolve(__dirname, '../../miniprogram/pages/profile/profile.js'),
+    'utf8'
+  );
+
+  assert.match(profileWxml, /data-field="phone_number"/);
+  assert.match(profileWxml, /open-type="getPhoneNumber"/);
+  assert.doesNotMatch(profileWxml, /wx:else class="secondary-button phone-auth-button"/);
+  assert.match(profileSource, /phone_number:\s*phoneNumber/);
+});
+
 test('workspace keeps large-screen tray controls above the material drawer', () => {
   const page = loadPage('miniprogram/pages/workspace/workspace.js');
   const viewportRpx = Math.round(932 * 750 / 430);

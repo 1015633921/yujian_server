@@ -167,6 +167,9 @@ async function updateBasicProfile(profile) {
     nickname: profile.nickname,
     gender: profile.gender
   };
+  if (profile.phone_number) {
+    payload.phone_number = String(profile.phone_number).trim();
+  }
   if (avatarChanged) {
     payload.avatar_url = avatarUrl;
   }

@@ -47,7 +47,7 @@ Page({
     showProfileModal: false,
     showLogisticsModal: false,
     logisticsDetail: null,
-    profileDraft: { nickname: '', avatar_url: '' },
+    profileDraft: { nickname: '', avatar_url: '', phone_number: '' },
     profileAvatarChanged: false,
     profile: {},
     draft: null,
@@ -136,7 +136,8 @@ Page({
       hasPhone: !!(user && user.has_phone),
       profileDraft: {
         nickname: (user && user.nickname) || '',
-        avatar_url: (user && user.avatar_url) || ''
+        avatar_url: (user && user.avatar_url) || '',
+        phone_number: (user && user.phone_number) || ''
       },
       profileAvatarChanged: false,
       profile,
@@ -275,7 +276,8 @@ Page({
         avatarChar: this.avatarChar(user, this.data.profile),
         profileDraft: {
           nickname: user.nickname || '',
-          avatar_url: user.avatar_url || ''
+          avatar_url: user.avatar_url || '',
+          phone_number: user.phone_number || ''
         },
         profileAvatarChanged: false
       });
@@ -318,7 +320,7 @@ Page({
           hasProfile: false,
           hasPhone: false,
           showProfileModal: false,
-          profileDraft: { nickname: '', avatar_url: '' },
+          profileDraft: { nickname: '', avatar_url: '', phone_number: '' },
           profileAvatarChanged: false,
           avatarChar: '',
           orders: [],
@@ -358,12 +360,18 @@ Page({
       wx.showToast({ title: '请填写昵称', icon: 'none' });
       return;
     }
+    const phoneNumber = String(draft.phone_number || '').trim();
+    if (phoneNumber && !/^1\d{10}$/.test(phoneNumber)) {
+      wx.showToast({ title: '请填写正确的 11 位手机号', icon: 'none' });
+      return;
+    }
     this.setData({ savingProfile: true });
     wx.showLoading({ title: '保存资料' });
     try {
       const user = await auth.updateBasicProfile({
         nickname: draft.nickname.trim(),
         avatar_url: draft.avatar_url,
+        phone_number: phoneNumber,
         avatar_changed: this.data.profileAvatarChanged
       });
       this.setData({
@@ -373,7 +381,8 @@ Page({
         avatarChar: this.avatarChar(user, this.data.profile),
         profileDraft: {
           nickname: user.nickname || draft.nickname,
-          avatar_url: user.avatar_url || draft.avatar_url
+          avatar_url: user.avatar_url || draft.avatar_url,
+          phone_number: user.phone_number || phoneNumber
         },
         profileAvatarChanged: false
       });
@@ -396,7 +405,11 @@ Page({
     wx.showLoading({ title: '微信快捷绑定' });
     try {
       const user = await auth.bindWechatPhone(e);
-      this.setData({ user, hasPhone: !!user.has_phone });
+      this.setData({
+        user,
+        hasPhone: !!user.has_phone,
+        'profileDraft.phone_number': user.phone_number || ''
+      });
       wx.showToast({ title: '微信手机号已绑定', icon: 'success' });
     } catch (error) {
       console.error('bind phone failed:', error);

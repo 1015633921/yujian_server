@@ -197,9 +197,11 @@
 
         <view class="profile-form-card phone-form-card">
           <view class="form-field phone-form-field">
-            <view class="field-label">手机号</view>
-            <view wx:if="{{hasPhone}}" class="phone-value">{{user.phone_number}}</view>
-            <button wx:else class="secondary-button phone-auth-button" loading="{{phoneLoading}}" open-type="getPhoneNumber" bindgetphonenumber="onGetPhoneNumber">微信授权手机号</button>
+            <view class="field-header">
+              <view class="field-label">手机号</view>
+              <button class="field-action" loading="{{phoneLoading}}" open-type="getPhoneNumber" bindgetphonenumber="onGetPhoneNumber">{{hasPhone ? '微信手机号更新' : '微信快速获取'}}</button>
+            </view>
+            <input class="nickname-input phone-input" type="number" maxlength="11" confirm-type="done" placeholder="填写 11 位联系手机号" value="{{profileDraft.phone_number}}" data-field="phone_number" adjust-position="{{true}}" cursor-spacing="160" bindinput="onProfileInput" />
           </view>
         </view>
       </scroll-view>

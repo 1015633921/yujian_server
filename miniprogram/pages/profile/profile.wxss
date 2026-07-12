@@ -796,6 +796,10 @@ page {
   box-sizing: border-box;
 }
 
+.phone-input {
+  width: 100%;
+}
+
 .phone-auth-button {
   width: 100%;
   height: 74rpx;

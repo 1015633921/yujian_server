@@ -105,6 +105,7 @@ class UserProfileUpdateRequest(BaseModel):
     avatar_url: str | None = Field(default=None, max_length=500)
     gender: str | None = Field(default=None, max_length=20)
     name: str | None = Field(default=None, max_length=100)
+    phone_number: str | None = Field(default=None, max_length=32)
 
 
 class PhoneBindRequest(BaseModel):

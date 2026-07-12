@@ -4,6 +4,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import secrets
 import time
 from datetime import datetime, timezone
@@ -64,12 +65,16 @@ class WechatAuthService:
 
     def update_profile(self, payload: UserProfileUpdateRequest) -> dict[str, Any]:
         now = self.now()
+        phone_number = str(payload.phone_number or "").strip() or None
+        if phone_number and not re.fullmatch(r"1\d{10}", phone_number):
+            raise ValueError("请填写正确的 11 位手机号")
         user = self.repository.upsert_user(
             {
                 "user_id": payload.user_id,
                 "nickname": payload.nickname or payload.name,
                 "avatar_url": self.persist_avatar_url(payload.user_id, payload.avatar_url, required=True),
                 "gender": payload.gender,
+                "phone_number": phone_number,
                 "source": "wechat_profile",
                 "updated_at": now,
             }
@@ -255,6 +260,7 @@ class WechatAuthService:
             "nickname": user.get("nickname"),
             "avatar_url": user.get("avatar_url"),
             "gender": user.get("gender"),
+            "phone_number": user.get("phone_number") or "",
             "has_profile": bool(user.get("nickname") or user.get("avatar_url")),
             "has_phone": bool(user.get("phone_number")),
         }
