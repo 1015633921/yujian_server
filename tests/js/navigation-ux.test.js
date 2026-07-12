@@ -14,6 +14,16 @@ function loadPage(relativePath) {
   return pageConfig;
 }
 
+test('mini program explicitly launches on the home page', () => {
+  const appConfig = JSON.parse(fs.readFileSync(
+    path.resolve(__dirname, '../../miniprogram/app.json'),
+    'utf8'
+  ));
+
+  assert.equal(appConfig.entryPagePath, 'pages/home/home');
+  assert.equal(appConfig.pages[0], 'pages/home/home');
+});
+
 test('workspace back always returns to home and relaunches on switch failure', () => {
   const page = loadPage('miniprogram/pages/workspace/workspace.js');
   const calls = [];

@@ -59,7 +59,7 @@ test('workspace gives the material drawer more room without collapsing the tray'
   assert.ok(tallOverlap >= 88 && tallOverlap <= 96);
 });
 
-test('workspace reserves the device bottom inset inside the expanded material drawer', () => {
+test('workspace reserves the device bottom inset without lifting the drawer over the workbench', () => {
   const page = loadPage('miniprogram/pages/workspace/workspace.js');
   const viewportRpx = Math.round(844 * 750 / 390);
   const withoutInset = parseWorkspaceLayoutStyle(page.buildResponsiveWorkspaceLayout({
@@ -78,9 +78,17 @@ test('workspace reserves the device bottom inset inside the expanded material dr
   assert.equal(withInset['--workspace-safe-bottom'], 65);
   assert.equal(
     withInset['--workspace-drawer-height'] - withoutInset['--workspace-drawer-height'],
-    65
+    0
   );
   assert.equal(withInset['--workspace-stage-size'], withoutInset['--workspace-stage-size']);
+  assert.equal(
+    withInset['--workspace-top-chrome']
+      + withInset['--workspace-canvas-height']
+      + withInset['--workspace-drawer-height'],
+    withoutInset['--workspace-top-chrome']
+      + withoutInset['--workspace-canvas-height']
+      + withoutInset['--workspace-drawer-height']
+  );
 });
 
 test('workspace keeps all physics collisions silent and only shakes on tray-wall impact', () => {

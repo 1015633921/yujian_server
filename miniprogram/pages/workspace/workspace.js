@@ -1169,7 +1169,9 @@ Page({
     const drawerTopInCanvas = Math.max(360, viewportRpx - topChrome - baseDrawerHeight);
     const safeBottom = clamp(Number(bottomInsetRpx) || 0, 0, 88);
     const drawerLift = Math.round(lerp(64, 96, heightRoom));
-    const drawerHeight = baseDrawerHeight + drawerLift + safeBottom;
+    // Keep the drawer top stable on devices with a home indicator. The inset is
+    // reserved inside the drawer body instead of lifting it over the workbench.
+    const drawerHeight = baseDrawerHeight + drawerLift;
     const railWidth = 90;
     const railSide = Math.round(lerp(10, 14, widthRoom));
     const railGap = Math.round(lerp(14, 18, layoutRoom));
