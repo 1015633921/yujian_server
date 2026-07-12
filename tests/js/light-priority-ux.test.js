@@ -189,6 +189,10 @@ test('report leads with a plain-language answer and keeps technical evidence sec
   assert.match(reportWxml, /\{\{viewReport\.score\}\}<text>\/100<\/text>/);
   assert.match(reportWxml, /class="state-prompt[^>]+aria-role="button"/);
   assert.match(reportWxml, /class="recommend-band[^>]+aria-role="button"/);
+  assert.match(reportWxml, /MBTI 偏好如何参与/);
+  assert.match(reportWxml, /MBTI \{\{viewReport\.mbti\.type\}\} 已参与/);
+  assert.match(reportWxml, /辅助权重 \{\{viewReport\.mbti\.weight\}\}\/100/);
+  assert.match(reportWxml, /性格、星座、状态与近期参考/);
 });
 
 test('report turns element ratios and poetic tags into actionable styling guidance', () => {
@@ -201,7 +205,8 @@ test('report turns element ratios and poetic tags into actionable styling guidan
     useful_elements: ['金', '水', '木'],
     recommendation_strategy: '土元素偏强，建议参考金、水、木元素进行调和。',
     interpretation: { balance_index: 44 },
-    input_summary: { core_wishes: ['事业专注'], chakra_answers: [], mood_palette_id: null },
+    input_summary: { mbti: 'INTJ', core_wishes: ['事业专注'], chakra_answers: [], mood_palette_id: null },
+    energy_breakdown: { mbti: { 金: 2.13, 木: 0.53, 水: 2.68, 火: 0.53, 土: 2.13 } },
     bracelet_plan: {
       pattern: '中心主石 + 对称点睛 + 调和配珠',
       items: [
@@ -251,6 +256,13 @@ test('report turns element ratios and poetic tags into actionable styling guidan
   assert.match(view.styleAnswer.evidence, /事业专注/);
   assert.deepEqual(view.keywords.map(item => item.label), ['沉稳可靠', '安静细腻', '增加轻盈与生长感']);
   assert.deepEqual(view.keywords.map(item => item.poeticLabel), ['厚载', '静澜', '含章']);
+  assert.equal(view.hasMbtiInput, true);
+  assert.equal(view.mbti.type, 'INTJ');
+  assert.deepEqual(view.mbti.keywords, ['安静聚焦', '灵感探索', '理性清晰', '计划有序']);
+  assert.deepEqual(view.mbti.topElements, ['水', '金']);
+  assert.match(view.mbti.influence, /8\/100/);
+  assert.equal(view.recommendationReasons[2].title, '性格与当下状态');
+  assert.match(view.recommendationReasons[2].desc, /INTJ/);
   assert.equal(view.needsMoreInput, true);
 });
 

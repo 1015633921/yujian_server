@@ -98,6 +98,16 @@ const ELEMENT_NAME_ALIASES = {
   huo: '火',
   tu: '土'
 };
+const MBTI_DIMENSION_LABELS = {
+  I: '安静聚焦',
+  E: '开放表达',
+  N: '灵感探索',
+  S: '具体务实',
+  T: '理性清晰',
+  F: '柔和共情',
+  J: '计划有序',
+  P: '弹性自由'
+};
 const STEPS = [
   { key: 'basic', index: 1, label: '基础', activeClass: 'done' },
   { key: 'wish', index: 2, label: '目标', activeClass: 'done' },
@@ -579,6 +589,7 @@ Page({
     const inputSummary = report.input_summary || {};
     const chakraAnalysis = report.chakra_analysis || {};
     const moodAnalysis = report.mood_analysis || {};
+    const mbti = this.buildMbtiView(report);
     const hasChakraInput = Boolean(
       (Array.isArray(inputSummary.chakra_answers) && inputSummary.chakra_answers.length)
       || (chakraAnalysis.primary_chakra && chakraAnalysis.primary_chakra !== 'none')
@@ -586,7 +597,7 @@ Page({
     const hasMoodInput = Boolean(inputSummary.mood_palette_id || moodAnalysis.palette_id);
     return {
       title: sanitizeDisplayText((report.interpretation && report.interpretation.headline) || '你的元素比例参考已生成'),
-      mbti: (report.input_summary && report.input_summary.mbti) || '未填写 MBTI',
+      mbti,
       wish: this.buildWishText(report.input_summary || {}),
       summary: this.buildSummary(report),
       strongest: report.strongest_element,
@@ -604,13 +615,14 @@ Page({
       chakra: this.buildChakraView(report.chakra_analysis || {}),
       mood: this.buildMoodView(report.mood_analysis || {}),
       zodiac: this.buildZodiacView(report.zodiac_analysis || {}),
+      hasMbtiInput: mbti.selected,
       hasChakraInput,
       hasMoodInput,
       hasLiveInput: hasChakraInput || hasMoodInput,
       needsMoreInput: !hasChakraInput || !hasMoodInput,
       missingInputText: this.buildMissingInputText(hasChakraInput, hasMoodInput),
       recommendationStrategy: sanitizeDisplayText(report.recommendation_strategy || ''),
-      recommendationReasons: this.buildRecommendationReasons(report, elements),
+      recommendationReasons: this.buildRecommendationReasons(report, elements, mbti),
       elements,
       ringGradient: this.buildRingGradient(elements)
     };
@@ -826,6 +838,63 @@ Page({
     };
   },
 
+  buildMbtiView(report = {}) {
+    const inputSummary = report.input_summary || {};
+    const analysis = report.mbti_analysis || {};
+    const type = safeText(analysis.type || inputSummary.mbti).toUpperCase();
+    const selected = Boolean(type && /^[IE][NS][TF][JP]$/.test(type));
+    if (!selected) {
+      return {
+        selected: false,
+        type: '',
+        weight: 8,
+        keywords: [],
+        topElements: [],
+        topElementsText: '',
+        preference: '',
+        summary: '未填写 MBTI，本次不加入性格偏好方向。',
+        influence: 'MBTI 只作为搭配偏好辅助，不单独决定元素结论或推荐结果。'
+      };
+    }
+
+    const mbtiProfile = (report.energy_breakdown && report.energy_breakdown.mbti) || {};
+    const fallbackElements = Object.keys(mbtiProfile)
+      .filter(element => ELEMENT_META[element])
+      .sort((a, b) => (Number(mbtiProfile[b]) || 0) - (Number(mbtiProfile[a]) || 0))
+      .slice(0, 2);
+    const topElements = uniqueTextValues(
+      Array.isArray(analysis.top_elements) && analysis.top_elements.length
+        ? analysis.top_elements
+        : fallbackElements
+    ).slice(0, 2);
+    const keywords = uniqueTextValues(
+      Array.isArray(analysis.keywords) && analysis.keywords.length
+        ? analysis.keywords
+        : type.split('').map(letter => MBTI_DIMENSION_LABELS[letter])
+    );
+    const fallbackPreference = topElements
+      .map(element => (ELEMENT_STYLE_GUIDANCE[element] || {}).keyword)
+      .filter(Boolean)
+      .join('、');
+    return {
+      selected: true,
+      type,
+      weight: Number(analysis.weight) || 8,
+      keywords,
+      topElements,
+      topElementsText: topElements.join(' / '),
+      preference: sanitizeDisplayText(analysis.preference || fallbackPreference),
+      summary: sanitizeDisplayText(
+        analysis.summary
+        || `${type} 的偏好线索更接近${keywords.join('、')}，搭配上可参考${fallbackPreference}的表达。`
+      ),
+      influence: sanitizeDisplayText(
+        analysis.influence
+        || '以 8/100 的辅助权重参与，用于微调材质气质与推荐排序，不单独决定结果。'
+      )
+    };
+  },
+
   buildZodiacView(zodiac) {
     const keywords = Array.isArray(zodiac.keywords)
       ? zodiac.keywords
@@ -845,7 +914,7 @@ Page({
     };
   },
 
-  buildRecommendationReasons(report, elements) {
+  buildRecommendationReasons(report, elements, mbtiView) {
     const inputSummary = report.input_summary || {};
     const wishes = inputSummary.core_wishes || (inputSummary.core_wish ? [inputSummary.core_wish] : []);
     const bazi = report.bazi_basis || {};
@@ -855,6 +924,7 @@ Page({
     const weakest = safeText(report.weakest_element, '可调和');
     const chakra = report.chakra_analysis || {};
     const mood = report.mood_analysis || {};
+    const mbti = mbtiView || this.buildMbtiView(report);
     const chakraName = sanitizeDisplayText(chakra.primary_chakra_name || '');
     const moodName = sanitizeDisplayText(mood.name || '');
     const topElements = (elements || [])
@@ -876,6 +946,13 @@ Page({
     const stateDesc = stateParts.length
       ? `${stateParts.join('，')}，会影响辅助珠的颜色、寓意标签和排序权重。`
       : '尚未补充当下状态和直觉色彩，本次方案按中性信息生成，不额外偏向某一类颜色。';
+    const preferenceDesc = mbti.selected
+      ? `${mbti.type} 以 ${mbti.weight}/100 的偏好权重参与，主要微调材质气质和推荐排序。${stateDesc}`
+      : stateDesc;
+    const preferenceMeta = [
+      mbti.selected ? `MBTI：${mbti.type}${mbti.topElementsText ? ` · ${mbti.topElementsText}` : ''}` : '',
+      stateParts.length ? '状态线索 / 直觉色彩' : ''
+    ].filter(Boolean).join(' · ');
 
     return [
       {
@@ -892,9 +969,9 @@ Page({
       },
       {
         index: '03',
-        title: '当下状态',
-        desc: stateDesc,
-        meta: stateParts.length ? '状态线索 / 直觉色彩' : '当前按中性信息处理'
+        title: mbti.selected ? '性格与当下状态' : '当下状态',
+        desc: preferenceDesc,
+        meta: preferenceMeta || '当前按中性信息处理'
       }
     ];
   },

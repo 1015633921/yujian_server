@@ -96,7 +96,10 @@
       <view>
         <view class="section-kicker">可选阅读</view>
         <view class="details-title">更多测算依据</view>
-        <view class="details-subtitle">出生信息、星座、状态、关键词与近期参考</view>
+        <view class="details-subtitle">出生信息、性格、星座、状态与近期参考</view>
+        <view class="details-mbti-preview" wx:if="{{viewReport.hasMbtiInput}}">
+          MBTI {{viewReport.mbti.type}} 已参与 · 辅助权重 {{viewReport.mbti.weight}}/100
+        </view>
       </view>
       <view class="details-toggle-icon">{{showDetails ? '−' : '+'}}</view>
     </view>
@@ -120,6 +123,28 @@
           </view>
         </view>
         <view class="bazi-strategy">{{viewReport.bazi.strategy || viewReport.recommendationStrategy}}</view>
+      </view>
+
+      <view class="detail-block mbti-card" wx:if="{{viewReport.hasMbtiInput}}">
+        <view class="mbti-head">
+          <view>
+            <view class="card-title">MBTI 偏好如何参与</view>
+            <view class="mbti-weight">辅助权重 {{viewReport.mbti.weight}}/100 · 不单独决定结果</view>
+          </view>
+          <view class="mbti-type">{{viewReport.mbti.type}}</view>
+        </view>
+        <view class="mbti-summary">{{viewReport.mbti.summary}}</view>
+        <view class="mbti-tags">
+          <view wx:for="{{viewReport.mbti.keywords}}" wx:key="*this" class="mbti-tag">{{item}}</view>
+        </view>
+        <view class="mbti-line" wx:if="{{viewReport.mbti.topElementsText}}">
+          <text>偏好侧重</text>
+          <view>{{viewReport.mbti.topElementsText}}</view>
+        </view>
+        <view class="mbti-line">
+          <text>实际影响</text>
+          <view>{{viewReport.mbti.influence}}</view>
+        </view>
       </view>
 
       <view class="detail-block live-card" wx:if="{{viewReport.hasLiveInput}}">
@@ -196,7 +221,7 @@
 
       <view class="detail-block why-recommend-card">
         <view class="card-title">方案还参考了什么</view>
-        <view class="why-recommend-desc">佩戴目标和已填写的当下信息会继续影响材料颜色、角色与排序。</view>
+        <view class="why-recommend-desc">佩戴目标、MBTI 偏好和已填写的当下信息会继续影响材料颜色、角色与排序。</view>
         <view class="why-recommend-list">
           <view wx:for="{{viewReport.recommendationReasons}}" wx:key="index" class="why-recommend-row">
             <view class="why-recommend-index">{{item.index}}</view>

@@ -1773,6 +1773,9 @@ def test_calculate_returns_ui_ready_result():
     assert data["zodiac_analysis"]["name"] == "狮子座"
     assert data["zodiac_analysis"]["element"] == "火象"
     assert data["zodiac_analysis"]["suggestion"]
+    assert data["mbti_analysis"]["type"] == "INFJ"
+    assert data["mbti_analysis"]["weight"] == 8
+    assert data["mbti_analysis"]["top_elements"] == ["水", "木"]
 
 
 def test_two_step_energy_to_diy_workbench_flow():
@@ -1786,6 +1789,7 @@ def test_two_step_energy_to_diy_workbench_flow():
     assert energy_data["status"] == "energy_ready"
     assert energy_data["next_step"]["action"] == "open_wrist_size_form"
     assert energy_data["zodiac_analysis"]["name"] == "狮子座"
+    assert energy_data["mbti_analysis"]["selected"] is True
     assert "bracelet_plan" not in energy_data
 
     recommendation_response = client.post(
@@ -1959,6 +1963,7 @@ def test_optional_mbti_and_three_core_wishes_are_accepted():
 
     assert response.status_code == 200
     assert response.json()["data"]["input_summary"]["mbti"] is None
+    assert response.json()["data"]["mbti_analysis"]["selected"] is False
     assert len(response.json()["data"]["input_summary"]["core_wishes"]) == 3
     assert response.json()["data"]["chakra_analysis"]["primary_chakra"] == "throat"
     assert response.json()["data"]["mood_analysis"]["palette_id"] == "sea_salt_blue"

@@ -40,6 +40,25 @@ MBTI_MAPPING: dict[str, dict[str, float]] = {
 }
 NEUTRAL_MBTI_PROFILE = {element: 3.0 for element in ELEMENTS}
 
+MBTI_DIMENSION_LABELS = {
+    "I": "安静聚焦",
+    "E": "开放表达",
+    "N": "灵感探索",
+    "S": "具体务实",
+    "T": "理性清晰",
+    "F": "柔和共情",
+    "J": "计划有序",
+    "P": "弹性自由",
+}
+
+ELEMENT_STYLE_LABELS = {
+    "金": "清晰有序",
+    "木": "轻盈舒展",
+    "水": "清透安静",
+    "火": "明亮有活力",
+    "土": "温润稳重",
+}
+
 WISH_MAPPING = {
     "招财进宝/事业腾飞": ("金", "土"),
     "正缘桃花/人际和合": ("火", "木"),
@@ -84,6 +103,7 @@ class EnergyCalculator:
             "solar_time": {key: value for key, value in solar_time.items() if key != "true_solar_datetime"},
             "breakdown": breakdown,
             "bazi_basis": bazi_result.basis,
+            "mbti_analysis": self.analyze_mbti(request.mbti, mbti),
             "name_analysis": name_analysis,
             "chakra_analysis": chakra_analysis,
             "mood_analysis": mood_analysis,
@@ -128,6 +148,45 @@ class EnergyCalculator:
     def calculate_mbti_energy(mbti: str | None) -> dict[str, float]:
         raw = MBTI_MAPPING[mbti] if mbti else NEUTRAL_MBTI_PROFILE
         return normalized_profile(raw, ENERGY_WEIGHTS["mbti"])
+
+    @staticmethod
+    def analyze_mbti(mbti: str | None, profile: dict[str, float] | None = None) -> dict:
+        normalized_mbti = (mbti or "").upper()
+        if normalized_mbti not in MBTI_MAPPING:
+            return {
+                "selected": False,
+                "type": "",
+                "weight": ENERGY_WEIGHTS["mbti"],
+                "keywords": [],
+                "top_elements": [],
+                "preference": "",
+                "summary": "未填写 MBTI，本次不加入性格偏好方向。",
+                "influence": "MBTI 只作为搭配偏好辅助，不单独决定元素结论或推荐结果。",
+            }
+
+        mbti_profile = profile or EnergyCalculator.calculate_mbti_energy(normalized_mbti)
+        top_elements = [
+            element
+            for element, _ in sorted(mbti_profile.items(), key=lambda item: item[1], reverse=True)[:2]
+        ]
+        keywords = [MBTI_DIMENSION_LABELS[letter] for letter in normalized_mbti]
+        preference = "、".join(ELEMENT_STYLE_LABELS[element] for element in top_elements)
+        return {
+            "selected": True,
+            "type": normalized_mbti,
+            "weight": ENERGY_WEIGHTS["mbti"],
+            "keywords": keywords,
+            "top_elements": top_elements,
+            "preference": preference,
+            "summary": (
+                f"{normalized_mbti} 的偏好线索更接近{'、'.join(keywords)}，"
+                f"搭配上可参考{preference}的表达。"
+            ),
+            "influence": (
+                f"以 {ENERGY_WEIGHTS['mbti']}/100 的辅助权重参与，"
+                "用于微调材质气质与推荐排序，不单独决定结果。"
+            ),
+        }
 
     @staticmethod
     def calculate_name_energy(name: str) -> tuple[dict[str, float], dict]:

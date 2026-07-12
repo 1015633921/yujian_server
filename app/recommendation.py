@@ -415,9 +415,11 @@ class RecommendationEngine:
     def recommendation_context(request: AssessmentRequest, energy: dict) -> dict:
         chakra = energy.get("chakra_analysis") or {}
         mood = energy.get("mood_analysis") or {}
+        mbti = energy.get("mbti_analysis") or {}
         return {
             "useful_elements": set(energy.get("useful_elements") or []),
             "wish_elements": set(WISH_MAPPING[request.primary_core_wish]),
+            "mbti_elements": set(mbti.get("top_elements") or []) if mbti.get("selected") else set(),
             "wish_tags": {request.primary_core_wish, *request.core_wishes},
             "chakras": set(chakra.get("chakras") or []),
             "color_families": set(chakra.get("color_families") or []) | set(mood.get("color_families") or []),
@@ -557,6 +559,7 @@ class RecommendationEngine:
         score = 0.0
         score += 18 * len(elements & context["useful_elements"])
         score += 12 * len(elements & context["wish_elements"])
+        score += 4 * len(elements & context.get("mbti_elements", set()))
         score += 18 if target_element and target_element in elements else 0
         score += 18 if request.primary_core_wish in taxonomy.get("wish_tags", []) else 0
         score += 8 * len(set(taxonomy.get("chakras", [])) & context["chakras"])

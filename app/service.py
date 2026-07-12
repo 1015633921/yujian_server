@@ -18,7 +18,7 @@ from .repository import AssessmentRepository
 from .schemas import AssessmentRequest, DIYRecommendationRequest
 
 CHINA_TZ = ZoneInfo("Asia/Shanghai")
-DIY_RECOMMENDATION_CACHE_VERSION = "2026-07-11-v1"
+DIY_RECOMMENDATION_CACHE_VERSION = "2026-07-12-mbti-v2"
 LOGGER = logging.getLogger(__name__)
 
 ELEMENT_ZEN_WORDS = {
@@ -86,6 +86,7 @@ class AssessmentService:
             "input_summary": self.input_summary(request, include_wrist=True),
             "solar_time": energy["solar_time"],
             "bazi_basis": energy["bazi_basis"],
+            "mbti_analysis": energy["mbti_analysis"],
             "name_analysis": energy["name_analysis"],
             "chakra_analysis": energy["chakra_analysis"],
             "mood_analysis": energy["mood_analysis"],
@@ -149,6 +150,7 @@ class AssessmentService:
             "input_summary": self.input_summary(request, include_wrist=False),
             "solar_time": energy["solar_time"],
             "bazi_basis": energy["bazi_basis"],
+            "mbti_analysis": energy["mbti_analysis"],
             "name_analysis": energy["name_analysis"],
             "chakra_analysis": energy["chakra_analysis"],
             "mood_analysis": energy["mood_analysis"],
@@ -277,6 +279,10 @@ class AssessmentService:
             "breakdown": assessment["energy_breakdown"],
             "solar_time": assessment["solar_time"],
             "bazi_basis": assessment.get("bazi_basis") or {},
+            "mbti_analysis": assessment.get("mbti_analysis") or self.energy_calculator.analyze_mbti(
+                request.mbti,
+                (assessment.get("energy_breakdown") or {}).get("mbti"),
+            ),
             "chakra_analysis": assessment.get("chakra_analysis") or {},
             "mood_analysis": assessment.get("mood_analysis") or {},
             "useful_elements": assessment.get("useful_elements") or [],
@@ -483,6 +489,11 @@ class AssessmentService:
 
         if not enriched.get("energy_keywords"):
             enriched["energy_keywords"] = cls.energy_keywords(final_profile, strongest, weakest, core_wishes)
+        if not enriched.get("mbti_analysis"):
+            enriched["mbti_analysis"] = EnergyCalculator.analyze_mbti(
+                input_summary.get("mbti"),
+                (enriched.get("energy_breakdown") or {}).get("mbti"),
+            )
         if not enriched.get("seasonal_energy"):
             enriched["seasonal_energy"] = cls.seasonal_energy_prompt(final_profile, strongest, weakest)
         if not enriched.get("zodiac_analysis"):

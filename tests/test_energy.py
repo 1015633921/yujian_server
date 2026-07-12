@@ -35,13 +35,49 @@ def test_energy_profile_totals_exactly_100():
     assert round(sum(result["breakdown"]["mbti"].values()), 2) == ENERGY_WEIGHTS["mbti"]
     assert round(sum(result["breakdown"]["chakra"].values()), 2) == ENERGY_WEIGHTS["chakra"]
     assert round(sum(result["breakdown"]["mood"].values()), 2) == ENERGY_WEIGHTS["mood"]
+    assert result["mbti_analysis"]["selected"] is True
+    assert result["mbti_analysis"]["type"] == "INFJ"
+    assert result["mbti_analysis"]["weight"] == ENERGY_WEIGHTS["mbti"]
+    assert result["mbti_analysis"]["top_elements"] == ["水", "木"]
+    assert result["mbti_analysis"]["keywords"] == ["安静聚焦", "灵感探索", "柔和共情", "计划有序"]
 
 
 def test_optional_mbti_uses_neutral_profile():
     result = EnergyCalculator().calculate(make_request(mbti=None))
 
     assert result["breakdown"]["mbti"] == {"金": 1.6, "木": 1.6, "水": 1.6, "火": 1.6, "土": 1.6}
+    assert result["mbti_analysis"]["selected"] is False
+    assert result["mbti_analysis"]["top_elements"] == []
     assert round(sum(result["final"].values()), 2) == 100
+
+
+def test_mbti_adds_a_small_explicit_material_preference_score():
+    request = make_request(mbti="INTJ")
+    energy = EnergyCalculator().calculate(request)
+    context = {
+        "useful_elements": set(),
+        "wish_elements": set(),
+        "mbti_elements": {"水"},
+        "wish_tags": set(),
+        "chakras": set(),
+        "color_families": set(),
+        "mood_tags": set(),
+        "visual_tags": set(),
+    }
+    catalog = {
+        "water_stone": {"name": "水系材质", "element": "水", "secondary_elements": [], "color": "#fff", "effects": []},
+        "wood_stone": {"name": "木系材质", "element": "木", "secondary_elements": [], "color": "#fff", "effects": []},
+    }
+    pools = {request.primary_core_wish: []}
+
+    water_score = RecommendationEngine.score_crystal(
+        "water_stone", request, {**energy, "final": {}}, context, "support", catalog=catalog, primary_pools=pools
+    )
+    wood_score = RecommendationEngine.score_crystal(
+        "wood_stone", request, {**energy, "final": {}}, context, "support", catalog=catalog, primary_pools=pools
+    )
+
+    assert water_score - wood_score == 4
 
 
 def test_three_wishes_share_the_same_20_point_weight():
