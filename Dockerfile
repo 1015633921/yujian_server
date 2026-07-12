@@ -2,6 +2,7 @@ FROM python:3.12.13-slim-bookworm@sha256:8a7e7cc04fd3e2bd787f7f24e22d5d119aa590d
 
 ARG RELEASE_VERSION=dev
 ARG VCS_REF=unknown
+ARG PIP_INDEX_URL=https://pypi.org/simple
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -15,7 +16,7 @@ LABEL org.opencontainers.image.title="yujian-api" \
 WORKDIR /app
 
 COPY requirements.lock .
-RUN python -m pip install --require-hashes -r requirements.lock
+RUN python -m pip install --index-url "$PIP_INDEX_URL" --require-hashes -r requirements.lock
 
 COPY app ./app
 COPY static ./static
