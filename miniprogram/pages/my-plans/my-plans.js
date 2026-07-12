@@ -1,4 +1,5 @@
 const { assetUrl } = require('../../utils/assets');
+const { countPlanStatuses, editablePlanPresentation } = require('../../utils/planPresentation');
 
 const MATERIAL_NAMES = {
   aquamarine: '海蓝宝',
@@ -32,6 +33,7 @@ const PLAN_TRAY_IMAGES = {
 
 const TABS = [
   { key: 'all', label: '全部', count: 0 },
+  { key: 'draft', label: '草稿', count: 0 },
   { key: 'saved', label: '已保存', count: 0 },
   { key: 'ordered', label: '已下单', count: 0 },
   { key: 'completed', label: '已完成', count: 0 }
@@ -139,14 +141,16 @@ function normalizeSavedPlan(item = {}, index = 0, source = 'draft') {
   const createdAt = item.createdAt || item.savedAt || item.updatedAt || Date.now();
   const wristSize = item.wristSize || summary.wristSize || summary.targetWristText || '15.0cm';
   const name = item.name || item.title || (source === 'current' ? '当前编辑方案' : `自由搭配方案 ${index + 1}`);
+  const presentation = editablePlanPresentation(source, item);
 
   return {
     key: `${source}-${item.id || item.designId || createdAt || index}`,
     id: item.id || item.designId || '',
-    type: 'saved',
-    statusKey: 'saved',
-    statusText: '已保存',
-    statusClass: 'saved',
+    type: presentation.type,
+    statusKey: presentation.statusKey,
+    statusText: presentation.statusText,
+    statusClass: presentation.statusClass,
+    deleteText: presentation.deleteText,
     name,
     wristSize,
     dateText: `创建时间 ${formatDateTime(createdAt)}`,
@@ -221,7 +225,7 @@ Page({
     activeTab: 'all',
     plans: [],
     visiblePlans: [],
-    counts: { all: 0, saved: 0, ordered: 0, completed: 0 }
+    counts: { all: 0, draft: 0, saved: 0, ordered: 0, completed: 0 }
   },
 
   onShow() {
@@ -249,12 +253,7 @@ Page({
       plans.push(normalizeOrderPlan(order, index));
     });
 
-    const counts = {
-      all: plans.length,
-      saved: plans.filter(item => item.statusKey === 'saved').length,
-      ordered: plans.filter(item => item.statusKey === 'ordered').length,
-      completed: plans.filter(item => item.statusKey === 'completed').length
-    };
+    const counts = countPlanStatuses(plans, ['draft', 'saved', 'ordered', 'completed']);
     const activeTab = this.data.activeTab;
     this.setData({
       plans,
@@ -324,10 +323,13 @@ Page({
   deletePlan(e) {
     const key = e.currentTarget.dataset.key;
     const plan = this.data.plans.find(item => item.key === key);
-    if (!plan || plan.type !== 'saved') return;
+    if (!plan || !['draft', 'saved'].includes(plan.type)) return;
+    const isDraft = plan.type === 'draft';
     wx.showModal({
-      title: '删除保存方案？',
-      content: '删除后不会影响已下单订单，只会移除本地保存的草稿。',
+      title: isDraft ? '清除自动草稿？' : '删除保存方案？',
+      content: isDraft
+        ? '清除后不会影响已保存方案和订单。'
+        : '删除后不会影响已下单订单，只会移除本地保存的方案。',
       confirmText: '删除',
       confirmColor: '#C83B3D',
       success: res => {

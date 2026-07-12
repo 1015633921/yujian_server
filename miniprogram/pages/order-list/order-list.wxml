@@ -1,7 +1,6 @@
 <view class="page order-list-page">
-  <view class="list-head">
-    <view class="list-title">{{title}}</view>
-    <view wx:if="{{showListCount}}" class="list-count">{{filteredOrders.length}} 个订单</view>
+  <view wx:if="{{showListCount}}" class="list-head">
+    <view class="list-count">{{filteredOrders.length}} 个订单</view>
   </view>
 
   <view wx:if="{{loading}}" class="card state-card">正在加载订单...</view>

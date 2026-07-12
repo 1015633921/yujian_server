@@ -1,7 +1,13 @@
 <view class="assessment-page yu-page">
+  <view wx:if="{{redirectingToReport}}" class="assessment-redirecting" aria-label="正在打开搭配报告">
+    <view class="yu-spinner"></view>
+    <view class="redirecting-title">正在打开搭配报告</view>
+    <view class="redirecting-desc">正在读取你上次生成的元素比例参考</view>
+  </view>
+
   <view class="assessment-nav">
     <view class="nav-back yu-pressable" bindtap="goBack">‹</view>
-    <view class="nav-title">{{currentStepKey === 'review' ? '确认分析信息' : modeCopy.navTitle}}</view>
+    <view></view>
     <view class="nav-more yu-pressable" bindtap="openGuide">?</view>
   </view>
 

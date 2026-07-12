@@ -7,9 +7,11 @@ const {
 } = require('../../utils/api');
 const { assetUrl } = require('../../utils/assets');
 const {
+  expandSequenceToCount,
   estimateInnerCircumferenceMm,
   recommendBeadCount
 } = require('../../utils/braceletSizing');
+const { buildFreshWorkspaceDraft } = require('../../utils/workspaceImport');
 
 let Body;
 let Bodies;
@@ -42,6 +44,9 @@ const STRINGED_COMFORT_ALLOWANCE_MM = 8;
 const RING_SLIDE_EDGE_RATIO = 0.38;
 const RING_REORDER_CENTER_DEAD_ZONE_RATIO = 0.35;
 const RING_SLIDE_MIN_MOVE_RAD = 0.018;
+const RING_GESTURE_INTENT_MIN_RPX = 7;
+const RING_SLIDE_TANGENTIAL_BIAS = 0.74;
+const RING_REORDER_RADIAL_BIAS = 1.16;
 const MAX_BEAD_ANGULAR_VELOCITY = 0.16;
 const COLLISION_SPIN_FACTOR = 0.018;
 const ROLLING_SPIN_FACTOR = 0.10;
@@ -2721,10 +2726,35 @@ Page({
     }
   },
 
+  replaceCurrentDesignWithImportedDraft(options = {}) {
+    const draft = buildFreshWorkspaceDraft({
+      ...options,
+      fallbackName: DEFAULT_DESIGN_NAME
+    });
+    this.lastPersistedDraftSignature = '';
+    wx.setStorageSync('currentDesign', draft);
+  },
+
   applyRecommendedRecipe(options = {}) {
     if (!this.materialPayloadReady) return false;
     const rawRecipe = wx.getStorageSync('recommendedRecipe') || ['aquamarine', 'amethyst', 'clearQuartz', 'moonstone'];
     const recipe = this.normalizedRecommendedRecipe(rawRecipe);
+    const storedRecipeContext = wx.getStorageSync('recommendedRecipeContext') || {};
+    const contextRecipe = this.normalizedRecommendedRecipe(storedRecipeContext.recipe || []);
+    const contextMatchesRecipe = !contextRecipe.length
+      || JSON.stringify(contextRecipe) === JSON.stringify(recipe);
+    const sourceContext = contextMatchesRecipe && storedRecipeContext.title
+      ? {
+          source: storedRecipeContext.source || 'community_inspiration',
+          source_label: storedRecipeContext.source_label || '灵感方案',
+          post_id: storedRecipeContext.post_id || '',
+          title: storedRecipeContext.title
+        }
+      : {
+          source: 'recommended_recipe',
+          source_label: '推荐方案',
+          title: ''
+        };
     const wristSize = Number(wx.getStorageSync('recommendedWristSize')) || this.data.wristSize || 16;
     const idMap = {
       aquamarine: 'aquamarine8',
@@ -2748,21 +2778,11 @@ Page({
     const recipeMaterialIds = beadMaterialIds.length
       ? beadMaterialIds
       : materialIds.filter(id => materialIsWorkspaceSupported(this.findMaterialById(id) || {}));
-    const selected = [];
-    const targetLengthMm = wristSize * 10 + STRINGED_COMFORT_ALLOWANCE_MM;
-    const selectedSizes = [];
-    let cursor = 0;
-    while (
-      recipeMaterialIds.length
-      && (estimateStringedLengthMm(selectedSizes) < targetLengthMm || selected.length < MIN_STRING_BEAD_COUNT)
-      && selected.length < MAX_RECOMMENDED_RECIPE_BEADS
-    ) {
-      const materialId = recipeMaterialIds[cursor % recipeMaterialIds.length];
-      const material = this.findMaterialById(materialId);
-      selected.push(materialId);
-      selectedSizes.push(material ? material.size : 8);
-      cursor += 1;
-    }
+    const recipeItems = recipeMaterialIds
+      .map(id => this.findMaterialById(id))
+      .filter(Boolean);
+    const targetCount = recommendedStringedBeadCount(recipeItems, wristSize);
+    const selected = expandSequenceToCount(recipeMaterialIds, targetCount);
     if (!selected.length) {
       if (!options.silent) wx.showToast({ title: '暂未匹配到可用珠材', icon: 'none' });
       if (!options.keepPendingOnEmpty) this.pendingRecommendedRecipe = false;
@@ -2771,12 +2791,22 @@ Page({
     this.pendingRecommendedRecipe = false;
     this.resetWorkspaceRuntime();
     this.pushHistory();
+    wx.removeStorageSync('recommendedRecipeContext');
     wx.setStorageSync('recommendedWristSize', wristSize);
     wx.setStorageSync('workspaceWristConfirmed', true);
+    this.sourceContext = sourceContext;
+    const placements = this.normalizePlacements(selected);
+    this.replaceCurrentDesignWithImportedDraft({
+      name: sourceContext.title,
+      selected,
+      placements,
+      wristSize,
+      sourceContext
+    });
     this.setData({
       wristSize,
       selected,
-      placements: this.normalizePlacements(selected),
+      placements,
       attachedPendants: [],
       isLooseMode: false,
       selectedBeadIndex: -1,
@@ -2787,7 +2817,8 @@ Page({
       isStringingFinishing: false,
       isReleasingString: false,
       draggingBeadIndex: -1,
-      dragDeleteArmed: false
+      dragDeleteArmed: false,
+      sourceContext
     });
     this.recalculate();
     return true;
@@ -2804,8 +2835,8 @@ Page({
       return false;
     }
     if (!this.materialPayloadReady) return false;
-    const selected = this.buildBackendRecommendationSelected(payload);
-    if (!selected.length) {
+    const baseSelected = this.buildBackendRecommendationSelected(payload);
+    if (!baseSelected.length) {
       if (!options.silent) wx.showToast({ title: '推荐方案暂未匹配到可用珠材', icon: 'none' });
       if (!options.keepPendingOnEmpty) this.pendingBackendRecommendation = false;
       return false;
@@ -2817,17 +2848,30 @@ Page({
       keyword: payload.keyword || '',
       title: payload.bracelet_plan.title || ''
     };
-    this.sourceContext = sourceContext;
     const wristSize = Number(payload.wrist_size_cm) || Number(wx.getStorageSync('recommendedWristSize')) || this.data.wristSize || 16;
+    const recommendationItems = baseSelected
+      .map(id => this.findMaterialById(id))
+      .filter(Boolean);
+    const recommendedCount = recommendedStringedBeadCount(recommendationItems, wristSize);
+    const selected = expandSequenceToCount(baseSelected, recommendedCount);
     this.pendingBackendRecommendation = false;
     this.resetWorkspaceRuntime();
     this.pushHistory();
     wx.setStorageSync('recommendedWristSize', wristSize);
     wx.setStorageSync('workspaceWristConfirmed', true);
+    this.sourceContext = sourceContext;
+    const placements = this.normalizePlacements(selected);
+    this.replaceCurrentDesignWithImportedDraft({
+      name: sourceContext.title || payload.name || payload.bracelet_plan.title,
+      selected,
+      placements,
+      wristSize,
+      sourceContext
+    });
     this.setData({
       wristSize,
       selected,
-      placements: this.normalizePlacements(selected),
+      placements,
       isLooseMode: false,
       selectedBeadIndex: -1,
       showTip: false,
@@ -7962,6 +8006,8 @@ Page({
         geometry,
         visualSlots,
         moved: false,
+        startPoint: point,
+        startAngle: Math.atan2(point.y - geometry.center, point.x - geometry.center),
         dragAngle: (visualSlots[index] || {}).angle,
         draggingX: null,
         draggingY: null,
@@ -8144,6 +8190,68 @@ Page({
     query.exec(rects => setup(rects && rects[0]));
   },
 
+  getRingGestureIntent(state, point, geometry) {
+    if (!state || state.moved || !state.startPoint || !point || !geometry) return 'reorder';
+    const beadSize = Number(state.beadSize || (geometry.beadSizes || [])[state.currentIndex] || 54);
+    const minTravel = Math.max(
+      RING_GESTURE_INTENT_MIN_RPX,
+      Math.min(12, beadSize * 0.14)
+    );
+    const moveX = point.x - state.startPoint.x;
+    const moveY = point.y - state.startPoint.y;
+    const travel = Math.sqrt(moveX * moveX + moveY * moveY);
+    if (travel < minTravel) return 'pending';
+    const angle = Number.isFinite(state.startAngle)
+      ? state.startAngle
+      : Math.atan2(state.startPoint.y - geometry.center, state.startPoint.x - geometry.center);
+    const radialX = Math.cos(angle);
+    const radialY = Math.sin(angle);
+    const tangentialX = -radialY;
+    const tangentialY = radialX;
+    const radial = Math.abs(moveX * radialX + moveY * radialY);
+    const tangential = Math.abs(moveX * tangentialX + moveY * tangentialY);
+    if (radial > tangential * RING_REORDER_RADIAL_BIAS) return 'reorder';
+    if (tangential >= minTravel && tangential >= radial * RING_SLIDE_TANGENTIAL_BIAS) return 'slide';
+    return 'reorder';
+  },
+
+  convertRingReorderToSlide(state, point, geometry) {
+    if (!state || !point || !geometry) return false;
+    const startAngle = Number.isFinite(state.startAngle)
+      ? state.startAngle
+      : Math.atan2(point.y - geometry.center, point.x - geometry.center);
+    const angle = Math.atan2(point.y - geometry.center, point.x - geometry.center);
+    const totalDelta = this.normalizeAngleDelta(angle - startAngle);
+    const placements = this.buildRingSlidePlacements(state.placements, totalDelta, geometry);
+    this.ringDragState = null;
+    this.ringSlideState = {
+      rect: state.rect,
+      scale: state.scale,
+      basePlacements: state.placements,
+      items: state.items,
+      geometry,
+      originIndex: Number.isInteger(state.originalIndex) ? state.originalIndex : state.currentIndex,
+      lastAngle: angle,
+      totalDelta,
+      moved: Math.abs(totalDelta) > RING_SLIDE_MIN_MOVE_RAD
+    };
+    this.setLivePlacements(placements);
+    const updates = {
+      draggingBeadIndex: -1,
+      selectedBeadIndex: -1,
+      selectedBeadInfo: null,
+      dragDeleteArmed: false
+    };
+    if (!this.data.useCanvasRenderer) {
+      updates.placements = placements;
+      updates.selectedItems = this.layoutSelectedItems(state.items || [], placements, geometry);
+    }
+    this.setData(updates, () => {
+      if (this.data.useCanvasRenderer) this.scheduleCanvasRender(true);
+    });
+    return true;
+  },
+
   onBeadTouchMove(e) {
     if (this.ringSlideState) {
       this.onRingSlideMove(e);
@@ -8213,8 +8321,11 @@ Page({
     const geometry = state.geometry || this.getStringedRingContext().geometry;
     const currentItem = items[state.currentIndex];
     if (!currentItem) return;
-    const visualSlots = state.visualSlots || this.getRingVisualSlots(items, currentPlacements, geometry);
     const point = this.touchToTrayPoint(touch, state.rect, state.scale);
+    const gestureIntent = this.getRingGestureIntent(state, point, geometry);
+    if (gestureIntent === 'pending') return;
+    if (gestureIntent === 'slide' && this.convertRingReorderToSlide(state, point, geometry)) return;
+    const visualSlots = state.visualSlots || this.getRingVisualSlots(items, currentPlacements, geometry);
     const dx = point.x - geometry.center;
     const dy = point.y - geometry.center;
     const distanceFromCenter = Math.sqrt(dx ** 2 + dy ** 2);
@@ -8581,6 +8692,7 @@ Page({
   },
 
   buildDraftPersistencePayload(existingDesign = {}) {
+    const now = Date.now();
     return {
       designId: existingDesign.designId || existingDesign.design_id || '',
       design_id: existingDesign.designId || existingDesign.design_id || '',
@@ -8594,6 +8706,8 @@ Page({
       wearStyle: 'single',
       isLooseMode: this.data.isLooseMode,
       sourceContext: this.data.sourceContext || this.sourceContext || existingDesign.sourceContext || null,
+      createdAt: existingDesign.createdAt || now,
+      updatedAt: now,
       summary: this.data.summary
     };
   },
@@ -9325,12 +9439,11 @@ Page({
   },
 
   goBack() {
-    const pages = getCurrentPages();
-    if (pages.length > 1) {
-      wx.navigateBack();
-      return;
-    }
-    wx.switchTab({ url: '/pages/home/home' });
+    const url = '/pages/home/home';
+    wx.switchTab({
+      url,
+      fail: () => wx.reLaunch({ url })
+    });
   }
 
 });

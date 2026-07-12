@@ -65,7 +65,24 @@ function recommendBeadCount(itemsOrSizes = [], wristSizeCm = 16, options = {}) {
   return best.count;
 }
 
+function expandSequenceToCount(sequence = [], targetCount = 0) {
+  const source = Array.isArray(sequence) ? sequence.filter(Boolean) : [];
+  if (!source.length) return [];
+  const count = Math.max(source.length, Math.floor(Number(targetCount) || 0));
+  if (count === source.length) return source.slice();
+
+  const expanded = [];
+  source.forEach((item, index) => {
+    const start = Math.round(index * count / source.length);
+    const end = Math.round((index + 1) * count / source.length);
+    const copies = Math.max(1, end - start);
+    for (let copy = 0; copy < copies; copy += 1) expanded.push(item);
+  });
+  return expanded.slice(0, count);
+}
+
 module.exports = {
+  expandSequenceToCount,
   estimateInnerCircumferenceMm,
   normalizeBeadSizes,
   recommendBeadCount

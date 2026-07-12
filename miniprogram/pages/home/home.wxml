@@ -142,7 +142,7 @@
   <view wx:if="{{shoppingCart.length}}" class="inspiration-tray yu-card yu-card-pressable" bindtap="viewMyPlans">
     <view>
       <view class="tray-title">我的方案</view>
-      <view class="tray-sub">{{shoppingCart.length}} 个已保存方案</view>
+      <view class="tray-sub">{{shoppingCart.length}} 个方案与草稿</view>
     </view>
     <view class="tray-action">查看</view>
   </view>

@@ -1,12 +1,4 @@
 <view class="result-page yu-page" wx:if="{{report}}">
-  <view class="result-nav">
-    <view class="nav-back yu-pressable" bindtap="goBack">‹</view>
-    <view class="nav-title">五行风格分析</view>
-    <view class="nav-share yu-pressable" bindtap="shareReport">
-      <image class="nav-share-image yu-share-button-image" src="/images/workspace-icons/share-button-gold.png" mode="aspectFit"></image>
-    </view>
-  </view>
-
   <view class="result-stepper">
     <view
       wx:for="{{steps}}"
@@ -19,8 +11,13 @@
   </view>
 
   <view class="result-head">
-    <view class="result-title">你的元素比例参考</view>
-    <view class="result-subtitle">根据出生信息与当前佩戴目标生成</view>
+    <view>
+      <view class="result-title">你的元素比例参考</view>
+      <view class="result-subtitle">根据出生信息与当前佩戴目标生成</view>
+    </view>
+    <view class="nav-share result-share yu-pressable" bindtap="shareReport">
+      <image class="nav-share-image yu-share-button-image" src="/images/workspace-icons/share-button-gold.png" mode="aspectFit"></image>
+    </view>
   </view>
 
   <view class="energy-stage">

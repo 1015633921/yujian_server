@@ -121,6 +121,10 @@ page {
   background: rgba(249, 247, 242, .8);
 }
 
+.plan-preview.draft {
+  background: rgba(246, 248, 247, .8);
+}
+
 .plan-preview.ordered {
   background: rgba(246, 248, 247, .8);
 }
@@ -148,6 +152,23 @@ page {
   font-weight: 900;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+
+.plan-status {
+  flex: 0 0 auto;
+  border: 1rpx solid rgba(32, 32, 31, .10);
+  border-radius: 6rpx;
+  padding: 4rpx 8rpx;
+  color: var(--yu-color-text-secondary);
+  background: rgba(247, 245, 240, .92);
+  font-size: 18rpx;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.plan-status.draft {
+  color: #4f6f62;
+  background: rgba(79, 111, 98, .08);
 }
 
 .plan-arrow {

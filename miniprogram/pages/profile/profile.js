@@ -38,6 +38,7 @@ Page({
     isLoggedIn: false,
     hasProfile: false,
     hasPhone: false,
+    profileReady: false,
     authLoading: false,
     savingProfile: false,
     phoneLoading: false,
@@ -129,6 +130,7 @@ Page({
     const localOrders = wx.getStorageSync('orders') || [];
     this.setData({
       user,
+      profileReady: true,
       isLoggedIn: !!(user && user.user_id),
       hasProfile: !!(user && user.has_profile),
       hasPhone: !!(user && user.has_phone),

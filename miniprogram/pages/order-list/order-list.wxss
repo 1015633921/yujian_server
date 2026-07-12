@@ -5,14 +5,8 @@
 .list-head {
   display: flex;
   align-items: flex-end;
-  justify-content: space-between;
+  justify-content: flex-end;
   margin-bottom: 22rpx;
-}
-
-.list-title {
-  color: #25222a;
-  font-size: 38rpx;
-  font-weight: 900;
 }
 
 .list-count {

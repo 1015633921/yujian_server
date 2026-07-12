@@ -17,15 +17,7 @@ page {
   margin: 14rpx 0 22rpx;
 }
 
-.section-title {
-  color: var(--yu-color-anchor-dark);
-  font-size: 38rpx;
-  font-weight: 900;
-  letter-spacing: 0;
-}
-
 .section-subtitle {
-  margin-top: 10rpx;
   color: var(--yu-color-text-secondary);
   font-size: 22rpx;
   line-height: 1.45;

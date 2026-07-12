@@ -30,7 +30,6 @@ function expandBomSequence(bom = []) {
 Page({
   data: {
     status: 'all',
-    title: '全部订单',
     orders: [],
     filteredOrders: [],
     showListCount: true,
@@ -41,7 +40,6 @@ Page({
     const status = options.status || 'all';
     this.setData({
       status,
-      title: STATUS_TITLE[status] || '全部订单',
       showListCount: status !== 'done'
     });
     wx.setNavigationBarTitle({ title: STATUS_TITLE[status] || '全部订单' });

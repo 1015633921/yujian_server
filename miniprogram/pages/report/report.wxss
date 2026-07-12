@@ -162,6 +162,13 @@
   text-align: center;
 }
 
+.result-share {
+  position: absolute;
+  top: 50%;
+  right: 0;
+  transform: translateY(-50%);
+}
+
 .result-title {
   color: var(--yu-color-anchor-dark);
   font-family: "Songti SC", "STSong", "STKaiti", "KaiTi", serif;

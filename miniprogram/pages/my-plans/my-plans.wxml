@@ -1,10 +1,4 @@
 <view class="my-plans-page yu-page">
-  <view class="plans-nav">
-    <view class="nav-back yu-pressable" bindtap="goBack">‹</view>
-    <view class="nav-title">我的方案</view>
-    <view class="nav-spacer"></view>
-  </view>
-
   <scroll-view class="tabs-scroll" scroll-x enable-flex show-scrollbar="{{false}}">
     <view
       wx:for="{{tabs}}"
@@ -44,14 +38,15 @@
       <view class="plan-main">
         <view class="plan-topline">
           <view class="plan-name">{{item.name}}</view>
+          <view class="plan-status {{item.statusClass}}">{{item.statusText}}</view>
           <view class="plan-arrow">›</view>
         </view>
         <view class="plan-date">{{item.dateText}}</view>
       </view>
-      <view wx:if="{{item.type === 'saved'}}" class="saved-actions">
+      <view wx:if="{{item.type === 'saved' || item.type === 'draft'}}" class="saved-actions">
         <button class="action-button edit" data-key="{{item.key}}" catchtap="continueEdit">继续编辑</button>
         <button class="action-button checkout" data-key="{{item.key}}" catchtap="checkoutPlan">去结算</button>
-        <button class="action-button delete" data-key="{{item.key}}" catchtap="deletePlan">删除</button>
+        <button class="action-button delete" data-key="{{item.key}}" catchtap="deletePlan">{{item.deleteText}}</button>
       </view>
     </view>
   </view>

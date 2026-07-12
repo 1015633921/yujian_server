@@ -438,10 +438,12 @@ Page({
     const report = wx.getStorageSync('energyReport');
     if (report) {
       const inputSummary = report.input_summary || {};
+      const savedBeadSize = Number(wx.getStorageSync('recommendedBeadSize'));
       this.setData({
         report,
         viewReport: this.buildViewReport(report),
-        avatarChar: safeText(inputSummary.name, '宇').slice(0, 1)
+        avatarChar: safeText(inputSummary.name, '宇').slice(0, 1),
+        beadSize: this.data.beadSizeOptions.includes(savedBeadSize) ? savedBeadSize : 8
       });
     }
   },
@@ -827,8 +829,9 @@ Page({
       return;
     }
     this.setData({ generating: true });
-    wx.showLoading({ title: '正在生成手串' });
+    wx.showLoading({ title: '正在读取方案' });
     try {
+      wx.setStorageSync('recommendedBeadSize', this.data.beadSize);
       const result = await createDIYRecommendation(this.data.report.assessment_id, {
         wrist_size_cm: wristSize,
         bead_size_mm: this.data.beadSize

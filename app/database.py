@@ -86,6 +86,15 @@ MYSQL_SCHEMA = [
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     """,
     """
+    CREATE TABLE IF NOT EXISTS assessment_recommendations (
+      assessment_id VARCHAR(80) NOT NULL, wrist_size_tenths INT NOT NULL,
+      bead_size_mm INT NOT NULL, algorithm_version VARCHAR(40) NOT NULL,
+      result_json LONGTEXT NOT NULL, created_at VARCHAR(40) NOT NULL, updated_at VARCHAR(40) NOT NULL,
+      PRIMARY KEY (assessment_id, wrist_size_tenths, bead_size_mm, algorithm_version),
+      INDEX idx_assessment_recommendations_assessment (assessment_id, updated_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """,
+    """
     CREATE TABLE IF NOT EXISTS daily_energies (
       user_id VARCHAR(100) NOT NULL, energy_date VARCHAR(20) NOT NULL, mode VARCHAR(40) NOT NULL,
       assessment_id VARCHAR(80), result_json LONGTEXT NOT NULL, created_at VARCHAR(40) NOT NULL,

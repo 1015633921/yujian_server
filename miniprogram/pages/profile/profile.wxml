@@ -1,4 +1,11 @@
-<view class="profile-page yu-page">
+<view class="profile-page yu-page {{profileReady ? '' : 'is-loading'}}">
+  <view wx:if="{{!profileReady}}" class="profile-loading" aria-label="正在读取个人中心">
+    <view class="profile-loading-avatar"></view>
+    <view class="profile-loading-copy">
+      <view class="profile-loading-line strong"></view>
+      <view class="profile-loading-line"></view>
+    </view>
+  </view>
   <view class="profile-hero yu-card">
     <view class="hero-main">
       <view wx:if="{{isLoggedIn && user && user.avatar_url}}" class="profile-avatar avatar-image">
@@ -72,7 +79,7 @@
         </view>
         <view>
           <view class="menu-title">我的方案</view>
-          <view class="menu-desc">查看、编辑和结算保存过的 DIY 方案</view>
+          <view class="menu-desc">查看、编辑和结算草稿与已保存方案</view>
         </view>
       </view>
       <view class="menu-right">{{shoppingCartCount}} 个 ></view>

@@ -1,5 +1,11 @@
 const auth = require('../../utils/auth');
 const { getPrivacyDataSummary, deletePersonalizationData } = require('../../utils/api');
+const {
+  CHAKRA_OPTIONS,
+  MOOD_PALETTES,
+  labelForAssessmentValue,
+  labelsForAssessmentValues
+} = require('../../utils/assessmentOptions');
 
 const DISCLOSURE_GROUPS = [
   {
@@ -90,8 +96,8 @@ Page({
         { label: '出生信息', value: [input.birthday, input.birth_time, input.birth_place].filter(Boolean).join(' · ') || '未填写' },
         { label: '性格偏好', value: displayValue(input.mbti) },
         { label: '佩戴目标', value: displayValue(input.core_wishes || input.core_wish) },
-        { label: '当下状态', value: displayValue(input.chakra_answers) },
-        { label: '色彩偏好', value: displayValue(input.mood_palette_id) }
+        { label: '当下状态', value: labelsForAssessmentValues(input.chakra_answers, CHAKRA_OPTIONS) },
+        { label: '色彩偏好', value: labelForAssessmentValue(input.mood_palette_id, MOOD_PALETTES) }
       ],
       countsText: sourceHint || (assessmentCount || dailyCount
         ? `已保存 ${assessmentCount} 份测算画像、${dailyCount} 条每日状态记录`

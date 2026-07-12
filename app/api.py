@@ -6,7 +6,7 @@ import json
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
@@ -581,8 +581,14 @@ def calculate_assessment(payload: AssessmentRequest):
 
 
 @router.post("/assessment/energy", summary="第一步：生成五行元素画像")
-def calculate_energy(payload: AssessmentRequest):
+def calculate_energy(payload: AssessmentRequest, background_tasks: BackgroundTasks):
     result, cache_hit = service.calculate_energy(payload)
+    background_tasks.add_task(
+        service.pre_generate_diy_recommendation,
+        result["assessment_id"],
+        payload.wrist_size_cm,
+        payload.bead_size_mm,
+    )
     message = "读取已有元素画像" if cache_hit else "元素分析完成"
     return success({**result, "cache_hit": cache_hit}, message)
 
@@ -595,7 +601,8 @@ def create_diy_recommendation(assessment_id: str, payload: DIYRecommendationRequ
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     if not result:
         raise HTTPException(status_code=404, detail="分析结果不存在")
-    return success(result, "专属手串已生成")
+    message = "读取预生成手串" if result.get("recommendation_cache_hit") else "专属手串已生成"
+    return success(result, message)
 
 
 @legacy_router.post("/crystal/assessment/", summary="兼容旧小程序路径的专属水晶分析")

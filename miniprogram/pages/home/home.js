@@ -475,14 +475,20 @@ Page({
         selectedAt: Date.now()
       });
     }
-    const navigate = TAB_BAR_PAGES.includes(url) ? wx.switchTab : wx.navigateTo;
-    navigate({
+    if (TAB_BAR_PAGES.includes(url)) {
+      const pages = getCurrentPages();
+      const currentPage = pages[pages.length - 1] || {};
+      const currentRoute = currentPage.route || currentPage.__route__ || '';
+      if (`/${currentRoute}` === url) return;
+      wx.switchTab({
+        url,
+        fail: () => wx.reLaunch({ url })
+      });
+      return;
+    }
+    wx.navigateTo({
       url,
-      fail: () => {
-        if (!TAB_BAR_PAGES.includes(url)) {
-          wx.redirectTo({ url, fail: () => {} });
-        }
-      }
+      fail: () => wx.redirectTo({ url, fail: () => {} })
     });
   },
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import math
 import uuid
 from datetime import datetime
@@ -17,6 +18,8 @@ from .repository import AssessmentRepository
 from .schemas import AssessmentRequest, DIYRecommendationRequest
 
 CHINA_TZ = ZoneInfo("Asia/Shanghai")
+DIY_RECOMMENDATION_CACHE_VERSION = "2026-07-11-v1"
+LOGGER = logging.getLogger(__name__)
 
 ELEMENT_ZEN_WORDS = {
     "金": ["澄心", "清骨", "守界", "素光"],
@@ -181,6 +184,84 @@ class AssessmentService:
         assessment_id: str,
         payload: DIYRecommendationRequest,
     ) -> dict | None:
+        cached = self.repository.get_cached_recommendation(
+            assessment_id,
+            payload.wrist_size_cm,
+            payload.bead_size_mm,
+            DIY_RECOMMENDATION_CACHE_VERSION,
+        )
+        if cached:
+            self.repository.update(cached)
+            return {**self.with_energy_extras(cached), "recommendation_cache_hit": True}
+
+        result = self._build_diy_recommendation(assessment_id, payload)
+        if not result:
+            return None
+        timestamp = datetime.now(CHINA_TZ).isoformat()
+        self.repository.save_cached_recommendation(
+            assessment_id,
+            payload.wrist_size_cm,
+            payload.bead_size_mm,
+            DIY_RECOMMENDATION_CACHE_VERSION,
+            result,
+            timestamp,
+        )
+        self.repository.update(result)
+        return {**self.with_energy_extras(result), "recommendation_cache_hit": False}
+
+    def pre_generate_diy_recommendation(
+        self,
+        assessment_id: str,
+        wrist_size_cm: float = 16.0,
+        bead_size_mm: int = 8,
+    ) -> bool:
+        try:
+            return self._pre_generate_diy_recommendation(
+                assessment_id,
+                wrist_size_cm,
+                bead_size_mm,
+            )
+        except Exception:
+            LOGGER.exception("DIY recommendation pre-generation failed for %s", assessment_id)
+            return False
+
+    def _pre_generate_diy_recommendation(
+        self,
+        assessment_id: str,
+        wrist_size_cm: float,
+        bead_size_mm: int,
+    ) -> bool:
+        payload = DIYRecommendationRequest(
+            wrist_size_cm=wrist_size_cm,
+            bead_size_mm=bead_size_mm,
+        )
+        cached = self.repository.get_cached_recommendation(
+            assessment_id,
+            payload.wrist_size_cm,
+            payload.bead_size_mm,
+            DIY_RECOMMENDATION_CACHE_VERSION,
+        )
+        if cached:
+            return True
+        result = self._build_diy_recommendation(assessment_id, payload)
+        if not result:
+            return False
+        timestamp = datetime.now(CHINA_TZ).isoformat()
+        self.repository.save_cached_recommendation(
+            assessment_id,
+            payload.wrist_size_cm,
+            payload.bead_size_mm,
+            DIY_RECOMMENDATION_CACHE_VERSION,
+            result,
+            timestamp,
+        )
+        return True
+
+    def _build_diy_recommendation(
+        self,
+        assessment_id: str,
+        payload: DIYRecommendationRequest,
+    ) -> dict | None:
         assessment = self.repository.get(assessment_id)
         if not assessment:
             return None
@@ -235,7 +316,6 @@ class AssessmentService:
                 },
             }
         )
-        self.repository.update(assessment)
         return assessment
 
     @staticmethod

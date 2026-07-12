@@ -1,7 +1,6 @@
 <view class="favorites-page yu-page">
   <view class="section-head">
     <view>
-      <view class="section-title">我的收藏</view>
       <view class="section-subtitle">收藏过的灵感搭配、推荐方案和今日搭配</view>
     </view>
     <view class="result-count">{{posts.length}} 款</view>

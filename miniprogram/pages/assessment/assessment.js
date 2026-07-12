@@ -1,5 +1,6 @@
 const { calculateEnergy, getAssessmentOptions } = require('../../utils/api');
 const auth = require('../../utils/auth');
+const { CHAKRA_OPTIONS, MOOD_PALETTES } = require('../../utils/assessmentOptions');
 
 const DEFAULT_WISH = '情绪平衡';
 const ASSESSMENT_DRAFT_KEY = 'assessmentDraft';
@@ -38,26 +39,6 @@ const WISH_MAPPING = {
   专注灵感: '健康护身/保持专注',
   安定边界: '辟邪防小人/消除焦虑'
 };
-const CHAKRA_OPTIONS = [
-  { value: 'state_expression', label: '表达卡住', desc: '表达感' },
-  { value: 'state_soft_heart', label: '关系消耗', desc: '关系感' },
-  { value: 'state_low_confidence', label: '缺少底气', desc: '行动力' },
-  { value: 'state_unsettled', label: '不够安定', desc: '稳定感' },
-  { value: 'state_low_inspiration', label: '灵感变少', desc: '灵感' },
-  { value: 'need_grounding', label: '想更稳定', desc: '稳定感' },
-  { value: 'need_flow', label: '想更流动', desc: '情绪流动' },
-  { value: 'need_action', label: '想更行动', desc: '行动力' },
-  { value: 'need_acceptance', label: '想更柔软', desc: '关系感' },
-  { value: 'need_clarity', label: '想更清晰', desc: '表达感' }
-];
-const MOOD_PALETTES = [
-  { value: 'sea_salt_blue', label: '海盐蓝白', desc: '表达 · 清澈', colors: ['#DCEFF2', '#F8F7F2', '#6D8FA3'] },
-  { value: 'rose_garden', label: '粉绿花园', desc: '接纳 · 关系', colors: ['#F0B7C3', '#DDEAD7', '#7EA27E'] },
-  { value: 'sunlit_gold', label: '金橙日光', desc: '自信 · 行动', colors: ['#F1C75B', '#E9924E', '#FFF1C8'] },
-  { value: 'moon_violet', label: '紫白月光', desc: '灵感 · 安静', colors: ['#DDD7EF', '#F7F5F0', '#8177B4'] },
-  { value: 'earth_red', label: '红棕大地', desc: '稳定 · 安全', colors: ['#8E3F35', '#B9835A', '#E8D8C7'] },
-  { value: 'black_gold', label: '黑金镜面', desc: '边界 · 保护', colors: ['#1F2225', '#C8A95B', '#F5F2EA'] }
-];
 const MODE_COPY = {
   wuxing: {
     navTitle: '五行风格分析',
@@ -210,7 +191,8 @@ Page({
     rawMoodPalettes: MOOD_PALETTES,
     selectedWishMap: {},
     selectedChakraMap: {},
-    submitting: false
+    submitting: false,
+    redirectingToReport: false
   },
 
   onLoad(options = {}) {
@@ -227,6 +209,9 @@ Page({
 
   onShow() {
     this.hideNativeTabBar();
+    if (this.data.redirectingToReport) {
+      this.setData({ redirectingToReport: false });
+    }
     const storedMode = wx.getStorageSync('customMode') || {};
     const modeId = storedMode.id || 'wuxing';
     this.setData({ modeCopy: MODE_COPY[modeId] || MODE_COPY.wuxing });
@@ -284,11 +269,17 @@ Page({
     if (!this.hasValidReport(report)) return;
     this.autoReportNavigating = true;
     wx.setStorageSync(ASSESSMENT_SUPPRESS_AUTO_REPORT_ONCE_KEY, true);
-    wx.navigateTo({
-      url: '/pages/report/report?from=assessment',
-      complete: () => {
-        this.autoReportNavigating = false;
-      }
+    this.setData({ redirectingToReport: true }, () => {
+      wx.navigateTo({
+        url: '/pages/report/report?from=assessment',
+        fail: () => {
+          wx.removeStorageSync(ASSESSMENT_SUPPRESS_AUTO_REPORT_ONCE_KEY);
+          this.setData({ redirectingToReport: false });
+        },
+        complete: () => {
+          this.autoReportNavigating = false;
+        }
+      });
     });
   },
 
@@ -693,6 +684,8 @@ Page({
     }
     const selectedWishes = form.wishes.length ? form.wishes : [DEFAULT_WISH];
     const coreWishes = Array.from(new Set(selectedWishes.map(wish => WISH_MAPPING[wish])));
+    const preferredWristSize = Number(wx.getStorageSync('recommendedWristSize')) || 16;
+    const preferredBeadSize = Number(wx.getStorageSync('recommendedBeadSize')) || 8;
     const payload = {
       user_id: user.user_id,
       name: form.name.trim(),
@@ -703,6 +696,8 @@ Page({
       core_wishes: coreWishes,
       chakra_answers: form.chakraAnswers,
       mood_palette_id: form.moodPaletteId || null,
+      wrist_size_cm: preferredWristSize,
+      bead_size_mm: preferredBeadSize,
       force_recalculate: true
     };
     this.setData({ submitting: true });
@@ -730,19 +725,10 @@ Page({
   },
 
   goBack() {
-    const pages = getCurrentPages();
-    if (pages.length > 1) {
-      const current = pages[pages.length - 1] || {};
-      const previous = pages[pages.length - 2] || {};
-      const currentRoute = current.route || current.__route__ || '';
-      const previousRoute = previous.route || previous.__route__ || '';
-      if (previousRoute && previousRoute !== currentRoute && previousRoute !== 'pages/report/report') {
-        wx.navigateBack();
-        return;
-      }
-      wx.switchTab({ url: '/pages/home/home' });
-      return;
-    }
-    wx.switchTab({ url: '/pages/home/home' });
+    const url = '/pages/home/home';
+    wx.switchTab({
+      url,
+      fail: () => wx.reLaunch({ url })
+    });
   }
 });

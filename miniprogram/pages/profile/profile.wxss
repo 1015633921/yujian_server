@@ -3,8 +3,49 @@ page {
 }
 
 .profile-page {
+  position: relative;
   min-height: 100vh;
   padding-bottom: calc(190rpx + env(safe-area-inset-bottom));
+}
+
+.profile-page.is-loading > view:not(.profile-loading) {
+  visibility: hidden;
+}
+
+.profile-loading {
+  display: flex;
+  align-items: center;
+  gap: 24rpx;
+  min-height: 178rpx;
+  padding: 30rpx 28rpx;
+  border: var(--yu-line-hair);
+  border-radius: var(--yu-radius-card);
+  background: rgba(255, 255, 255, .82);
+}
+
+.profile-loading-avatar {
+  width: 112rpx;
+  height: 112rpx;
+  border-radius: 50%;
+  background: var(--yu-color-bg-soft);
+}
+
+.profile-loading-copy {
+  flex: 1;
+}
+
+.profile-loading-line {
+  width: 58%;
+  height: 22rpx;
+  margin-top: 18rpx;
+  border-radius: 6rpx;
+  background: var(--yu-color-bg-soft);
+}
+
+.profile-loading-line.strong {
+  width: 42%;
+  height: 30rpx;
+  margin-top: 0;
 }
 
 .profile-hero {

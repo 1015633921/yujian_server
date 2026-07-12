@@ -5,7 +5,7 @@ from uuid import uuid4
 from app.main import app
 from app.order_service import OrderService, generate_numeric_order_no, now_iso
 from app.repository import AssessmentRepository
-from app.service import AssessmentService
+from app.service import AssessmentService, DIY_RECOMMENDATION_CACHE_VERSION
 
 client = TestClient(app)
 
@@ -1804,6 +1804,59 @@ def test_two_step_energy_to_diy_workbench_flow():
     assert all(check["passed"] for check in plan["validation"]["checks"])
 
 
+def test_energy_background_prefetch_is_reused_by_matching_recommendation():
+    energy_response = client.post(
+        "/api/v1/assessment/energy",
+        json={
+            **PAYLOAD,
+            "user_id": f"prefetch-{uuid4().hex}",
+            "wrist_size_cm": 16,
+            "bead_size_mm": 8,
+            "force_recalculate": True,
+        },
+    )
+    energy_data = energy_response.json()["data"]
+
+    recommendation_response = client.post(
+        f"/api/v1/assessment/{energy_data['assessment_id']}/diy-recommendation",
+        json={"wrist_size_cm": 16, "bead_size_mm": 8},
+    )
+    recommendation_data = recommendation_response.json()["data"]
+
+    assert energy_response.status_code == 200
+    assert recommendation_response.status_code == 200
+    assert recommendation_data["recommendation_cache_hit"] is True
+    assert recommendation_data["workbench_payload"]["wrist_size_cm"] == 16
+    assert recommendation_data["workbench_payload"]["bead_size_mm"] == 8
+
+
+def test_recommendation_cache_is_isolated_by_wrist_size():
+    energy_response = client.post(
+        "/api/v1/assessment/energy",
+        json={
+            **PAYLOAD,
+            "user_id": f"prefetch-size-{uuid4().hex}",
+            "wrist_size_cm": 16,
+            "bead_size_mm": 8,
+            "force_recalculate": True,
+        },
+    )
+    assessment_id = energy_response.json()["data"]["assessment_id"]
+
+    first = client.post(
+        f"/api/v1/assessment/{assessment_id}/diy-recommendation",
+        json={"wrist_size_cm": 16.7, "bead_size_mm": 8},
+    ).json()["data"]
+    second = client.post(
+        f"/api/v1/assessment/{assessment_id}/diy-recommendation",
+        json={"wrist_size_cm": 16.7, "bead_size_mm": 8},
+    ).json()["data"]
+
+    assert first["recommendation_cache_hit"] is False
+    assert second["recommendation_cache_hit"] is True
+    assert second["workbench_payload"]["wrist_size_cm"] == 16.7
+
+
 def test_privacy_summary_and_personalization_deletion(tmp_path, monkeypatch):
     from app import api as api_module
 
@@ -1850,6 +1903,14 @@ def test_privacy_summary_and_personalization_deletion(tmp_path, monkeypatch):
             "created_at": timestamp,
         }
     )
+    repository.save_cached_recommendation(
+        "privacy-assessment",
+        16,
+        8,
+        DIY_RECOMMENDATION_CACHE_VERSION,
+        {"assessment_id": "privacy-assessment", "workbench_payload": {"wrist_size_cm": 16}},
+        timestamp,
+    )
 
     summary_response = client.get("/api/v1/privacy/data-summary?user_id=privacy-user")
     assert summary_response.status_code == 200
@@ -1862,6 +1923,12 @@ def test_privacy_summary_and_personalization_deletion(tmp_path, monkeypatch):
     assert delete_response.status_code == 200
     assert delete_response.json()["data"]["deleted"] is True
     assert repository.history("privacy-user") == []
+    assert repository.get_cached_recommendation(
+        "privacy-assessment",
+        16,
+        8,
+        DIY_RECOMMENDATION_CACHE_VERSION,
+    ) is None
     assert repository.recent_checkins("privacy-user", "2026-01-01") == []
     assert repository.get_user("privacy-user")["nickname"] == "小羽"
 

@@ -324,6 +324,13 @@ Page({
     const post = this.data.viewPost;
     if (!post) return;
     wx.setStorageSync('recommendedRecipe', post.recipe);
+    wx.setStorageSync('recommendedRecipeContext', {
+      source: 'community_inspiration',
+      source_label: '灵感方案',
+      post_id: post.id || '',
+      title: post.title || '',
+      recipe: post.recipe
+    });
     wx.setStorageSync('workspacePreset', 'recommended');
     wx.switchTab({ url: '/pages/workspace/workspace' });
   },

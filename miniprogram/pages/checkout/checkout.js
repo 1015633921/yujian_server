@@ -1,4 +1,5 @@
 const auth = require('../../utils/auth');
+const { effectiveWristText } = require('../../utils/designSummary');
 const env = require('../../config/env');
 const { createOrder, mockPayOrder, getMaterials } = require('../../utils/api');
 const { assetUrl } = require('../../utils/assets');
@@ -356,7 +357,8 @@ Page({
       ...(design.summary || {}),
       count: sequence.length,
       price: amount,
-      priceText: this.formatAmount(amount)
+      priceText: this.formatAmount(amount),
+      effectiveWrist: effectiveWristText(design.summary || {})
     };
     const displayTitle = cleanDesignTitle(design.name) || cleanDesignTitle(design.title) || DEFAULT_CHECKOUT_DESIGN_TITLE;
     const designForView = { ...design, summary, displayTitle };

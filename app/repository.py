@@ -46,6 +46,20 @@ class AssessmentRepository:
             )
             connection.execute(
                 """
+                CREATE TABLE IF NOT EXISTS assessment_recommendations (
+                    assessment_id TEXT NOT NULL,
+                    wrist_size_tenths INTEGER NOT NULL,
+                    bead_size_mm INTEGER NOT NULL,
+                    algorithm_version TEXT NOT NULL,
+                    result_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY (assessment_id, wrist_size_tenths, bead_size_mm, algorithm_version)
+                )
+                """
+            )
+            connection.execute(
+                """
                 CREATE TABLE IF NOT EXISTS daily_energies (
                     user_id TEXT NOT NULL,
                     energy_date TEXT NOT NULL,
@@ -147,6 +161,73 @@ class AssessmentRepository:
             ).fetchone()
         return json.loads(row["result_json"]) if row else None
 
+    @staticmethod
+    def recommendation_wrist_key(wrist_size_cm: float) -> int:
+        return int(round(float(wrist_size_cm) * 10))
+
+    def get_cached_recommendation(
+        self,
+        assessment_id: str,
+        wrist_size_cm: float,
+        bead_size_mm: int,
+        algorithm_version: str,
+    ) -> dict[str, Any] | None:
+        with self.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT result_json FROM assessment_recommendations
+                WHERE assessment_id = ? AND wrist_size_tenths = ?
+                  AND bead_size_mm = ? AND algorithm_version = ?
+                """,
+                (
+                    assessment_id,
+                    self.recommendation_wrist_key(wrist_size_cm),
+                    int(bead_size_mm),
+                    algorithm_version,
+                ),
+            ).fetchone()
+        return json.loads(row["result_json"]) if row else None
+
+    def save_cached_recommendation(
+        self,
+        assessment_id: str,
+        wrist_size_cm: float,
+        bead_size_mm: int,
+        algorithm_version: str,
+        result: dict[str, Any],
+        timestamp: str,
+    ) -> None:
+        if use_mysql() and not self._force_sqlite:
+            sql = """
+                INSERT INTO assessment_recommendations
+                (assessment_id, wrist_size_tenths, bead_size_mm, algorithm_version,
+                 result_json, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON DUPLICATE KEY UPDATE result_json=VALUES(result_json), updated_at=VALUES(updated_at)
+            """
+        else:
+            sql = """
+                INSERT INTO assessment_recommendations
+                (assessment_id, wrist_size_tenths, bead_size_mm, algorithm_version,
+                 result_json, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(assessment_id, wrist_size_tenths, bead_size_mm, algorithm_version)
+                DO UPDATE SET result_json=excluded.result_json, updated_at=excluded.updated_at
+            """
+        with self._lock, self.connect() as connection:
+            connection.execute(
+                sql,
+                (
+                    assessment_id,
+                    self.recommendation_wrist_key(wrist_size_cm),
+                    int(bead_size_mm),
+                    algorithm_version,
+                    json.dumps(result, ensure_ascii=False),
+                    timestamp,
+                    timestamp,
+                ),
+            )
+
     def history(self, user_id: str, limit: int = 20) -> list[dict[str, Any]]:
         with self.connect() as connection:
             rows = connection.execute(
@@ -208,6 +289,15 @@ class AssessmentRepository:
     def delete_personalization_data(self, user_id: str) -> dict[str, Any]:
         summary = self.privacy_data_summary(user_id)
         with self._lock, self.connect() as connection:
+            connection.execute(
+                """
+                DELETE FROM assessment_recommendations
+                WHERE assessment_id IN (
+                    SELECT assessment_id FROM energy_assessments WHERE user_id = ?
+                )
+                """,
+                (user_id,),
+            )
             connection.execute("DELETE FROM daily_checkins WHERE user_id = ?", (user_id,))
             connection.execute("DELETE FROM daily_energies WHERE user_id = ?", (user_id,))
             connection.execute("DELETE FROM energy_assessments WHERE user_id = ?", (user_id,))
