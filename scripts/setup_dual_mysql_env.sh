@@ -25,6 +25,7 @@ SQL
   echo "MYSQL_DATABASE=yujian_test"
   echo "WECHAT_PAY_TEST_MODE=true"
   echo "LOGISTICS_SYNC_ENABLED=false"
+  echo "KUAIDI100_SUBSCRIBE_ENABLED=false"
 } > .env.test
 
 {
@@ -34,6 +35,7 @@ SQL
   echo "MYSQL_DATABASE=yujian_local"
   echo "WECHAT_PAY_TEST_MODE=true"
   echo "LOGISTICS_SYNC_ENABLED=false"
+  echo "KUAIDI100_SUBSCRIBE_ENABLED=false"
 } > .env.local
 
 chmod 600 .env.test

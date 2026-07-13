@@ -25,7 +25,8 @@ def test_p1b_migration_backfills_stable_legacy_snapshot_and_round_trips(tmp_path
     OrderService(db_path)
     AssessmentRepository(db_path)
     upgrade("sqlite", db_path)
-    assert downgrade("sqlite", db_path, steps=3) == [
+    assert downgrade("sqlite", db_path, steps=4) == [
+        "20260713_07_order_receipt_completion",
         "20260712_06_p1_material_price_cents",
         "20260712_05_p1c_runtime_tasks",
         "20260712_04_p1b_report_snapshots",
@@ -62,6 +63,7 @@ def test_p1b_migration_backfills_stable_legacy_snapshot_and_round_trips(tmp_path
         "20260712_04_p1b_report_snapshots",
         "20260712_05_p1c_runtime_tasks",
         "20260712_06_p1_material_price_cents",
+        "20260713_07_order_receipt_completion",
     ]
     with sqlite3.connect(db_path) as connection:
         first = connection.execute(
@@ -72,7 +74,8 @@ def test_p1b_migration_backfills_stable_legacy_snapshot_and_round_trips(tmp_path
     first_report_id = first[0]
     assert upgrade("sqlite", db_path) == []
 
-    assert downgrade("sqlite", db_path, steps=3) == [
+    assert downgrade("sqlite", db_path, steps=4) == [
+        "20260713_07_order_receipt_completion",
         "20260712_06_p1_material_price_cents",
         "20260712_05_p1c_runtime_tasks",
         "20260712_04_p1b_report_snapshots",
@@ -83,6 +86,7 @@ def test_p1b_migration_backfills_stable_legacy_snapshot_and_round_trips(tmp_path
         "20260712_04_p1b_report_snapshots",
         "20260712_05_p1c_runtime_tasks",
         "20260712_06_p1_material_price_cents",
+        "20260713_07_order_receipt_completion",
     ]
     with sqlite3.connect(db_path) as connection:
         second_report_id = connection.execute(

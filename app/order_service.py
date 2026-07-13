@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import hmac
 import json
 import logging
 import os
@@ -13,12 +14,13 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qs, urlencode, urlsplit, urlunsplit
 
 import httpx
 
 from .repository import DB_PATH
 from .database import connect_database, integrity_errors, runtime_schema_mutation_allowed, use_mysql
-from .feature_flags import mock_trade_enabled, payment_enabled
+from .feature_flags import kuaidi100_subscribe_enabled, mock_trade_enabled, payment_enabled
 from .materials import clean_image_urls
 from .money import stored_cents
 from .observability import current_request_id, log_event, metrics
@@ -82,6 +84,9 @@ REFUND_EVENT_STATES = {
     "REFUND.PROCESSING": "PROCESSING",
 }
 WEBHOOK_TERMINAL_STATUSES = {"succeeded", "ignored", "compensation_required"}
+KUAIDI100_PHONE_REQUIRED_COMPANIES = {"shunfeng", "shunfengkuaiyun", "zhongtong"}
+KUAIDI100_CALLBACK_MAX_BYTES = 512 * 1024
+SIGNED_AUTO_COMPLETE_DAYS = 7
 
 
 class OrderConflictError(ValueError):
@@ -103,6 +108,10 @@ class PaymentWebhookError(ValueError):
 
 
 class WebhookEventConflictError(PaymentWebhookError):
+    pass
+
+
+class LogisticsCallbackSignatureError(ValueError):
     pass
 
 
@@ -212,10 +221,22 @@ class Kuaidi100Config:
         self.customer = os.getenv("KUAIDI100_CUSTOMER") or os.getenv("KUAIDI100_CUSTOMER_ID")
         self.key = os.getenv("KUAIDI100_KEY") or os.getenv("KUAIDI100_SECRET")
         self.query_url = os.getenv("KUAIDI100_QUERY_URL") or "https://poll.kuaidi100.com/poll/query.do"
+        self.subscribe_url = os.getenv("KUAIDI100_SUBSCRIBE_URL") or "https://poll.kuaidi100.com/poll"
+        self.callback_url = str(os.getenv("KUAIDI100_CALLBACK_URL") or "").strip()
+        self.callback_salt = str(os.getenv("KUAIDI100_CALLBACK_SALT") or "").strip()
+        self.resultv2 = str(os.getenv("KUAIDI100_SUBSCRIBE_RESULTV2") or "1").strip() or "1"
 
     @property
     def ready(self) -> bool:
         return bool(self.customer and self.key)
+
+    @property
+    def subscription_ready(self) -> bool:
+        return bool(self.key and self.callback_url and self.callback_salt)
+
+    @property
+    def callback_ready(self) -> bool:
+        return bool(self.callback_salt)
 
 
 class OrderService:
@@ -261,7 +282,9 @@ class OrderService:
                     refund_status TEXT,
                     refund_json TEXT,
                     logistics_json TEXT,
-                    status_history_json TEXT
+                    status_history_json TEXT,
+                    logistics_signed_at TEXT,
+                    auto_complete_at TEXT
                 )
                 """
             )
@@ -340,6 +363,9 @@ class OrderService:
             self.ensure_columns(connection)
             connection.execute("CREATE INDEX IF NOT EXISTS idx_orders_user_created ON orders(user_id, created_at DESC)")
             connection.execute("CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status, payment_status)")
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS idx_orders_auto_complete ON orders(status, auto_complete_at)"
+            )
             connection.execute("CREATE INDEX IF NOT EXISTS idx_diy_designs_user_updated ON diy_designs(user_id, updated_at DESC)")
             connection.execute("CREATE INDEX IF NOT EXISTS idx_cart_items_user_updated ON cart_items(user_id, updated_at DESC)")
             connection.execute("CREATE INDEX IF NOT EXISTS idx_community_favorites_user_updated ON community_favorites(user_id, updated_at DESC)")
@@ -356,6 +382,8 @@ class OrderService:
             "logistics_json": "ALTER TABLE orders ADD COLUMN logistics_json TEXT",
             "status_history_json": "ALTER TABLE orders ADD COLUMN status_history_json TEXT",
             "design_id": "ALTER TABLE orders ADD COLUMN design_id TEXT",
+            "logistics_signed_at": "ALTER TABLE orders ADD COLUMN logistics_signed_at TEXT",
+            "auto_complete_at": "ALTER TABLE orders ADD COLUMN auto_complete_at TEXT",
         }
         for column, sql in migrations.items():
             if column not in columns:
@@ -1555,11 +1583,23 @@ class OrderService:
         return self.get_order(order_id)
 
     def confirm_receipt(self, order_id: str, user_id: str) -> dict[str, Any]:
-        order = self.get_order(order_id)
-        self.ensure_order_owner(order, user_id)
-        if order["status"] != "shipped":
-            raise ValueError("订单尚未发货，不能确认收货")
-        self.transition_order(order, "completed", event_label="用户确认收货")
+        with self.connect() as connection:
+            self.begin_order_transaction(connection)
+            row = self.order_row_for_update(connection, order_id)
+            if not row:
+                raise ValueError("订单不存在")
+            order = self.public_order(row)
+            self.ensure_order_owner(order, user_id)
+            if order["status"] == "completed":
+                return order
+            if order["status"] != "shipped":
+                raise ValueError("订单尚未发货，不能确认收货")
+            self.transition_order(
+                order,
+                "completed",
+                event_label="用户确认收货",
+                connection=connection,
+            )
         return self.get_order(order_id)
 
     def cancel_order(self, order_id: str, user_id: str, reason: str = "") -> dict[str, Any]:
@@ -1776,15 +1816,7 @@ class OrderService:
     def get_logistics(self, order_id: str, user_id: str) -> dict[str, Any]:
         order = self.get_order(order_id)
         self.ensure_order_owner(order, user_id)
-        logistics = order.get("logistics") or {
-            "carrier": "",
-            "tracking_no": "",
-            "status": "not_shipped",
-            "status_text": "商家尚未发货",
-            "traces": [],
-        }
-        logistics = self.refresh_logistics_if_needed(order, logistics)
-        return {"order_id": order_id, "logistics": logistics, "status_history": order.get("status_history") or []}
+        return self.refresh_order_logistics(order_id, force=False)
 
     def transition_order(
         self,
@@ -1897,8 +1929,494 @@ class OrderService:
             ],
         }
 
+    @staticmethod
+    def parse_logistics_time(value: Any) -> datetime | None:
+        text = str(value or "").strip()
+        if not text:
+            return None
+        try:
+            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone(timedelta(hours=8)))
+            return parsed.astimezone(timezone.utc)
+        except ValueError:
+            pass
+        for pattern in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"):
+            try:
+                return datetime.strptime(text, pattern).replace(
+                    tzinfo=timezone(timedelta(hours=8))
+                ).astimezone(timezone.utc)
+            except ValueError:
+                continue
+        return None
+
+    @classmethod
+    def latest_trace_time(cls, traces: list[dict[str, Any]]) -> str:
+        best_text = ""
+        best_time: datetime | None = None
+        for trace in traces:
+            text = str(trace.get("time") or "").strip()
+            parsed = cls.parse_logistics_time(text)
+            if parsed is not None and (best_time is None or parsed > best_time):
+                best_time = parsed
+                best_text = text
+            elif not best_text and text:
+                best_text = text
+        return best_text
+
+    @classmethod
+    def with_signed_completion_deadline(
+        cls,
+        existing: dict[str, Any],
+        incoming: dict[str, Any],
+        merged: dict[str, Any],
+    ) -> dict[str, Any]:
+        if merged.get("status") != "signed":
+            return merged
+        signed_at_value = (
+            existing.get("signed_at")
+            or incoming.get("signed_at")
+            or (existing.get("latest_event_time") if existing.get("status") == "signed" else "")
+            or incoming.get("latest_event_time")
+            or cls.latest_trace_time(list(incoming.get("traces") or []))
+            or incoming.get("updated_at")
+            or existing.get("updated_at")
+            or now_iso()
+        )
+        signed_at = cls.parse_logistics_time(signed_at_value) or datetime.now(timezone.utc)
+        signed_at = signed_at.astimezone(timezone.utc).replace(microsecond=0)
+        merged["signed_at"] = signed_at.isoformat()
+        merged["auto_complete_at"] = (
+            signed_at + timedelta(days=SIGNED_AUTO_COMPLETE_DAYS)
+        ).isoformat()
+        return merged
+
+    @staticmethod
+    def logistics_completion_fields(logistics: dict[str, Any]) -> tuple[str | None, str | None]:
+        if logistics.get("status") != "signed":
+            return None, None
+        return (
+            str(logistics.get("signed_at") or "") or None,
+            str(logistics.get("auto_complete_at") or "") or None,
+        )
+
+    @classmethod
+    def merge_logistics(
+        cls,
+        existing: dict[str, Any] | None,
+        incoming: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        current = dict(existing or {})
+        update = dict(incoming or {})
+        merged = {**current, **update}
+
+        traces: list[dict[str, str]] = []
+        seen: set[tuple[str, str, str]] = set()
+        for raw_trace in list(update.get("traces") or []) + list(current.get("traces") or []):
+            if not isinstance(raw_trace, dict):
+                continue
+            trace = {
+                "time": str(raw_trace.get("time") or "").strip(),
+                "location": str(raw_trace.get("location") or "").strip(),
+                "desc": str(raw_trace.get("desc") or "").strip(),
+            }
+            key = (trace["time"], trace["location"], trace["desc"])
+            if key in seen or not any(key):
+                continue
+            seen.add(key)
+            traces.append(trace)
+        traces.sort(
+            key=lambda item: cls.parse_logistics_time(item.get("time")) or datetime.min.replace(tzinfo=timezone.utc),
+            reverse=True,
+        )
+        merged["traces"] = traces[:200]
+
+        existing_event = cls.parse_logistics_time(current.get("latest_event_time"))
+        incoming_event_text = str(update.get("latest_event_time") or cls.latest_trace_time(list(update.get("traces") or [])))
+        incoming_event = cls.parse_logistics_time(incoming_event_text)
+        existing_signed = current.get("status") == "signed"
+        incoming_signed = update.get("status") == "signed"
+        incoming_is_older = bool(existing_event and incoming_event and incoming_event < existing_event)
+        if existing_signed or (incoming_is_older and not incoming_signed):
+            for key in ("status", "status_text", "kuaidi100_state"):
+                if key in current:
+                    merged[key] = current[key]
+        current_subscription = current.get("subscription_status")
+        incoming_subscription = update.get("subscription_status")
+        preserve_subscription = (
+            current_subscription == "completed" and incoming_subscription != "completed"
+        ) or (
+            current_subscription == "aborted" and incoming_subscription not in {"completed", "aborted"}
+        ) or (
+            incoming_is_older and not incoming_signed and bool(current_subscription)
+        )
+        if preserve_subscription:
+            merged["subscription_status"] = current["subscription_status"]
+            if current.get("monitor_status"):
+                merged["monitor_status"] = current["monitor_status"]
+        if incoming_event and (existing_event is None or incoming_event >= existing_event):
+            merged["latest_event_time"] = incoming_event_text
+        elif current.get("latest_event_time"):
+            merged["latest_event_time"] = current["latest_event_time"]
+
+        if current.get("sync_mode") == "push" and not update.get("sync_mode"):
+            merged["sync_mode"] = "push"
+        if current.get("source") == "kuaidi100" and update.get("source") in {None, "", "local", "admin"}:
+            merged["source"] = "kuaidi100"
+        return cls.with_signed_completion_deadline(current, update, merged)
+
+    @staticmethod
+    def build_kuaidi100_callback_url(callback_url: str, order_id: str) -> str:
+        parsed = urlsplit(str(callback_url or "").strip())
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise ValueError("快递100回调地址无效")
+        query = parse_qs(parsed.query, keep_blank_values=True)
+        query["order_id"] = [order_id]
+        return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, urlencode(query, doseq=True), ""))
+
+    def build_kuaidi100_subscription_payload(
+        self,
+        order_id: str,
+        logistics: dict[str, Any],
+        config: Kuaidi100Config,
+    ) -> dict[str, Any]:
+        carrier_code = str(logistics.get("carrier_code") or "").strip().lower()
+        tracking_no = str(logistics.get("tracking_no") or "").strip()
+        if not carrier_code or not tracking_no:
+            raise ValueError("快递公司编码或快递单号缺失")
+        if len(tracking_no) < 6 or len(tracking_no) > 32:
+            raise ValueError("快递单号长度必须为 6 至 32 个字符")
+        phone_tail = "".join(character for character in str(logistics.get("phone_tail") or "") if character.isdigit())[-4:]
+        if carrier_code in KUAIDI100_PHONE_REQUIRED_COMPANIES and len(phone_tail) != 4:
+            raise ValueError("该快递公司订阅需要收件手机号后四位")
+        parameters = {
+            "callbackurl": self.build_kuaidi100_callback_url(config.callback_url, order_id),
+            "salt": config.callback_salt,
+            "resultv2": config.resultv2,
+        }
+        if phone_tail:
+            parameters["phone"] = phone_tail
+        return {
+            "company": carrier_code,
+            "number": tracking_no,
+            "key": config.key,
+            "parameters": parameters,
+        }
+
+    def submit_kuaidi100_subscription(
+        self,
+        order_id: str,
+        logistics: dict[str, Any],
+        config: Kuaidi100Config,
+    ) -> dict[str, Any]:
+        payload = self.build_kuaidi100_subscription_payload(order_id, logistics, config)
+        param_text = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+        try:
+            timeout = max(1.0, min(float(os.getenv("KUAIDI100_REQUEST_TIMEOUT_SECONDS", "10")), 30.0))
+        except ValueError:
+            timeout = 10.0
+        try:
+            with httpx.Client(timeout=timeout) as client:
+                response = client.post(
+                    config.subscribe_url,
+                    data={"schema": "json", "param": param_text},
+                    headers={
+                        "Content-Type": "application/x-www-form-urlencoded",
+                        "X-Request-ID": current_request_id(),
+                    },
+                )
+        except httpx.RequestError as exc:
+            raise ValueError("快递100订阅请求超时或网络不可用") from exc
+        if response.status_code >= 400:
+            raise ValueError(f"快递100订阅失败：HTTP {response.status_code}")
+        try:
+            data = response.json()
+        except ValueError as exc:
+            raise ValueError("快递100订阅返回格式无效") from exc
+        return_code = str(data.get("returnCode") or "")
+        accepted = (
+            return_code == "200" and str(data.get("result")).lower() == "true"
+        ) or return_code == "501"
+        if not accepted:
+            raise ValueError(str(data.get("message") or "快递100订阅失败")[:200])
+        return {
+            "return_code": return_code or "200",
+            "message": str(data.get("message") or "成功")[:200],
+            "duplicate": return_code == "501",
+        }
+
+    def subscribe_order_logistics(self, order_id: str) -> dict[str, Any]:
+        if not kuaidi100_subscribe_enabled():
+            return {"enabled": False, "status": "disabled", "replayed": False}
+
+        config = Kuaidi100Config()
+        started_at = now_iso()
+        with self.connect() as connection:
+            self.begin_order_transaction(connection)
+            row = self.order_row_for_update(connection, order_id)
+            if not row:
+                raise ValueError("订单不存在")
+            order = self.public_order(row)
+            logistics = dict(order.get("logistics") or {})
+            tracking_no = str(logistics.get("tracking_no") or "").strip()
+            if order.get("status") != "shipped" or not tracking_no:
+                return {"enabled": True, "status": "skipped", "replayed": False}
+            same_tracking = logistics.get("subscription_tracking_no") == tracking_no
+            subscription_status = str(logistics.get("subscription_status") or "")
+            if same_tracking and subscription_status in {"active", "completed"}:
+                return {"enabled": True, "status": subscription_status, "replayed": True}
+            subscription_updated_at = self.parse_logistics_time(logistics.get("subscription_updated_at"))
+            abort_in_cooldown = bool(
+                same_tracking
+                and subscription_status == "aborted"
+                and subscription_updated_at
+                and (datetime.now(timezone.utc) - subscription_updated_at).total_seconds() < 1800
+            )
+            if abort_in_cooldown:
+                return {"enabled": True, "status": "cooldown", "replayed": True}
+            requested_at = self.parse_logistics_time(logistics.get("subscription_requested_at"))
+            request_is_fresh = bool(
+                requested_at and (datetime.now(timezone.utc) - requested_at).total_seconds() < 60
+            )
+            if same_tracking and subscription_status == "subscribing" and request_is_fresh:
+                return {"enabled": True, "status": "subscribing", "replayed": True}
+            logistics.update(
+                {
+                    "subscription_status": "subscribing",
+                    "subscription_tracking_no": tracking_no,
+                    "subscription_requested_at": started_at,
+                    "subscription_updated_at": started_at,
+                    "subscription_attempts": int(logistics.get("subscription_attempts") or 0) + 1,
+                    "subscription_return_code": "",
+                    "subscription_message": "",
+                }
+            )
+            connection.execute(
+                "UPDATE orders SET logistics_json = ?, updated_at = ? WHERE order_id = ?",
+                (json.dumps(logistics, ensure_ascii=False), started_at, order_id),
+            )
+
+        result: dict[str, Any] = {}
+        error: Exception | None = None
+        try:
+            if not config.subscription_ready:
+                raise ValueError("快递100主动订阅配置不完整")
+            result = self.submit_kuaidi100_subscription(order_id, logistics, config)
+        except Exception as exc:
+            error = exc
+            metrics.increment("external_service_failed_total", service="kuaidi100_subscribe", error_type=type(exc).__name__)
+            log_event(
+                logistics_logger,
+                "logistics.subscription.failed",
+                level=logging.WARNING,
+                service="kuaidi100",
+                error_type=type(exc).__name__,
+                result="failed",
+            )
+
+        finished_at = now_iso()
+        with self.connect() as connection:
+            self.begin_order_transaction(connection)
+            row = self.order_row_for_update(connection, order_id)
+            if not row:
+                raise ValueError("订单不存在")
+            latest = dict(self.public_order(row).get("logistics") or {})
+            if str(latest.get("tracking_no") or "") != tracking_no:
+                return {"enabled": True, "status": "stale", "replayed": False}
+            existing_status = str(latest.get("subscription_status") or "")
+            callback_already_accepted = bool(latest.get("last_callback_hash")) and existing_status in {
+                "active", "completed", "aborted"
+            }
+            if callback_already_accepted:
+                final_status = existing_status
+            else:
+                final_status = "active" if error is None else "failed"
+            latest.update(
+                {
+                    "subscription_status": final_status,
+                    "subscription_updated_at": finished_at,
+                    "subscription_return_code": str(result.get("return_code") or ""),
+                    "subscription_message": str(result.get("message") or (str(error) if error else ""))[:200],
+                }
+            )
+            connection.execute(
+                "UPDATE orders SET logistics_json = ?, updated_at = ? WHERE order_id = ?",
+                (json.dumps(latest, ensure_ascii=False), finished_at, order_id),
+            )
+        if error is None:
+            metrics.increment("logistics_subscription_total", service="kuaidi100", result="replayed" if result.get("duplicate") else "created")
+            log_event(logistics_logger, "logistics.subscription.succeeded", service="kuaidi100", result="success")
+        return {
+            "enabled": True,
+            "status": final_status,
+            "replayed": bool(result.get("duplicate")),
+            "return_code": str(result.get("return_code") or ""),
+        }
+
+    @staticmethod
+    def parse_kuaidi100_callback_form(body_text: str) -> tuple[str, str]:
+        try:
+            fields = parse_qs(
+                body_text,
+                keep_blank_values=True,
+                strict_parsing=True,
+                max_num_fields=10,
+            )
+        except ValueError as exc:
+            raise ValueError("快递100回调表单格式无效") from exc
+        param_values = fields.get("param") or []
+        sign_values = fields.get("sign") or []
+        if len(param_values) != 1 or len(sign_values) != 1 or not param_values[0] or not sign_values[0]:
+            raise ValueError("快递100回调缺少必要字段")
+        return param_values[0], sign_values[0]
+
+    @staticmethod
+    def verify_kuaidi100_callback(param_text: str, sign: str, config: Kuaidi100Config) -> None:
+        if not config.callback_ready:
+            raise RuntimeError("快递100回调验签配置不可用")
+        expected = hashlib.md5(f"{param_text}{config.callback_salt}".encode("utf-8")).hexdigest().upper()
+        if not hmac.compare_digest(expected, str(sign or "").strip().upper()):
+            raise LogisticsCallbackSignatureError("快递100回调签名无效")
+
+    def handle_kuaidi100_callback(self, order_id: str, param_text: str, sign: str) -> dict[str, Any]:
+        config = Kuaidi100Config()
+        self.verify_kuaidi100_callback(param_text, sign, config)
+        try:
+            payload = json.loads(param_text)
+        except json.JSONDecodeError as exc:
+            raise ValueError("快递100回调 JSON 无效") from exc
+        if not isinstance(payload, dict):
+            raise ValueError("快递100回调数据无效")
+        last_result = payload.get("lastResult") or {}
+        if isinstance(last_result, str):
+            try:
+                last_result = json.loads(last_result)
+            except json.JSONDecodeError as exc:
+                raise ValueError("快递100轨迹数据无效") from exc
+        if not isinstance(last_result, dict):
+            raise ValueError("快递100轨迹数据无效")
+
+        raw_traces = last_result.get("data") or []
+        if not isinstance(raw_traces, list) or len(raw_traces) > 500:
+            raise ValueError("快递100轨迹数量异常")
+        traces = [
+            {
+                "time": str(item.get("ftime") or item.get("time") or "")[:40],
+                "location": str(item.get("areaName") or item.get("areaCode") or "")[:200],
+                "desc": str(item.get("context") or "")[:1000],
+            }
+            for item in raw_traces
+            if isinstance(item, dict)
+        ]
+        tracking_no = str(last_result.get("nu") or last_result.get("number") or "").strip()
+        carrier_code = str(last_result.get("com") or "").strip()
+        auto_check = str(payload.get("autoCheck") or "0").strip()
+        original_carrier_code = str(payload.get("comOld") or "").strip()
+        corrected_carrier_code = str(payload.get("comNew") or "").strip()
+        state = str(last_result.get("state") or "").strip()
+        monitor_status = str(payload.get("status") or "").strip().lower()
+        signed = str(last_result.get("ischeck") or "").lower() in {"1", "true"} or state == "3"
+        event_time = self.latest_trace_time(traces)
+        canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        event_hash = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+        received_at = now_iso()
+
+        with self.connect() as connection:
+            self.begin_order_transaction(connection)
+            row = self.order_row_for_update(connection, order_id)
+            if not row:
+                raise ValueError("订单不存在")
+            order = self.public_order(row)
+            existing = dict(order.get("logistics") or {})
+            if not tracking_no or tracking_no != str(existing.get("tracking_no") or ""):
+                raise ValueError("快递100回调单号与订单不一致")
+            existing_carrier_code = str(existing.get("carrier_code") or "")
+            company_corrected = bool(
+                carrier_code
+                and existing_carrier_code
+                and carrier_code != existing_carrier_code
+                and auto_check == "1"
+                and original_carrier_code == existing_carrier_code
+                and corrected_carrier_code in {"", carrier_code}
+            )
+            if carrier_code and existing_carrier_code and carrier_code != existing_carrier_code and not company_corrected:
+                raise ValueError("快递100回调快递公司与订单不一致")
+
+            if monitor_status == "abort":
+                subscription_status = "aborted"
+            elif monitor_status == "shutdown":
+                subscription_status = "completed" if signed else "stopped"
+            else:
+                subscription_status = "active"
+            callback_hashes = [
+                str(value)
+                for value in list(existing.get("callback_event_hashes") or [])
+                if str(value)
+            ]
+            duplicate = event_hash in callback_hashes
+            if not duplicate:
+                callback_hashes = ([event_hash] + callback_hashes)[:50]
+            incoming = {
+                "status": "signed" if signed else "in_transit",
+                "status_text": self.kuaidi100_state_text(state) if state else existing.get("status_text") or "物流更新中",
+                "updated_at": received_at,
+                "source": "kuaidi100",
+                "sync_mode": "push",
+                "kuaidi100_state": state,
+                "monitor_status": monitor_status,
+                "subscription_status": subscription_status,
+                "subscription_tracking_no": tracking_no,
+                "subscription_updated_at": received_at,
+                "last_callback_at": received_at,
+                "last_callback_hash": event_hash,
+                "callback_event_hashes": callback_hashes,
+                "latest_event_time": event_time,
+                "message": str(last_result.get("message") or payload.get("message") or "")[:200],
+                "sync_error": monitor_status == "abort",
+                "last_error_type": "provider_abort" if monitor_status == "abort" else "",
+                "traces": traces,
+            }
+            if company_corrected:
+                incoming.update(
+                    {
+                        "carrier_code": carrier_code,
+                        "carrier_code_corrected_from": original_carrier_code,
+                        "carrier_code_corrected_at": received_at,
+                    }
+                )
+            if corrected_carrier_code:
+                incoming["provider_suggested_carrier_code"] = corrected_carrier_code
+            merged = self.merge_logistics(existing, incoming)
+            if not duplicate:
+                signed_at, auto_complete_at = self.logistics_completion_fields(merged)
+                connection.execute(
+                    """
+                    UPDATE orders
+                    SET logistics_json = ?, logistics_signed_at = ?, auto_complete_at = ?, updated_at = ?
+                    WHERE order_id = ?
+                    """,
+                    (
+                        json.dumps(merged, ensure_ascii=False),
+                        signed_at,
+                        auto_complete_at,
+                        received_at,
+                        order_id,
+                    ),
+                )
+
+        metrics.increment("logistics_callback_total", service="kuaidi100", result="duplicate" if duplicate else "success")
+        log_event(
+            logistics_logger,
+            "logistics.callback.succeeded",
+            service="kuaidi100",
+            result="duplicate" if duplicate else "success",
+        )
+        return {"duplicate": duplicate, "signed": signed, "monitor_status": monitor_status}
+
     def refresh_logistics_if_needed(self, order: dict[str, Any], logistics: dict[str, Any]) -> dict[str, Any]:
         if not logistics.get("tracking_no"):
+            return logistics
+        if logistics.get("status") == "signed":
             return logistics
         config = Kuaidi100Config()
         if not config.ready:
@@ -1924,8 +2442,7 @@ class OrderService:
                 "sync_error": True,
                 "last_error_type": type(exc).__name__,
             }
-        self.update_logistics(order["order_id"], refreshed)
-        return refreshed
+        return self.update_logistics(order["order_id"], refreshed)
 
     def refresh_order_logistics(self, order_id: str, force: bool = True) -> dict[str, Any]:
         order = self.get_order(order_id)
@@ -1933,14 +2450,12 @@ class OrderService:
         if force:
             logistics = {**logistics, "updated_at": ""}
         refreshed = self.refresh_logistics_if_needed(order, logistics)
-        if refreshed.get("status") == "signed" and order.get("status") == "shipped":
-            self.transition_order(
-                order,
-                "completed",
-                event_label="物流显示已签收，订单自动完成",
-                logistics=refreshed,
-            )
+        if refreshed.get("status") == "signed":
+            if not refreshed.get("auto_complete_at"):
+                refreshed = self.update_logistics(order_id, refreshed)
+            self.complete_signed_order_if_due(order_id)
             order = self.get_order(order_id)
+            refreshed = order.get("logistics") or refreshed
         return {
             "order_id": order_id,
             "order_status": order.get("status"),
@@ -1949,10 +2464,84 @@ class OrderService:
             "status_history": order.get("status_history") or [],
         }
 
-    def refresh_active_shipments(self, limit: int = 50) -> dict[str, Any]:
+    def complete_signed_order_if_due(
+        self,
+        order_id: str,
+        now: datetime | None = None,
+    ) -> bool:
+        current_time = now or datetime.now(timezone.utc)
+        if current_time.tzinfo is None:
+            current_time = current_time.replace(tzinfo=timezone.utc)
+        current_time = current_time.astimezone(timezone.utc)
+        with self.connect() as connection:
+            self.begin_order_transaction(connection)
+            row = self.order_row_for_update(connection, order_id)
+            if not row:
+                return False
+            order = self.public_order(row)
+            logistics = dict(order.get("logistics") or {})
+            if order.get("status") != "shipped" or logistics.get("status") != "signed":
+                return False
+            deadline = self.parse_logistics_time(
+                order.get("auto_complete_at") or logistics.get("auto_complete_at")
+            )
+            if deadline is None or deadline > current_time:
+                return False
+            self.transition_order(
+                order,
+                "completed",
+                event_label="快递签收满7天，订单自动完成",
+                connection=connection,
+            )
+            return True
+
+    def complete_signed_orders_due(
+        self,
+        limit: int = 50,
+        now: datetime | None = None,
+    ) -> dict[str, Any]:
+        current_time = now or datetime.now(timezone.utc)
+        if current_time.tzinfo is None:
+            current_time = current_time.replace(tzinfo=timezone.utc)
+        current_time = current_time.astimezone(timezone.utc).replace(microsecond=0)
         with self.connect() as connection:
             rows = connection.execute(
-                "SELECT order_id FROM orders WHERE status = 'shipped' ORDER BY updated_at ASC LIMIT ?",
+                """
+                SELECT order_id FROM orders
+                WHERE status = 'shipped'
+                  AND auto_complete_at IS NOT NULL
+                  AND auto_complete_at <= ?
+                ORDER BY auto_complete_at ASC
+                LIMIT ?
+                """,
+                (current_time.isoformat(), limit),
+            ).fetchall()
+        completed_order_ids: list[str] = []
+        failed_order_ids: list[str] = []
+        for row in rows:
+            order_id = row["order_id"]
+            try:
+                if self.complete_signed_order_if_due(order_id, current_time):
+                    completed_order_ids.append(order_id)
+            except Exception:
+                failed_order_ids.append(order_id)
+        return {
+            "checked": len(rows),
+            "completed": len(completed_order_ids),
+            "completed_order_ids": completed_order_ids,
+            "failed": len(failed_order_ids),
+            "failed_order_ids": failed_order_ids,
+        }
+
+    def refresh_active_shipments(self, limit: int = 50) -> dict[str, Any]:
+        auto_completion = self.complete_signed_orders_due(limit=limit)
+        with self.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT order_id FROM orders
+                WHERE status = 'shipped' AND auto_complete_at IS NULL
+                ORDER BY updated_at ASC LIMIT ?
+                """,
                 (limit,),
             ).fetchall()
         results = []
@@ -1966,9 +2555,13 @@ class OrderService:
             for item in results
             if item.get("error_type") or (item.get("logistics") or {}).get("sync_error")
         ]
+        failed_order_ids = list(dict.fromkeys(
+            list(auto_completion.get("failed_order_ids") or []) + failed_order_ids
+        ))
         return {
-            "checked": len(results),
-            "completed": sum(1 for item in results if item.get("order_status") == "completed"),
+            "checked": int(auto_completion.get("checked") or 0) + len(results),
+            "completed": int(auto_completion.get("completed") or 0)
+            + sum(1 for item in results if item.get("order_status") == "completed"),
             "failed": len(failed_order_ids),
             "failed_order_ids": failed_order_ids,
             "results": results,
@@ -2019,7 +2612,7 @@ class OrderService:
         state_text = self.kuaidi100_state_text(str(data.get("state", "")))
         return {
             **logistics,
-            "status": "signed" if data.get("ischeck") == "1" else "in_transit",
+            "status": "signed" if str(data.get("ischeck") or "") == "1" else "in_transit",
             "status_text": state_text,
             "updated_at": now_iso(),
             "source": "kuaidi100",
@@ -2030,12 +2623,30 @@ class OrderService:
             "traces": traces or logistics.get("traces") or [],
         }
 
-    def update_logistics(self, order_id: str, logistics: dict[str, Any]) -> None:
+    def update_logistics(self, order_id: str, logistics: dict[str, Any]) -> dict[str, Any]:
         with self.connect() as connection:
+            self.begin_order_transaction(connection)
+            row = self.order_row_for_update(connection, order_id)
+            if not row:
+                raise ValueError("订单不存在")
+            existing = self.loads(row.get("logistics_json") or "", {})
+            merged = self.merge_logistics(existing, logistics)
+            signed_at, auto_complete_at = self.logistics_completion_fields(merged)
             connection.execute(
-                "UPDATE orders SET logistics_json = ?, updated_at = ? WHERE order_id = ?",
-                (json.dumps(logistics, ensure_ascii=False), now_iso(), order_id),
+                """
+                UPDATE orders
+                SET logistics_json = ?, logistics_signed_at = ?, auto_complete_at = ?, updated_at = ?
+                WHERE order_id = ?
+                """,
+                (
+                    json.dumps(merged, ensure_ascii=False),
+                    signed_at,
+                    auto_complete_at,
+                    now_iso(),
+                    order_id,
+                ),
             )
+        return merged
 
     def public_design(self, row: dict[str, Any]) -> dict[str, Any]:
         return {
@@ -2055,7 +2666,11 @@ class OrderService:
         sequence = self.loads(row.get("sequence_json") or "", [])
         placement_keys = {
             "id", "materialId", "material_id", "sku", "skuId", "index", "angle",
-            "x", "y", "rotation", "scale", "image_url", "name", "size", "size_mm",
+            # These values are presentation-only.  Keeping the full placement snapshot
+            # lets a shared workspace reproduce the sender's composition without
+            # exposing the private design metadata filtered below.
+            "x", "y", "dx", "dy", "looseX", "looseY", "rotation", "scale", "beadSize",
+            "image_url", "name", "size", "size_mm",
         }
 
         def safe_placement(value: Any) -> dict[str, Any]:
@@ -2065,6 +2680,7 @@ class OrderService:
 
         design_keys = {
             "name", "title", "selected", "placements", "wearStyle", "isLooseMode",
+            "workspaceStageCenter", "workspace_stage_center",
             "preview_image", "previewImage", "image_url",
         }
         sequence_keys = {
@@ -3199,6 +3815,8 @@ class OrderService:
             "refund_status": row.get("refund_status") or "",
             "refund": self.loads(row.get("refund_json") or "", {}),
             "logistics": self.loads(row.get("logistics_json") or "", {}),
+            "logistics_signed_at": row.get("logistics_signed_at") or "",
+            "auto_complete_at": row.get("auto_complete_at") or "",
             "status_history": status_history,
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],

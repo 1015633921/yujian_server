@@ -32,7 +32,8 @@ foreach ($required in @("MYSQL_USER", "MYSQL_PASSWORD")) {
   "MYSQL_USER=$($values["MYSQL_USER"])",
   "MYSQL_PASSWORD=$($values["MYSQL_PASSWORD"])",
   "WECHAT_PAY_TEST_MODE=true",
-  "LOGISTICS_SYNC_ENABLED=false"
+  "LOGISTICS_SYNC_ENABLED=false",
+  "KUAIDI100_SUBSCRIBE_ENABLED=false"
 ) | Set-Content -Path $Target -Encoding UTF8
 
 Write-Host "Wrote $Target"

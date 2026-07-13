@@ -37,6 +37,7 @@ def valid_environment(environment: str) -> dict[str, str]:
         "LOG_HASH_SALT": "not-a-real-log-salt",
         "COMMERCE_CHECKOUT_ENABLED": "false",
         "WECHAT_PAYMENT_ENABLED": "false",
+        "KUAIDI100_SUBSCRIBE_ENABLED": "false",
         "WECHAT_PAY_TEST_MODE": "false",
         "ALLOW_RUNTIME_SCHEMA_MUTATION": "false",
         "ALLOW_DEV_WECHAT_LOGIN": "false",
@@ -66,15 +67,58 @@ def test_environment_validator_fails_closed_and_keeps_databases_isolated():
     crossed = valid_environment("prod")
     crossed["MYSQL_DATABASE"] = "yujian_test"
     assert "PROD_DATABASE_NAME_UNSAFE" in validate(crossed, "prod")
-    enabled = valid_environment("prod")
-    enabled["WECHAT_PAYMENT_ENABLED"] = "true"
-    assert "WECHAT_PAYMENT_ENABLED_MUST_REMAIN_FALSE" in validate(enabled, "prod")
+    incomplete_payment = valid_environment("prod")
+    incomplete_payment["WECHAT_PAYMENT_ENABLED"] = "true"
+    assert "WECHAT_PAY_MCH_ID_MISSING" in validate(incomplete_payment, "prod")
+    enabled_payment = valid_environment("prod")
+    enabled_payment.update(
+        {
+            "WECHAT_PAYMENT_ENABLED": "true",
+            "WECHAT_PAY_MCH_ID": "1900000109",
+            "WECHAT_PAY_SERIAL_NO": "ABCDEF1234",
+            "WECHAT_PAY_PRIVATE_KEY_PATH": "/run/secrets/apiclient_key.pem",
+            "WECHAT_PAY_API_V3_KEY": "0" * 32,
+            "WECHAT_PAY_NOTIFY_URL": "https://api.invalid/api/v1/wechat-pay/notify",
+            "WECHAT_PAY_PUBLIC_KEY_PATH": "/run/secrets/wechatpay_pub_key.pem",
+            "WECHAT_PAY_PUBLIC_KEY_ID": "PUB_KEY_ID_01111111111111111111111111111111",
+        }
+    )
+    assert validate(enabled_payment, "prod") == []
+    invalid_payment = valid_environment("prod")
+    invalid_payment["WECHAT_PAYMENT_ENABLED"] = "sometimes"
+    assert "WECHAT_PAYMENT_ENABLED_INVALID_BOOLEAN" in validate(invalid_payment, "prod")
+    checkout_enabled = valid_environment("prod")
+    checkout_enabled["COMMERCE_CHECKOUT_ENABLED"] = "true"
+    assert validate(checkout_enabled, "prod") == []
+    invalid_checkout = valid_environment("prod")
+    invalid_checkout["COMMERCE_CHECKOUT_ENABLED"] = "sometimes"
+    assert "COMMERCE_CHECKOUT_ENABLED_INVALID_BOOLEAN" in validate(invalid_checkout, "prod")
     mock_trade = valid_environment("prod")
     mock_trade["WECHAT_PAY_TEST_MODE"] = "true"
     assert "WECHAT_PAY_TEST_MODE_FORBIDDEN" in validate(mock_trade, "prod")
     missing_mock_guard = valid_environment("prod")
     missing_mock_guard.pop("WECHAT_PAY_TEST_MODE")
     assert "WECHAT_PAY_TEST_MODE_MISSING" in validate(missing_mock_guard, "prod")
+    invalid_subscription = valid_environment("prod")
+    invalid_subscription["KUAIDI100_SUBSCRIBE_ENABLED"] = "sometimes"
+    assert "KUAIDI100_SUBSCRIBE_ENABLED_INVALID_BOOLEAN" in validate(invalid_subscription, "prod")
+    incomplete_subscription = valid_environment("prod")
+    incomplete_subscription["KUAIDI100_SUBSCRIBE_ENABLED"] = "true"
+    assert "KUAIDI100_CALLBACK_SALT_MISSING" in validate(incomplete_subscription, "prod")
+    enabled_subscription = valid_environment("prod")
+    enabled_subscription.update(
+        {
+            "KUAIDI100_SUBSCRIBE_ENABLED": "true",
+            "KUAIDI100_CUSTOMER": "test-customer",
+            "KUAIDI100_KEY": "test-key",
+            "KUAIDI100_CALLBACK_URL": "https://api.invalid/api/v1/logistics/kuaidi100/callback",
+            "KUAIDI100_CALLBACK_SALT": "not-a-real-callback-salt-32-bytes",
+        }
+    )
+    assert validate(enabled_subscription, "prod") == []
+    insecure_subscription = dict(enabled_subscription)
+    insecure_subscription["KUAIDI100_CALLBACK_URL"] = "http://api.invalid/callback"
+    assert "KUAIDI100_CALLBACK_URL_MUST_USE_HTTPS" in validate(insecure_subscription, "prod")
 
 
 def test_example_environment_files_have_expected_shape():
@@ -93,6 +137,28 @@ def test_strict_startup_rejects_missing_configuration(monkeypatch):
     assert "RELEASE_VERSION_MISSING" in errors
     with pytest.raises(RuntimeError, match="startup configuration rejected"):
         assert_startup_configuration()
+
+
+def test_runtime_configuration_requires_signed_kuaidi100_callback(monkeypatch):
+    monkeypatch.setenv("APP_ENV", "development")
+    monkeypatch.setenv("DATABASE_BACKEND", "sqlite")
+    monkeypatch.setenv("KUAIDI100_SUBSCRIBE_ENABLED", "true")
+    for name in (
+        "KUAIDI100_CUSTOMER",
+        "KUAIDI100_KEY",
+        "KUAIDI100_CALLBACK_URL",
+        "KUAIDI100_CALLBACK_SALT",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    errors = required_config_errors()
+    assert "KUAIDI100_KEY_MISSING" in errors
+    assert "KUAIDI100_CALLBACK_SALT_MISSING" in errors
+
+    monkeypatch.setenv("KUAIDI100_CUSTOMER", "test-customer")
+    monkeypatch.setenv("KUAIDI100_KEY", "test-key")
+    monkeypatch.setenv("KUAIDI100_CALLBACK_URL", "http://127.0.0.1:8000/callback")
+    monkeypatch.setenv("KUAIDI100_CALLBACK_SALT", "not-a-real-callback-salt-32-bytes")
+    assert not [error for error in required_config_errors() if error.startswith("KUAIDI100_")]
 
 
 def test_production_startup_and_feature_flag_reject_mock_trade_mode(monkeypatch):

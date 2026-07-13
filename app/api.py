@@ -23,7 +23,14 @@ from .feature_flags import (
 )
 from .admin_service import AdminService
 from .materials import MaterialCatalogUnavailable, list_materials
-from .order_service import OrderConflictError, OrderPriceChangedError, OrderPricingError, OrderService
+from .order_service import (
+    KUAIDI100_CALLBACK_MAX_BYTES,
+    LogisticsCallbackSignatureError,
+    OrderConflictError,
+    OrderPriceChangedError,
+    OrderPricingError,
+    OrderService,
+)
 from .observability import Timer, current_request_id, log_event, metrics
 from .recommendation import RecommendationEngine
 from .report_repository import ReportConflictError, ReportVersionConflictError
@@ -830,6 +837,66 @@ def get_order_logistics(
         return success(order_service.get_logistics(order_id, principal.user_id))
     except ValueError as exc:
         raise private_not_found() from exc
+
+
+@router.post("/logistics/kuaidi100/callback", summary="快递100主动订阅回调")
+async def kuaidi100_logistics_callback(
+    request: Request,
+    order_id: str = Query(min_length=1, max_length=80),
+):
+    body = await request.body()
+    if len(body) > KUAIDI100_CALLBACK_MAX_BYTES:
+        return JSONResponse(
+            status_code=413,
+            content={"result": False, "returnCode": "500", "message": "回调数据过大"},
+        )
+    try:
+        body_text = body.decode("utf-8")
+        param_text, sign = order_service.parse_kuaidi100_callback_form(body_text)
+        order_service.handle_kuaidi100_callback(order_id, param_text, sign)
+    except LogisticsCallbackSignatureError as exc:
+        metrics.increment("logistics_callback_total", service="kuaidi100", result="invalid_signature")
+        log_event(
+            LOGGER,
+            "logistics.callback.failed",
+            level=logging.WARNING,
+            service="kuaidi100",
+            error_type=type(exc).__name__,
+            result="invalid_signature",
+        )
+        return JSONResponse(
+            status_code=401,
+            content={"result": False, "returnCode": "500", "message": "验签失败"},
+        )
+    except RuntimeError as exc:
+        metrics.increment("logistics_callback_total", service="kuaidi100", result="configuration_unavailable")
+        log_event(
+            LOGGER,
+            "logistics.callback.failed",
+            level=logging.ERROR,
+            service="kuaidi100",
+            error_type=type(exc).__name__,
+            result="configuration_unavailable",
+        )
+        return JSONResponse(
+            status_code=503,
+            content={"result": False, "returnCode": "500", "message": "回调服务未就绪"},
+        )
+    except (UnicodeDecodeError, ValueError, json.JSONDecodeError) as exc:
+        metrics.increment("logistics_callback_total", service="kuaidi100", result="invalid_payload")
+        log_event(
+            LOGGER,
+            "logistics.callback.failed",
+            level=logging.WARNING,
+            service="kuaidi100",
+            error_type=type(exc).__name__,
+            result="invalid_payload",
+        )
+        return JSONResponse(
+            status_code=400,
+            content={"result": False, "returnCode": "500", "message": "回调处理失败"},
+        )
+    return {"result": True, "returnCode": "200", "message": "成功"}
 
 
 @router.post("/wechat-pay/notify", summary="微信支付结果回调")

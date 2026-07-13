@@ -39,3 +39,7 @@ def remote_avatar_fetch_enabled() -> bool:
 
 def metrics_endpoint_enabled() -> bool:
     return enabled("METRICS_ENDPOINT_ENABLED", False)
+
+
+def kuaidi100_subscribe_enabled() -> bool:
+    return enabled("KUAIDI100_SUBSCRIBE_ENABLED", False)

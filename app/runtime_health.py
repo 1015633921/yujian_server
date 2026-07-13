@@ -5,9 +5,10 @@ import re
 import sqlite3
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from .database import DEFAULT_SQLITE_PATH, MySQLConnection, use_mysql
-from .feature_flags import checkout_enabled, payment_enabled, report_versioning_v2_enabled
+from .feature_flags import checkout_enabled, kuaidi100_subscribe_enabled, payment_enabled, report_versioning_v2_enabled
 from .observability import metrics
 
 
@@ -48,6 +49,26 @@ def required_config_errors() -> list[str]:
     if str(os.getenv("METRICS_ENDPOINT_ENABLED", "false")).lower() in {"1", "true", "yes", "on"}:
         if not os.getenv("METRICS_ACCESS_TOKEN"):
             errors.append("METRICS_ACCESS_TOKEN_MISSING")
+    subscribe_value = str(os.getenv("KUAIDI100_SUBSCRIBE_ENABLED", "false")).strip().lower()
+    if subscribe_value not in {"0", "1", "false", "true", "no", "yes", "off", "on"}:
+        errors.append("KUAIDI100_SUBSCRIBE_ENABLED_INVALID_BOOLEAN")
+    callback_url = str(os.getenv("KUAIDI100_CALLBACK_URL") or "").strip()
+    parsed_callback = urlparse(callback_url)
+    if callback_url and (parsed_callback.scheme not in {"http", "https"} or not parsed_callback.netloc):
+        errors.append("KUAIDI100_CALLBACK_URL_INVALID")
+    if app_env == "production" and callback_url and parsed_callback.scheme != "https":
+        errors.append("KUAIDI100_CALLBACK_URL_MUST_USE_HTTPS")
+    if 0 < len(str(os.getenv("KUAIDI100_CALLBACK_SALT") or "")) < 16:
+        errors.append("KUAIDI100_CALLBACK_SALT_TOO_SHORT")
+    if kuaidi100_subscribe_enabled():
+        for name in (
+            "KUAIDI100_CUSTOMER",
+            "KUAIDI100_KEY",
+            "KUAIDI100_CALLBACK_URL",
+            "KUAIDI100_CALLBACK_SALT",
+        ):
+            if not os.getenv(name):
+                errors.append(f"{name}_MISSING")
     if payment_enabled():
         alternatives = {
             "WECHAT_PAY_APP_ID": ("WECHAT_PAY_APP_ID", "WECHAT_APP_ID", "WX_APPID"),

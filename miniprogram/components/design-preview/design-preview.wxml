@@ -6,11 +6,11 @@
     mode="aspectFill"
     binderror="onTrayImageError"
   ></image>
-  <view class="design-preview-guide"></view>
+  <view wx:if="{{showGuide}}" class="design-preview-guide" style="{{guideStyle}}"></view>
   <view class="design-preview-beads">
     <view wx:for="{{renderBeads}}" wx:key="key" class="design-preview-bead" style="{{item.style}}">
-      <view class="design-preview-bead-fallback"></view>
-      <image wx:if="{{item.image_url}}" class="design-preview-bead-image" src="{{item.image_url}}" mode="aspectFill"></image>
+      <image wx:if="{{item.image_url}}" class="design-preview-bead-image" src="{{item.image_url}}" mode="aspectFit"></image>
+      <view wx:else class="design-preview-bead-fallback" style="{{item.fallbackStyle}}"></view>
     </view>
   </view>
 </view>

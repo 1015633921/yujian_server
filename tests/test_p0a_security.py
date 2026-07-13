@@ -181,6 +181,7 @@ def test_risk_flags_default_to_closed(monkeypatch):
         "DIY_PUBLIC_SHARE_ENABLED",
         "REMOTE_AVATAR_FETCH_ENABLED",
         "LOGISTICS_SYNC_ENABLED",
+        "KUAIDI100_SUBSCRIBE_ENABLED",
         "METRICS_ENDPOINT_ENABLED",
     ):
         monkeypatch.delenv(name, raising=False)

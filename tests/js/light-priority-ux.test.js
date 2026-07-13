@@ -86,6 +86,72 @@ test('workspace never exposes demo materials as sellable inventory', () => {
   assert.doesNotMatch(workspaceSource, /喜马拉雅白水晶/);
 });
 
+test('backend recommendation replaces stale placement prices with current sellable SKU prices', () => {
+  const page = loadPage('miniprogram/pages/workspace/workspace.js');
+  const currentMaterial = {
+    id: 'mat_clear_quartz_12',
+    skuId: '104119802',
+    material_code: 'clear_quartz',
+    top: 'bead',
+    category: '白水晶',
+    series: '白水晶',
+    name: '白水晶',
+    size: 12,
+    price: 10,
+    stock: 99,
+    enabled: true,
+    weight: 1,
+    element: '金',
+    image_url: 'https://cdn-prod.yustream.cn/materials/beads/clear-quartz.webp'
+  };
+  const staleDemoMaterial = {
+    ...currentMaterial,
+    id: 'clearQuartz12',
+    skuId: 'clearQuartz',
+    name: 'legacy-demo-clear-quartz',
+    price: 15,
+    stock: 0
+  };
+  const instance = Object.assign({}, page, {
+    data: { ...page.data, wristSize: 14.5, selected: [], placements: [] },
+    materialCatalog: [staleDemoMaterial, currentMaterial],
+    materialPayloadReady: true
+  });
+  instance.rebuildMaterialLookup(instance.materialCatalog);
+  const payload = {
+    bead_size_mm: 12,
+    bracelet_plan: {
+      bead_size_mm: 12,
+      items: [{ code: 'clear_quartz', bead_size_mm: 12 }],
+      layout: Array.from({ length: 16 }, () => ({ crystal_code: 'clear_quartz', bead_size_mm: 12 }))
+    }
+  };
+
+  const selected = instance.buildBackendRecommendationSelected(payload);
+  const stalePlacements = selected.map((id, index) => ({
+    id,
+    name: 'legacy-demo-clear-quartz',
+    price: 15,
+    size: 12,
+    looseX: 200 + index,
+    looseY: 200 + index,
+    dx: 0,
+    dy: 0,
+    rotation: 0,
+    beadSize: 60
+  }));
+  const placements = instance.normalizePlacements(selected, stalePlacements);
+  const items = selected.map(id => instance.findMaterialById(id));
+  const summary = instance.getCachedWorkspaceSummary(items).summary;
+
+  assert.equal(selected.length, 16);
+  assert.deepEqual(new Set(selected), new Set([currentMaterial.id]));
+  assert.ok(placements.every(item => item.price === 10));
+  assert.ok(placements.every(item => item.name === '白水晶'));
+  assert.equal(summary.price, 160);
+  assert.equal(summary.priceText, '160.00');
+});
+
 test('workspace keeps large-screen tray controls above the material drawer', () => {
   const page = loadPage('miniprogram/pages/workspace/workspace.js');
   const viewportRpx = Math.round(932 * 750 / 430);
@@ -260,7 +326,7 @@ test('backend recommendation uses its descriptive payload name for the fresh dra
     data: { ...page.data, wristSize: 16 },
     materialPayloadReady: true,
     buildBackendRecommendationSelected: () => ['clearQuartz8'],
-    findMaterialById: id => ({ id, size: 8, size_mm: 8, type: 'bead' }),
+    findMaterialById: id => ({ id, top: 'bead', size: 8, size_mm: 8, price: 10, stock: 99, enabled: true }),
     resetWorkspaceRuntime() {},
     pushHistory() {},
     normalizePlacements: selected => selected.map(id => ({ id })),
@@ -303,7 +369,7 @@ test('backend recommendation recalculates only after selected beads reach page d
     data: { ...page.data, selected: [], placements: [], wristSize: 16 },
     materialPayloadReady: true,
     buildBackendRecommendationSelected: () => ['clearQuartz8'],
-    findMaterialById: id => ({ id, size: 8, size_mm: 8, type: 'bead' }),
+    findMaterialById: id => ({ id, top: 'bead', size: 8, size_mm: 8, price: 10, stock: 99, enabled: true }),
     resetWorkspaceRuntime() {},
     pushHistory() {},
     normalizePlacements: selected => selected.map(id => ({ id })),

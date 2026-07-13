@@ -44,6 +44,7 @@ from .material_options import (
 )
 from .repository import DB_PATH
 from .database import connect_database, integrity_errors, runtime_schema_mutation_allowed, use_mysql
+from .feature_flags import kuaidi100_subscribe_enabled
 from .wechat_trade_service import WechatTradeService
 
 
@@ -4202,7 +4203,7 @@ class AdminService:
         timestamp = now_iso()
         logistics = {
             "carrier": carrier.strip() or "顺丰速运",
-            "carrier_code": carrier_code.strip() or "shunfeng",
+            "carrier_code": carrier_code.strip().lower() or "shunfeng",
             "tracking_no": tracking_no.strip(),
             "phone_tail": phone_tail.strip(),
             "status": "in_transit",
@@ -4214,6 +4215,14 @@ class AdminService:
                 {"time": timestamp, "location": "宇涧工作室", "desc": "商家已填写发货信息，等待物流公司更新轨迹"}
             ],
         }
+        if kuaidi100_subscribe_enabled():
+            logistics.update(
+                {
+                    "subscription_status": "pending",
+                    "subscription_tracking_no": tracking_no.strip(),
+                    "subscription_updated_at": timestamp,
+                }
+            )
         try:
             wechat_shipping = self.wechat_trade.upload_shipping(order, logistics)
         except Exception as exc:
@@ -4231,7 +4240,9 @@ class AdminService:
         with self.connect() as connection:
             connection.execute(
                 """
-                UPDATE orders SET status = 'shipped', logistics_json = ?, status_history_json = ?, updated_at = ?
+                UPDATE orders
+                SET status = 'shipped', logistics_json = ?, status_history_json = ?,
+                    logistics_signed_at = NULL, auto_complete_at = NULL, updated_at = ?
                 WHERE order_id = ?
                 """,
                 (
@@ -4264,8 +4275,10 @@ class AdminService:
         return {"order": self.get_order(order_id), "wechat_shipping": result}
 
     def update_order_status(self, order_id: str, status: str, note: str = "") -> dict[str, Any]:
+        if status == "completed":
+            raise ValueError("已完成状态只能由用户确认收货，或在快递签收满7天后自动进入")
         allowed = {
-            "pending_payment", "pending_ship", "shipped", "completed",
+            "pending_payment", "pending_ship", "shipped",
             "after_sale", "refund_requested", "refunded", "closed",
         }
         if status not in allowed:
@@ -4316,6 +4329,8 @@ class AdminService:
             "refund_status": row.get("refund_status") or "",
             "refund": self.loads(row.get("refund_json") or "", {}),
             "logistics": self.loads(row.get("logistics_json") or "", {}),
+            "logistics_signed_at": row.get("logistics_signed_at") or "",
+            "auto_complete_at": row.get("auto_complete_at") or "",
             "status_history": self.loads(row.get("status_history_json") or "", []),
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],

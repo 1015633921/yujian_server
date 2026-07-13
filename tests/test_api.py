@@ -1750,6 +1750,12 @@ def test_diy_share_requires_published_token_and_revocation_invalidates_it(tmp_pa
                 "selected": ["clearQuartz8"],
                 "summary": {"price": 128},
                 "sourceContext": {"birthday": "1990-01-01"},
+                "workspaceStageCenter": 360,
+                "placements": [{
+                    "id": "clearQuartz8", "dx": 12, "dy": -8,
+                    "looseX": 280, "looseY": 410, "rotation": 24,
+                    "beadSize": 58, "private_note": "must not leak",
+                }],
             },
             "sequence": [
                 {
@@ -1787,6 +1793,11 @@ def test_diy_share_requires_published_token_and_revocation_invalidates_it(tmp_pa
     assert "design_id" not in public_data
     assert "summary" not in public_data["design"]
     assert "sourceContext" not in public_data["design"]
+    assert public_data["design"]["workspaceStageCenter"] == 360
+    assert public_data["design"]["placements"] == [{
+        "id": "clearQuartz8", "dx": 12, "dy": -8,
+        "looseX": 280, "looseY": 410, "rotation": 24, "beadSize": 58,
+    }]
     assert "price" not in public_data["sequence"][0]
     assert "internal_price" not in public_data["sequence"][0]["placement"]
 

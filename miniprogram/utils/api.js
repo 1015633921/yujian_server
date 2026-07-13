@@ -703,8 +703,13 @@ function refundOrder(orderId, userId, reason = '') {
   });
 }
 
-function getOrderLogistics(orderId, userId) {
-  return request(`/api/v1/orders/${encodeURIComponent(orderId)}/logistics?user_id=${encodeURIComponent(userId)}`);
+function getOrderLogistics(orderId, userId, options = {}) {
+  const silent = options.silent === true;
+  return request(`/api/v1/orders/${encodeURIComponent(orderId)}/logistics?user_id=${encodeURIComponent(userId)}`, {
+    silent,
+    showModal: !silent,
+    timeout: options.timeout || 10000
+  });
 }
 
 module.exports = {

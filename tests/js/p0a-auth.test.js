@@ -65,3 +65,15 @@ test('workspace sharing publishes and opens opaque share tokens instead of desig
   assert.match(workspaceSource, /getSharedDIYDesign\(shareToken/);
   assert.doesNotMatch(workspaceSource, /shareDesignId=/);
 });
+
+test('shared workspace preloads bead images and keeps the published layout frozen initially', () => {
+  const workspaceSource = fs.readFileSync(workspacePath, 'utf8');
+  const applySharedStart = workspaceSource.indexOf('async applySharedDesign(');
+  const applySharedEnd = workspaceSource.indexOf('\n  scaleSharedPlacementsForStage(', applySharedStart);
+  const applySharedSource = workspaceSource.slice(applySharedStart, applySharedEnd);
+
+  assert.match(applySharedSource, /await this\.preloadSharedDesignImages\(placements\)/);
+  assert.match(applySharedSource, /sharedDesignFrozen: normalized\.isLooseMode/);
+  assert.doesNotMatch(applySharedSource, /startPhysicsFromCurrentDesign/);
+  assert.match(workspaceSource, /if \(this\.data\.isLooseMode && !this\.data\.sharedDesignFrozen && this\.physicsEngine\) this\.runPhysics\(\);/);
+});

@@ -98,10 +98,36 @@
   box-shadow: 0 0 0 10rpx rgba(127, 146, 120, .12);
 }
 
+.status-steps-scroll {
+  width: 100%;
+  margin-top: 44rpx;
+}
+
 .status-steps {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  margin-top: 44rpx;
+  width: 100%;
+  margin-top: 0;
+  box-sizing: border-box;
+}
+
+.status-steps.steps-1 {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.status-steps.steps-2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.status-steps.steps-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.status-steps.steps-4 {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.status-steps.steps-5 {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
 }
 
 .step-item {
@@ -166,10 +192,18 @@
 }
 
 .step-label {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  min-height: 56rpx;
   margin-top: 14rpx;
+  padding: 0 2rpx;
   color: #8a8d86;
-  font-size: 23rpx;
+  font-size: 21rpx;
   font-weight: 600;
+  line-height: 1.3;
+  text-align: center;
+  word-break: break-all;
 }
 
 .step-item.active .step-label {
@@ -180,7 +214,9 @@
   min-height: 30rpx;
   margin-top: 8rpx;
   color: #a2a39e;
-  font-size: 21rpx;
+  font-size: 18rpx;
+  line-height: 1.3;
+  text-align: center;
 }
 
 .logistics-card,
@@ -593,30 +629,6 @@
   font-size: 23rpx;
   font-weight: 700;
   line-height: 1.35;
-}
-
-.material-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8rpx;
-  margin-top: 10rpx;
-}
-
-.material-tags text {
-  max-width: 100%;
-  padding: 4rpx 10rpx;
-  border-radius: 8rpx;
-  color: #73786f;
-  background: rgba(246, 244, 238, .82);
-  font-size: 20rpx;
-  line-height: 1.35;
-  word-break: break-all;
-}
-
-.material-effect {
-  margin-top: 8rpx;
-  color: #85877f;
-  font-size: 23rpx;
 }
 
 .material-price {

@@ -9,7 +9,8 @@ dev、test、prod 使用独立 env 文件、数据库名、API、COS、微信与
 - 后端 test/prod 必须使用 MySQL，并显式提供 host、port、database、user 和 password。
 - test/prod 必须提供规范 `RELEASE_VERSION` 和非公开 `LOG_HASH_SALT`。
 - `ALLOW_RUNTIME_SCHEMA_MUTATION=false`；生产进程不得启动时建表、改列或 seed。
-- 当前 `COMMERCE_CHECKOUT_ENABLED` 和 `WECHAT_PAYMENT_ENABLED` 必须为 false。
+- `COMMERCE_CHECKOUT_ENABLED` 缺省必须为 false；仅在订单幂等、权威定价、库存预占和迁移门禁通过后，才允许生产环境显式开启。
+- `WECHAT_PAYMENT_ENABLED` 缺省必须为 false。只有商户签名、回调验签材料、API v3 Key、HTTPS 回调和支付状态机门禁全部通过后，才允许生产环境显式开启；开启建单不等于自动开启真实支付。
 - dev 微信登录和 CloudBase 身份头在 test/prod 必须关闭。
 - 微信、COS 配置组只允许全有或全无；指标开启时必须有独立 token。
 

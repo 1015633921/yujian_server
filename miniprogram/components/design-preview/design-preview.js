@@ -1,4 +1,7 @@
-const { buildDesignPreviewBeads } = require('../../utils/designPreview');
+const {
+  buildDesignPreviewBeads,
+  buildDesignPreviewGuide
+} = require('../../utils/designPreview');
 
 Component({
   properties: {
@@ -11,13 +14,19 @@ Component({
   },
 
   data: {
-    renderBeads: []
+    renderBeads: [],
+    showGuide: false,
+    guideStyle: ''
   },
 
   observers: {
     'sequence, placements, design': function updatePreview(sequence, placements, design) {
+      const renderBeads = buildDesignPreviewBeads(sequence || [], placements || [], design || {});
+      const guide = buildDesignPreviewGuide(renderBeads, design || {});
       this.setData({
-        renderBeads: buildDesignPreviewBeads(sequence || [], placements || [], design || {})
+        renderBeads,
+        showGuide: guide.visible,
+        guideStyle: guide.style
       });
     }
   },

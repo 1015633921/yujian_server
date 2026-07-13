@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import re
 from pathlib import Path
+from urllib.parse import urlparse
 
 
 FALSE_VALUES = {"0", "false", "no", "off"}
@@ -35,6 +36,16 @@ def validate(values: dict[str, str], environment: str, allow_placeholders: bool 
             errors.append(f"{name}_PLACEHOLDER")
         return value
 
+    def require_any(label: str, names: tuple[str, ...]) -> str:
+        for name in names:
+            value = values.get(name, "").strip()
+            if value:
+                if not allow_placeholders and any(marker in value.lower() for marker in PLACEHOLDER_MARKERS):
+                    errors.append(f"{label}_PLACEHOLDER")
+                return value
+        errors.append(f"{label}_MISSING")
+        return ""
+
     expected_app_env = "production" if environment == "prod" else environment
     if values.get("APP_ENV", "").lower() != expected_app_env:
         errors.append("APP_ENV_MISMATCH")
@@ -53,10 +64,56 @@ def validate(values: dict[str, str], environment: str, allow_placeholders: bool 
     if release_version and not allow_placeholders and not RELEASE_PATTERN.fullmatch(release_version):
         errors.append("RELEASE_VERSION_INVALID")
     require("LOG_HASH_SALT")
-    for name in ("COMMERCE_CHECKOUT_ENABLED", "WECHAT_PAYMENT_ENABLED"):
-        value = require(name).lower()
-        if value and value not in FALSE_VALUES:
-            errors.append(f"{name}_MUST_REMAIN_FALSE")
+    checkout_value = require("COMMERCE_CHECKOUT_ENABLED").lower()
+    if checkout_value and checkout_value not in FALSE_VALUES | TRUE_VALUES:
+        errors.append("COMMERCE_CHECKOUT_ENABLED_INVALID_BOOLEAN")
+
+    payment_value = require("WECHAT_PAYMENT_ENABLED").lower()
+    if payment_value and payment_value not in FALSE_VALUES | TRUE_VALUES:
+        errors.append("WECHAT_PAYMENT_ENABLED_INVALID_BOOLEAN")
+    if payment_value in TRUE_VALUES:
+        require_any("WECHAT_PAY_APP_ID", ("WECHAT_PAY_APP_ID", "WECHAT_APP_ID", "WX_APPID"))
+        require_any("WECHAT_PAY_MCH_ID", ("WECHAT_PAY_MCH_ID", "WX_MCH_ID"))
+        require_any("WECHAT_PAY_SERIAL_NO", ("WECHAT_PAY_SERIAL_NO", "WX_PAY_SERIAL_NO"))
+        require_any(
+            "WECHAT_PAY_PRIVATE_KEY",
+            ("WECHAT_PAY_PRIVATE_KEY_PATH", "WECHAT_PAY_PRIVATE_KEY", "WX_PAY_PRIVATE_KEY_PATH", "WX_PAY_PRIVATE_KEY"),
+        )
+        api_v3_key = require_any("WECHAT_PAY_API_V3_KEY", ("WECHAT_PAY_API_V3_KEY", "WX_PAY_API_V3_KEY"))
+        notify_url = require_any("WECHAT_PAY_NOTIFY_URL", ("WECHAT_PAY_NOTIFY_URL", "WX_PAY_NOTIFY_URL"))
+        public_key = require_any(
+            "WECHAT_PAY_VERIFICATION_KEY",
+            (
+                "WECHAT_PAY_PUBLIC_KEY_PATH", "WECHAT_PAY_PUBLIC_KEY",
+                "WECHAT_PAY_PLATFORM_CERT_PATH", "WECHAT_PAY_PLATFORM_CERT",
+            ),
+        )
+        if api_v3_key and not allow_placeholders and len(api_v3_key) != 32:
+            errors.append("WECHAT_PAY_API_V3_KEY_INVALID")
+        if notify_url and environment == "prod" and urlparse(notify_url).scheme.lower() != "https":
+            errors.append("WECHAT_PAY_NOTIFY_URL_MUST_USE_HTTPS")
+        if public_key and (values.get("WECHAT_PAY_PUBLIC_KEY_PATH") or values.get("WECHAT_PAY_PUBLIC_KEY")):
+            require("WECHAT_PAY_PUBLIC_KEY_ID")
+
+    kuaidi100_subscribe_value = values.get("KUAIDI100_SUBSCRIBE_ENABLED", "false").strip().lower()
+    if kuaidi100_subscribe_value not in FALSE_VALUES | TRUE_VALUES:
+        errors.append("KUAIDI100_SUBSCRIBE_ENABLED_INVALID_BOOLEAN")
+    configured_callback_url = values.get("KUAIDI100_CALLBACK_URL", "").strip()
+    configured_callback_salt = values.get("KUAIDI100_CALLBACK_SALT", "").strip()
+    parsed_callback = urlparse(configured_callback_url)
+    if configured_callback_url and (
+        parsed_callback.scheme not in {"http", "https"} or not parsed_callback.netloc
+    ):
+        errors.append("KUAIDI100_CALLBACK_URL_INVALID")
+    if configured_callback_url and environment == "prod" and parsed_callback.scheme != "https":
+        errors.append("KUAIDI100_CALLBACK_URL_MUST_USE_HTTPS")
+    if configured_callback_salt and not allow_placeholders and len(configured_callback_salt) < 16:
+        errors.append("KUAIDI100_CALLBACK_SALT_TOO_SHORT")
+    if kuaidi100_subscribe_value in TRUE_VALUES:
+        require("KUAIDI100_CUSTOMER")
+        require("KUAIDI100_KEY")
+        require("KUAIDI100_CALLBACK_URL")
+        require("KUAIDI100_CALLBACK_SALT")
     if environment == "prod":
         mock_trade_mode = require("WECHAT_PAY_TEST_MODE").lower()
         if mock_trade_mode and mock_trade_mode not in FALSE_VALUES:

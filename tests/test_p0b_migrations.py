@@ -29,12 +29,15 @@ def test_p0b_migration_is_additive_idempotent_and_independently_reversible(tmp_p
         "20260712_04_p1b_report_snapshots",
         "20260712_05_p1c_runtime_tasks",
         "20260712_06_p1_material_price_cents",
+        "20260713_07_order_receipt_completion",
     ]
     assert upgrade("sqlite", db_path) == []
     assert {"idempotency_key", "request_hash", "reservation_expires_at"}.issubset(columns(db_path, "orders"))
     assert "reserved_stock" in columns(db_path, "managed_materials")
     assert {"order_requests", "inventory_reservations", "user_sessions"}.issubset(tables(db_path))
 
+    assert downgrade("sqlite", db_path, steps=1) == ["20260713_07_order_receipt_completion"]
+    assert "order_requests" in tables(db_path)
     assert downgrade("sqlite", db_path, steps=1) == ["20260712_06_p1_material_price_cents"]
     assert "order_requests" in tables(db_path)
     assert downgrade("sqlite", db_path, steps=1) == ["20260712_05_p1c_runtime_tasks"]
@@ -54,4 +57,5 @@ def test_p0b_migration_is_additive_idempotent_and_independently_reversible(tmp_p
         "20260712_04_p1b_report_snapshots",
         "20260712_05_p1c_runtime_tasks",
         "20260712_06_p1_material_price_cents",
+        "20260713_07_order_receipt_completion",
     ]

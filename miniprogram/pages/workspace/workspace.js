@@ -40,6 +40,8 @@ const MATERIAL_PRELOAD_BATCH_SIZE = 3;
 const MATERIAL_PRELOAD_BATCH_DELAY_MS = 72;
 const MATERIAL_PRELOAD_IDLE_RETRY_MS = 180;
 const MATERIAL_PRELOAD_MAX_DEFER_MS = 1800;
+const SHARED_DESIGN_IMAGE_PRELOAD_CONCURRENCY = 6;
+const SHARED_DESIGN_IMAGE_PRELOAD_TIMEOUT_MS = 6000;
 const STRINGED_BEAD_GAP_RPX = 0.5;
 const STRINGED_COMFORT_ALLOWANCE_MM = 8;
 const RING_SLIDE_EDGE_RATIO = 0.38;
@@ -369,8 +371,21 @@ function materialIsPendant(material = {}) {
   return materialTop(material) === 'pendant';
 }
 
+function materialIsSellable(material = {}) {
+  const enabled = material.enabled;
+  const stock = Number(material.stock);
+  const price = Number(material.price);
+  return enabled !== false
+    && enabled !== 0
+    && enabled !== '0'
+    && Number.isFinite(stock)
+    && stock > 0
+    && Number.isFinite(price)
+    && price > 0;
+}
+
 function materialIsWorkspaceSupported(material = {}) {
-  return !materialIsPendant(material);
+  return !materialIsPendant(material) && materialIsSellable(material);
 }
 
 function materialIdentifiers(material = {}) {
@@ -622,6 +637,7 @@ Page({
     showShareSheet: false,
     sharingDesign: false,
     sharedDesignLoading: false,
+    sharedDesignFrozen: false,
     shareToken: '',
     shareDesignTitle: '宇涧水晶 DIY 手串方案',
     sharePreviewImage: '',
@@ -714,6 +730,9 @@ Page({
 
   finishWorkspaceLoading(options = {}) {
     if (!this.data.workspaceLoading) return;
+    // A shared composition must not be revealed one image at a time while its
+    // bead assets are still warming up.
+    if (this.data.sharedDesignLoading) return;
     const flags = this.workspaceReadyFlags || {};
     const ready = !!(flags.layout && flags.canvas && flags.materials);
     if (!options.force && !ready) return;
@@ -755,7 +774,16 @@ Page({
 
   async loadSharedDesign(shareToken) {
     if (!shareToken) return false;
-    this.setData({ sharedDesignLoading: true });
+    clearTimeout(this.workspaceLoadingFallbackTimer);
+    clearTimeout(this.workspaceLoadingDoneTimer);
+    clearTimeout(this.workspaceLoadingHideTimer);
+    this.setData({
+      sharedDesignLoading: true,
+      workspaceLoading: true,
+      workspaceLoadingClass: '',
+      workspaceLoadingText: '正在打开分享方案',
+      workspaceLoadingSubtext: '同步珠材与盘面...'
+    });
     try {
       const sharedDesign = await getSharedDIYDesign(shareToken, { silent: true, timeout: 10000 });
       this.pendingSharedDesign = sharedDesign;
@@ -770,7 +798,7 @@ Page({
       logWorkspaceWarning('load shared DIY design failed:', error);
       this.pendingSharedDesign = null;
       this.pendingShareToken = '';
-      this.setData({ sharedDesignLoading: false });
+      this.setData({ sharedDesignLoading: false, workspaceLoading: false, workspaceLoadingClass: '' });
       wx.showToast({ title: '分享方案暂时无法打开', icon: 'none' });
       this.loadDraft();
       return false;
@@ -814,6 +842,7 @@ Page({
       wristSize: Number(design.wristSize || design.wrist_size || summary.wristSize || 16) || 16,
       wearStyle: 'single',
       isLooseMode: design.isLooseMode === true,
+      workspaceStageCenter: Number(design.workspaceStageCenter || design.workspace_stage_center || 0) || 0,
       sourceContext,
       summary: {
         ...summary,
@@ -823,7 +852,7 @@ Page({
     };
   },
 
-  applySharedDesign(sharedDesign = {}, options = {}) {
+  async applySharedDesign(sharedDesign = {}, options = {}) {
     if (!this.materialPayloadReady) return false;
     const normalized = this.normalizeSharedDesignPayload(sharedDesign);
     const selected = this.resolveSharedDesignSelectedIds(normalized);
@@ -841,9 +870,15 @@ Page({
       source_label: '分享方案',
       design_id: normalized.designId || ''
     };
+    const placements = this.scaleSharedPlacementsForStage(
+      this.normalizePlacements(selected, normalized.placements),
+      normalized.workspaceStageCenter
+    );
+    await this.preloadSharedDesignImages(placements);
     const draft = {
       ...normalized,
       selected,
+      placements,
       attachedPendants: [],
       sourceContext,
       isSharedDesign: true
@@ -857,7 +892,7 @@ Page({
     this.resetWorkspaceRuntime();
     this.setData({
       selected,
-      placements: this.normalizePlacements(selected, normalized.placements),
+      placements,
       attachedPendants: [],
       wristSize: normalized.wristSize,
       wearStyle: 'single',
@@ -874,16 +909,80 @@ Page({
       draggingBeadIndex: -1,
       dragDeleteArmed: false,
       sharedDesignLoading: false,
+      sharedDesignFrozen: normalized.isLooseMode,
+      workspaceLoading: false,
+      workspaceLoadingClass: '',
       shareToken: activeShareToken,
       shareDesignTitle: this.buildShareDesignTitle(draft),
       sharePreviewImage: draft.preview_image || draft.previewImage || draft.image_url || ''
     });
     this.recalculate();
-    if (normalized.isLooseMode) {
-      wx.nextTick(() => this.startPhysicsFromCurrentDesign());
-    }
     if (!options.silent) wx.showToast({ title: '已打开分享方案', icon: 'success' });
     return true;
+  },
+
+  scaleSharedPlacementsForStage(placements = [], sourceCenter = 0) {
+    const senderCenter = Number(sourceCenter);
+    const receiverCenter = Number(this.getStageLayout().center);
+    if (!Number.isFinite(senderCenter) || senderCenter <= 0 || !Number.isFinite(receiverCenter) || receiverCenter <= 0) {
+      return placements;
+    }
+    const scale = receiverCenter / senderCenter;
+    if (!Number.isFinite(scale) || Math.abs(scale - 1) < 0.001) return placements;
+    return placements.map(placement => {
+      const next = { ...placement };
+      if (Number.isFinite(next.looseX)) next.looseX = receiverCenter + (next.looseX - senderCenter) * scale;
+      if (Number.isFinite(next.looseY)) next.looseY = receiverCenter + (next.looseY - senderCenter) * scale;
+      if (Number.isFinite(next.dx)) next.dx *= scale;
+      if (Number.isFinite(next.dy)) next.dy *= scale;
+      return next;
+    });
+  },
+
+  preloadSharedDesignImages(placements = []) {
+    const urls = Array.from(new Set((placements || [])
+      .map(item => String(item && item.image_url || '').trim())
+      .filter(Boolean)));
+    if (!urls.length || !wx.getImageInfo) return Promise.resolve();
+    let cursor = 0;
+    const preloadOne = url => new Promise(resolve => {
+      if (this.hasMaterialImagePreloadRecord(url)) {
+        resolve();
+        return;
+      }
+      this.rememberMaterialImagePreload(url, 'loading');
+      let settled = false;
+      const timeout = setTimeout(() => {
+        done('timed_out');
+      }, SHARED_DESIGN_IMAGE_PRELOAD_TIMEOUT_MS);
+      const done = status => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+        this.rememberMaterialImagePreload(url, status);
+        resolve();
+      };
+      try {
+        wx.getImageInfo({
+          src: url,
+          success: () => done('loaded'),
+          fail: () => done('failed')
+        });
+      } catch (error) {
+        done('failed');
+      }
+    });
+    const worker = async () => {
+      while (cursor < urls.length) {
+        const url = urls[cursor];
+        cursor += 1;
+        await preloadOne(url);
+      }
+    };
+    return Promise.all(Array.from(
+      { length: Math.min(SHARED_DESIGN_IMAGE_PRELOAD_CONCURRENCY, urls.length) },
+      () => worker()
+    ));
   },
 
   onReady() {
@@ -1635,7 +1734,7 @@ Page({
     }).filter(id => {
       if (unsupportedIds[id]) return false;
       const material = nextCatalog.find(item => item.id === id) || this.findMaterialById(id);
-      return !material || materialIsWorkspaceSupported(material);
+      return !!material && materialIsWorkspaceSupported(material);
     });
     this.materialCatalog = nextCatalog;
     this.rebuildMaterialLookup();
@@ -1867,7 +1966,7 @@ Page({
       keepPendingOnEmpty: options.keepPendingOnEmpty !== false
     };
     if (this.pendingSharedDesign) {
-      applied = this.applySharedDesign(this.pendingSharedDesign, applyOptions) || applied;
+      applied = (await this.applySharedDesign(this.pendingSharedDesign, applyOptions)) || applied;
     }
     if (this.pendingBackendRecommendation) {
       applied = this.applyBackendRecommendation(applyOptions) || applied;
@@ -2499,7 +2598,8 @@ Page({
   },
 
   resolveBackendCrystalMaterialId(code, preferredSize = 8) {
-    const catalog = (this.materialCatalog || DEFAULT_MATERIALS).filter(item => item.top === 'bead');
+    const catalog = filterWorkspaceMaterials(this.materialCatalog || DEFAULT_MATERIALS)
+      .filter(item => item.top === 'bead');
     if (!catalog.length) return '';
     const codeMatch = this.chooseClosestMaterial(
       catalog.filter(item => this.materialMatchesBackendCode(item, code)),
@@ -2560,7 +2660,7 @@ Page({
       .filter(id => {
         if (!id) return false;
         const material = this.findMaterialById(id);
-        return !material || materialIsWorkspaceSupported(material);
+        return !!material && materialIsWorkspaceSupported(material);
       });
   },
 
@@ -2577,7 +2677,7 @@ Page({
       this.loadProfileEnergy();
     }
     if (this.data.useCanvasRenderer) this.scheduleCanvasRender();
-    if (this.data.isLooseMode && this.physicsEngine) this.runPhysics();
+    if (this.data.isLooseMode && !this.data.sharedDesignFrozen && this.physicsEngine) this.runPhysics();
     if (wx.getStorageSync('workspaceOpenDesign')) {
       wx.removeStorageSync('workspaceOpenDesign');
       this.pendingBackendRecommendation = false;
@@ -2841,6 +2941,12 @@ Page({
     const recommendationItems = baseSelected
       .map(id => this.findMaterialById(id))
       .filter(Boolean);
+    if (recommendationItems.length !== baseSelected.length
+      || recommendationItems.some(item => !materialIsWorkspaceSupported(item))) {
+      if (!options.silent) wx.showToast({ title: '推荐材料已更新，请重新生成方案', icon: 'none' });
+      if (!options.keepPendingOnEmpty) this.pendingBackendRecommendation = false;
+      return false;
+    }
     const recommendedCount = recommendedStringedBeadCount(recommendationItems, wristSize);
     const selected = expandSequenceToCount(baseSelected, recommendedCount);
     this.pendingBackendRecommendation = false;
@@ -2887,18 +2993,20 @@ Page({
         ? previous
         : this.createLoosePlacement(index, id, normalized);
       const material = this.findMaterialById(id) || {};
-      const size = previous && (previous.size || previous.diameter || previous.size_mm)
+      const size = material.size
+        || material.size_mm
+        || previous && (previous.size || previous.diameter || previous.size_mm)
         || snapshot.size
         || snapshot.diameter
         || snapshot.size_mm
-        || material.size
-        || material.size_mm
         || '';
-      const price = previous && (previous.price || previous.priceText || previous.amount)
+      const currentPrice = Number(material.price);
+      const price = Number.isFinite(currentPrice) && currentPrice > 0
+        ? currentPrice
+        : previous && (previous.price || previous.priceText || previous.amount)
         || snapshot.price
         || snapshot.priceText
         || snapshot.amount
-        || material.price
         || '';
       normalized.push({
         id,
@@ -2906,14 +3014,15 @@ Page({
           || snapshot.image_url
           || firstWorkspaceImageUrl(snapshot)
           || this.pickMaterialImageUrl(material),
-        name: previous && (previous.name || previous.material_name || previous.materialName)
+        name: material.name
+          || material.series
+          || previous && (previous.name || previous.material_name || previous.materialName)
           || snapshot.name
           || snapshot.material_name
           || snapshot.materialName
-          || material.name
           || '',
-        category: previous && previous.category || snapshot.category || material.category || '',
-        series: previous && previous.series || snapshot.series || material.series || '',
+        category: material.category || previous && previous.category || snapshot.category || '',
+        series: material.series || previous && previous.series || snapshot.series || '',
         size,
         diameter: size,
         price,
@@ -4901,6 +5010,7 @@ Page({
       if (index < 0) return;
       this.pushHistory();
       if (this.data.isLooseMode && (!this.physicsBodies || !this.physicsBodies.length)) {
+        if (this.data.sharedDesignFrozen) this.setData({ sharedDesignFrozen: false });
         this.startPhysicsFromCurrentDesign();
       }
       if (this.data.isLooseMode) {
@@ -6834,6 +6944,7 @@ Page({
   },
 
   toggleStringMode() {
+    if (this.data.sharedDesignFrozen) this.setData({ sharedDesignFrozen: false });
     if (this.data.isLooseMode) {
       this.shuffleDesign();
       return;
@@ -6853,10 +6964,15 @@ Page({
     const center = Number(geometry.center) || this.getStageLayout().center;
     return context.placements.map((placement, index) => {
       const angle = Number((geometry.angles || [])[index]) || 0;
+      const x = center + Math.cos(angle) * Number(geometry.radius || 0);
+      const y = center + Math.sin(angle) * Number(geometry.radius || 0);
+      const visualX = x + Number(placement.dx || 0);
+      const visualY = y + Number(placement.dy || 0);
       return {
         ...placement,
-        x: center + Math.cos(angle) * Number(geometry.radius || 0),
-        y: center + Math.sin(angle) * Number(geometry.radius || 0),
+        x,
+        y,
+        rotation: stringedBeadRotationFromPoint(visualX, visualY, center),
         beadSize: Number((geometry.beadSizes || [])[index])
           || Number(placement.beadSize)
           || this.getMaterialDisplaySize(selected[index])
@@ -6903,6 +7019,12 @@ Page({
         placement: {
           x: placement.x,
           y: placement.y,
+          dx: placement.dx,
+          dy: placement.dy,
+          looseX: placement.looseX,
+          looseY: placement.looseY,
+          rotation: placement.rotation,
+          beadSize: placement.beadSize,
           angle: placement.angle,
           diameter: placement.diameter,
           image_url: placement.image_url || ''

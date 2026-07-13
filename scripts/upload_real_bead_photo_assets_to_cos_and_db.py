@@ -37,6 +37,7 @@ class AssetGroup:
     files: list[Path]
     keys: list[str]
     urls: list[str]
+    metadata: dict[str, object]
 
 
 DEFAULT_META = {
@@ -299,6 +300,11 @@ def load_asset_groups(args: argparse.Namespace) -> list[AssetGroup]:
                 files=files,
                 keys=keys,
                 urls=urls,
+                metadata={
+                    key: rows[0][key]
+                    for key in ("category", "effect", "element", "color", "shine", "sort_order", "price", "stock")
+                    if rows[0].get(key) not in (None, "")
+                },
             )
         )
     return groups
@@ -431,8 +437,11 @@ def meta_for_group(group: AssetGroup, existing: list[dict]) -> dict:
     meta = {**DEFAULT_META, **code_meta}
     if group.source_folder and not code_meta:
         meta["category"] = group.source_folder
+    meta.update(group.metadata)
     meta["effect"] = normalize_effect_key(meta.get("effect"))
-    return {**meta, "price": 0.01, "stock": 99}
+    meta.setdefault("price", 0.01)
+    meta.setdefault("stock", 99)
+    return meta
 
 
 def deterministic_id(group: AssetGroup, size: int) -> str:

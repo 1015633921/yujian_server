@@ -355,8 +355,10 @@ MYSQL_SCHEMA = [
       created_at VARCHAR(40) NOT NULL, updated_at VARCHAR(40) NOT NULL, paid_at VARCHAR(40),
       after_sale_status VARCHAR(40), refund_status VARCHAR(40), logistics_json LONGTEXT,
       status_history_json LONGTEXT, design_id VARCHAR(80), refund_json LONGTEXT,
+      logistics_signed_at VARCHAR(40), auto_complete_at VARCHAR(40),
       INDEX idx_orders_user_created (user_id, created_at),
-      INDEX idx_orders_status (status, payment_status)
+      INDEX idx_orders_status (status, payment_status),
+      INDEX idx_orders_auto_complete (status, auto_complete_at)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     """,
     """

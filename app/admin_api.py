@@ -219,10 +219,10 @@ class RecommendationPlanPayload(BaseModel):
 
 
 class OrderShipPayload(BaseModel):
-    carrier: str = "顺丰速运"
-    carrier_code: str = "shunfeng"
-    tracking_no: str
-    phone_tail: str = ""
+    carrier: str = Field(default="顺丰速运", max_length=50)
+    carrier_code: str = Field(default="shunfeng", min_length=1, max_length=40)
+    tracking_no: str = Field(min_length=6, max_length=32)
+    phone_tail: str = Field(default="", max_length=8)
 
 
 class OrderStatusPayload(BaseModel):
@@ -589,16 +589,28 @@ def ship_order(
 ):
     require_admin(authorization)
     try:
-        return success(
-            admin_service.ship_order(
-                order_id,
-                payload.carrier,
-                payload.tracking_no,
-                payload.carrier_code,
-                payload.phone_tail,
-            ),
-            "订单已发货",
+        result = admin_service.ship_order(
+            order_id,
+            payload.carrier,
+            payload.tracking_no,
+            payload.carrier_code,
+            payload.phone_tail,
         )
+        subscription = order_service.subscribe_order_logistics(order_id)
+        result["logistics"] = order_service.get_order(order_id).get("logistics") or result.get("logistics") or {}
+        result["logistics_subscription"] = subscription
+        message = "订单已发货" if subscription.get("status") != "failed" else "订单已发货，物流订阅待重试"
+        return success(result, message)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@admin_router.post("/orders/{order_id}/logistics/subscribe", summary="重试订单物流主动订阅")
+def subscribe_order_logistics(order_id: str, authorization: str | None = Header(default=None)):
+    require_admin(authorization)
+    try:
+        result = order_service.subscribe_order_logistics(order_id)
+        return success(result, "物流订阅已处理")
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

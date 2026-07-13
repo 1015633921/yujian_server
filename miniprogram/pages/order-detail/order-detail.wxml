@@ -13,18 +13,24 @@
       <text class="order-id-value" selectable="{{true}}">订单号：{{order.id}}</text>
     </view>
 
-    <view class="status-steps">
-      <block wx:for="{{order.statusSteps}}" wx:key="key">
-        <view class="step-item {{item.active ? 'active' : ''}}">
-          <view class="step-line" wx:if="{{index > 0}}"></view>
-          <view class="step-dot">
-            <view class="step-dot-core"></view>
+    <scroll-view
+      class="status-steps-scroll"
+      scroll-x="{{order.statusStepsScrollable}}"
+      show-scrollbar="{{false}}"
+    >
+      <view class="status-steps {{order.statusStepsClass}}" style="{{order.statusStepsStyle}}">
+        <block wx:for="{{order.statusSteps}}" wx:key="key">
+          <view class="step-item {{item.active ? 'active' : ''}}">
+            <view class="step-line" wx:if="{{index > 0}}"></view>
+            <view class="step-dot">
+              <view class="step-dot-core"></view>
+            </view>
+            <view class="step-label">{{item.label}}</view>
+            <view class="step-time">{{item.time || ' '}}</view>
           </view>
-          <view class="step-label">{{item.label}}</view>
-          <view class="step-time">{{item.time || ' '}}</view>
-        </view>
-      </block>
-    </view>
+        </block>
+      </view>
+    </scroll-view>
   </view>
 
   <view class="card logistics-card compact-logistics-card" wx:if="{{logisticsDetail && logisticsDetail.show}}">
@@ -127,10 +133,6 @@
               <text class="material-position">{{item.positionLabel}}</text>
             </view>
             <view class="material-detail" wx:if="{{item.detail}}">{{item.detail}}</view>
-            <view class="material-tags" wx:if="{{item.tags.length}}">
-              <text wx:for="{{item.tags}}" wx:key="label">{{item.label}} {{item.value}}</text>
-            </view>
-            <view class="material-effect" wx:if="{{item.effect}}">{{item.effect}}</view>
           </view>
           <view class="material-price">
             <view>¥{{item.priceText}}</view>
