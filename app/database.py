@@ -61,7 +61,11 @@ class MySQLConnection:
 
     def execute(self, sql: str, params: Any = ()):
         cursor = self.raw.cursor()
-        cursor.execute(self._sql(sql, params), params)
+        translated = self._sql(sql, params)
+        if params:
+            cursor.execute(translated, params)
+        else:
+            cursor.execute(translated)
         return cursor
 
     def __enter__(self):

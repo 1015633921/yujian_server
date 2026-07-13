@@ -3709,10 +3709,11 @@ class AdminService:
             clauses.append("core_wish LIKE ?")
             params.append(f"%{core_wish}%")
         if hide_tests:
-            clauses.append("COALESCE(user_id, '') NOT LIKE '%test%'")
-            clauses.append("COALESCE(user_id, '') NOT LIKE '%smoke%'")
-            clauses.append("COALESCE(user_id, '') NOT LIKE 'api-%'")
-            clauses.append("COALESCE(name, '') NOT LIKE '%测试%'")
+            clauses.append("COALESCE(user_id, '') NOT LIKE ?")
+            clauses.append("COALESCE(user_id, '') NOT LIKE ?")
+            clauses.append("COALESCE(user_id, '') NOT LIKE ?")
+            clauses.append("COALESCE(name, '') NOT LIKE ?")
+            params.extend(["%test%", "%smoke%", "api-%", "%测试%"])
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         params.append(limit)
         with self.connect() as connection:
