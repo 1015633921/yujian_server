@@ -137,6 +137,31 @@ def test_workspace_material_catalog_supports_paged_slim_payload():
                 assert item["id"] in [material["id"] for material in alias_data["materials"]]
 
 
+def test_production_material_catalog_does_not_fall_back_to_demo_inventory(monkeypatch):
+    from app import materials as materials_module
+
+    materials_module.invalidate_material_cache()
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setattr(materials_module, "list_db_materials", lambda **_kwargs: None)
+
+    with pytest.raises(materials_module.MaterialCatalogUnavailable, match="材料库暂时不可用"):
+        materials_module.list_materials(top="bead", compact=True)
+
+
+def test_material_api_returns_503_when_production_catalog_is_unavailable(monkeypatch):
+    from app import api as api_module
+    from app.materials import MaterialCatalogUnavailable
+
+    def unavailable(**_kwargs):
+        raise MaterialCatalogUnavailable("材料库暂时不可用，请稍后重试")
+
+    monkeypatch.setattr(api_module, "list_materials", unavailable)
+    response = client.get("/api/v1/materials?top=bead")
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "服务暂时不可用"
+
+
 def test_slim_material_preserves_image_url_pool_for_workspace_randomization():
     from app.materials import slim_material
 

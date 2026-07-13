@@ -427,8 +427,8 @@ class AdminService:
                 """
                 INSERT INTO managed_materials
                 (id, skuId, top, category, series, material_code, grade, name, effect, element, price, price_cents, size, weight, color, shine,
-                 image_path, image_url, image_urls_json, enabled, sort_order, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
+                 image_path, image_url, image_urls_json, stock, enabled, sort_order, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
                 """,
                 (
                     item["id"],
@@ -450,6 +450,7 @@ class AdminService:
                     image_path,
                     image_url,
                     json_text(clean_image_urls(item.get("image_urls"), image_url, image_path or "")),
+                    max(1, int(item.get("stock") or 99)),
                     index,
                     timestamp,
                     timestamp,

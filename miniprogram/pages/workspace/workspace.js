@@ -23,7 +23,7 @@ let Sleeping;
 
 const MATERIAL_PAGE_SIZE = 24;
 const MATERIAL_CACHE_TTL = 30 * 60 * 1000;
-const MATERIAL_CACHE_KEY = 'workspaceMaterialCatalogV6';
+const MATERIAL_CACHE_KEY = 'workspaceMaterialCatalogV7';
 const ALL_OPTION_LABEL = '\u5168\u90e8';
 const LEGACY_ALL_OPTION_LABELS = [ALL_OPTION_LABEL, '鍏ㄩ儴'];
 const TRAY_THEME_STORAGE_KEY = 'workspaceTrayThemeV1';
@@ -154,30 +154,7 @@ function cleanDesignName(value = '') {
   return text;
 }
 
-const DEFAULT_MATERIALS = [
-  { id: 'clearQuartz8', skuId: 'clearQuartz', top: 'bead', category: '白水晶', name: '喜马拉雅白水晶', effect: '清爽与干净感', element: '金', price: 5, size: 8, weight: 1.2, color: '#dfe3e5', shine: '#ffffff' },
-  { id: 'clearQuartz10', skuId: 'clearQuartz', top: 'bead', category: '白水晶', name: '喜马拉雅白水晶', effect: '清爽与干净感', element: '金', price: 10, size: 10, weight: 1.6, color: '#d6dbde', shine: '#ffffff' },
-  { id: 'clearQuartz12', skuId: 'clearQuartz', top: 'bead', category: '白水晶', name: '喜马拉雅白水晶', effect: '清爽与干净感', element: '金', price: 15, size: 12, weight: 2.1, color: '#cfd5d8', shine: '#ffffff' },
-  { id: 'clearQuartz14', skuId: 'clearQuartz', top: 'bead', category: '白水晶', name: '喜马拉雅白水晶', effect: '清爽与干净感', element: '金', price: 18, size: 14, weight: 2.8, color: '#c8ced1', shine: '#ffffff' },
-  { id: 'amethyst8', skuId: 'amethyst', top: 'bead', category: '紫水晶', name: '乌拉圭紫水晶', effect: '灵感与放松', element: '火', price: 12, size: 8, weight: 1.4, color: '#8b6aa5', shine: '#efe8ff' },
-  { id: 'amethyst10', skuId: 'amethyst', top: 'bead', category: '紫水晶', name: '乌拉圭紫水晶', effect: '灵感与放松', element: '火', price: 18, size: 10, weight: 1.8, color: '#76508f', shine: '#efe8ff' },
-  { id: 'citrine8', skuId: 'citrine', top: 'bead', category: '黄水晶', name: '巴西黄水晶', effect: '目标与行动', element: '土', price: 16, size: 8, weight: 1.5, color: '#d6ad50', shine: '#fff0b7' },
-  { id: 'citrine10', skuId: 'citrine', top: 'bead', category: '黄水晶', name: '巴西黄水晶', effect: '目标与行动', element: '土', price: 22, size: 10, weight: 1.9, color: '#c79838', shine: '#fff0b7' },
-  { id: 'obsidian10', skuId: 'obsidian', top: 'bead', category: '曜石', name: '冰种黑曜石', effect: '边界与安定', element: '金', price: 14, size: 10, weight: 1.8, color: '#262529', shine: '#aeb2b5' },
-  { id: 'tigerEye8', skuId: 'tigerEye', top: 'bead', category: '虎眼石', name: '南非虎眼石', effect: '执行与稳定', element: '土', price: 13, size: 8, weight: 1.5, color: '#9b6a2e', shine: '#f1c06b' },
-  { id: 'moonstone6', skuId: 'moonstone', top: 'bead', category: '月光石', name: '雪花幽灵', effect: '情绪放松', element: '水', price: 4, size: 6, weight: 0.9, color: '#c7cbca', shine: '#ffffff' },
-  { id: 'moonstone8', skuId: 'moonstone', top: 'bead', category: '月光石', name: '雪花幽灵', effect: '情绪舒缓', element: '水', price: 8, size: 8, weight: 1.2, color: '#bdc2c1', shine: '#ffffff' },
-  { id: 'aquamarine8', skuId: 'aquamarine', top: 'bead', category: '海蓝宝', name: '巴西海蓝宝', effect: '沟通与平静', element: '水', price: 25, size: 8, weight: 1.4, color: '#80b8c5', shine: '#e8fbff' },
-  { id: 'blueRutilatedQuartz10', skuId: 'blueRutilatedQuartz', top: 'bead', category: '蓝发晶', name: '蓝发晶', effect: '冷静与洞察', element: '水', price: 38, size: 10, weight: 1.9, color: '#4f789b', shine: '#dcecf3' },
-  { id: 'garnet8', skuId: 'garnet', top: 'bead', category: '石榴石', name: '石榴石', effect: '活力与自信', element: '火', price: 18, size: 8, weight: 1.5, color: '#8e2635', shine: '#e7a1aa' },
-  { id: 'turquoise6', skuId: 'turquoise', top: 'bead', category: '绿松石', name: '绿松石', effect: '生机与恢复', element: '木', price: 16, size: 6, weight: 0.9, color: '#56a6a2', shine: '#d7f1ef' },
-  { id: 'greenPhantom8', skuId: 'greenPhantom', top: 'bead', category: '绿幽灵', name: '绿幽灵', effect: '生长与专注', element: '木', price: 24, size: 8, weight: 1.4, color: '#4a825f', shine: '#d7eadc' },
-  { id: 'smokyQuartz8', skuId: 'smokyQuartz', top: 'bead', category: '茶晶', name: '茶晶', effect: '稳定与落地', element: '土', price: 14, size: 8, weight: 1.4, color: '#766052', shine: '#d8c8bc' },
-  { id: 'hematite8', skuId: 'hematite', top: 'bead', category: '赤铁矿', name: '赤铁矿', effect: '边界与决断', element: '金', price: 12, size: 8, weight: 1.7, color: '#5a5b60', shine: '#d5d6d8' },
-  { id: 'roseQuartz8', skuId: 'roseQuartz', top: 'bead', category: '粉水晶', name: '马达加斯加粉晶', effect: '人缘与亲密', element: '木', price: 11, size: 8, weight: 1.3, color: '#e0a3a8', shine: '#fff1f3' },
-  { id: 'silverSpacer', skuId: 'silverSpacer', top: 'accessory', category: '隔片', name: '925 银隔片', effect: '结构与光泽', element: '金', price: 18, size: 3, weight: 0.4, color: '#b9bdc2', shine: '#ffffff' },
-  { id: 'goldSpacer', skuId: 'goldSpacer', top: 'accessory', category: '隔片', name: '鎏金隔片', effect: '礼物感', element: '土', price: 16, size: 3, weight: 0.4, color: '#c99d4d', shine: '#fff0b7' }
-];
+const DEFAULT_MATERIALS = [];
 
 const TOP_TABS = [
   { key: 'bead', label: '珠珠' },

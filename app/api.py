@@ -22,7 +22,7 @@ from .feature_flags import (
     report_versioning_v2_enabled,
 )
 from .admin_service import AdminService
-from .materials import list_materials
+from .materials import MaterialCatalogUnavailable, list_materials
 from .order_service import OrderConflictError, OrderPriceChangedError, OrderPricingError, OrderService
 from .observability import Timer, current_request_id, log_event, metrics
 from .recommendation import RecommendationEngine
@@ -164,20 +164,23 @@ def material_catalog(
     slim: bool = Query(default=False),
     ids: str | None = Query(default=None, max_length=2000),
 ):
-    return success(
-        list_materials(
-            top=top,
-            keyword=keyword,
-            compact=compact,
-            limit=limit,
-            category=category,
-            series=series,
-            page=page,
-            page_size=page_size,
-            slim=slim,
-            ids=ids,
+    try:
+        return success(
+            list_materials(
+                top=top,
+                keyword=keyword,
+                compact=compact,
+                limit=limit,
+                category=category,
+                series=series,
+                page=page,
+                page_size=page_size,
+                slim=slim,
+                ids=ids,
+            )
         )
-    )
+    except MaterialCatalogUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
 @router.get("/content-blocks", summary="content blocks")

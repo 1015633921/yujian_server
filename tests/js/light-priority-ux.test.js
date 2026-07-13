@@ -75,6 +75,17 @@ test('profile exposes manual phone input and keeps WeChat phone shortcut visible
   assert.match(profileSource, /phone_number:\s*phoneNumber/);
 });
 
+test('workspace never exposes demo materials as sellable inventory', () => {
+  const workspaceSource = fs.readFileSync(
+    path.resolve(__dirname, '../../miniprogram/pages/workspace/workspace.js'),
+    'utf8'
+  );
+
+  assert.match(workspaceSource, /const DEFAULT_MATERIALS = \[\];/);
+  assert.match(workspaceSource, /workspaceMaterialCatalogV7/);
+  assert.doesNotMatch(workspaceSource, /喜马拉雅白水晶/);
+});
+
 test('workspace keeps large-screen tray controls above the material drawer', () => {
   const page = loadPage('miniprogram/pages/workspace/workspace.js');
   const viewportRpx = Math.round(932 * 750 / 430);

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import os
 
 from .copy_safety import safe_display_text, safe_wish_label
 from .energy import ELEMENTS, WISH_MAPPING
@@ -362,7 +363,8 @@ class RecommendationEngine:
     def material_is_sellable(material: dict | None) -> bool:
         if not material:
             return False
-        if material.get("enabled") is False:
+        enabled = material.get("enabled", True)
+        if enabled in {False, 0, "0", "false", "False"}:
             return False
         stock_status = str(
             material.get("stock_status")
@@ -372,11 +374,18 @@ class RecommendationEngine:
         ).strip().lower()
         if stock_status == "out":
             return False
+        stock = material.get("stock")
+        if stock not in (None, ""):
+            try:
+                if int(float(stock)) <= 0:
+                    return False
+            except (TypeError, ValueError):
+                return False
         price = material.get("price")
         if price in (None, ""):
             price = (material.get("sku") or {}).get("price_per_bead")
         try:
-            return math.isfinite(float(price)) and float(price) >= 0
+            return math.isfinite(float(price)) and float(price) > 0
         except (TypeError, ValueError):
             return False
 
@@ -455,8 +464,14 @@ class RecommendationEngine:
         available_codes: set[str] | None = None,
     ) -> str:
         pool = set(primary_pools[request.primary_core_wish])
-        candidates = [code for code in catalog if not available_codes or code in available_codes]
+        candidates = [
+            code
+            for code in catalog
+            if available_codes is None or code in available_codes
+        ]
         if not candidates:
+            if available_codes is not None:
+                raise ValueError("暂无匹配当前珠径的可售材料，请调整珠径后重试")
             candidates = list(catalog)
         return max(
             candidates,
@@ -503,7 +518,7 @@ class RecommendationEngine:
             and "avoid_dense" not in RecommendationEngine.rule_list(catalog[code], "match_rules")
         ]
         support_candidates = strict_candidates
-        if available_codes:
+        if available_codes is not None:
             available_strict = [code for code in strict_candidates if code in available_codes]
             available_relaxed = [
                 code
@@ -523,6 +538,8 @@ class RecommendationEngine:
             support_candidates = (
                 available_strict or available_relaxed or available_role_candidates or available_fallback
             )
+        if not support_candidates and available_codes is not None:
+            raise ValueError("暂无可售的调和配珠，请调整珠径后重试")
         if not support_candidates:
             support_candidates = role_candidates or [code for code in catalog if code != primary_code]
         first = max(
@@ -545,7 +562,7 @@ class RecommendationEngine:
             and RecommendationEngine.role_allowed(crystal, "accent")
             and not RecommendationEngine.conflicts_with(code, crystal, {primary_code, first}, catalog)
         ]
-        if available_codes:
+        if available_codes is not None:
             available_accent_candidates = [code for code in accent_candidates if code in available_codes]
             available_relaxed_accents = [
                 code
@@ -556,7 +573,7 @@ class RecommendationEngine:
             ]
             accent_candidates = available_accent_candidates or available_relaxed_accents
         if not accent_candidates:
-            accent_candidates = [first] if available_codes else [
+            accent_candidates = [first] if available_codes is not None else [
                 code for code in catalog if code not in {primary_code, first}
             ]
         accent = max(
@@ -785,8 +802,10 @@ class RecommendationEngine:
         from .materials import MATERIAL_CATALOG, list_db_materials
 
         db_materials = list_db_materials(top="bead", enrich=False)
-        if db_materials is not None:
+        if db_materials:
             return db_materials, True
+        if os.getenv("APP_ENV", "").strip().lower() in {"production", "prod"}:
+            return [], db_materials is not None
         return MATERIAL_CATALOG, False
 
     @staticmethod

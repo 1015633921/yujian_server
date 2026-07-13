@@ -128,7 +128,7 @@ CRYSTAL_CODE_KEYWORDS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("blue_lace_agate", ("蓝纹玛瑙",)),
     ("red_agate", ("红玛瑙",)),
     ("quartz_inclusion", ("胶花水晶", "胶花", "锦鲤胶花")),
-    ("clear_quartz", ("喜马拉雅白水晶", "白水晶", "白阿塞水晶")),
+    ("clear_quartz", ("白水晶", "白阿塞水晶")),
     ("milky_quartz", ("奶白晶",)),
     ("citrine", ("柠檬黄水晶", "巴西黄水晶", "黄水晶", "黄阿塞水晶")),
     ("ametrine", ("紫黄晶",)),

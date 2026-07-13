@@ -268,6 +268,46 @@ def test_explicit_out_of_stock_material_is_not_sellable():
     ) is False
 
 
+@pytest.mark.parametrize(
+    "material",
+    [
+        {"id": "disabled-int", "enabled": 0, "stock": 99, "price": 10},
+        {"id": "zero-stock", "enabled": 1, "stock": 0, "price": 10},
+        {"id": "zero-price", "enabled": 1, "stock": 99, "price": 0},
+    ],
+)
+def test_disabled_or_unavailable_material_is_not_sellable(material):
+    assert RecommendationEngine.material_is_sellable(material) is False
+
+
+def test_recommendation_fails_closed_when_no_catalog_code_is_sellable():
+    request = make_request()
+    energy = EnergyCalculator().calculate(request)
+    catalog = RecommendationEngine.catalog()
+
+    with pytest.raises(ValueError, match="可售材料"):
+        RecommendationEngine.select_primary(
+            request,
+            energy,
+            RecommendationEngine.recommendation_context(request, energy),
+            catalog,
+            RecommendationEngine.primary_pools(catalog),
+            available_codes=set(),
+        )
+
+
+def test_production_inventory_does_not_use_static_materials(monkeypatch):
+    from app import materials as materials_module
+
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setattr(materials_module, "list_db_materials", lambda **_kwargs: None)
+
+    materials, from_database = RecommendationEngine.load_bead_inventory()
+
+    assert materials == []
+    assert from_database is False
+
+
 def test_recommendation_respects_material_role_rules_for_primary():
     request = make_request(core_wish="招财进宝/事业腾飞")
     energy = EnergyCalculator().calculate(request)

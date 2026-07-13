@@ -5,10 +5,10 @@ const { createOrder, getOrder, getOrderPaymentStatus, mockPayOrder, getMaterials
 const { assetUrl } = require('../../utils/assets');
 
 const MATERIALS = {
-  clearQuartz8: { name: '喜马拉雅白水晶 8mm', sku: 'SKU_CLEAR_8MM', price: 5 },
-  clearQuartz10: { name: '喜马拉雅白水晶 10mm', sku: 'SKU_CLEAR_10MM', price: 10 },
-  clearQuartz12: { name: '喜马拉雅白水晶 12mm', sku: 'SKU_CLEAR_12MM', price: 15 },
-  clearQuartz14: { name: '喜马拉雅白水晶 14mm', sku: 'SKU_CLEAR_14MM', price: 18 },
+  clearQuartz8: { name: '白水晶 8mm', sku: 'SKU_CLEAR_8MM', price: 5 },
+  clearQuartz10: { name: '白水晶 10mm', sku: 'SKU_CLEAR_10MM', price: 10 },
+  clearQuartz12: { name: '白水晶 12mm', sku: 'SKU_CLEAR_12MM', price: 15 },
+  clearQuartz14: { name: '白水晶 14mm', sku: 'SKU_CLEAR_14MM', price: 18 },
   amethyst8: { name: '乌拉圭紫水晶 8mm', sku: 'SKU_AMETHYST_8MM', price: 12 },
   amethyst10: { name: '乌拉圭紫水晶 10mm', sku: 'SKU_AMETHYST_10MM', price: 18 },
   citrine8: { name: '巴西黄水晶 8mm', sku: 'SKU_CITRINE_8MM', price: 16 },

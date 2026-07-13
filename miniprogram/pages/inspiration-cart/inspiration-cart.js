@@ -5,10 +5,10 @@ const { getCartItems, updateCartItem, deleteCartItem } = require('../../utils/ap
 const CART_KEY = 'diyDesignCart';
 
 const MATERIAL_NAMES = {
-  clearQuartz8: '喜马拉雅白水晶',
-  clearQuartz10: '喜马拉雅白水晶',
-  clearQuartz12: '喜马拉雅白水晶',
-  clearQuartz14: '喜马拉雅白水晶',
+  clearQuartz8: '白水晶',
+  clearQuartz10: '白水晶',
+  clearQuartz12: '白水晶',
+  clearQuartz14: '白水晶',
   amethyst8: '乌拉圭紫水晶',
   amethyst10: '乌拉圭紫水晶',
   citrine8: '巴西黄水晶',
