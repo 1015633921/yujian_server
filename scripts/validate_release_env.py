@@ -95,6 +95,24 @@ def validate(values: dict[str, str], environment: str, allow_placeholders: bool 
         if public_key and (values.get("WECHAT_PAY_PUBLIC_KEY_PATH") or values.get("WECHAT_PAY_PUBLIC_KEY")):
             require("WECHAT_PAY_PUBLIC_KEY_ID")
 
+    community_enabled = values.get("COMMUNITY_UGC_ENABLED", "false").strip().lower()
+    community_writes_enabled = values.get("COMMUNITY_UGC_WRITES_ENABLED", "false").strip().lower()
+    moderation_required = values.get("COMMUNITY_MODERATION_REQUIRED", "true").strip().lower()
+    for name, value in (
+        ("COMMUNITY_UGC_ENABLED", community_enabled),
+        ("COMMUNITY_UGC_WRITES_ENABLED", community_writes_enabled),
+        ("COMMUNITY_MODERATION_REQUIRED", moderation_required),
+    ):
+        if value not in FALSE_VALUES | TRUE_VALUES:
+            errors.append(f"{name}_INVALID_BOOLEAN")
+    if community_writes_enabled in TRUE_VALUES and community_enabled not in TRUE_VALUES:
+        errors.append("COMMUNITY_UGC_WRITES_REQUIRES_COMMUNITY_UGC_ENABLED")
+    if environment == "prod":
+        if community_writes_enabled not in FALSE_VALUES:
+            errors.append("COMMUNITY_UGC_WRITES_FORBIDDEN_IN_PRODUCTION")
+        if moderation_required not in TRUE_VALUES:
+            errors.append("COMMUNITY_MODERATION_REQUIRED_IN_PRODUCTION")
+
     kuaidi100_subscribe_value = values.get("KUAIDI100_SUBSCRIBE_ENABLED", "false").strip().lower()
     if kuaidi100_subscribe_value not in FALSE_VALUES | TRUE_VALUES:
         errors.append("KUAIDI100_SUBSCRIBE_ENABLED_INVALID_BOOLEAN")

@@ -14,6 +14,7 @@ from app.migrations.versions import v20260712_04_p1b_report_snapshots
 from app.migrations.versions import v20260712_05_p1c_runtime_tasks
 from app.migrations.versions import v20260712_06_p1_material_price_cents
 from app.migrations.versions import v20260713_07_order_receipt_completion
+from app.migrations.versions import v20260717_09_community_ugc_core
 
 MIGRATIONS = [
     v20260712_01_p0a_security,
@@ -23,6 +24,7 @@ MIGRATIONS = [
     v20260712_05_p1c_runtime_tasks,
     v20260712_06_p1_material_price_cents,
     v20260713_07_order_receipt_completion,
+    v20260717_09_community_ugc_core,
 ]
 
 

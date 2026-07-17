@@ -119,6 +119,35 @@ def test_environment_validator_fails_closed_and_keeps_databases_isolated():
     insecure_subscription = dict(enabled_subscription)
     insecure_subscription["KUAIDI100_CALLBACK_URL"] = "http://api.invalid/callback"
     assert "KUAIDI100_CALLBACK_URL_MUST_USE_HTTPS" in validate(insecure_subscription, "prod")
+    invalid_community = valid_environment("prod")
+    invalid_community["COMMUNITY_UGC_ENABLED"] = "sometimes"
+    assert "COMMUNITY_UGC_ENABLED_INVALID_BOOLEAN" in validate(invalid_community, "prod")
+    writes_without_reads = valid_environment("prod")
+    writes_without_reads["COMMUNITY_UGC_WRITES_ENABLED"] = "true"
+    assert "COMMUNITY_UGC_WRITES_REQUIRES_COMMUNITY_UGC_ENABLED" in validate(
+        writes_without_reads, "prod"
+    )
+    production_writes = valid_environment("prod")
+    production_writes.update(
+        {"COMMUNITY_UGC_ENABLED": "true", "COMMUNITY_UGC_WRITES_ENABLED": "true"}
+    )
+    assert "COMMUNITY_UGC_WRITES_FORBIDDEN_IN_PRODUCTION" in validate(
+        production_writes, "prod"
+    )
+    production_without_moderation = valid_environment("prod")
+    production_without_moderation["COMMUNITY_MODERATION_REQUIRED"] = "false"
+    assert "COMMUNITY_MODERATION_REQUIRED_IN_PRODUCTION" in validate(
+        production_without_moderation, "prod"
+    )
+    test_writes = valid_environment("test")
+    test_writes.update(
+        {
+            "COMMUNITY_UGC_ENABLED": "true",
+            "COMMUNITY_UGC_WRITES_ENABLED": "true",
+            "COMMUNITY_MODERATION_REQUIRED": "false",
+        }
+    )
+    assert validate(test_writes, "test") == []
 
 
 def test_example_environment_files_have_expected_shape():
@@ -136,6 +165,39 @@ def test_strict_startup_rejects_missing_configuration(monkeypatch):
     assert "MYSQL_PASSWORD_MISSING" in errors
     assert "RELEASE_VERSION_MISSING" in errors
     with pytest.raises(RuntimeError, match="startup configuration rejected"):
+        assert_startup_configuration()
+
+
+def test_production_startup_rejects_community_writes_and_disabled_moderation(monkeypatch):
+    for name, value in valid_environment("prod").items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setenv("COMMUNITY_UGC_ENABLED", "true")
+    monkeypatch.setenv("COMMUNITY_UGC_WRITES_ENABLED", "true")
+    monkeypatch.setenv("COMMUNITY_MODERATION_REQUIRED", "false")
+
+    errors = required_config_errors()
+
+    assert "COMMUNITY_UGC_WRITES_FORBIDDEN_IN_PRODUCTION" in errors
+    assert "COMMUNITY_MODERATION_REQUIRED_IN_PRODUCTION" in errors
+    with pytest.raises(RuntimeError, match="COMMUNITY_UGC_WRITES_FORBIDDEN_IN_PRODUCTION"):
+        assert_startup_configuration()
+
+
+@pytest.mark.parametrize("app_env", ["prod", "staging", "preview", "unknown"])
+def test_non_safe_environment_names_cannot_bypass_community_write_gate(
+    monkeypatch, app_env
+):
+    monkeypatch.setenv("APP_ENV", app_env)
+    monkeypatch.setenv("DATABASE_BACKEND", "sqlite")
+    monkeypatch.setenv("COMMUNITY_UGC_ENABLED", "true")
+    monkeypatch.setenv("COMMUNITY_UGC_WRITES_ENABLED", "true")
+    monkeypatch.setenv("COMMUNITY_MODERATION_REQUIRED", "false")
+
+    errors = required_config_errors()
+
+    assert "COMMUNITY_UGC_WRITES_FORBIDDEN_IN_PRODUCTION" in errors
+    assert "COMMUNITY_MODERATION_REQUIRED_IN_PRODUCTION" in errors
+    with pytest.raises(RuntimeError, match="COMMUNITY_UGC_WRITES_FORBIDDEN_IN_PRODUCTION"):
         assert_startup_configuration()
 
 

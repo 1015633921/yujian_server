@@ -35,6 +35,7 @@ def test_p0a_migration_is_explicit_idempotent_and_reversible(tmp_path):
         "20260712_05_p1c_runtime_tasks",
         "20260712_06_p1_material_price_cents",
         "20260713_07_order_receipt_completion",
+        "20260717_09_community_ugc_core",
     ]
     assert upgrade("sqlite", db_path) == []
     assert "user_sessions" in sqlite_tables(db_path)
@@ -46,6 +47,7 @@ def test_p0a_migration_is_explicit_idempotent_and_reversible(tmp_path):
     }.issubset(sqlite_columns(db_path, "diy_designs"))
 
     assert downgrade("sqlite", db_path) == [
+        "20260717_09_community_ugc_core",
         "20260713_07_order_receipt_completion",
         "20260712_06_p1_material_price_cents",
         "20260712_05_p1c_runtime_tasks",
@@ -65,4 +67,5 @@ def test_p0a_migration_is_explicit_idempotent_and_reversible(tmp_path):
         "20260712_05_p1c_runtime_tasks",
         "20260712_06_p1_material_price_cents",
         "20260713_07_order_receipt_completion",
+        "20260717_09_community_ugc_core",
     ]

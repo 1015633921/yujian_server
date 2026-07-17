@@ -43,3 +43,22 @@ def metrics_endpoint_enabled() -> bool:
 
 def kuaidi100_subscribe_enabled() -> bool:
     return enabled("KUAIDI100_SUBSCRIBE_ENABLED", False)
+
+
+def community_ugc_enabled() -> bool:
+    return enabled("COMMUNITY_UGC_ENABLED", False)
+
+
+def community_ugc_writes_enabled() -> bool:
+    return enabled("COMMUNITY_UGC_WRITES_ENABLED", False)
+
+
+def community_moderation_required() -> bool:
+    value = os.getenv("COMMUNITY_MODERATION_REQUIRED")
+    if value is None:
+        return True
+    normalized = value.strip().lower()
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    # Invalid values must never bypass moderation; readiness reports the error.
+    return True

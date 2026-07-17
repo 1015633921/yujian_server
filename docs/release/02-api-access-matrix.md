@@ -19,6 +19,9 @@
 | GET | `/api/v1/home-banners` | 无 / 无 | Public | 无 | 否 | 无 | N/A | 是 | `test_api.py` |
 | GET | `/api/v1/community-posts` | 无 / 无 | Public | 无 | 否 | 无 | N/A | 是 | `test_api.py` |
 | GET | `/api/v1/community-posts/{post_id}` | 无 / 无 | Public | 已发布内容 | 否 | 发布态校验 | N/A | 是 | `test_api.py` |
+| GET | `/api/v1/community/readiness` | 无 / 无 | Public readiness | 无 | 否 | 无 | N/A | 是 | `test_community_ugc.py` |
+| GET | `/api/v1/community/posts[/{post_id}]` | 默认关闭；无 / 无 | Public UGC | 已发布内容 | 否 | 发布态校验 | N/A | 是 | `test_community_ugc.py` |
+| GET | `/api/v1/community/posts/{post_id}/comments` | 默认关闭；无 / 无 | Public UGC | 已发布帖子与有效评论 | 否 | 发布态校验 | N/A | 是 | `test_community_ugc.py` |
 | GET | `/api/v1/recommendation-plans` | 无 / 无 | Public | 无 | 否 | 无 | N/A | 是 | `test_api.py` |
 | GET | `/api/v1/recommendation-plans/{plan_id}` | 无 / 无 | Public | 已发布内容 | 否 | 发布态校验 | N/A | 是 | `test_api.py` |
 | POST | `/api/v1/auth/wechat-login` | 微信 code/header / 微信身份交换后创建会话 | Public 登录 | 微信主体 | 否 | 无 | N/A | 否 | `test_p0a_security.py` |
@@ -40,6 +43,12 @@
 | POST | `/api/v1/auth/profile` | session.user | body 校验 | 是 | 不自动重试 | `test_p0a_security.py` |
 | POST | `/api/v1/auth/phone` | session.user | body 校验 | 是 | 不自动重试 | `test_api.py` |
 | GET/POST/DELETE | `/api/v1/community-favorites[/{post_id}]` | session.user | query/body 校验 | 是 | GET 可重试；写不重试 | `test_p0a_security.py` |
+| GET/POST/PATCH/DELETE | `/api/v1/community/me/posts`, `/api/v1/community/posts[/{post_id}]` | session.user / post.owner | 不接收 | 新增接口 | owner CRUD；草稿/待审/发布状态机 | `test_community_ugc.py` |
+| POST | `/api/v1/community/posts/{post_id}/submit`, `/withdraw` | post.owner | 不接收 | 新增接口 | `pending` 重复提交和草稿重复撤回返回 `changed=false`；关闭审核时直接发布的重复提交也幂等；其余状态冲突返回 409 | `test_community_ugc.py` |
+| PUT/DELETE | `/api/v1/community/posts/{post_id}/like`, `/save` | session.user | 不接收 | 新增接口 | 唯一键保证幂等 | `test_community_ugc.py` |
+| POST/DELETE | `/api/v1/community/posts/{post_id}/comments`, `/api/v1/community/comments/{comment_id}` | session.user / comment.author | 不接收 | 新增接口 | 一级评论；作者软删除 | `test_community_ugc.py` |
+| PUT/DELETE | `/api/v1/community/users/{user_id}/follow` | session.user | 不接收 | 新增接口 | 唯一键保证幂等；禁止关注自己 | `test_community_ugc.py` |
+| POST | `/api/v1/community/reports` | session.user | 不接收 | 新增接口 | reporter + target 唯一去重 | `test_community_ugc.py` |
 | POST | `/api/v1/diy-designs` | session.user | body 校验 | 是 | 不自动重试 | `test_p0a_security.py` |
 | POST | `/api/v1/diy-designs/preview` | session.user | form 校验 | 是 | 不自动重试 | `test_p0a_security.py` |
 | GET | `/api/v1/diy-designs` | session.user | query 可选校验 | 是 | GET 可受控重试一次 | `test_p0a_security.py` |

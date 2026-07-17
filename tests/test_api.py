@@ -1715,7 +1715,16 @@ def test_mock_trade_api_is_not_reachable_in_production(monkeypatch):
 
 
 def test_diy_design_list_and_delete(tmp_path):
-    service = OrderService(tmp_path / "design-assets.db")
+    db_path = tmp_path / "design-assets.db"
+    repository = AssessmentRepository(db_path)
+    service = OrderService(db_path)
+    repository.upsert_user(
+        {
+            "user_id": "design-user",
+            "source": "test",
+            "updated_at": "2026-07-17T00:00:00+00:00",
+        }
+    )
     saved = service.save_design(
         {
             "user_id": "design-user",
@@ -1874,7 +1883,16 @@ def test_cart_item_idempotency_key_is_scoped_to_user(tmp_path):
 
 
 def test_community_favorites_are_user_scoped_and_mutable(tmp_path):
-    service = OrderService(tmp_path / "community-favorites.db")
+    db_path = tmp_path / "community-favorites.db"
+    repository = AssessmentRepository(db_path)
+    service = OrderService(db_path)
+    repository.upsert_user(
+        {
+            "user_id": "favorite-user",
+            "source": "test",
+            "updated_at": "2026-07-17T00:00:00+00:00",
+        }
+    )
     saved = service.save_community_favorite(
         {
             "user_id": "favorite-user",

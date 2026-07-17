@@ -249,6 +249,30 @@ class OrderService:
     def connect(self):
         return connect_database(self.db_path if self._force_sqlite else None)
 
+    def _lock_existing_users(self, connection, *user_ids: str) -> None:
+        expected = sorted(set(user_ids))
+        placeholders = ", ".join("?" for _ in expected)
+        lock = " FOR UPDATE" if self.mysql_transactions else ""
+        rows = connection.execute(
+            f"SELECT user_id FROM users WHERE user_id IN ({placeholders}) "
+            f"ORDER BY user_id{lock}",
+            tuple(expected),
+        ).fetchall()
+        if {str(row["user_id"]) for row in rows} != set(expected):
+            raise ValueError("用户不存在")
+
+    def _table_exists(self, connection, table: str) -> bool:
+        if self.mysql_transactions:
+            return connection.execute(
+                "SELECT 1 FROM INFORMATION_SCHEMA.TABLES "
+                "WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? LIMIT 1",
+                (os.environ["MYSQL_DATABASE"], table),
+            ).fetchone() is not None
+        return connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1",
+            (table,),
+        ).fetchone() is not None
+
     def init_db(self) -> None:
         if use_mysql() and not self._force_sqlite:
             if not runtime_schema_mutation_allowed():
@@ -557,13 +581,32 @@ class OrderService:
         return [self.public_design(dict(row)) for row in rows]
 
     def delete_design(self, design_id: str, user_id: str) -> dict[str, Any]:
-        design = self.get_design(design_id)
-        if design["user_id"] != user_id:
-            raise ValueError("no permission to delete this DIY design")
-        if design.get("order_id"):
-            raise ValueError("ordered DIY design snapshots cannot be deleted")
         with self.connect() as connection:
-            connection.execute("DELETE FROM diy_designs WHERE design_id = ? AND user_id = ?", (design_id, user_id))
+            self.begin_order_transaction(connection)
+            self._lock_existing_users(connection, user_id)
+            lock = " FOR UPDATE" if self.mysql_transactions else ""
+            design = connection.execute(
+                "SELECT design_id, user_id, order_id FROM diy_designs "
+                f"WHERE design_id = ? LIMIT 1{lock}",
+                (design_id,),
+            ).fetchone()
+            if not design or design["user_id"] != user_id:
+                raise ValueError("no permission to delete this DIY design")
+            if design["order_id"]:
+                raise ValueError("ordered DIY design snapshots cannot be deleted")
+            if self._table_exists(connection, "community_ugc_posts"):
+                references = connection.execute(
+                    "SELECT post_id FROM community_ugc_posts "
+                    "WHERE design_id = ? AND deleted_at IS NULL ORDER BY post_id"
+                    f"{lock}",
+                    (design_id,),
+                ).fetchall()
+                if references:
+                    raise ValueError("已被灵感帖子引用的 DIY 方案不能删除")
+            connection.execute(
+                "DELETE FROM diy_designs WHERE design_id = ? AND user_id = ?",
+                (design_id, user_id),
+            )
         return {"design_id": design_id, "deleted": True}
 
     def list_cart_items(self, user_id: str) -> list[dict[str, Any]]:
@@ -683,8 +726,12 @@ class OrderService:
         item = {**item, "id": item.get("id") or post_id, "post_id": post_id}
         timestamp = now_iso()
         with self.connect() as connection:
+            self.begin_order_transaction(connection)
+            self._lock_existing_users(connection, user_id)
+            lock = " FOR UPDATE" if self.mysql_transactions else ""
             existing = connection.execute(
-                "SELECT user_id FROM community_favorites WHERE user_id = ? AND post_id = ?",
+                "SELECT user_id FROM community_favorites WHERE user_id = ? AND post_id = ?"
+                f"{lock}",
                 (user_id, post_id),
             ).fetchone()
             if existing:
@@ -704,7 +751,11 @@ class OrderService:
                     """,
                     (user_id, post_id, json.dumps(item, ensure_ascii=False), timestamp, timestamp),
                 )
-        return self.get_community_favorite(user_id, post_id)
+            row = connection.execute(
+                "SELECT * FROM community_favorites WHERE user_id = ? AND post_id = ?",
+                (user_id, post_id),
+            ).fetchone()
+        return self.public_community_favorite(dict(row))
 
     def get_community_favorite(self, user_id: str, post_id: str) -> dict[str, Any]:
         with self.connect() as connection:
@@ -718,6 +769,8 @@ class OrderService:
 
     def delete_community_favorite(self, user_id: str, post_id: str) -> dict[str, Any]:
         with self.connect() as connection:
+            self.begin_order_transaction(connection)
+            self._lock_existing_users(connection, user_id)
             connection.execute(
                 "DELETE FROM community_favorites WHERE user_id = ? AND post_id = ?",
                 (user_id, post_id),

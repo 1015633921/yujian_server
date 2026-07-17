@@ -566,6 +566,219 @@ class AssessmentRepository:
             ).fetchone()
         return row is not None
 
+    @property
+    def _uses_mysql(self) -> bool:
+        return use_mysql() and not self._force_sqlite
+
+    def _merge_community_post_relation(
+        self,
+        connection,
+        table: str,
+        old_user_id: str,
+        new_user_id: str,
+    ) -> None:
+        """Merge a post/user relation while preserving its earliest timestamp."""
+
+        if not self.table_exists(connection, table):
+            return
+        lock = " FOR UPDATE" if self._uses_mysql else ""
+        rows = connection.execute(
+            f"SELECT post_id, user_id, created_at FROM {table} "
+            f"WHERE user_id IN (?, ?) ORDER BY post_id, user_id{lock}",
+            (old_user_id, new_user_id),
+        ).fetchall()
+        if not rows:
+            return
+        merged: dict[str, str] = {}
+        for row in rows:
+            post_id = str(row["post_id"])
+            created_at = str(row["created_at"])
+            merged[post_id] = min(merged.get(post_id, created_at), created_at)
+        connection.execute(
+            f"DELETE FROM {table} WHERE user_id IN (?, ?)",
+            (old_user_id, new_user_id),
+        )
+        for post_id, created_at in merged.items():
+            connection.execute(
+                f"INSERT INTO {table} (post_id, user_id, created_at) VALUES (?, ?, ?)",
+                (post_id, new_user_id, created_at),
+            )
+
+    def _merge_community_favorites(
+        self,
+        connection,
+        old_user_id: str,
+        new_user_id: str,
+    ) -> None:
+        """Merge legacy editorial favorites by newest snapshot and earliest creation."""
+
+        table = "community_favorites"
+        if not self.table_exists(connection, table):
+            return
+        lock = " FOR UPDATE" if self._uses_mysql else ""
+        rows = connection.execute(
+            "SELECT user_id, post_id, item_json, created_at, updated_at "
+            f"FROM {table} WHERE user_id IN (?, ?) ORDER BY post_id, updated_at, user_id{lock}",
+            (old_user_id, new_user_id),
+        ).fetchall()
+        if not rows:
+            return
+        merged: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            candidate = dict(row)
+            post_id = str(candidate["post_id"])
+            current = merged.get(post_id)
+            if current is None:
+                candidate["created_at"] = str(candidate["created_at"])
+                merged[post_id] = candidate
+                continue
+            earliest = min(str(current["created_at"]), str(candidate["created_at"]))
+            candidate_order = (
+                str(candidate["updated_at"]),
+                candidate["user_id"] == new_user_id,
+            )
+            current_order = (
+                str(current["updated_at"]),
+                current["user_id"] == new_user_id,
+            )
+            winner = candidate if candidate_order > current_order else current
+            winner["created_at"] = earliest
+            merged[post_id] = winner
+        connection.execute(
+            f"DELETE FROM {table} WHERE user_id IN (?, ?)",
+            (old_user_id, new_user_id),
+        )
+        for row in merged.values():
+            connection.execute(
+                f"INSERT INTO {table} (user_id, post_id, item_json, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (
+                    new_user_id,
+                    row["post_id"],
+                    row["item_json"],
+                    row["created_at"],
+                    row["updated_at"],
+                ),
+            )
+
+    def _merge_community_follows(
+        self,
+        connection,
+        old_user_id: str,
+        new_user_id: str,
+    ) -> None:
+        table = "community_ugc_follows"
+        if not self.table_exists(connection, table):
+            return
+        lock = " FOR UPDATE" if self._uses_mysql else ""
+        rows = connection.execute(
+            "SELECT follower_user_id, followed_user_id, created_at "
+            f"FROM {table} WHERE follower_user_id IN (?, ?) OR followed_user_id IN (?, ?) "
+            f"ORDER BY follower_user_id, followed_user_id{lock}",
+            (old_user_id, new_user_id, old_user_id, new_user_id),
+        ).fetchall()
+        if not rows:
+            return
+        merged: dict[tuple[str, str], str] = {}
+        for row in rows:
+            follower = (
+                new_user_id
+                if row["follower_user_id"] == old_user_id
+                else str(row["follower_user_id"])
+            )
+            followed = (
+                new_user_id
+                if row["followed_user_id"] == old_user_id
+                else str(row["followed_user_id"])
+            )
+            if follower == followed:
+                continue
+            key = (follower, followed)
+            created_at = str(row["created_at"])
+            merged[key] = min(merged.get(key, created_at), created_at)
+        connection.execute(
+            f"DELETE FROM {table} WHERE follower_user_id IN (?, ?) OR followed_user_id IN (?, ?)",
+            (old_user_id, new_user_id, old_user_id, new_user_id),
+        )
+        for (follower, followed), created_at in merged.items():
+            connection.execute(
+                f"INSERT INTO {table} (follower_user_id, followed_user_id, created_at) "
+                "VALUES (?, ?, ?)",
+                (follower, followed, created_at),
+            )
+
+    def _merge_community_reports(
+        self,
+        connection,
+        old_user_id: str,
+        new_user_id: str,
+    ) -> None:
+        table = "community_ugc_reports"
+        if not self.table_exists(connection, table):
+            return
+        lock = " FOR UPDATE" if self._uses_mysql else ""
+        rows = connection.execute(
+            "SELECT report_id, reporter_user_id, target_type, target_id, reason, detail, "
+            f"status, created_at, updated_at FROM {table} "
+            f"WHERE reporter_user_id IN (?, ?) ORDER BY target_type, target_id, created_at, report_id{lock}",
+            (old_user_id, new_user_id),
+        ).fetchall()
+        if not rows:
+            return
+        winners: dict[tuple[str, str], dict[str, Any]] = {}
+        for row in rows:
+            candidate = dict(row)
+            key = (str(candidate["target_type"]), str(candidate["target_id"]))
+            current = winners.get(key)
+            candidate_order = (str(candidate["created_at"]), str(candidate["report_id"]))
+            if current is None or candidate_order < (
+                str(current["created_at"]),
+                str(current["report_id"]),
+            ):
+                winners[key] = candidate
+        connection.execute(
+            f"DELETE FROM {table} WHERE reporter_user_id IN (?, ?)",
+            (old_user_id, new_user_id),
+        )
+        for row in winners.values():
+            connection.execute(
+                f"INSERT INTO {table} "
+                "(report_id, reporter_user_id, target_type, target_id, reason, detail, status, "
+                "created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    row["report_id"],
+                    new_user_id,
+                    row["target_type"],
+                    row["target_id"],
+                    row["reason"],
+                    row["detail"],
+                    row["status"],
+                    row["created_at"],
+                    row["updated_at"],
+                ),
+            )
+
+    def _reassign_community_user_id(
+        self,
+        connection,
+        old_user_id: str,
+        new_user_id: str,
+    ) -> None:
+        if self.table_exists(connection, "community_ugc_posts"):
+            connection.execute(
+                "UPDATE community_ugc_posts SET owner_user_id = ? WHERE owner_user_id = ?",
+                (new_user_id, old_user_id),
+            )
+        for table in ("community_ugc_likes", "community_ugc_saves"):
+            self._merge_community_post_relation(connection, table, old_user_id, new_user_id)
+        if self.table_exists(connection, "community_ugc_comments"):
+            connection.execute(
+                "UPDATE community_ugc_comments SET author_user_id = ? WHERE author_user_id = ?",
+                (new_user_id, old_user_id),
+            )
+        self._merge_community_follows(connection, old_user_id, new_user_id)
+        self._merge_community_reports(connection, old_user_id, new_user_id)
+
     def reassign_user_id(self, old_user_id: str, new_user_id: str, updated_at: str) -> dict[str, Any]:
         if old_user_id == new_user_id:
             user = self.get_user(new_user_id)
@@ -573,17 +786,20 @@ class AssessmentRepository:
                 raise ValueError("user not found")
             return user
         with self._lock, self.connect() as connection:
-            existing = connection.execute(
-                "SELECT * FROM users WHERE user_id = ?",
-                (old_user_id,),
-            ).fetchone()
+            if not self._uses_mysql:
+                connection.execute("BEGIN IMMEDIATE")
+            lock = " FOR UPDATE" if self._uses_mysql else ""
+            locked_user_ids = tuple(sorted((old_user_id, new_user_id)))
+            locked_users = connection.execute(
+                "SELECT * FROM users WHERE user_id IN (?, ?) ORDER BY user_id"
+                f"{lock}",
+                locked_user_ids,
+            ).fetchall()
+            users_by_id = {str(row["user_id"]): row for row in locked_users}
+            existing = users_by_id.get(old_user_id)
             if existing is None:
                 raise ValueError("user not found")
-            collision = connection.execute(
-                "SELECT 1 FROM users WHERE user_id = ? LIMIT 1",
-                (new_user_id,),
-            ).fetchone()
-            if collision is not None:
+            if new_user_id in users_by_id:
                 raise ValueError("new user_id already exists")
             for table in (
                 "energy_assessments",
@@ -597,6 +813,7 @@ class AssessmentRepository:
                 "cart_items",
                 "user_addresses",
                 "user_coupons",
+                "user_sessions",
             ):
                 if not self.table_exists(connection, table):
                     continue
@@ -604,6 +821,8 @@ class AssessmentRepository:
                     f"UPDATE {table} SET user_id = ? WHERE user_id = ?",
                     (new_user_id, old_user_id),
                 )
+            self._merge_community_favorites(connection, old_user_id, new_user_id)
+            self._reassign_community_user_id(connection, old_user_id, new_user_id)
             connection.execute(
                 "UPDATE users SET user_id = ?, updated_at = ? WHERE user_id = ?",
                 (new_user_id, updated_at, old_user_id),

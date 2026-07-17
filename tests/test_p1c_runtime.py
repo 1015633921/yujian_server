@@ -245,6 +245,24 @@ def test_readiness_checks_database_and_required_configuration(tmp_path, monkeypa
     assert client.get("/health/live").status_code == 200
 
 
+def test_global_readiness_requires_community_migration_record_when_read_is_enabled(
+    tmp_path, monkeypatch
+):
+    from app.migrations.versions.v20260717_09_community_ugc_core import VERSION
+
+    db_path = runtime_db(tmp_path)
+    monkeypatch.setenv("DATABASE_BACKEND", "sqlite")
+    monkeypatch.setenv("COMMUNITY_UGC_ENABLED", "true")
+    with sqlite3.connect(db_path) as connection:
+        connection.execute("DELETE FROM schema_migrations WHERE version = ?", (VERSION,))
+
+    result = readiness(db_path)
+
+    assert result["ready"] is False
+    assert result["missing_tables"] == []
+    assert result["missing_migrations"] == [VERSION]
+
+
 def test_metrics_endpoint_is_closed_by_default_and_requires_token(monkeypatch):
     monkeypatch.delenv("METRICS_ENDPOINT_ENABLED", raising=False)
     assert client.get("/internal/metrics").status_code == 404
@@ -340,7 +358,8 @@ def test_p1c_runtime_migration_round_trip(tmp_path):
     with sqlite3.connect(db_path) as connection:
         tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     assert {"runtime_task_leases", "runtime_task_runs"}.issubset(tables)
-    assert downgrade("sqlite", db_path, steps=3) == [
+    assert downgrade("sqlite", db_path, steps=4) == [
+        "20260717_09_community_ugc_core",
         "20260713_07_order_receipt_completion",
         "20260712_06_p1_material_price_cents",
         "20260712_05_p1c_runtime_tasks",
@@ -349,4 +368,5 @@ def test_p1c_runtime_migration_round_trip(tmp_path):
         "20260712_05_p1c_runtime_tasks",
         "20260712_06_p1_material_price_cents",
         "20260713_07_order_receipt_completion",
+        "20260717_09_community_ugc_core",
     ]

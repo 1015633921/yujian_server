@@ -55,6 +55,7 @@ def test_mysql_payment_event_migration_and_concurrent_deduplication(monkeypatch)
     AdminService()
     OrderService()
     upgrade("mysql")
+    assert downgrade("mysql", steps=1) == ["20260717_09_community_ugc_core"]
     assert downgrade("mysql", steps=1) == ["20260713_07_order_receipt_completion"]
     assert downgrade("mysql", steps=1) == ["20260712_06_p1_material_price_cents"]
     assert downgrade("mysql", steps=1) == ["20260712_05_p1c_runtime_tasks"]
@@ -66,6 +67,7 @@ def test_mysql_payment_event_migration_and_concurrent_deduplication(monkeypatch)
         "20260712_05_p1c_runtime_tasks",
         "20260712_06_p1_material_price_cents",
         "20260713_07_order_receipt_completion",
+        "20260717_09_community_ugc_core",
     ]
 
     service = OrderService()

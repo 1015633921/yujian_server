@@ -8,12 +8,26 @@ from typing import Any
 from urllib.parse import urlparse
 
 from .database import DEFAULT_SQLITE_PATH, MySQLConnection, use_mysql
-from .feature_flags import checkout_enabled, kuaidi100_subscribe_enabled, payment_enabled, report_versioning_v2_enabled
+from .feature_flags import (
+    checkout_enabled,
+    community_ugc_enabled,
+    community_ugc_writes_enabled,
+    kuaidi100_subscribe_enabled,
+    payment_enabled,
+    report_versioning_v2_enabled,
+)
 from .observability import metrics
+from .migrations.versions.v20260717_09_community_ugc_core import (
+    VERSION as COMMUNITY_UGC_MIGRATION_VERSION,
+)
+
+
+COMMUNITY_WRITE_SAFE_APP_ENVS = {"development", "dev", "local", "test", "testing"}
 
 
 def required_config_errors() -> list[str]:
     errors: list[str] = []
+    boolean_values = {"0", "1", "false", "true", "no", "yes", "off", "on"}
     backend = os.getenv("DATABASE_BACKEND", "sqlite").lower()
     if backend not in {"sqlite", "mysql"}:
         errors.append("DATABASE_BACKEND_INVALID")
@@ -84,13 +98,29 @@ def required_config_errors() -> list[str]:
         for label, names in alternatives.items():
             if not any(os.getenv(name) for name in names):
                 errors.append(f"{label}_MISSING")
+    if community_ugc_writes_enabled() and not community_ugc_enabled():
+        errors.append("COMMUNITY_UGC_WRITES_REQUIRES_COMMUNITY_UGC_ENABLED")
+    for name, default in (
+        ("COMMUNITY_UGC_ENABLED", "false"),
+        ("COMMUNITY_UGC_WRITES_ENABLED", "false"),
+        ("COMMUNITY_MODERATION_REQUIRED", "true"),
+    ):
+        if str(os.getenv(name, default)).strip().lower() not in boolean_values:
+            errors.append(f"{name}_INVALID_BOOLEAN")
+    if app_env not in COMMUNITY_WRITE_SAFE_APP_ENVS:
+        if community_ugc_writes_enabled():
+            errors.append("COMMUNITY_UGC_WRITES_FORBIDDEN_IN_PRODUCTION")
+        moderation = str(os.getenv("COMMUNITY_MODERATION_REQUIRED", "true")).strip().lower()
+        if moderation not in {"1", "true", "yes", "on"}:
+            errors.append("COMMUNITY_MODERATION_REQUIRED_IN_PRODUCTION")
     return errors
 
 
 def assert_startup_configuration() -> None:
-    if os.getenv("APP_ENV", "development").lower() not in {"test", "production"}:
-        return
+    app_env = os.getenv("APP_ENV", "development").lower()
     errors = required_config_errors()
+    if app_env not in {"test", "production"}:
+        errors = [error for error in errors if error.startswith("COMMUNITY_")]
     if errors:
         raise RuntimeError("startup configuration rejected: " + ", ".join(sorted(errors)))
 
@@ -103,6 +133,17 @@ def _required_tables() -> tuple[str, ...]:
         required.append("payment_webhook_events")
     if report_versioning_v2_enabled():
         required.extend(("report_snapshots", "report_generation_requests"))
+    if community_ugc_enabled():
+        required.extend(
+            (
+                "community_ugc_posts",
+                "community_ugc_likes",
+                "community_ugc_saves",
+                "community_ugc_comments",
+                "community_ugc_follows",
+                "community_ugc_reports",
+            )
+        )
     return tuple(required)
 
 
@@ -122,7 +163,19 @@ def _probe_connection(connection, backend: str, database: str = "") -> dict[str,
             ).fetchone()
         if not exists:
             missing_tables.append(table)
-    return {"ok": not missing_tables, "missing_tables": missing_tables}
+    missing_migrations: list[str] = []
+    if community_ugc_enabled() and "schema_migrations" not in missing_tables:
+        migration = connection.execute(
+            "SELECT 1 FROM schema_migrations WHERE version = ? LIMIT 1",
+            (COMMUNITY_UGC_MIGRATION_VERSION,),
+        ).fetchone()
+        if not migration:
+            missing_migrations.append(COMMUNITY_UGC_MIGRATION_VERSION)
+    return {
+        "ok": not missing_tables and not missing_migrations,
+        "missing_tables": missing_tables,
+        "missing_migrations": missing_migrations,
+    }
 
 
 def database_readiness(sqlite_path: Path | None = None) -> dict[str, Any]:
@@ -135,7 +188,12 @@ def database_readiness(sqlite_path: Path | None = None) -> dict[str, Any]:
                 connection.raw.close()
         path = Path(sqlite_path or DEFAULT_SQLITE_PATH)
         if not path.exists():
-            return {"ok": False, "reason": "database_missing", "missing_tables": []}
+            return {
+                "ok": False,
+                "reason": "database_missing",
+                "missing_tables": [],
+                "missing_migrations": [],
+            }
         uri = f"file:{path.resolve()}?mode=ro"
         connection = sqlite3.connect(uri, uri=True)
         connection.row_factory = sqlite3.Row
@@ -145,7 +203,13 @@ def database_readiness(sqlite_path: Path | None = None) -> dict[str, Any]:
             connection.close()
     except Exception as exc:
         metrics.increment("db_error_total", operation="readiness")
-        return {"ok": False, "reason": "database_unavailable", "error_type": type(exc).__name__, "missing_tables": []}
+        return {
+            "ok": False,
+            "reason": "database_unavailable",
+            "error_type": type(exc).__name__,
+            "missing_tables": [],
+            "missing_migrations": [],
+        }
 
 
 def readiness(sqlite_path: Path | None = None) -> dict[str, Any]:
@@ -160,4 +224,5 @@ def readiness(sqlite_path: Path | None = None) -> dict[str, Any]:
         },
         "missing_config": config_errors,
         "missing_tables": database.get("missing_tables") or [],
+        "missing_migrations": database.get("missing_migrations") or [],
     }

@@ -20,6 +20,7 @@ assert_startup_configuration()
 from .admin_api import admin_router  # noqa: E402
 from .admin_page import admin_page  # noqa: E402
 from .api import legacy_router, router  # noqa: E402
+from .community_ugc_api import community_ugc_router  # noqa: E402
 from .observability import (
     REQUEST_ID_HEADER,
     Timer,
@@ -67,6 +68,7 @@ app.add_middleware(
 app.include_router(router)
 app.include_router(legacy_router)
 app.include_router(admin_router)
+app.include_router(community_ugc_router)
 
 
 @app.middleware("http")
