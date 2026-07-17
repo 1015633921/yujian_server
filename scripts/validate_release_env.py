@@ -147,6 +147,13 @@ def validate(values: dict[str, str], environment: str, allow_placeholders: bool 
     metrics_enabled = values.get("METRICS_ENDPOINT_ENABLED", "false").lower() in TRUE_VALUES
     if metrics_enabled:
         require("METRICS_ACCESS_TOKEN")
+    web_pairing_value = values.get("WEB_LOGIN_PAIRING_ENABLED", "false").strip().lower()
+    if web_pairing_value not in FALSE_VALUES | TRUE_VALUES:
+        errors.append("WEB_LOGIN_PAIRING_ENABLED_INVALID_BOOLEAN")
+    if web_pairing_value in TRUE_VALUES:
+        pairing_secret = require("WEB_LOGIN_PAIRING_BFF_SECRET")
+        if pairing_secret and not allow_placeholders and len(pairing_secret.encode("utf-8")) < 32:
+            errors.append("WEB_LOGIN_PAIRING_BFF_SECRET_TOO_SHORT")
     return sorted(set(errors))
 
 

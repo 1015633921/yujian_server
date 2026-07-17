@@ -120,6 +120,19 @@ def test_environment_validator_fails_closed_and_keeps_databases_isolated():
     insecure_subscription["KUAIDI100_CALLBACK_URL"] = "http://api.invalid/callback"
     assert "KUAIDI100_CALLBACK_URL_MUST_USE_HTTPS" in validate(insecure_subscription, "prod")
 
+    invalid_web_pairing = valid_environment("test")
+    invalid_web_pairing["WEB_LOGIN_PAIRING_ENABLED"] = "sometimes"
+    assert "WEB_LOGIN_PAIRING_ENABLED_INVALID_BOOLEAN" in validate(invalid_web_pairing, "test")
+    missing_web_pairing_secret = valid_environment("test")
+    missing_web_pairing_secret["WEB_LOGIN_PAIRING_ENABLED"] = "true"
+    assert "WEB_LOGIN_PAIRING_BFF_SECRET_MISSING" in validate(missing_web_pairing_secret, "test")
+    weak_web_pairing_secret = dict(missing_web_pairing_secret)
+    weak_web_pairing_secret["WEB_LOGIN_PAIRING_BFF_SECRET"] = "too-short"
+    assert "WEB_LOGIN_PAIRING_BFF_SECRET_TOO_SHORT" in validate(weak_web_pairing_secret, "test")
+    enabled_web_pairing = dict(missing_web_pairing_secret)
+    enabled_web_pairing["WEB_LOGIN_PAIRING_BFF_SECRET"] = "release-web-pairing-secret-32-bytes"
+    assert validate(enabled_web_pairing, "test") == []
+
 
 def test_example_environment_files_have_expected_shape():
     for environment in ("test", "prod"):

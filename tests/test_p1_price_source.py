@@ -29,7 +29,8 @@ def test_price_cents_migration_backfills_only_exact_positive_legacy_prices(tmp_p
     AdminService(db_path)
     OrderService(db_path)
     upgrade("sqlite", db_path)
-    assert downgrade("sqlite", db_path, steps=2) == [
+    assert downgrade("sqlite", db_path, steps=3) == [
+        "20260717_08_web_login_pairing",
         "20260713_07_order_receipt_completion",
         "20260712_06_p1_material_price_cents",
     ]
@@ -44,6 +45,7 @@ def test_price_cents_migration_backfills_only_exact_positive_legacy_prices(tmp_p
     assert upgrade("sqlite", db_path) == [
         "20260712_06_p1_material_price_cents",
         "20260713_07_order_receipt_completion",
+        "20260717_08_web_login_pairing",
     ]
     assert upgrade("sqlite", db_path) == []
     with sqlite3.connect(db_path) as connection:
@@ -57,7 +59,8 @@ def test_price_cents_migration_backfills_only_exact_positive_legacy_prices(tmp_p
     assert values[ids[1]] is None
     assert values[ids[2]] is None
 
-    assert downgrade("sqlite", db_path, steps=2) == [
+    assert downgrade("sqlite", db_path, steps=3) == [
+        "20260717_08_web_login_pairing",
         "20260713_07_order_receipt_completion",
         "20260712_06_p1_material_price_cents",
     ]

@@ -340,7 +340,8 @@ def test_p1c_runtime_migration_round_trip(tmp_path):
     with sqlite3.connect(db_path) as connection:
         tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     assert {"runtime_task_leases", "runtime_task_runs"}.issubset(tables)
-    assert downgrade("sqlite", db_path, steps=3) == [
+    assert downgrade("sqlite", db_path, steps=4) == [
+        "20260717_08_web_login_pairing",
         "20260713_07_order_receipt_completion",
         "20260712_06_p1_material_price_cents",
         "20260712_05_p1c_runtime_tasks",
@@ -349,4 +350,5 @@ def test_p1c_runtime_migration_round_trip(tmp_path):
         "20260712_05_p1c_runtime_tasks",
         "20260712_06_p1_material_price_cents",
         "20260713_07_order_receipt_completion",
+        "20260717_08_web_login_pairing",
     ]

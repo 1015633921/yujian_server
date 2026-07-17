@@ -23,6 +23,7 @@ os.environ.setdefault("REMOTE_AVATAR_FETCH_ENABLED", "false")
 os.environ.setdefault("LOGISTICS_SYNC_ENABLED", "false")
 os.environ.setdefault("KUAIDI100_SUBSCRIBE_ENABLED", "false")
 os.environ.setdefault("METRICS_ENDPOINT_ENABLED", "false")
+os.environ.setdefault("WEB_LOGIN_PAIRING_ENABLED", "false")
 os.environ.setdefault("ALLOW_DEV_WECHAT_LOGIN", "true")
 os.environ.setdefault("TRUST_CLOUDBASE_IDENTITY_HEADERS", "false")
 

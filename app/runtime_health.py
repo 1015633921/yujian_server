@@ -8,7 +8,13 @@ from typing import Any
 from urllib.parse import urlparse
 
 from .database import DEFAULT_SQLITE_PATH, MySQLConnection, use_mysql
-from .feature_flags import checkout_enabled, kuaidi100_subscribe_enabled, payment_enabled, report_versioning_v2_enabled
+from .feature_flags import (
+    checkout_enabled,
+    kuaidi100_subscribe_enabled,
+    payment_enabled,
+    report_versioning_v2_enabled,
+    web_login_pairing_enabled,
+)
 from .observability import metrics
 
 
@@ -49,6 +55,12 @@ def required_config_errors() -> list[str]:
     if str(os.getenv("METRICS_ENDPOINT_ENABLED", "false")).lower() in {"1", "true", "yes", "on"}:
         if not os.getenv("METRICS_ACCESS_TOKEN"):
             errors.append("METRICS_ACCESS_TOKEN_MISSING")
+    if web_login_pairing_enabled():
+        pairing_secret = os.getenv("WEB_LOGIN_PAIRING_BFF_SECRET", "")
+        if not pairing_secret:
+            errors.append("WEB_LOGIN_PAIRING_BFF_SECRET_MISSING")
+        elif len(pairing_secret.encode("utf-8")) < 32:
+            errors.append("WEB_LOGIN_PAIRING_BFF_SECRET_TOO_SHORT")
     subscribe_value = str(os.getenv("KUAIDI100_SUBSCRIBE_ENABLED", "false")).strip().lower()
     if subscribe_value not in {"0", "1", "false", "true", "no", "yes", "off", "on"}:
         errors.append("KUAIDI100_SUBSCRIBE_ENABLED_INVALID_BOOLEAN")
@@ -103,6 +115,8 @@ def _required_tables() -> tuple[str, ...]:
         required.append("payment_webhook_events")
     if report_versioning_v2_enabled():
         required.extend(("report_snapshots", "report_generation_requests"))
+    if web_login_pairing_enabled():
+        required.extend(("user_sessions", "web_login_pairings"))
     return tuple(required)
 
 

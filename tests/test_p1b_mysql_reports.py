@@ -51,6 +51,7 @@ def test_mysql_report_migration_and_concurrent_idempotency(monkeypatch):
     OrderService()
     AssessmentRepository()
     upgrade("mysql")
+    assert downgrade("mysql", steps=1) == ["20260717_08_web_login_pairing"]
     assert downgrade("mysql", steps=1) == ["20260713_07_order_receipt_completion"]
     assert downgrade("mysql", steps=1) == ["20260712_06_p1_material_price_cents"]
     assert downgrade("mysql", steps=1) == ["20260712_05_p1c_runtime_tasks"]
@@ -60,6 +61,7 @@ def test_mysql_report_migration_and_concurrent_idempotency(monkeypatch):
         "20260712_05_p1c_runtime_tasks",
         "20260712_06_p1_material_price_cents",
         "20260713_07_order_receipt_completion",
+        "20260717_08_web_login_pairing",
     ]
 
     user_id = "p1b-mysql-idempotency-user"

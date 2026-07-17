@@ -183,6 +183,7 @@ def test_risk_flags_default_to_closed(monkeypatch):
         "LOGISTICS_SYNC_ENABLED",
         "KUAIDI100_SUBSCRIBE_ENABLED",
         "METRICS_ENDPOINT_ENABLED",
+        "WEB_LOGIN_PAIRING_ENABLED",
     ):
         monkeypatch.delenv(name, raising=False)
     session, headers = login()
@@ -199,6 +200,7 @@ def test_risk_flags_default_to_closed(monkeypatch):
     assert checkout.status_code == 503
     assert client.get("/api/v1/diy-designs/shared/not-a-token").status_code == 503
     assert client.get("/internal/metrics").status_code == 404
+    assert client.post("/api/v1/auth/web-pairings").status_code == 503
     with pytest.raises(ValueError, match="已关闭"):
         AvatarStorage().upload_url(user_id, "https://thirdwx.qlogo.cn/avatar.png")
 

@@ -10,6 +10,7 @@ from app.repository import AssessmentRepository
 
 
 MIGRATION_VERSION = "20260713_07_order_receipt_completion"
+PAIRING_MIGRATION_VERSION = "20260717_08_web_login_pairing"
 
 
 def columns(path, table: str) -> set[str]:
@@ -28,6 +29,7 @@ def test_receipt_completion_migration_backfills_signed_order_and_round_trips(tmp
     OrderService(db_path)
     AssessmentRepository(db_path)
     upgrade("sqlite", db_path)
+    assert downgrade("sqlite", db_path, steps=1) == [PAIRING_MIGRATION_VERSION]
     assert downgrade("sqlite", db_path, steps=1) == [MIGRATION_VERSION]
     assert "logistics_signed_at" not in columns(db_path, "orders")
     assert "auto_complete_at" not in columns(db_path, "orders")
@@ -55,7 +57,7 @@ def test_receipt_completion_migration_backfills_signed_order_and_round_trips(tmp
             (timestamp, timestamp, timestamp, json.dumps(logistics, ensure_ascii=False)),
         )
 
-    assert upgrade("sqlite", db_path) == [MIGRATION_VERSION]
+    assert upgrade("sqlite", db_path) == [MIGRATION_VERSION, PAIRING_MIGRATION_VERSION]
     assert {"logistics_signed_at", "auto_complete_at"} <= columns(db_path, "orders")
     assert "idx_orders_auto_complete" in indexes(db_path, "orders")
     with sqlite3.connect(db_path) as connection:
@@ -73,6 +75,7 @@ def test_receipt_completion_migration_backfills_signed_order_and_round_trips(tmp
     assert migrated["auto_complete_at"] == row["auto_complete_at"]
     assert upgrade("sqlite", db_path) == []
 
+    assert downgrade("sqlite", db_path, steps=1) == [PAIRING_MIGRATION_VERSION]
     assert downgrade("sqlite", db_path, steps=1) == [MIGRATION_VERSION]
     assert "idx_orders_auto_complete" not in indexes(db_path, "orders")
     assert "auto_complete_at" not in columns(db_path, "orders")

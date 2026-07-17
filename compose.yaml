@@ -31,6 +31,7 @@ services:
       LOGISTICS_SYNC_ENABLED: "false"
       KUAIDI100_SUBSCRIBE_ENABLED: "${KUAIDI100_SUBSCRIBE_ENABLED:-false}"
       METRICS_ENDPOINT_ENABLED: "false"
+      WEB_LOGIN_PAIRING_ENABLED: "false"
       ALLOW_DEV_WECHAT_LOGIN: "false"
       TRUST_CLOUDBASE_IDENTITY_HEADERS: "false"
     networks:
@@ -116,6 +117,7 @@ services:
       ALLOW_DEV_WECHAT_LOGIN: "false"
       TRUST_CLOUDBASE_IDENTITY_HEADERS: "false"
       METRICS_ENDPOINT_ENABLED: "false"
+      WEB_LOGIN_PAIRING_ENABLED: "false"
     networks:
       - default
       - backend
