@@ -298,6 +298,14 @@ function logoutSession(token, options = {}) {
   });
 }
 
+function confirmWebLoginPairing(pairingId, verificationCode, options = {}) {
+  return request(`/api/v1/auth/web-pairings/${encodeURIComponent(pairingId)}/confirm`, {
+    ...options,
+    method: 'POST',
+    data: { verification_code: verificationCode }
+  });
+}
+
 function getUserProfile(userId, options = {}) {
   return request(`/api/v1/auth/profile?user_id=${encodeURIComponent(userId)}`, options);
 }
@@ -727,6 +735,7 @@ module.exports = {
   createReportDIYRecommendation,
   wechatLogin,
   logoutSession,
+  confirmWebLoginPairing,
   getUserProfile,
   saveUserProfile,
   uploadAvatar,

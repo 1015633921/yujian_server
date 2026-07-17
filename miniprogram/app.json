@@ -12,6 +12,7 @@
     "pages/my-plans/my-plans",
     "pages/workspace/workspace",
     "pages/profile/profile",
+    "pages/web-login-confirm/web-login-confirm",
     "pages/privacy-center/privacy-center",
     "pages/support-center/support-center",
     "pages/daily-energy/daily-energy",

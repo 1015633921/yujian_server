@@ -1,0 +1,77 @@
+<view class="pairing-page yu-page">
+  <view class="pairing-heading">
+    <view class="yu-eyebrow">WEB SIGN-IN</view>
+    <view class="yu-title">确认网页登录</view>
+    <view class="yu-desc">将电脑端登录页显示的两项信息完整填入。确认后，该浏览器会登录为你当前的小程序账号。</view>
+  </view>
+
+  <view wx:if="{{status === 'success'}}" class="result-card yu-card">
+    <view class="result-mark success-mark">✓</view>
+    <view class="result-title">网页登录已确认</view>
+    <view class="result-desc">请返回电脑端继续。配对信息为一次性使用，无需保留。</view>
+    <button class="yu-button yu-button-primary result-button" bindtap="goBack">完成</button>
+  </view>
+
+  <block wx:else>
+    <view class="account-card yu-card">
+      <view>
+        <view class="account-label">当前确认账号</view>
+        <view class="account-name">{{isLoggedIn ? (user.nickname || '已登录用户') : '尚未登录'}}</view>
+      </view>
+      <button
+        wx:if="{{!isLoggedIn}}"
+        class="account-login"
+        loading="{{authLoading}}"
+        disabled="{{authLoading}}"
+        bindtap="loginWithWechat"
+      >微信登录</button>
+      <view wx:else class="account-state">已验证</view>
+    </view>
+
+    <view class="form-card yu-card">
+      <view class="field-group">
+        <view class="field-label">配对编号</view>
+        <view class="field-hint">复制电脑端显示的完整 pairing_id，以 wp_ 开头</view>
+        <input
+          class="pairing-input pairing-id-input"
+          value="{{pairingId}}"
+          placeholder="wp_..."
+          maxlength="100"
+          confirm-type="next"
+          aria-label="配对编号"
+          bindinput="onPairingIdInput"
+        />
+      </view>
+
+      <view class="field-group code-group">
+        <view class="field-label">8 位验证码</view>
+        <view class="field-hint">不包含数字 0、1 和字母 I、O</view>
+        <input
+          class="pairing-input code-input"
+          value="{{verificationCode}}"
+          placeholder="例如 7K9M2QXZ"
+          maxlength="8"
+          confirm-type="done"
+          aria-label="八位验证码"
+          bindinput="onVerificationCodeInput"
+          bindconfirm="submitConfirmation"
+        />
+      </view>
+
+      <view wx:if="{{errorText}}" class="form-message {{status === 'expired' ? 'is-expired' : 'is-error'}}" role="alert">{{errorText}}</view>
+
+      <button
+        class="yu-button yu-button-primary confirm-button"
+        loading="{{submitting}}"
+        disabled="{{submitting || !isLoggedIn}}"
+        bindtap="submitConfirmation"
+      >{{submitting ? '正在确认...' : '确认网页登录'}}</button>
+      <button wx:if="{{status === 'expired'}}" class="reset-button" bindtap="resetForm">重新填写</button>
+    </view>
+
+    <view class="safety-note">
+      <view class="safety-title">安全提醒</view>
+      <view class="safety-copy">只确认你本人刚刚发起的登录。宇涧工作人员不会向你索要配对编号或验证码。</view>
+    </view>
+  </block>
+</view>

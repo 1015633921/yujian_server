@@ -613,6 +613,10 @@ Page({
     wx.navigateTo({ url: '/pages/privacy-center/privacy-center' });
   },
 
+  openWebLoginConfirm() {
+    wx.navigateTo({ url: '/pages/web-login-confirm/web-login-confirm' });
+  },
+
   openSupportCenter() {
     wx.navigateTo({ url: '/pages/support-center/support-center' });
   },

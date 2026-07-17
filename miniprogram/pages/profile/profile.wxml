@@ -113,6 +113,19 @@
       <view class="menu-arrow">></view>
     </view>
     <view class="menu-divider"></view>
+    <view class="menu-row" bindtap="openWebLoginConfirm">
+      <view class="menu-left">
+        <view class="menu-icon settings">
+          <image class="menu-icon-image" src="{{profileMenuIcons.settings}}" mode="aspectFit" />
+        </view>
+        <view>
+          <view class="menu-title">确认网页登录</view>
+          <view class="menu-desc">输入电脑端显示的配对编号和验证码</view>
+        </view>
+      </view>
+      <view class="menu-arrow">></view>
+    </view>
+    <view class="menu-divider"></view>
     <view class="menu-row" bindtap="openSettings">
       <view class="menu-left">
         <view class="menu-icon settings">
