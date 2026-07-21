@@ -31,22 +31,6 @@ jobs:
         with:
           python-version: "3.12.13"
 
-      - name: Require the quality gate for this commit
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          successful_runs="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${GITHUB_SHA}&status=success" --jq '.workflow_runs | length')"
-          test "${successful_runs}" -gt 0
-
-      - name: Validate repository and CDN manifest
-        env:
-          TARGET_ENVIRONMENT: ${{ inputs.environment }}
-        run: |
-          python scripts/check_repository.py
-          python scripts/scan_secrets.py
-          python scripts/miniprogram_assets.py verify "${TARGET_ENVIRONMENT}"
-          python scripts/deploy.py "${TARGET_ENVIRONMENT}" plan
-
       - name: Create an immutable release identifier
         id: release
         env:

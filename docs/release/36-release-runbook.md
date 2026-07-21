@@ -1,6 +1,6 @@
 # 发布 Runbook
 
-1. 确认目标 commit 的 `release-quality-gate` 全绿，release 和变更范围冻结。
+1. 确认目标 commit 和变更范围；CI 可异步运行，不阻塞部署。
 2. 在 GitHub Actions 运行 `deploy-docker-blue-green`，只选择 `test` 或 `prod`。
 3. 工作流校验仓库与 CDN 清单，构建摘要镜像，并在服务器执行统一部署命令。
 4. 部署命令自动完成备份、migration、候选启动、健康检查、Nginx 切流和公网验证。

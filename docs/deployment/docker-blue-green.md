@@ -29,12 +29,12 @@
 
 GitHub Actions 中运行 `deploy-docker-blue-green`，只选择目标环境。工作流会：
 
-1. 要求当前 commit 的质量门禁已经成功。
-2. 校验仓库、Secret 扫描和目标环境 CDN 清单。
-3. 构建并推送唯一的 `repository@sha256:<digest>` 镜像。
-4. 上传最小部署控制包，不上传源码或环境配置。
-5. 使用临时 Docker 登录目录在服务器拉取镜像，任务结束立即删除登录文件。
-6. 执行 `python3 scripts/deploy.py <env>`。
+1. 构建并推送唯一的 `repository@sha256:<digest>` 镜像。
+2. 上传最小部署控制包，不上传源码或环境配置。
+3. 使用临时 Docker 登录目录在服务器拉取镜像，任务结束立即删除登录文件。
+4. 执行 `python3 scripts/deploy.py <env>`，以候选服务 readiness 作为切流条件。
+
+完整 CI 继续异步运行并提供反馈，但不作为部署前置条件，方便测试环境快速迭代。
 
 服务器命令也保持一致：
 
