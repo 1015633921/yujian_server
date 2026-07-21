@@ -49,7 +49,8 @@ def test_mysql_runtime_lease_allows_only_one_worker(monkeypatch):
     AdminService()
     OrderService()
     upgrade("mysql")
-    assert downgrade("mysql", steps=6) == [
+    assert downgrade("mysql", steps=7) == [
+        "20260715_11_material_types",
         "20260714_10_material_physical_specs",
         "20260714_09_after_sale_return_flow",
         "20260713_08_after_sale_cases",
@@ -64,6 +65,7 @@ def test_mysql_runtime_lease_allows_only_one_worker(monkeypatch):
         "20260713_08_after_sale_cases",
         "20260714_09_after_sale_return_flow",
         "20260714_10_material_physical_specs",
+        "20260715_11_material_types",
     ]
 
     store = RuntimeTaskStore()

@@ -51,6 +51,7 @@ def test_mysql_report_migration_and_concurrent_idempotency(monkeypatch):
     OrderService()
     AssessmentRepository()
     upgrade("mysql")
+    assert downgrade("mysql", steps=1) == ["20260715_11_material_types"]
     assert downgrade("mysql", steps=1) == ["20260714_10_material_physical_specs"]
     assert downgrade("mysql", steps=1) == ["20260714_09_after_sale_return_flow"]
     assert downgrade("mysql", steps=1) == ["20260713_08_after_sale_cases"]
@@ -66,6 +67,7 @@ def test_mysql_report_migration_and_concurrent_idempotency(monkeypatch):
         "20260713_08_after_sale_cases",
         "20260714_09_after_sale_return_flow",
         "20260714_10_material_physical_specs",
+        "20260715_11_material_types",
     ]
 
     user_id = "p1b-mysql-idempotency-user"
