@@ -167,6 +167,7 @@ def test_deployment_workflow_has_one_environment_choice_and_no_kubernetes() -> N
     assert "github.event_name == 'push' && 'test' || inputs.environment" in workflow
     assert "python3 scripts/deploy.py '${TARGET_ENVIRONMENT}'" in workflow
     assert "compose.release.yaml" in workflow
+    assert "docker/setup-buildx-action@" in workflow
     assert "kubectl" not in workflow
     assert "k3s" not in workflow.lower()
     assert "--password-stdin" in workflow
