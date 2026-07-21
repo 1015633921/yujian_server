@@ -127,6 +127,32 @@ def test_example_environment_files_have_expected_shape():
         assert validate(parse_env(path), environment, allow_placeholders=True) == []
 
 
+def test_test_payment_can_be_enabled_only_through_the_test_env_file():
+    compose = (ROOT / "compose.yaml").read_text(encoding="utf-8")
+    test_service = compose.split("  api-test:\n", 1)[1].split("  logistics-worker:\n", 1)[0]
+    assert "      - .env.test" in test_service
+    assert "COMMERCE_CHECKOUT_ENABLED:" not in test_service
+    assert "WECHAT_PAYMENT_ENABLED:" not in test_service
+
+    enabled = valid_environment("test")
+    enabled.update(
+        {
+            "COMMERCE_CHECKOUT_ENABLED": "true",
+            "WECHAT_PAYMENT_ENABLED": "true",
+            "WECHAT_PAY_TEST_MODE": "false",
+            "WECHAT_PAY_APP_ID": "wx-test-payment",
+            "WECHAT_PAY_MCH_ID": "1900000109",
+            "WECHAT_PAY_SERIAL_NO": "ABCDEF1234",
+            "WECHAT_PAY_PRIVATE_KEY_PATH": "/run/secrets/apiclient_key.pem",
+            "WECHAT_PAY_API_V3_KEY": "0" * 32,
+            "WECHAT_PAY_NOTIFY_URL": "https://api.invalid/test-api/api/v1/wechat-pay/notify",
+            "WECHAT_PAY_PUBLIC_KEY_PATH": "/run/secrets/wechatpay_pub_key.pem",
+            "WECHAT_PAY_PUBLIC_KEY_ID": "PUB_KEY_ID_01111111111111111111111111111111",
+        }
+    )
+    assert validate(enabled, "test") == []
+
+
 def test_strict_startup_rejects_missing_configuration(monkeypatch):
     monkeypatch.setenv("APP_ENV", "production")
     monkeypatch.setenv("DATABASE_BACKEND", "mysql")

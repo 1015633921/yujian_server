@@ -21,7 +21,7 @@ import httpx
 from .repository import DB_PATH
 from .database import connect_database, integrity_errors, runtime_schema_mutation_allowed, use_mysql
 from .feature_flags import kuaidi100_subscribe_enabled, mock_trade_enabled, payment_enabled
-from .materials import clean_image_urls
+from .materials import clean_image_urls, fetch_db_series_assets, series_asset_key
 from .money import stored_cents
 from .observability import current_request_id, log_event, metrics
 
@@ -53,7 +53,6 @@ ORDER_STATUS_TEXT = {
     "pending_ship": "待发货",
     "shipped": "待收货",
     "completed": "已完成",
-    "after_sale": "售后中",
     "refund_requested": "退款中",
     "refunded": "已退款",
     "closed": "已关闭",
@@ -62,12 +61,60 @@ ORDER_STATUS_TEXT = {
 ORDER_STATE_TRANSITIONS = {
     "pending_payment": {"pending_ship", "closed"},
     "pending_ship": {"shipped", "refund_requested"},
-    "shipped": {"completed", "after_sale", "refund_requested"},
-    "completed": {"after_sale"},
-    "after_sale": {"refund_requested", "completed"},
-    "refund_requested": {"refunded", "after_sale"},
+    "shipped": {"completed", "refund_requested"},
+    "completed": {"refund_requested"},
+    "refund_requested": {"refunded", "pending_ship"},
     "refunded": set(),
     "closed": set(),
+}
+
+AFTER_SALE_TYPE_TEXT = {
+    "return_refund": "退货退款",
+    "resize": "修改手围",
+    "repair": "重新穿制／维修",
+    "resend": "缺件／补发",
+    "other": "其他问题",
+}
+AFTER_SALE_REASON_CODES = {
+    "return_refund": {"quality_issue", "damaged", "not_as_expected", "other"},
+    "resize": {"size_large", "size_small", "wearing_uncomfortable", "other"},
+    "repair": {"cord_loose", "bead_damaged", "accessory_issue", "other"},
+    "resend": {"item_missing", "logistics_damage", "wrong_item", "other"},
+    "other": {"care_question", "service_consulting", "other"},
+}
+AFTER_SALE_REASON_TEXT = {
+    "quality_issue": "商品质量问题",
+    "damaged": "商品破损",
+    "not_as_expected": "与预期不符",
+    "size_small": "手围偏小",
+    "size_large": "手围偏大",
+    "wearing_uncomfortable": "佩戴不舒适",
+    "cord_loose": "弹力线松动",
+    "bead_damaged": "珠子损坏",
+    "accessory_issue": "配件问题",
+    "item_missing": "商品或配件缺失",
+    "logistics_damage": "物流破损",
+    "wrong_item": "收到错误商品",
+    "care_question": "保养与使用问题",
+    "service_consulting": "其他服务咨询",
+    "other": "其他问题",
+}
+AFTER_SALE_STATUS_TEXT = {
+    "requested": "待审核",
+    "approved": "已同意",
+    "awaiting_return": "等待寄回",
+    "returning": "寄回中",
+    "service_processing": "处理中",
+    "refund_pending": "待确认退款",
+    "refund_submitting": "退款提交中",
+    "refunding": "退款处理中",
+    "resolved": "已完成",
+    "rejected": "已拒绝",
+    "canceled": "已取消",
+}
+AFTER_SALE_ACTIVE_STATUSES = {
+    "requested", "approved", "awaiting_return", "returning", "service_processing",
+    "refund_pending", "refund_submitting", "refunding",
 }
 
 PAYMENT_EVENT_STATES = {
@@ -83,10 +130,11 @@ REFUND_EVENT_STATES = {
     "REFUND.CLOSED": "CLOSED",
     "REFUND.PROCESSING": "PROCESSING",
 }
-WEBHOOK_TERMINAL_STATUSES = {"succeeded", "ignored", "compensation_required"}
+WEBHOOK_TERMINAL_STATUSES = {"succeeded", "ignored", "compensation_required", "compensation_resolved"}
 KUAIDI100_PHONE_REQUIRED_COMPANIES = {"shunfeng", "shunfengkuaiyun", "zhongtong"}
 KUAIDI100_CALLBACK_MAX_BYTES = 512 * 1024
 SIGNED_AUTO_COMPLETE_DAYS = 7
+REFUND_SUBMISSION_RETRY_DELAY_SECONDS = 60
 
 
 class OrderConflictError(ValueError):
@@ -99,6 +147,28 @@ class OrderPricingError(ValueError):
 
 class OrderPriceChangedError(OrderConflictError):
     pass
+
+
+class WechatPayRequestError(ValueError):
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int | None = None,
+        provider_code: str = "",
+        retryable: bool = False,
+    ) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+        self.provider_code = provider_code
+        self.retryable = retryable
+
+    @property
+    def resource_not_found(self) -> bool:
+        return self.status_code == 404 and self.provider_code in {
+            "RESOURCE_NOT_EXISTS",
+            "REFUND_NOT_EXIST",
+        }
 
 
 class PaymentWebhookError(ValueError):
@@ -249,6 +319,19 @@ class OrderService:
     def connect(self):
         return connect_database(self.db_path if self._force_sqlite else None)
 
+    @staticmethod
+    def parse_utc_datetime(value: Any) -> datetime | None:
+        text = str(value or "").strip()
+        if not text:
+            return None
+        try:
+            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+
     def init_db(self) -> None:
         if use_mysql() and not self._force_sqlite:
             if not runtime_schema_mutation_allowed():
@@ -299,6 +382,52 @@ class OrderService:
                     order_id TEXT,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS after_sale_cases (
+                    case_id TEXT PRIMARY KEY,
+                    order_id TEXT NOT NULL,
+                    user_id TEXT NOT NULL,
+                    case_type TEXT NOT NULL,
+                    reason_code TEXT NOT NULL,
+                    reason TEXT NOT NULL,
+                    evidence_json TEXT NOT NULL,
+                    order_snapshot_json TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    requested_refund_fee INTEGER NOT NULL DEFAULT 0,
+                    approved_refund_fee INTEGER NOT NULL DEFAULT 0,
+                    resolution_type TEXT NOT NULL DEFAULT '',
+                    review_note TEXT NOT NULL DEFAULT '',
+                    reviewed_by TEXT NOT NULL DEFAULT '',
+                    reviewed_at TEXT,
+                    resolved_at TEXT,
+                    idempotency_key TEXT NOT NULL,
+                    request_hash TEXT NOT NULL,
+                    return_carrier TEXT NOT NULL DEFAULT '',
+                    return_tracking_no TEXT NOT NULL DEFAULT '',
+                    return_submitted_at TEXT,
+                    canceled_at TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE (user_id, idempotency_key)
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS after_sale_events (
+                    event_id TEXT PRIMARY KEY,
+                    case_id TEXT NOT NULL,
+                    event_type TEXT NOT NULL,
+                    from_status TEXT NOT NULL DEFAULT '',
+                    to_status TEXT NOT NULL,
+                    operator_type TEXT NOT NULL,
+                    operator_id TEXT NOT NULL,
+                    note TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL
                 )
                 """
             )
@@ -371,6 +500,9 @@ class OrderService:
             connection.execute("CREATE INDEX IF NOT EXISTS idx_community_favorites_user_updated ON community_favorites(user_id, updated_at DESC)")
             connection.execute("CREATE INDEX IF NOT EXISTS idx_user_addresses_user_updated ON user_addresses(user_id, updated_at DESC)")
             connection.execute("CREATE INDEX IF NOT EXISTS idx_user_coupons_user_status ON user_coupons(user_id, status, expires_at)")
+            connection.execute("CREATE INDEX IF NOT EXISTS idx_after_sale_order_created ON after_sale_cases(order_id, created_at DESC)")
+            connection.execute("CREATE INDEX IF NOT EXISTS idx_after_sale_status_created ON after_sale_cases(status, created_at DESC)")
+            connection.execute("CREATE INDEX IF NOT EXISTS idx_after_sale_events_case_created ON after_sale_events(case_id, created_at)")
             self.backfill_order_designs(connection)
 
     def ensure_columns(self, connection) -> None:
@@ -428,6 +560,8 @@ class OrderService:
         timestamp = now_iso()
         design = payload.get("design") or {}
         sequence = payload.get("sequence") or []
+        if sequence:
+            self.validate_attachment_sequence(sequence)
         with self.connect() as connection:
             existing = connection.execute(
                 "SELECT design_id, user_id FROM diy_designs WHERE design_id = ?",
@@ -1128,6 +1262,7 @@ class OrderService:
         connection,
         sequence: list[dict[str, Any]],
     ) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]]:
+        self.validate_attachment_sequence(sequence)
         requested: list[tuple[dict[str, Any], str, int]] = []
         references: set[str] = set()
         for raw_item in sequence:
@@ -1151,9 +1286,15 @@ class OrderService:
         except Exception as exc:
             raise OrderPricingError("SKU 数据查询失败，订单未创建") from exc
 
+        row_dicts = [dict(raw_row) for raw_row in rows]
+        series_assets = fetch_db_series_assets(connection, row_dicts)
         by_reference: dict[str, dict[str, Any]] = {}
-        for raw_row in rows:
-            material = dict(raw_row)
+        for material in row_dicts:
+            series_asset = series_assets.get(series_asset_key(material), {})
+            image_urls = series_asset.get("image_urls") or []
+            material["image_path"] = series_asset.get("image_path") or ""
+            material["image_url"] = series_asset.get("image_url") or (image_urls[0] if image_urls else "")
+            material["image_urls_json"] = json.dumps(image_urls, ensure_ascii=False)
             for key in (str(material.get("id") or ""), str(material.get("skuId") or "")):
                 if key:
                     existing = by_reference.get(key)
@@ -1232,6 +1373,44 @@ class OrderService:
                     f"SKU 库存不足：{reservation['name']}，可用 {max(0, available)}"
                 )
         return snapshots, reservations
+
+    @staticmethod
+    def validate_attachment_sequence(sequence: list[dict[str, Any]]) -> None:
+        base_count = sum(
+            1
+            for item in sequence
+            if isinstance(item, dict)
+            and item.get("attachment_mode") != "bead_cap"
+            and not (
+                isinstance(item.get("attachment"), dict)
+                and item["attachment"].get("mode") == "bead_cap"
+            )
+        )
+        occupied_slots: set[tuple[int, str]] = set()
+        for item in sequence:
+            if not isinstance(item, dict):
+                continue
+            attachment = item.get("attachment")
+            is_bead_cap = item.get("attachment_mode") == "bead_cap" or (
+                isinstance(attachment, dict) and attachment.get("mode") == "bead_cap"
+            )
+            if not is_bead_cap:
+                continue
+            if item.get("placement_mode") != "attached_side":
+                raise ValueError("包珠隔片安装方式无效")
+            if not isinstance(attachment, dict):
+                raise ValueError("包珠隔片缺少主珠位置")
+            side = str(attachment.get("side") or "")
+            try:
+                host_index = int(attachment.get("host_index"))
+            except (TypeError, ValueError) as exc:
+                raise ValueError("包珠隔片主珠位置无效") from exc
+            if side not in {"left", "right"} or host_index < 1 or host_index > base_count:
+                raise ValueError("包珠隔片主珠位置无效")
+            slot = (host_index, side)
+            if slot in occupied_slots:
+                raise ValueError("同一主珠侧面不能重复安装包珠隔片")
+            occupied_slots.add(slot)
 
     def fetch_locked_material_rows(self, connection, references: set[str]):
         marks = ", ".join(["?"] * len(references))
@@ -1363,6 +1542,52 @@ class OrderService:
             released += 1
         return released
 
+    def restock_confirmed_reservations(self, connection, order_id: str) -> int:
+        rows = self.reservation_rows(connection, order_id)
+        restocked = 0
+        timestamp = now_iso()
+        for row in rows:
+            if row["status"] == "restocked":
+                continue
+            if row["status"] != "confirmed":
+                continue
+            quantity = int(row["quantity"])
+            cursor = connection.execute(
+                "UPDATE inventory_reservations "
+                "SET status = 'restocked', released_at = ?, updated_at = ? "
+                "WHERE reservation_id = ? AND status = 'confirmed'",
+                (timestamp, timestamp, row["reservation_id"]),
+            )
+            if cursor.rowcount != 1:
+                continue
+            connection.execute(
+                "UPDATE managed_materials SET stock = stock + ? WHERE id = ?",
+                (quantity, row["sku_id"]),
+            )
+            restocked += 1
+        return restocked
+
+    def apply_refund_inventory_disposition(
+        self,
+        connection,
+        order: dict[str, Any],
+        refund: dict[str, Any],
+    ) -> dict[str, Any]:
+        updated = dict(refund)
+        if updated.get("inventory_disposition") == "restocked":
+            return updated
+        source_status = str(updated.get("source_order_status") or "")
+        is_full_refund = int(updated.get("refund_fee") or 0) == int(order.get("total_fee") or 0)
+        has_tracking = bool((order.get("logistics") or {}).get("tracking_no"))
+        if source_status == "pending_ship" and is_full_refund and not has_tracking:
+            count = self.restock_confirmed_reservations(connection, order["order_id"])
+            updated["inventory_disposition"] = "restocked"
+            updated["restocked_reservation_count"] = count
+            updated["restocked_at"] = now_iso()
+        else:
+            updated["inventory_disposition"] = "pending_manual_inspection"
+        return updated
+
     def order_row_for_update(self, connection, order_id: str) -> dict[str, Any] | None:
         lock_clause = " FOR UPDATE" if self.mysql_transactions else ""
         row = connection.execute(
@@ -1405,6 +1630,13 @@ class OrderService:
             if order["payment_status"] == "paid":
                 confirmed = self.confirm_reservations(connection, order_id)
                 return {"order_id": order_id, "released": 0, "confirmed": confirmed}
+            if order["payment_status"] == "processing":
+                return {
+                    "order_id": order_id,
+                    "released": 0,
+                    "deferred_processing": True,
+                    "missing": False,
+                }
             released = self.release_reservations(connection, order_id, "expired")
             if order["status"] == "pending_payment":
                 self.transition_order(
@@ -1431,6 +1663,9 @@ class OrderService:
         return {
             "processed_orders": len(results),
             "released_reservations": sum(int(item.get("released") or 0) for item in results),
+            "deferred_processing": sum(
+                1 for item in results if item.get("deferred_processing")
+            ),
             "results": results,
         }
 
@@ -1570,16 +1805,65 @@ class OrderService:
     ) -> dict[str, Any]:
         if not WechatPayConfig().test_mode:
             raise ValueError("正式环境已禁用模拟发货")
-        order = self.get_order(order_id)
-        self.ensure_order_owner(order, user_id)
-        if order["payment_status"] != "paid":
-            raise ValueError("订单未支付，不能发货")
-        self.transition_order(
-            order,
-            "shipped",
-            event_label="商家已发货",
-            logistics=self.build_logistics(carrier, tracking_no, carrier_code, phone_tail),
+        dev_tracking_no = str(tracking_no or "").strip() or (
+            f"YJ{int(time.time())}{secrets.token_hex(3).upper()}"
         )
+        return self.ship_paid_order(
+            order_id,
+            carrier=carrier,
+            tracking_no=dev_tracking_no,
+            carrier_code=carrier_code,
+            phone_tail=phone_tail,
+            source="dev",
+            expected_user_id=user_id,
+        )
+
+    def ship_paid_order(
+        self,
+        order_id: str,
+        carrier: str,
+        tracking_no: str | None,
+        carrier_code: str = "shunfeng",
+        phone_tail: str | None = None,
+        source: str = "admin",
+        expected_user_id: str = "",
+    ) -> dict[str, Any]:
+        normalized_tracking = str(tracking_no or "").strip()
+        if not normalized_tracking:
+            raise ValueError("请填写快递单号")
+        logistics = self.build_logistics(
+            carrier,
+            normalized_tracking,
+            carrier_code,
+            phone_tail,
+            source=source,
+        )
+        with self.connect() as connection:
+            self.begin_order_transaction(connection)
+            row = self.order_row_for_update(connection, order_id)
+            if not row:
+                raise ValueError("订单不存在")
+            order = self.public_order(row)
+            if expected_user_id:
+                self.ensure_order_owner(order, expected_user_id)
+            existing = dict(order.get("logistics") or {})
+            if order["status"] == "shipped":
+                if str(existing.get("tracking_no") or "").strip() == normalized_tracking:
+                    return order
+                raise OrderConflictError("订单已经发货，不能更换快递单号")
+            if order["status"] != "pending_ship":
+                raise ValueError("仅待发货订单可以发货")
+            if order["payment_status"] != "paid":
+                raise ValueError("订单未支付，不能发货")
+            if order.get("refund_status") in {"requested", "approved", "submitting", "processing", "success"}:
+                raise ValueError("订单正在退款或已退款，不能发货")
+            self.transition_order(
+                order,
+                "shipped",
+                event_label="商家已发货，等待快递揽收",
+                connection=connection,
+                logistics=logistics,
+            )
         return self.get_order(order_id)
 
     def confirm_receipt(self, order_id: str, user_id: str) -> dict[str, Any]:
@@ -1627,99 +1911,908 @@ class OrderService:
         return self.get_order(order_id)
 
     def update_order_receiver(self, order_id: str, user_id: str, receiver: dict[str, Any]) -> dict[str, Any]:
-        order = self.get_order(order_id)
-        self.ensure_order_owner(order, user_id)
-        if order["status"] not in {"pending_payment", "pending_ship"}:
-            raise ValueError("订单已发货，不能修改收货地址")
-
         clean_receiver = self.normalize_order_receiver(receiver)
-        timestamp = now_iso()
-        history = list(order.get("status_history") or [])
-        history.append({
-            "status": order["status"],
-            "label": "用户修改收货地址",
-            "time": timestamp,
-        })
         with self.connect() as connection:
+            self.begin_order_transaction(connection)
+            row = self.order_row_for_update(connection, order_id)
+            if not row:
+                raise ValueError("订单不存在")
+            order = self.public_order(row)
+            self.ensure_order_owner(order, user_id)
+            if order["status"] not in {"pending_payment", "pending_ship"}:
+                raise ValueError("订单已发货，不能修改收货地址")
+            self.append_order_event(
+                order,
+                status=order["status"],
+                label="用户修改收货地址",
+                connection=connection,
+            )
             connection.execute(
                 """
-                UPDATE orders
-                SET receiver_json = ?, updated_at = ?, status_history_json = ?
-                WHERE order_id = ?
+                UPDATE orders SET receiver_json = ?, updated_at = ?
+                WHERE order_id = ? AND status = ?
                 """,
                 (
                     json.dumps(clean_receiver, ensure_ascii=False),
-                    timestamp,
-                    json.dumps(history, ensure_ascii=False),
+                    now_iso(),
                     order_id,
+                    order["status"],
                 ),
             )
         return self.get_order(order_id)
 
-    def request_after_sale(self, order_id: str, user_id: str, reason: str = "") -> dict[str, Any]:
-        order = self.get_order(order_id)
-        self.ensure_order_owner(order, user_id)
-        if order["payment_status"] != "paid":
-            raise ValueError("未支付订单不能申请售后")
-        remark = f"{order.get('remark') or ''}\n售后原因：{reason}".strip()
-        self.transition_order(
-            order,
-            "after_sale",
-            event_label="用户申请售后",
-            remark=remark,
-            after_sale_status="requested",
-        )
-        return self.get_order(order_id)
+    @staticmethod
+    def after_sale_request_hash(payload: dict[str, Any]) -> str:
+        canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
-    def request_refund(self, order_id: str, user_id: str, reason: str = "") -> dict[str, Any]:
+    @classmethod
+    def public_after_sale_case(cls, row: dict[str, Any]) -> dict[str, Any]:
+        requested_refund_fee = int(row.get("requested_refund_fee") or 0)
+        approved_refund_fee = int(row.get("approved_refund_fee") or 0)
+        return {
+            "case_id": row["case_id"],
+            "order_id": row["order_id"],
+            "user_id": row["user_id"],
+            "type": row["case_type"],
+            "type_text": AFTER_SALE_TYPE_TEXT.get(row["case_type"], row["case_type"]),
+            "reason_code": row["reason_code"],
+            "reason_text": AFTER_SALE_REASON_TEXT.get(row["reason_code"], row["reason_code"]),
+            "reason": row["reason"],
+            "evidence_urls": cls.loads(row.get("evidence_json") or "", []),
+            "order_snapshot": cls.loads(row.get("order_snapshot_json") or "", {}),
+            "status": row["status"],
+            "status_text": AFTER_SALE_STATUS_TEXT.get(row["status"], row["status"]),
+            "requested_refund_fee": requested_refund_fee,
+            "requested_refund_amount": cls.cents_text(requested_refund_fee),
+            "approved_refund_fee": approved_refund_fee,
+            "approved_refund_amount": cls.cents_text(approved_refund_fee),
+            "resolution_type": row.get("resolution_type") or "",
+            "review_note": row.get("review_note") or "",
+            "reviewed_by": row.get("reviewed_by") or "",
+            "reviewed_at": row.get("reviewed_at") or "",
+            "resolved_at": row.get("resolved_at") or "",
+            "return_carrier": row.get("return_carrier") or "",
+            "return_tracking_no": row.get("return_tracking_no") or "",
+            "return_submitted_at": row.get("return_submitted_at") or "",
+            "canceled_at": row.get("canceled_at") or "",
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+        }
+
+    def list_after_sale_cases(self, order_id: str, user_id: str) -> list[dict[str, Any]]:
         order = self.get_order(order_id)
         self.ensure_order_owner(order, user_id)
-        if order["payment_status"] != "paid":
-            raise ValueError("未支付订单不能申请退款")
-        if order["status"] in {"refunded", "closed"}:
-            raise ValueError("当前订单状态不能申请退款")
-        if order["status"] == "refund_requested":
-            raise ValueError("订单已提交退款申请，请等待商家处理")
-        requested_at = now_iso()
-        refund = {
-            **(order.get("refund") or {}),
-            "status": "requested",
-            "reason": reason or "用户申请退款",
-            "requested_at": requested_at,
-            "refund_fee": int(order.get("total_fee") or self.to_cents(Decimal(str(order.get("total_amount") or 0)))),
-            "total_fee": int(order.get("total_fee") or 0),
-            "currency": order.get("currency") or "CNY",
+        with self.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT * FROM after_sale_cases
+                WHERE order_id = ? AND user_id = ?
+                ORDER BY created_at DESC
+                """,
+                (order_id, user_id),
+            ).fetchall()
+        return [self.public_after_sale_case(dict(row)) for row in rows]
+
+    def create_after_sale_case(
+        self,
+        order_id: str,
+        user_id: str,
+        case_type: str,
+        reason_code: str,
+        reason: str,
+        evidence_urls: list[str] | None,
+        idempotency_key: str,
+    ) -> dict[str, Any]:
+        normalized_type = str(case_type or "").strip()
+        normalized_reason_code = str(reason_code or "").strip()
+        normalized_reason = str(reason or "").strip()
+        if normalized_type not in AFTER_SALE_TYPE_TEXT:
+            raise ValueError("请选择有效的售后类型")
+        if normalized_reason_code not in AFTER_SALE_REASON_CODES[normalized_type]:
+            raise ValueError("请选择与售后类型匹配的问题原因")
+        if len(normalized_reason) < 5:
+            raise ValueError("请至少填写 5 个字的问题说明")
+        if len(normalized_reason) > 500:
+            raise ValueError("问题说明不能超过 500 个字")
+        clean_evidence = []
+        for raw_url in evidence_urls or []:
+            url = str(raw_url or "").strip()
+            if not url:
+                continue
+            if not url.startswith("https://") or len(url) > 2000:
+                raise ValueError("售后凭证必须是有效的 HTTPS 地址")
+            if url not in clean_evidence:
+                clean_evidence.append(url)
+        if len(clean_evidence) > 3:
+            raise ValueError("售后凭证最多上传 3 张")
+        key = self.normalize_idempotency_key(idempotency_key)
+        request_payload = {
+            "order_id": order_id,
+            "type": normalized_type,
+            "reason_code": normalized_reason_code,
+            "reason": normalized_reason,
+            "evidence_urls": clean_evidence,
         }
-        remark = f"{order.get('remark') or ''}\n退款原因：{reason}".strip()
+        request_hash = self.after_sale_request_hash(request_payload)
+        timestamp = now_iso()
+        with self.connect() as connection:
+            self.begin_order_transaction(connection)
+            locked_row = self.order_row_for_update(connection, order_id)
+            if not locked_row:
+                raise ValueError("订单不存在")
+            order = self.public_order(locked_row)
+            self.ensure_order_owner(order, user_id)
+            replay = connection.execute(
+                "SELECT * FROM after_sale_cases WHERE user_id = ? AND idempotency_key = ?",
+                (user_id, key),
+            ).fetchone()
+            if replay:
+                replay_row = dict(replay)
+                if replay_row["request_hash"] != request_hash:
+                    raise OrderConflictError("同一提交标识不能用于不同的售后申请")
+                return self.public_after_sale_case(replay_row)
+            if order["payment_status"] != "paid":
+                raise ValueError("只有已支付订单可以申请售后")
+            if order["status"] not in {"shipped", "completed"}:
+                raise ValueError("当前订单状态暂不能申请售后")
+            if order.get("refund_status") in {"processing", "success"}:
+                raise ValueError("订单退款正在处理或已完成，不能重复申请售后")
+            placeholders = ",".join("?" for _ in AFTER_SALE_ACTIVE_STATUSES)
+            active = connection.execute(
+                f"""
+                SELECT case_id FROM after_sale_cases
+                WHERE order_id = ? AND status IN ({placeholders})
+                LIMIT 1
+                """,
+                (order_id, *sorted(AFTER_SALE_ACTIVE_STATUSES)),
+            ).fetchone()
+            if active:
+                raise OrderConflictError("该订单已有进行中的售后申请")
+            case_id = f"AS{int(time.time() * 1000)}{secrets.token_hex(3).upper()}"
+            event_id = f"ase_{secrets.token_hex(12)}"
+            requested_refund_fee = int(order.get("total_fee") or 0) if normalized_type == "return_refund" else 0
+            order_snapshot = {
+                "order_id": order["order_id"],
+                "out_trade_no": order.get("out_trade_no") or "",
+                "status": order["status"],
+                "payment_status": order["payment_status"],
+                "total_fee": int(order.get("total_fee") or 0),
+                "total_amount": order.get("total_amount") or "0.00",
+                "currency": order.get("currency") or "CNY",
+                "design_id": order.get("design_id") or "",
+                "receiver": order.get("receiver") or {},
+                "sequence": order.get("sequence") or [],
+                "bom": order.get("bom") or [],
+            }
+            connection.execute(
+                """
+                INSERT INTO after_sale_cases
+                (case_id, order_id, user_id, case_type, reason_code, reason, evidence_json,
+                 order_snapshot_json, status, requested_refund_fee, approved_refund_fee,
+                 resolution_type, review_note, reviewed_by, reviewed_at, resolved_at,
+                 idempotency_key, request_hash, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'requested', ?, 0, '', '', '', NULL, NULL, ?, ?, ?, ?)
+                """,
+                (
+                    case_id, order_id, user_id, normalized_type, normalized_reason_code,
+                    normalized_reason, json.dumps(clean_evidence, ensure_ascii=False),
+                    json.dumps(order_snapshot, ensure_ascii=False), requested_refund_fee,
+                    key, request_hash, timestamp, timestamp,
+                ),
+            )
+            connection.execute(
+                """
+                INSERT INTO after_sale_events
+                (event_id, case_id, event_type, from_status, to_status, operator_type,
+                 operator_id, note, created_at)
+                VALUES (?, ?, 'submitted', '', 'requested', 'user', ?, ?, ?)
+                """,
+                (event_id, case_id, user_id, normalized_reason, timestamp),
+            )
+            connection.execute(
+                "UPDATE orders SET after_sale_status = 'requested', updated_at = ? WHERE order_id = ?",
+                (timestamp, order_id),
+            )
+            created = connection.execute(
+                "SELECT * FROM after_sale_cases WHERE case_id = ?",
+                (case_id,),
+            ).fetchone()
+        return self.public_after_sale_case(dict(created))
+
+    def submit_after_sale_return_shipment(
+        self,
+        order_id: str,
+        case_id: str,
+        user_id: str,
+        carrier: str,
+        tracking_no: str,
+    ) -> dict[str, Any]:
+        normalized_carrier = str(carrier or "").strip()
+        normalized_tracking = str(tracking_no or "").strip()
+        if not normalized_carrier or len(normalized_carrier) > 50:
+            raise ValueError("请填写有效的退回快递公司")
+        if len(normalized_tracking) < 6 or len(normalized_tracking) > 80:
+            raise ValueError("请填写有效的退回快递单号")
+        timestamp = now_iso()
+        with self.connect() as connection:
+            self.begin_order_transaction(connection)
+            order_row = self.order_row_for_update(connection, order_id)
+            if not order_row:
+                raise ValueError("订单不存在")
+            order = self.public_order(order_row)
+            self.ensure_order_owner(order, user_id)
+            case_row = self.after_sale_case_row_for_update(connection, case_id)
+            if not case_row or case_row["order_id"] != order_id or case_row["user_id"] != user_id:
+                raise ValueError("售后工单不存在")
+            if case_row["case_type"] != "return_refund":
+                raise ValueError("当前售后工单不需要寄回商品")
+            if case_row["status"] == "returning":
+                if (
+                    str(case_row.get("return_carrier") or "") == normalized_carrier
+                    and str(case_row.get("return_tracking_no") or "") == normalized_tracking
+                ):
+                    return self.public_after_sale_case(case_row)
+                raise OrderConflictError("退回物流已提交，不能更换快递单号")
+            if case_row["status"] != "awaiting_return":
+                raise ValueError("当前售后工单不能提交退回物流")
+            connection.execute(
+                """
+                UPDATE after_sale_cases
+                SET status = 'returning', return_carrier = ?, return_tracking_no = ?,
+                    return_submitted_at = ?, updated_at = ?
+                WHERE case_id = ? AND status = 'awaiting_return'
+                """,
+                (normalized_carrier, normalized_tracking, timestamp, timestamp, case_id),
+            )
+            connection.execute(
+                "UPDATE orders SET after_sale_status = 'returning', updated_at = ? WHERE order_id = ?",
+                (timestamp, order_id),
+            )
+            self.append_after_sale_event(
+                connection,
+                case_id,
+                "return_shipped",
+                "awaiting_return",
+                "returning",
+                user_id,
+                f"{normalized_carrier} {normalized_tracking}",
+                operator_type="user",
+            )
+            updated = self.after_sale_case_row_for_update(connection, case_id)
+        return self.public_after_sale_case(updated)
+
+    def cancel_after_sale_case(
+        self,
+        order_id: str,
+        case_id: str,
+        user_id: str,
+        reason: str = "",
+    ) -> dict[str, Any]:
+        normalized_reason = str(reason or "用户取消售后申请").strip()[:500]
+        timestamp = now_iso()
+        with self.connect() as connection:
+            self.begin_order_transaction(connection)
+            order_row = self.order_row_for_update(connection, order_id)
+            if not order_row:
+                raise ValueError("订单不存在")
+            order = self.public_order(order_row)
+            self.ensure_order_owner(order, user_id)
+            case_row = self.after_sale_case_row_for_update(connection, case_id)
+            if not case_row or case_row["order_id"] != order_id or case_row["user_id"] != user_id:
+                raise ValueError("售后工单不存在")
+            if case_row["status"] == "canceled":
+                return self.public_after_sale_case(case_row)
+            if case_row["status"] not in {"requested", "awaiting_return"}:
+                raise ValueError("当前售后工单已进入处理，不能取消")
+            previous = case_row["status"]
+            connection.execute(
+                """
+                UPDATE after_sale_cases
+                SET status = 'canceled', canceled_at = ?, resolved_at = ?, updated_at = ?
+                WHERE case_id = ? AND status = ?
+                """,
+                (timestamp, timestamp, timestamp, case_id, previous),
+            )
+            connection.execute(
+                "UPDATE orders SET after_sale_status = 'canceled', updated_at = ? WHERE order_id = ?",
+                (timestamp, order_id),
+            )
+            self.append_after_sale_event(
+                connection,
+                case_id,
+                "canceled",
+                previous,
+                "canceled",
+                user_id,
+                normalized_reason,
+                operator_type="user",
+            )
+            updated = self.after_sale_case_row_for_update(connection, case_id)
+        return self.public_after_sale_case(updated)
+
+    def admin_list_after_sale_cases(
+        self,
+        keyword: str = "",
+        status: str = "",
+        case_type: str = "",
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        normalized_status = str(status or "").strip()
+        normalized_type = str(case_type or "").strip()
+        if normalized_status and normalized_status not in AFTER_SALE_STATUS_TEXT:
+            raise ValueError("不支持的售后状态")
+        if normalized_type and normalized_type not in AFTER_SALE_TYPE_TEXT:
+            raise ValueError("不支持的售后类型")
+        clauses: list[str] = []
+        params: list[Any] = []
+        if normalized_status:
+            clauses.append("c.status = ?")
+            params.append(normalized_status)
+        if normalized_type:
+            clauses.append("c.case_type = ?")
+            params.append(normalized_type)
+        normalized_keyword = str(keyword or "").strip()
+        if normalized_keyword:
+            value = f"%{normalized_keyword}%"
+            clauses.append(
+                "(c.case_id LIKE ? OR c.order_id LIKE ? OR c.user_id LIKE ? "
+                "OR c.reason LIKE ? OR o.receiver_json LIKE ?)"
+            )
+            params.extend([value, value, value, value, value])
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        params.append(max(1, min(int(limit or 100), 500)))
+        with self.connect() as connection:
+            rows = connection.execute(
+                f"""
+                SELECT c.*, o.status AS current_order_status,
+                       o.payment_status AS current_payment_status,
+                       o.total_fee AS current_total_fee,
+                       o.receiver_json AS current_receiver_json,
+                       o.refund_status AS current_refund_status,
+                       o.refund_json AS current_refund_json
+                FROM after_sale_cases c
+                LEFT JOIN orders o ON o.order_id = c.order_id
+                {where}
+                ORDER BY
+                  CASE c.status
+                    WHEN 'requested' THEN 0
+                    WHEN 'awaiting_return' THEN 1
+                    WHEN 'returning' THEN 2
+                    WHEN 'service_processing' THEN 3
+                    WHEN 'refund_pending' THEN 4
+                    WHEN 'refund_submitting' THEN 5
+                    WHEN 'refunding' THEN 6
+                    ELSE 7
+                  END,
+                  c.created_at DESC
+                LIMIT ?
+                """,
+                params,
+            ).fetchall()
+        result = []
+        for raw_row in rows:
+            row = dict(raw_row)
+            item = self.public_after_sale_case(row)
+            order_status = row.get("current_order_status") or ""
+            total_fee = int(row.get("current_total_fee") or 0)
+            item["order"] = {
+                "status": order_status,
+                "status_text": ORDER_STATUS_TEXT.get(order_status, order_status),
+                "payment_status": row.get("current_payment_status") or "",
+                "total_fee": total_fee,
+                "total_amount": self.cents_text(total_fee),
+                "receiver": self.loads(row.get("current_receiver_json") or "", {}),
+                "refund_status": row.get("current_refund_status") or "",
+                "refund": self.loads(row.get("current_refund_json") or "", {}),
+            }
+            result.append(item)
+        return result
+
+    def admin_get_after_sale_case(self, case_id: str) -> dict[str, Any]:
+        normalized_case_id = str(case_id or "").strip()
+        with self.connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM after_sale_cases WHERE case_id = ?",
+                (normalized_case_id,),
+            ).fetchone()
+            if not row:
+                raise ValueError("售后工单不存在")
+            events = connection.execute(
+                """
+                SELECT event_id, event_type, from_status, to_status, operator_type,
+                       operator_id, note, created_at
+                FROM after_sale_events
+                WHERE case_id = ?
+                ORDER BY created_at ASC, event_id ASC
+                """,
+                (normalized_case_id,),
+            ).fetchall()
+        item = self.public_after_sale_case(dict(row))
+        item["order"] = self.get_order(item["order_id"])
+        item["events"] = [dict(event) for event in events]
+        return item
+
+    def after_sale_case_row_for_update(self, connection, case_id: str) -> dict[str, Any] | None:
+        lock_clause = " FOR UPDATE" if self.mysql_transactions else ""
+        row = connection.execute(
+            f"SELECT * FROM after_sale_cases WHERE case_id = ?{lock_clause}",
+            (case_id,),
+        ).fetchone()
+        return dict(row) if row else None
+
+    @staticmethod
+    def append_after_sale_event(
+        connection,
+        case_id: str,
+        event_type: str,
+        from_status: str,
+        to_status: str,
+        operator_id: str,
+        note: str,
+        operator_type: str = "admin",
+    ) -> None:
+        connection.execute(
+            """
+            INSERT INTO after_sale_events
+            (event_id, case_id, event_type, from_status, to_status, operator_type,
+             operator_id, note, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                f"ase_{secrets.token_hex(12)}", case_id, event_type, from_status, to_status,
+                operator_type, operator_id, note, datetime.now(timezone.utc).isoformat(),
+            ),
+        )
+
+    def prepare_after_sale_refund(
+        self,
+        connection,
+        case_row: dict[str, Any],
+        order: dict[str, Any],
+        operator: str,
+        note: str,
+    ) -> None:
+        if case_row["case_type"] != "return_refund":
+            raise ValueError("只有退货退款工单可以进入退款流程")
+        if order["payment_status"] != "paid":
+            raise ValueError("订单未处于已支付状态，不能准备退款")
+        if order["status"] not in {"shipped", "completed"}:
+            raise ValueError("订单当前履约状态不能进入退款流程")
+        refund = dict(order.get("refund") or {})
+        if order.get("refund_status") in {"requested", "approved", "submitting", "processing", "success"} or refund.get("status") in {
+            "requested", "approved", "submitting", "processing", "success"
+        }:
+            raise ValueError("订单已有退款流程，不能重复准备退款")
+        total_fee = int(order.get("total_fee") or 0)
+        approved_fee = int(case_row.get("requested_refund_fee") or total_fee)
+        if total_fee <= 0 or approved_fee <= 0 or approved_fee > total_fee:
+            raise ValueError("退款金额异常，不能进入退款流程")
+        timestamp = now_iso()
+        refund.update(
+            {
+                "after_sale_case_id": case_row["case_id"],
+                "status": "approved",
+                "reason": case_row["reason"],
+                "requested_at": case_row["created_at"],
+                "prepared_at": timestamp,
+                "approved_by": operator,
+                "approve_note": note,
+                "out_refund_no": f"RF{case_row['case_id']}"[:64],
+                "refund_fee": approved_fee,
+                "total_fee": total_fee,
+                "currency": order.get("currency") or "CNY",
+                "source_order_status": order["status"],
+            }
+        )
         self.transition_order(
             order,
             "refund_requested",
-            event_label="用户申请退款",
-            remark=remark,
-            refund_status="requested",
+            event_label="售后审核通过，等待运营确认原路退款",
+            connection=connection,
+            after_sale_status="refund_pending",
+            refund_status="approved",
             refund=refund,
         )
+
+    def review_after_sale_case(
+        self,
+        case_id: str,
+        action: str,
+        operator: str,
+        note: str = "",
+    ) -> dict[str, Any]:
+        normalized_action = str(action or "").strip()
+        normalized_operator = str(operator or "admin").strip()[:100] or "admin"
+        normalized_note = str(note or "").strip()
+        if len(normalized_note) > 500:
+            raise ValueError("审核备注不能超过 500 个字")
+        if normalized_action == "reject" and len(normalized_note) < 2:
+            raise ValueError("请填写拒绝原因")
+        timestamp = now_iso()
+        with self.connect() as connection:
+            self.begin_order_transaction(connection)
+            case_lookup = connection.execute(
+                "SELECT order_id FROM after_sale_cases WHERE case_id = ?",
+                (case_id,),
+            ).fetchone()
+            if not case_lookup:
+                raise ValueError("售后工单不存在")
+            order_row = self.order_row_for_update(connection, case_lookup["order_id"])
+            if not order_row:
+                raise ValueError("关联订单不存在")
+            order = self.public_order(order_row)
+            case_row = self.after_sale_case_row_for_update(connection, case_id)
+            if not case_row or case_row["order_id"] != order["order_id"]:
+                raise OrderConflictError("售后工单关联订单已变化，请刷新后重试")
+            current_status = case_row["status"]
+            event_type = normalized_action
+            resolution_type = case_row.get("resolution_type") or ""
+            resolved_at = case_row.get("resolved_at")
+
+            if normalized_action == "reject":
+                if current_status != "requested":
+                    raise ValueError("只有待审核工单可以拒绝")
+                target_status = "rejected"
+                resolution_type = "rejected"
+                resolved_at = timestamp
+            elif normalized_action == "approve_service":
+                if current_status != "requested" or case_row["case_type"] == "return_refund":
+                    raise ValueError("当前工单不能接受为服务处理")
+                target_status = "service_processing"
+                resolution_type = case_row["case_type"]
+            elif normalized_action == "request_return":
+                if current_status != "requested" or case_row["case_type"] != "return_refund":
+                    raise ValueError("当前工单不能要求寄回商品")
+                target_status = "awaiting_return"
+                resolution_type = "return_refund"
+            elif normalized_action == "prepare_direct_refund":
+                if current_status != "requested" or case_row["case_type"] != "return_refund":
+                    raise ValueError("当前工单不能免退进入退款")
+                target_status = "refund_pending"
+                resolution_type = "direct_refund"
+                self.prepare_after_sale_refund(connection, case_row, order, normalized_operator, normalized_note)
+            elif normalized_action == "confirm_return":
+                if current_status not in {"awaiting_return", "returning"} or case_row["case_type"] != "return_refund":
+                    raise ValueError("当前工单不能确认收货")
+                target_status = "refund_pending"
+                resolution_type = "return_refund"
+                self.prepare_after_sale_refund(connection, case_row, order, normalized_operator, normalized_note)
+            elif normalized_action == "complete":
+                if current_status != "service_processing":
+                    raise ValueError("只有处理中的服务工单可以完成")
+                target_status = "resolved"
+                resolved_at = timestamp
+            else:
+                raise ValueError("不支持的售后审核操作")
+
+            approved_fee = int(case_row.get("approved_refund_fee") or 0)
+            if target_status == "refund_pending":
+                approved_fee = int(case_row.get("requested_refund_fee") or order.get("total_fee") or 0)
+            connection.execute(
+                """
+                UPDATE after_sale_cases
+                SET status = ?, approved_refund_fee = ?, resolution_type = ?, review_note = ?,
+                    reviewed_by = ?, reviewed_at = ?, resolved_at = ?, updated_at = ?
+                WHERE case_id = ?
+                """,
+                (
+                    target_status, approved_fee, resolution_type, normalized_note,
+                    normalized_operator, timestamp, resolved_at, timestamp, case_id,
+                ),
+            )
+            self.append_after_sale_event(
+                connection,
+                case_id,
+                event_type,
+                current_status,
+                target_status,
+                normalized_operator,
+                normalized_note,
+            )
+            if target_status != "refund_pending":
+                connection.execute(
+                    "UPDATE orders SET after_sale_status = ?, updated_at = ? WHERE order_id = ?",
+                    (target_status, timestamp, order["order_id"]),
+                )
+        return self.admin_get_after_sale_case(case_id)
+
+    def resolve_linked_after_sale_case(
+        self,
+        connection,
+        order: dict[str, Any],
+        operator: str = "wechat",
+    ) -> None:
+        refund = dict(order.get("refund") or {})
+        case_id = str(refund.get("after_sale_case_id") or "").strip()
+        if not case_id:
+            return
+        refund_status = str(order.get("refund_status") or refund.get("status") or "").lower()
+        if refund_status not in {"submitting", "processing", "success", "abnormal", "closed"}:
+            return
+        timestamp = now_iso()
+        case_row = self.after_sale_case_row_for_update(connection, case_id)
+        if not case_row:
+            raise ValueError("退款关联的售后工单不存在")
+        if case_row["order_id"] != order["order_id"]:
+            raise ValueError("退款与售后工单关联不一致")
+        if refund_status == "submitting":
+            if case_row["status"] == "refund_pending":
+                connection.execute(
+                    "UPDATE after_sale_cases SET status = 'refund_submitting', updated_at = ? WHERE case_id = ?",
+                    (timestamp, case_id),
+                )
+                connection.execute(
+                    "UPDATE orders SET after_sale_status = 'refund_submitting', updated_at = ? WHERE order_id = ?",
+                    (timestamp, order["order_id"]),
+                )
+                self.append_after_sale_event(
+                    connection,
+                    case_id,
+                    "refund_submitting",
+                    "refund_pending",
+                    "refund_submitting",
+                    str(operator or "system")[:100],
+                    "退款指令已登记，等待微信接口结果",
+                    operator_type="system",
+                )
+                return
+            if case_row["status"] != "refund_submitting":
+                raise ValueError("售后工单当前状态不能提交退款")
+            return
+        if refund_status == "processing":
+            if case_row["status"] in {"refund_pending", "refund_submitting"}:
+                previous = case_row["status"]
+                connection.execute(
+                    "UPDATE after_sale_cases SET status = 'refunding', updated_at = ? WHERE case_id = ?",
+                    (timestamp, case_id),
+                )
+                connection.execute(
+                    "UPDATE orders SET after_sale_status = 'refunding', updated_at = ? WHERE order_id = ?",
+                    (timestamp, order["order_id"]),
+                )
+                self.append_after_sale_event(
+                    connection,
+                    case_id,
+                    "refund_submitted",
+                    previous,
+                    "refunding",
+                    str(operator or "wechat")[:100],
+                    "已提交微信原路退款",
+                    operator_type="system",
+                )
+                return
+            if case_row["status"] != "refunding":
+                raise ValueError("售后工单当前状态不能进入退款处理")
+            return
+        if refund_status in {"abnormal", "closed"}:
+            if case_row["status"] in {"refund_submitting", "refunding"}:
+                previous = case_row["status"]
+                connection.execute(
+                    "UPDATE after_sale_cases SET status = 'refund_pending', updated_at = ? WHERE case_id = ?",
+                    (timestamp, case_id),
+                )
+                connection.execute(
+                    "UPDATE orders SET after_sale_status = 'refund_pending', updated_at = ? WHERE order_id = ?",
+                    (timestamp, order["order_id"]),
+                )
+                self.append_after_sale_event(
+                    connection,
+                    case_id,
+                    "refund_failed",
+                    previous,
+                    "refund_pending",
+                    str(operator or "wechat")[:100],
+                    f"微信退款状态为 {refund_status.upper()}，已退回待确认退款",
+                    operator_type="system",
+                )
+                return
+            if case_row["status"] != "refund_pending":
+                raise ValueError("售后工单当前状态不能恢复退款")
+            return
+        if case_row["status"] == "resolved":
+            connection.execute(
+                "UPDATE orders SET after_sale_status = 'resolved', updated_at = ? WHERE order_id = ?",
+                (timestamp, order["order_id"]),
+            )
+            return
+        if case_row["status"] not in {"refund_pending", "refund_submitting", "refunding"}:
+            raise ValueError("售后工单当前状态不能完成退款")
+        connection.execute(
+            """
+            UPDATE after_sale_cases
+            SET status = 'resolved', resolved_at = ?, updated_at = ?
+            WHERE case_id = ?
+            """,
+            (timestamp, timestamp, case_id),
+        )
+        connection.execute(
+            "UPDATE orders SET after_sale_status = 'resolved', updated_at = ? WHERE order_id = ?",
+            (timestamp, order["order_id"]),
+        )
+        self.append_after_sale_event(
+            connection,
+            case_id,
+            "refund_success",
+            case_row["status"],
+            "resolved",
+            str(operator or "wechat")[:100],
+            "微信原路退款成功",
+            operator_type="system",
+        )
+
+    def sync_linked_after_sale_case(self, order: dict[str, Any], operator: str = "wechat") -> None:
+        with self.connect() as connection:
+            self.begin_order_transaction(connection)
+            row = self.order_row_for_update(connection, order["order_id"])
+            if not row:
+                raise ValueError("订单不存在")
+            self.resolve_linked_after_sale_case(connection, self.public_order(row), operator)
+
+    def submit_after_sale_refund(self, case_id: str, operator: str, note: str = "") -> dict[str, Any]:
+        case = self.admin_get_after_sale_case(case_id)
+        if case["type"] != "return_refund" or case["status"] != "refund_pending":
+            raise ValueError("当前售后工单不能发起退款")
+        refund = dict((case.get("order") or {}).get("refund") or {})
+        if refund.get("after_sale_case_id") != case_id:
+            raise ValueError("订单退款记录与售后工单不一致")
+        self.approve_refund(
+            case["order_id"],
+            operator=operator,
+            note=note,
+            expected_after_sale_case_id=case_id,
+        )
+        return self.admin_get_after_sale_case(case_id)
+
+    def sync_after_sale_refund(self, case_id: str, operator: str) -> dict[str, Any]:
+        case = self.admin_get_after_sale_case(case_id)
+        if case["type"] != "return_refund" or case["status"] not in {
+            "refund_pending", "refund_submitting", "refunding"
+        }:
+            raise ValueError("当前售后工单不能同步退款")
+        refund = dict((case.get("order") or {}).get("refund") or {})
+        if refund.get("after_sale_case_id") != case_id:
+            raise ValueError("订单退款记录与售后工单不一致")
+        order = self.sync_wechat_refund(case["order_id"], operator=operator)
+        self.sync_linked_after_sale_case(order, operator=operator)
+        return self.admin_get_after_sale_case(case_id)
+
+    def retry_after_sale_refund(self, case_id: str, operator: str, note: str = "") -> dict[str, Any]:
+        case = self.admin_get_after_sale_case(case_id)
+        if case["type"] != "return_refund" or case["status"] not in {
+            "refund_pending", "refund_submitting", "refunding"
+        }:
+            raise ValueError("当前售后工单不能恢复退款")
+        refund = dict((case.get("order") or {}).get("refund") or {})
+        if refund.get("after_sale_case_id") != case_id:
+            raise ValueError("订单退款记录与售后工单不一致")
+        self.retry_refund_submission(
+            case["order_id"],
+            operator=operator,
+            note=note,
+            expected_after_sale_case_id=case_id,
+        )
+        return self.admin_get_after_sale_case(case_id)
+
+    def request_refund(self, order_id: str, user_id: str, reason: str = "") -> dict[str, Any]:
+        with self.connect() as connection:
+            self.begin_order_transaction(connection)
+            row = self.order_row_for_update(connection, order_id)
+            if not row:
+                raise ValueError("订单不存在")
+            order = self.public_order(row)
+            self.ensure_order_owner(order, user_id)
+            if order["payment_status"] != "paid":
+                raise ValueError("未支付订单不能申请退款")
+            if order["status"] == "refund_requested":
+                refund = dict(order.get("refund") or {})
+                if refund.get("source_order_status") == "pending_ship" and not refund.get("after_sale_case_id"):
+                    return order
+                raise OrderConflictError("订单已进入其他退款流程，请刷新后查看")
+            if order["status"] != "pending_ship":
+                raise ValueError("仅待发货订单可直接申请退款；已发货订单请申请退货退款")
+            requested_at = now_iso()
+            refund = {
+                **(order.get("refund") or {}),
+                "status": "requested",
+                "out_refund_no": str((order.get("refund") or {}).get("out_refund_no") or f"RF{order_id}")[:64],
+                "reason": reason or "用户申请退款",
+                "requested_at": requested_at,
+                "source_order_status": order["status"],
+                "refund_fee": int(order.get("total_fee") or self.to_cents(Decimal(str(order.get("total_amount") or 0)))),
+                "total_fee": int(order.get("total_fee") or 0),
+                "currency": order.get("currency") or "CNY",
+            }
+            remark = f"{order.get('remark') or ''}\n退款原因：{reason}".strip()
+            self.transition_order(
+                order,
+                "refund_requested",
+                event_label="用户申请退款",
+                connection=connection,
+                remark=remark,
+                refund_status="requested",
+                refund=refund,
+            )
         return self.get_order(order_id)
 
-    def approve_refund(self, order_id: str, operator: str = "", note: str = "") -> dict[str, Any]:
-        order = self.get_order(order_id)
-        if order["status"] != "refund_requested":
-            raise ValueError("仅退款申请中的订单可以同意退款")
-        if order["payment_status"] != "paid":
-            raise ValueError("订单未处于已支付状态，不能发起原路退款")
-        if order.get("refund_status") == "processing" or (order.get("refund") or {}).get("status") == "processing":
-            raise ValueError("退款已提交微信处理，请不要重复发起")
-        refund = dict(order.get("refund") or {})
-        total_fee = int(order.get("total_fee") or self.to_cents(Decimal(str(order.get("total_amount") or 0))))
-        if total_fee <= 0:
-            raise ValueError("订单金额异常，不能退款")
-        refund_fee = int(refund.get("refund_fee") or total_fee)
-        if refund_fee <= 0 or refund_fee > total_fee:
-            raise ValueError("退款金额异常，不能超过原订单金额")
-        out_refund_no = str(refund.get("out_refund_no") or f"RF{order['order_id']}")[:64]
+    def approve_refund(
+        self,
+        order_id: str,
+        operator: str = "",
+        note: str = "",
+        expected_after_sale_case_id: str = "",
+    ) -> dict[str, Any]:
         config = WechatPayConfig()
         if not config.ready:
             raise ValueError(f"微信支付未配置：缺少 {', '.join(config.missing)}")
+
+        linked_case_id = ""
+        with self.connect() as connection:
+            self.begin_order_transaction(connection)
+            row = self.order_row_for_update(connection, order_id)
+            if not row:
+                raise ValueError("订单不存在")
+            order = self.public_order(row)
+            if order["status"] != "refund_requested":
+                raise ValueError("仅退款申请中的订单可以同意退款")
+            if order["payment_status"] != "paid":
+                raise ValueError("订单未处于已支付状态，不能发起原路退款")
+            refund = dict(order.get("refund") or {})
+            current_refund_status = str(order.get("refund_status") or refund.get("status") or "").lower()
+            if current_refund_status in {"submitting", "processing", "success"}:
+                raise OrderConflictError("退款已提交，请同步微信退款状态，不要重复发起")
+            if current_refund_status in {"abnormal", "closed"}:
+                raise OrderConflictError("原退款未生效，请使用退款恢复入口核对后重试")
+            if current_refund_status not in {"requested", "approved"}:
+                raise ValueError("退款状态异常，不能发起原路退款")
+            linked_case_id = str(refund.get("after_sale_case_id") or "").strip()
+            if linked_case_id and not expected_after_sale_case_id:
+                raise ValueError("该退款来自售后工单，请在售后审核页确认退款")
+            if expected_after_sale_case_id and linked_case_id != expected_after_sale_case_id:
+                raise ValueError("订单退款记录与售后工单不一致")
+            if linked_case_id:
+                case_row = self.after_sale_case_row_for_update(connection, linked_case_id)
+                if not case_row or case_row["order_id"] != order_id:
+                    raise ValueError("订单退款记录与售后工单不一致")
+                if case_row["status"] != "refund_pending":
+                    raise OrderConflictError("售后退款状态已更新，请刷新后重试")
+            total_fee = int(order.get("total_fee") or self.to_cents(Decimal(str(order.get("total_amount") or 0))))
+            if total_fee <= 0:
+                raise ValueError("订单金额异常，不能退款")
+            refund_fee = int(refund.get("refund_fee") or total_fee)
+            if refund_fee <= 0 or refund_fee > total_fee:
+                raise ValueError("退款金额异常，不能超过原订单金额")
+            out_refund_no = str(refund.get("out_refund_no") or f"RF{order['order_id']}")[:64]
+            timestamp = now_iso()
+            refund.update(
+                {
+                    "status": "submitting",
+                    "out_refund_no": out_refund_no,
+                    "refund_fee": refund_fee,
+                    "total_fee": total_fee,
+                    "currency": order.get("currency") or "CNY",
+                    "approved_at": timestamp,
+                    "approved_by": operator,
+                    "approve_note": note,
+                    "submission_started_at": timestamp,
+                    "submission_attempt_id": secrets.token_hex(12),
+                    "submission_attempts": int(refund.get("submission_attempts") or 0) + 1,
+                }
+            )
+            self.append_order_event(
+                order,
+                status=order["status"],
+                label="退款指令已登记，等待微信接口结果",
+                connection=connection,
+                refund_status="submitting",
+                refund=refund,
+            )
+            self.resolve_linked_after_sale_case(
+                connection,
+                {**order, "refund_status": "submitting", "refund": refund},
+                operator=operator or "admin",
+            )
+
         response = self.create_wechat_refund(
             order,
             out_refund_no,
@@ -1728,62 +2821,228 @@ class OrderService:
             note or refund.get("reason") or "用户申请退款",
             config,
         )
-        wechat_status = str(response.get("status") or "").upper()
-        timestamp = now_iso()
-        refund.update(
-            {
-                "status": "success" if wechat_status == "SUCCESS" else "processing",
-                "out_refund_no": out_refund_no,
-                "refund_fee": refund_fee,
-                "total_fee": total_fee,
-                "currency": order.get("currency") or "CNY",
-                "approved_at": timestamp,
-                "approved_by": operator,
-                "approve_note": note,
-                "wechat_status": wechat_status,
-                "wechat_response": response,
-            }
+        return self.finalize_wechat_refund_submission(
+            order_id,
+            out_refund_no,
+            response,
+            operator=operator or "admin",
         )
-        if wechat_status == "SUCCESS":
-            self.transition_order(
-                order,
-                "refunded",
-                event_label="后台已同意退款，微信原路退款成功",
-                payment_status="refunded",
-                refund_status="success",
-                refund=refund,
+
+    def finalize_wechat_refund_submission(
+        self,
+        order_id: str,
+        out_refund_no: str,
+        response: dict[str, Any],
+        *,
+        operator: str,
+    ) -> dict[str, Any]:
+        wechat_status = str(response.get("status") or response.get("refund_status") or "PROCESSING").upper()
+        with self.connect() as connection:
+            self.begin_order_transaction(connection)
+            row = self.order_row_for_update(connection, order_id)
+            if not row:
+                raise ValueError("订单不存在")
+            current_order = self.public_order(row)
+            current_refund = dict(current_order.get("refund") or {})
+            if str(current_refund.get("out_refund_no") or "") != out_refund_no:
+                raise OrderConflictError("退款单号已变化，请人工核对")
+            if (
+                current_order["status"] == "refunded"
+                and current_order["payment_status"] == "refunded"
+                and str(current_order.get("refund_status") or current_refund.get("status") or "").lower() == "success"
+            ):
+                return current_order
+            if current_order["status"] != "refund_requested" or current_order["payment_status"] != "paid":
+                raise OrderConflictError("退款返回期间订单状态已变化，请人工核对")
+            current_refund.update(
+                {
+                    "status": {
+                        "SUCCESS": "success",
+                        "PROCESSING": "processing",
+                        "ABNORMAL": "abnormal",
+                        "CLOSED": "closed",
+                    }.get(wechat_status, "unknown"),
+                    "wechat_status": wechat_status,
+                    "wechat_response": response,
+                    "submission_finished_at": now_iso(),
+                }
             )
-        else:
-            self.append_order_event(
-                order,
-                status=order["status"],
-                label=f"后台已同意退款，微信退款处理中：{wechat_status or 'PROCESSING'}",
-                refund_status="processing",
-                refund=refund,
+            amount = response.get("amount") or {
+                "refund": current_refund.get("refund_fee") or 0,
+                "total": current_refund.get("total_fee") or current_order.get("total_fee") or 0,
+            }
+            current_order = {
+                **current_order,
+                "refund": current_refund,
+                "refund_status": current_refund["status"],
+            }
+            self.apply_wechat_refund_result(
+                current_order,
+                {
+                    **response,
+                    "status": wechat_status,
+                    "out_refund_no": out_refund_no,
+                    "amount": amount,
+                },
+                "后台提交微信退款",
+                connection=connection,
             )
         return self.get_order(order_id)
 
-    def reject_refund(self, order_id: str, operator: str = "", note: str = "") -> dict[str, Any]:
+    def retry_refund_submission(
+        self,
+        order_id: str,
+        operator: str = "",
+        note: str = "",
+        expected_after_sale_case_id: str = "",
+    ) -> dict[str, Any]:
         order = self.get_order(order_id)
-        if order["status"] != "refund_requested":
-            raise ValueError("仅退款申请中的订单可以拒绝退款")
+        if order.get("status") != "refund_requested" or order.get("payment_status") != "paid":
+            raise ValueError("当前订单不能恢复退款提交")
         refund = dict(order.get("refund") or {})
-        timestamp = now_iso()
-        refund.update(
-            {
-                "status": "rejected",
-                "rejected_at": timestamp,
-                "rejected_by": operator,
-                "reject_note": note,
+        current_refund_status = str(order.get("refund_status") or refund.get("status") or "").lower()
+        if current_refund_status not in {"submitting", "processing", "abnormal", "closed", "success"}:
+            raise ValueError("退款尚未提交微信，不能同步退款状态")
+        out_refund_no = str(refund.get("out_refund_no") or "").strip()
+        if not out_refund_no or len(out_refund_no) > 64:
+            raise ValueError("退款单号缺失或非法，不能恢复退款提交")
+        linked_case_id = str(refund.get("after_sale_case_id") or "").strip()
+        if linked_case_id and not expected_after_sale_case_id:
+            raise ValueError("该退款来自售后工单，请在售后审核页恢复退款")
+        if expected_after_sale_case_id and linked_case_id != expected_after_sale_case_id:
+            raise ValueError("订单退款记录与售后工单不一致")
+
+        query_not_found = False
+        try:
+            synced = self.sync_wechat_refund(order_id, operator=operator)
+        except WechatPayRequestError as exc:
+            if not exc.resource_not_found:
+                raise
+            query_not_found = True
+        else:
+            synced_status = str(synced.get("refund_status") or (synced.get("refund") or {}).get("status") or "").lower()
+            if synced_status not in {"abnormal", "closed"}:
+                return synced
+
+        config = WechatPayConfig()
+        if not config.ready:
+            raise ValueError(f"微信支付未配置：缺少 {', '.join(config.missing)}")
+
+        with self.connect() as connection:
+            self.begin_order_transaction(connection)
+            row = self.order_row_for_update(connection, order_id)
+            if not row:
+                raise ValueError("订单不存在")
+            current_order = self.public_order(row)
+            if current_order["status"] != "refund_requested" or current_order["payment_status"] != "paid":
+                raise OrderConflictError("退款状态已更新，请刷新后重试")
+            current_refund = dict(current_order.get("refund") or {})
+            if str(current_refund.get("out_refund_no") or "") != out_refund_no:
+                raise OrderConflictError("退款单号已变化，请人工核对")
+            current_status = str(current_order.get("refund_status") or current_refund.get("status") or "").lower()
+            if query_not_found:
+                if current_status != "submitting":
+                    raise OrderConflictError("退款状态已更新，请先同步微信结果")
+                started_at = self.parse_utc_datetime(current_refund.get("submission_started_at"))
+                if started_at is None:
+                    raise ValueError("退款提交时间缺失，请人工核对")
+                elapsed = (datetime.now(timezone.utc) - started_at).total_seconds()
+                if elapsed < REFUND_SUBMISSION_RETRY_DELAY_SECONDS:
+                    remaining = max(1, int(REFUND_SUBMISSION_RETRY_DELAY_SECONDS - elapsed))
+                    raise OrderConflictError(f"退款指令仍在保护期，请 {remaining} 秒后再次核对")
+            elif current_status not in {"abnormal", "closed"}:
+                raise OrderConflictError("退款状态已更新，请先同步微信结果")
+
+            total_fee = int(current_refund.get("total_fee") or current_order.get("total_fee") or 0)
+            refund_fee = int(current_refund.get("refund_fee") or 0)
+            if total_fee <= 0 or refund_fee <= 0 or refund_fee > total_fee:
+                raise ValueError("退款金额异常，不能恢复退款提交")
+
+            if linked_case_id:
+                case_row = self.after_sale_case_row_for_update(connection, linked_case_id)
+                if not case_row or case_row["order_id"] != order_id:
+                    raise ValueError("订单退款记录与售后工单不一致")
+                allowed_case_statuses = {"refund_submitting"} if query_not_found else {"refund_pending"}
+                if case_row["status"] not in allowed_case_statuses:
+                    raise OrderConflictError("售后退款状态已更新，请刷新后重试")
+
+            timestamp = now_iso()
+            current_refund.update(
+                {
+                    "status": "submitting",
+                    "submission_started_at": timestamp,
+                    "submission_attempt_id": secrets.token_hex(12),
+                    "submission_attempts": int(current_refund.get("submission_attempts") or 0) + 1,
+                    "last_recovery_query": "not_found" if query_not_found else current_status,
+                    "recovery_note": str(note or "核对微信退款结果后恢复提交")[:500],
+                    "recovered_by": str(operator or "admin")[:100],
+                }
+            )
+            self.append_order_event(
+                current_order,
+                status=current_order["status"],
+                label="微信退款未生效，使用原退款单号恢复提交",
+                connection=connection,
+                refund_status="submitting",
+                refund=current_refund,
+            )
+            claimed_order = {
+                **current_order,
+                "refund_status": "submitting",
+                "refund": current_refund,
             }
+            self.resolve_linked_after_sale_case(
+                connection,
+                claimed_order,
+                operator=operator or "admin",
+            )
+
+        response = self.create_wechat_refund(
+            claimed_order,
+            out_refund_no,
+            refund_fee,
+            total_fee,
+            note or current_refund.get("reason") or "用户申请退款",
+            config,
         )
-        self.transition_order(
-            order,
-            "after_sale",
-            event_label=note or "后台拒绝退款，转入售后处理",
-            refund_status="rejected",
-            refund=refund,
+        return self.finalize_wechat_refund_submission(
+            order_id,
+            out_refund_no,
+            response,
+            operator=operator or "admin",
         )
+
+    def reject_refund(self, order_id: str, operator: str = "", note: str = "") -> dict[str, Any]:
+        with self.connect() as connection:
+            self.begin_order_transaction(connection)
+            row = self.order_row_for_update(connection, order_id)
+            if not row:
+                raise ValueError("订单不存在")
+            order = self.public_order(row)
+            if order["status"] != "refund_requested":
+                raise ValueError("仅退款申请中的订单可以拒绝退款")
+            refund = dict(order.get("refund") or {})
+            if refund.get("after_sale_case_id"):
+                raise ValueError("该退款来自售后工单，请在售后审核页处理")
+            if refund.get("source_order_status") != "pending_ship":
+                raise ValueError("退款申请缺少可信的原始履约状态，请人工核对")
+            timestamp = now_iso()
+            refund.update(
+                {
+                    "status": "rejected",
+                    "rejected_at": timestamp,
+                    "rejected_by": operator,
+                    "reject_note": note,
+                }
+            )
+            self.transition_order(
+                order,
+                "pending_ship",
+                event_label=note or "退款申请未通过，订单恢复待发货",
+                connection=connection,
+                refund_status="rejected",
+                refund=refund,
+            )
         return self.get_order(order_id)
 
     def create_wechat_refund(
@@ -1826,7 +3085,25 @@ class OrderService:
         connection=None,
         **updates,
     ) -> None:
-        current_status = order["status"]
+        if connection is None:
+            with self.connect() as owned_connection:
+                self.begin_order_transaction(owned_connection)
+                self.transition_order(
+                    order,
+                    target_status,
+                    event_label=event_label,
+                    connection=owned_connection,
+                    **updates,
+                )
+            return
+
+        row = self.order_row_for_update(connection, order["order_id"])
+        if not row:
+            raise ValueError("订单不存在")
+        fresh_order = self.public_order(row)
+        current_status = fresh_order["status"]
+        if current_status != order["status"]:
+            raise OrderConflictError("订单状态已更新，请刷新后重试")
         allowed = ORDER_STATE_TRANSITIONS.get(current_status, set())
         if target_status != current_status and target_status not in allowed:
             current = ORDER_STATUS_TEXT.get(current_status, current_status)
@@ -1834,7 +3111,10 @@ class OrderService:
             raise ValueError(f"订单状态不能从 {current} 变更为 {target}")
 
         timestamp = now_iso()
-        history = list(order.get("status_history") or [])
+        payment_status = updates.get("payment_status", fresh_order.get("payment_status"))
+        self.validate_order_state(target_status, str(payment_status or ""))
+
+        history = list(fresh_order.get("status_history") or [])
         if target_status != current_status:
             history.append({
                 "status": target_status,
@@ -1861,12 +3141,31 @@ class OrderService:
         if "refund" in updates:
             set_parts.append("refund_json = ?")
             values.append(json.dumps(updates["refund"], ensure_ascii=False))
-        values.append(order["order_id"])
-        if connection is not None:
-            connection.execute(f"UPDATE orders SET {', '.join(set_parts)} WHERE order_id = ?", values)
-            return
-        with self.connect() as owned_connection:
-            owned_connection.execute(f"UPDATE orders SET {', '.join(set_parts)} WHERE order_id = ?", values)
+        values.extend([order["order_id"], current_status])
+        cursor = connection.execute(
+            f"UPDATE orders SET {', '.join(set_parts)} WHERE order_id = ? AND status = ?",
+            values,
+        )
+        if cursor.rowcount == 0:
+            current = self.order_row_for_update(connection, order["order_id"])
+            if not current or current["status"] != current_status:
+                raise OrderConflictError("订单状态已更新，请刷新后重试")
+
+    @staticmethod
+    def validate_order_state(status: str, payment_status: str) -> None:
+        allowed_payment_states = {
+            "pending_payment": {"unpaid", "processing"},
+            "pending_ship": {"paid"},
+            "shipped": {"paid"},
+            "completed": {"paid"},
+            "refund_requested": {"paid"},
+            "refunded": {"refunded"},
+            "closed": {"cancelled", "expired", "failed"},
+        }
+        if status not in allowed_payment_states:
+            raise ValueError("不支持的订单状态")
+        if payment_status not in allowed_payment_states[status]:
+            raise ValueError("订单履约状态与支付状态不一致")
 
     def append_order_event(
         self,
@@ -1876,8 +3175,28 @@ class OrderService:
         connection=None,
         **updates,
     ) -> None:
+        if connection is None:
+            with self.connect() as owned_connection:
+                self.begin_order_transaction(owned_connection)
+                self.append_order_event(
+                    order,
+                    status=status,
+                    label=label,
+                    connection=owned_connection,
+                    **updates,
+                )
+            return
+
+        row = self.order_row_for_update(connection, order["order_id"])
+        if not row:
+            raise ValueError("订单不存在")
+        fresh_order = self.public_order(row)
+        if fresh_order["status"] != order["status"] or status != fresh_order["status"]:
+            raise OrderConflictError("订单状态已更新，请刷新后重试")
+        payment_status = updates.get("payment_status", fresh_order.get("payment_status"))
+        self.validate_order_state(fresh_order["status"], str(payment_status or ""))
         timestamp = now_iso()
-        history = list(order.get("status_history") or [])
+        history = list(fresh_order.get("status_history") or [])
         history.append({"status": status, "label": label, "time": timestamp})
         set_parts = ["updated_at = ?", "status_history_json = ?"]
         values: list[Any] = [timestamp, json.dumps(history, ensure_ascii=False)]
@@ -1898,12 +3217,15 @@ class OrderService:
         if "refund" in updates:
             set_parts.append("refund_json = ?")
             values.append(json.dumps(updates["refund"], ensure_ascii=False))
-        values.append(order["order_id"])
-        if connection is not None:
-            connection.execute(f"UPDATE orders SET {', '.join(set_parts)} WHERE order_id = ?", values)
-            return
-        with self.connect() as owned_connection:
-            owned_connection.execute(f"UPDATE orders SET {', '.join(set_parts)} WHERE order_id = ?", values)
+        values.extend([order["order_id"], fresh_order["status"]])
+        cursor = connection.execute(
+            f"UPDATE orders SET {', '.join(set_parts)} WHERE order_id = ? AND status = ?",
+            values,
+        )
+        if cursor.rowcount == 0:
+            current = self.order_row_for_update(connection, order["order_id"])
+            if not current or current["status"] != fresh_order["status"]:
+                raise OrderConflictError("订单状态已更新，请刷新后重试")
 
     def build_logistics(
         self,
@@ -1911,6 +3233,7 @@ class OrderService:
         tracking_no: str | None = None,
         carrier_code: str = "shunfeng",
         phone_tail: str | None = None,
+        source: str = "local",
     ) -> dict[str, Any]:
         timestamp = now_iso()
         tracking = tracking_no or f"YJ{int(time.time())}{secrets.token_hex(3).upper()}"
@@ -1919,13 +3242,13 @@ class OrderService:
             "carrier_code": carrier_code or "shunfeng",
             "tracking_no": tracking,
             "phone_tail": phone_tail or "",
-            "status": "in_transit",
-            "status_text": "运输中",
+            "status": "awaiting_pickup",
+            "status_text": "已发货待揽收",
             "updated_at": timestamp,
-            "source": "local",
+            "shipped_at": timestamp,
+            "source": source or "local",
             "traces": [
-                {"time": timestamp, "location": "宇涧水晶工作室", "desc": "商家已打包，待快递揽收"},
-                {"time": timestamp, "location": "宇涧水晶工作室", "desc": "商家已填写发货信息，等待物流公司更新轨迹"},
+                {"time": timestamp, "location": "宇涧水晶工作室", "desc": "商家已打包并发货，等待快递揽收"},
             ],
         }
 
@@ -2507,7 +3830,7 @@ class OrderService:
         with self.connect() as connection:
             rows = connection.execute(
                 """
-                SELECT order_id FROM orders
+                SELECT order_id, logistics_json FROM orders
                 WHERE status = 'shipped'
                   AND auto_complete_at IS NOT NULL
                   AND auto_complete_at <= ?
@@ -2538,12 +3861,19 @@ class OrderService:
         with self.connect() as connection:
             rows = connection.execute(
                 """
-                SELECT order_id FROM orders
-                WHERE status = 'shipped' AND auto_complete_at IS NULL
+                SELECT order_id, logistics_json FROM orders
+                WHERE status IN ('shipped', 'refund_requested', 'refunded')
+                  AND logistics_json IS NOT NULL
+                  AND logistics_json <> ''
                 ORDER BY updated_at ASC LIMIT ?
                 """,
                 (limit,),
             ).fetchall()
+        rows = [
+            row
+            for row in rows
+            if self.loads(dict(row).get("logistics_json") or "", {}).get("tracking_no")
+        ]
         results = []
         for row in rows:
             try:
@@ -2670,13 +4000,30 @@ class OrderService:
             # lets a shared workspace reproduce the sender's composition without
             # exposing the private design metadata filtered below.
             "x", "y", "dx", "dy", "looseX", "looseY", "rotation", "scale", "beadSize",
-            "image_url", "name", "size", "size_mm",
+            "image_url", "name", "size", "size_mm", "bead_caps",
         }
+
+        bead_cap_keys = {
+            "id", "material_id", "sku", "skuId", "name", "category", "series",
+            "size", "image_url", "image_urls", "material_params", "attachment_mode", "side",
+        }
+
+        def safe_bead_caps(value: Any) -> dict[str, Any]:
+            if not isinstance(value, dict):
+                return {}
+            return {
+                side: {key: item for key, item in cap.items() if key in bead_cap_keys}
+                for side, cap in value.items()
+                if side in {"left", "right"} and isinstance(cap, dict)
+            }
 
         def safe_placement(value: Any) -> dict[str, Any]:
             if not isinstance(value, dict):
                 return {}
-            return {key: item for key, item in value.items() if key in placement_keys}
+            placement = {key: item for key, item in value.items() if key in placement_keys}
+            if "bead_caps" in placement:
+                placement["bead_caps"] = safe_bead_caps(placement["bead_caps"])
+            return placement
 
         design_keys = {
             "name", "title", "selected", "placements", "wearStyle", "isLooseMode",
@@ -2685,7 +4032,8 @@ class OrderService:
         }
         sequence_keys = {
             "id", "sku", "skuId", "name", "category", "series", "size", "size_mm",
-            "color", "shine", "image_url", "placement",
+            "color", "shine", "image_url", "placement", "top", "item_type",
+            "material_params", "placement_mode", "attachment_mode", "attachment",
         }
         safe_design = {key: value for key, value in design.items() if key in design_keys}
         safe_design["placements"] = [
@@ -2828,8 +4176,18 @@ class OrderService:
                 error_type=type(exc).__name__,
                 result="failed",
             )
-            raise ValueError(f"{error_label}：网络超时") from exc
+            raise WechatPayRequestError(
+                f"{error_label}：网络超时",
+                retryable=True,
+            ) from exc
         if response.status_code >= 400:
+            provider_code = ""
+            try:
+                error_payload = response.json()
+                if isinstance(error_payload, dict):
+                    provider_code = str(error_payload.get("code") or "").strip().upper()
+            except (ValueError, TypeError):
+                provider_code = ""
             metrics.increment("external_service_failed_total", service="wechat_pay", status_code=response.status_code)
             log_event(
                 external_logger,
@@ -2839,7 +4197,12 @@ class OrderService:
                 status_code=response.status_code,
                 result="failed",
             )
-            raise ValueError(f"{error_label}：HTTP {response.status_code}")
+            raise WechatPayRequestError(
+                f"{error_label}：HTTP {response.status_code}",
+                status_code=response.status_code,
+                provider_code=provider_code,
+                retryable=response.status_code == 429 or response.status_code >= 500,
+            )
         return response.json()
 
     @staticmethod
@@ -3275,7 +4638,14 @@ class OrderService:
             self.transition_order(order, "pending_payment", connection=connection, payment_status="processing")
             status = "succeeded"
         elif trade_state == "NOTPAY":
-            status = "ignored"
+            self.append_order_event(
+                order,
+                status=order["status"],
+                label="微信支付未完成，可重新发起支付",
+                connection=connection,
+                payment_status="unpaid",
+            )
+            status = "succeeded"
         else:
             self.release_reservations(connection, order["order_id"], "released")
             self.transition_order(
@@ -3393,6 +4763,11 @@ class OrderService:
         )
         if not expected_transaction or transaction_id != expected_transaction:
             raise PaymentWebhookError("transaction_id_mismatch", "退款交易号与原支付订单不一致")
+        refund = dict(order.get("refund") or {})
+        expected_refund_no = str(refund.get("out_refund_no") or "").strip()
+        actual_refund_no = str(refund_result.get("out_refund_no") or "").strip()
+        if not expected_refund_no or actual_refund_no != expected_refund_no:
+            raise PaymentWebhookError("out_refund_no_mismatch", "微信退款单号与本地退款申请不一致")
         amount = refund_result.get("amount") or {}
         total_fee = self.strict_webhook_amount(
             amount.get("total"),
@@ -3406,12 +4781,13 @@ class OrderService:
         )
         if total_fee != int(order["total_fee"]):
             raise PaymentWebhookError("amount_mismatch", "退款原订单金额不一致")
-        expected_refund = int((order.get("refund") or {}).get("refund_fee") or order["total_fee"])
+        expected_refund = int(refund.get("refund_fee") or order["total_fee"])
         if refund_fee <= 0 or refund_fee != expected_refund or refund_fee > total_fee:
             raise PaymentWebhookError("refund_amount_mismatch", "微信退款金额与退款申请不一致")
         refund_id = str(refund_result.get("refund_id") or "").strip()
         resource_id = refund_id or str(refund_result.get("out_refund_no") or "")
         if order["status"] == "refunded" and order["payment_status"] == "refunded":
+            self.resolve_linked_after_sale_case(connection, order, "wechat")
             return {
                 "processing_status": "ignored",
                 "merchant_order_no": merchant_order_no,
@@ -3431,7 +4807,7 @@ class OrderService:
             **dict(order.get("refund") or {}),
             "status": normalized_status,
             "wechat_status": refund_status,
-            "out_refund_no": refund_result.get("out_refund_no") or "",
+            "out_refund_no": actual_refund_no,
             "refund_id": refund_id,
             "transaction_id": transaction_id,
             "success_time": refund_result.get("success_time") or "",
@@ -3442,6 +4818,7 @@ class OrderService:
         if refund_status == "SUCCESS":
             if order["status"] != "refund_requested":
                 raise PaymentWebhookError("refund_order_state_invalid", "退款成功通知与订单状态不一致")
+            refund = self.apply_refund_inventory_disposition(connection, order, refund)
             self.transition_order(
                 order,
                 "refunded",
@@ -3451,11 +4828,21 @@ class OrderService:
                 refund_status="success",
                 refund=refund,
             )
+            self.resolve_linked_after_sale_case(
+                connection,
+                {**order, "status": "refunded", "payment_status": "refunded", "refund_status": "success", "refund": refund},
+                "wechat",
+            )
             status = "succeeded"
         else:
             connection.execute(
                 "UPDATE orders SET refund_status = ?, refund_json = ?, updated_at = ? WHERE order_id = ?",
                 (normalized_status, json.dumps(refund, ensure_ascii=False), now_iso(), order["order_id"]),
+            )
+            self.resolve_linked_after_sale_case(
+                connection,
+                {**order, "refund_status": normalized_status, "refund": refund},
+                "wechat",
             )
             status = "succeeded"
         return {
@@ -3481,26 +4868,38 @@ class OrderService:
         if order.get("status") not in {"refund_requested", "refunded"}:
             raise ValueError("订单未进入退款流程")
         refund = dict(order.get("refund") or {})
-        out_refund_no = str(refund.get("out_refund_no") or f"RF{order_id}")[:64]
+        out_refund_no = str(refund.get("out_refund_no") or "").strip()
+        if not out_refund_no or len(out_refund_no) > 64:
+            raise ValueError("退款单号缺失或非法，不能同步退款状态")
         config = WechatPayConfig()
         if not config.ready:
             raise ValueError(f"微信支付未配置：缺少 {', '.join(config.missing)}")
         refund_result = self.query_wechat_refund(out_refund_no, config)
-        if refund_result.get("mchid") and refund_result.get("mchid") != config.mch_id:
+        if str(refund_result.get("mchid") or "") != str(config.mch_id or ""):
             raise ValueError("微信退款查询结果商户号不匹配")
-        refund_result.setdefault("out_refund_no", out_refund_no)
-        refund_result.setdefault("out_trade_no", order.get("out_trade_no") or order_id)
-        if refund_result.get("out_trade_no") != order.get("out_trade_no"):
+        if str(refund_result.get("out_refund_no") or "") != out_refund_no:
+            raise ValueError("微信退款查询结果退款单号不匹配")
+        if str(refund_result.get("out_trade_no") or "") != str(order.get("out_trade_no") or ""):
             raise ValueError("微信退款查询结果订单号不匹配")
         expected_transaction = str((order.get("payment") or {}).get("transaction_id") or "")
-        if not expected_transaction or refund_result.get("transaction_id") != expected_transaction:
+        if not expected_transaction or str(refund_result.get("transaction_id") or "") != expected_transaction:
             raise ValueError("微信退款查询结果交易号不匹配")
+        query_status = str(refund_result.get("status") or refund_result.get("refund_status") or "").upper()
+        if query_status not in {"SUCCESS", "PROCESSING", "ABNORMAL", "CLOSED"}:
+            raise ValueError("微信退款查询结果状态非法")
         amount = refund_result.get("amount") or {}
-        if int(amount.get("total") or 0) != int(order.get("total_fee") or 0):
+        try:
+            query_total_fee = int(amount.get("total"))
+            query_refund_fee = int(amount.get("refund"))
+        except (TypeError, ValueError):
+            raise ValueError("微信退款查询结果金额字段非法") from None
+        if query_total_fee != int(order.get("total_fee") or 0):
             raise ValueError("微信退款查询结果原订单金额不匹配")
         expected_refund = int(refund.get("refund_fee") or order.get("total_fee") or 0)
-        if int(amount.get("refund") or 0) != expected_refund:
+        if expected_refund <= 0 or query_refund_fee != expected_refund:
             raise ValueError("微信退款查询结果退款金额不匹配")
+        if amount.get("currency") and amount.get("currency") != (order.get("currency") or "CNY"):
+            raise ValueError("微信退款查询结果币种不匹配")
         with self.connect() as connection:
             self.begin_order_transaction(connection)
             locked_row = self.order_row_for_update(connection, order_id)
@@ -3516,6 +4915,11 @@ class OrderService:
             locked_transaction = str((locked_order.get("payment") or {}).get("transaction_id") or "")
             if locked_transaction != expected_transaction:
                 raise ValueError("退款同步期间支付交易号已变化")
+            locked_refund = dict(locked_order.get("refund") or {})
+            if str(locked_refund.get("out_refund_no") or "") != out_refund_no:
+                raise OrderConflictError("退款同步期间退款单号已变化")
+            if int(locked_refund.get("refund_fee") or locked_order.get("total_fee") or 0) != expected_refund:
+                raise OrderConflictError("退款同步期间退款金额已变化")
             self.apply_wechat_refund_result(
                 locked_order,
                 refund_result,
@@ -3564,6 +4968,9 @@ class OrderService:
                     connection=connection,
                 )
             elif order.get("status") == "refund_requested" and order.get("payment_status") == "paid":
+                if connection is None:
+                    raise ValueError("退款成功结果必须在订单事务中应用")
+                refund = self.apply_refund_inventory_disposition(connection, order, refund)
                 self.transition_order(
                     order,
                     "refunded",
@@ -3575,6 +4982,17 @@ class OrderService:
                 )
             else:
                 raise ValueError("订单当前状态不能应用退款成功结果")
+            if connection is None:
+                self.sync_linked_after_sale_case(
+                    {**order, "status": "refunded", "payment_status": "refunded", "refund_status": "success", "refund": refund},
+                    operator=event_label_prefix,
+                )
+            else:
+                self.resolve_linked_after_sale_case(
+                    connection,
+                    {**order, "status": "refunded", "payment_status": "refunded", "refund_status": "success", "refund": refund},
+                    operator=event_label_prefix,
+                )
         else:
             if order.get("status") == "refunded" or order.get("payment_status") == "refunded":
                 return refund
@@ -3586,6 +5004,20 @@ class OrderService:
                 refund=refund,
                 connection=connection,
             )
+            if normalized_status in {"processing", "abnormal", "closed"}:
+                next_order = {
+                    **order,
+                    "refund_status": normalized_status,
+                    "refund": refund,
+                }
+                if connection is None:
+                    self.sync_linked_after_sale_case(next_order, operator=event_label_prefix)
+                else:
+                    self.resolve_linked_after_sale_case(
+                        connection,
+                        next_order,
+                        operator=event_label_prefix,
+                    )
         return refund
 
     def update_refund_snapshot(
@@ -3765,6 +5197,121 @@ class OrderService:
             config,
             error_label="微信支付订单查询失败",
         )
+
+    def reconcile_processing_payments(self, limit: int = 100) -> dict[str, Any]:
+        config = WechatPayConfig()
+        if not config.ready:
+            return {
+                "configured": False,
+                "checked": 0,
+                "updated": 0,
+                "compensation_required": 0,
+                "failed": 0,
+                "results": [],
+            }
+        with self.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT order_id, out_trade_no FROM orders
+                WHERE status = 'pending_payment' AND payment_status = 'processing'
+                ORDER BY updated_at ASC LIMIT ?
+                """,
+                (max(1, min(int(limit), 1000)),),
+            ).fetchall()
+        event_types = {
+            "SUCCESS": "TRANSACTION.SUCCESS",
+            "CLOSED": "TRANSACTION.CLOSED",
+            "PAYERROR": "TRANSACTION.PAYERROR",
+            "USERPAYING": "TRANSACTION.USERPAYING",
+            "NOTPAY": "TRANSACTION.NOTPAY",
+        }
+        results: list[dict[str, Any]] = []
+        for row in rows:
+            order_id = str(row["order_id"])
+            try:
+                transaction = self.query_wechat_transaction(str(row["out_trade_no"]), config)
+                trade_state = str(transaction.get("trade_state") or "").upper()
+                event_type = event_types.get(trade_state)
+                if not event_type:
+                    raise ValueError(f"不支持的微信支付状态：{trade_state or 'UNKNOWN'}")
+                with self.connect() as connection:
+                    self.begin_order_transaction(connection)
+                    outcome = self.apply_payment_notification(
+                        connection,
+                        event_type,
+                        transaction,
+                        config,
+                    )
+                results.append({"order_id": order_id, "trade_state": trade_state, **outcome})
+            except Exception as exc:
+                results.append({"order_id": order_id, "error_type": type(exc).__name__})
+        return {
+            "configured": True,
+            "checked": len(results),
+            "updated": sum(
+                1 for item in results if item.get("processing_status") in {"succeeded", "ignored"}
+            ),
+            "compensation_required": sum(
+                1 for item in results if item.get("processing_status") == "compensation_required"
+            ),
+            "failed": sum(1 for item in results if item.get("error_type")),
+            "results": results,
+        }
+
+    def list_payment_compensations(self, limit: int = 100) -> list[dict[str, Any]]:
+        with self.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT e.id, e.provider_event_id, e.merchant_order_no, e.transaction_id,
+                       e.failure_reason, e.received_at, e.updated_at,
+                       o.order_id, o.user_id, o.status AS order_status,
+                       o.payment_status, o.total_fee, o.currency
+                FROM payment_webhook_events e
+                LEFT JOIN orders o ON o.out_trade_no = e.merchant_order_no
+                WHERE e.processing_status = 'compensation_required'
+                ORDER BY e.received_at ASC
+                LIMIT ?
+                """,
+                (max(1, min(int(limit), 500)),),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def resolve_payment_compensation(
+        self,
+        event_id: str,
+        action: str,
+        operator: str,
+        note: str,
+    ) -> dict[str, Any]:
+        normalized_action = str(action or "").strip()
+        if normalized_action not in {"refund_verified", "manual_settlement_verified"}:
+            raise ValueError("请选择有效的支付补偿处理结果")
+        normalized_note = str(note or "").strip()
+        if len(normalized_note) < 5:
+            raise ValueError("请填写至少 5 个字的处理凭证说明")
+        with self.connect() as connection:
+            self.begin_order_transaction(connection)
+            event = self.locked_webhook_event(connection, event_id)
+            if event["processing_status"] == "compensation_resolved":
+                return event
+            if event["processing_status"] != "compensation_required":
+                raise ValueError("该支付事件不在人工补偿队列中")
+            resolution = (
+                f"resolved:{normalized_action}:{str(operator or 'admin')[:40]}:"
+                f"{normalized_note}"
+            )[:120]
+            timestamp = now_iso()
+            connection.execute(
+                """
+                UPDATE payment_webhook_events
+                SET processing_status = 'compensation_resolved', failure_reason = ?,
+                    processed_at = ?, updated_at = ?
+                WHERE id = ? AND processing_status = 'compensation_required'
+                """,
+                (resolution, timestamp, timestamp, event_id),
+            )
+            updated = self.locked_webhook_event(connection, event_id)
+        return updated
 
     def get_order(self, order_id: str) -> dict[str, Any]:
         with self.connect() as connection:

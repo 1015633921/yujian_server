@@ -10,6 +10,10 @@ from app.repository import AssessmentRepository
 
 
 MIGRATION_VERSION = "20260713_07_order_receipt_completion"
+AFTER_SALE_MIGRATION_VERSION = "20260713_08_after_sale_cases"
+AFTER_SALE_RETURN_MIGRATION_VERSION = "20260714_09_after_sale_return_flow"
+MATERIAL_PHYSICAL_SPECS_MIGRATION_VERSION = "20260714_10_material_physical_specs"
+MATERIAL_TYPES_MIGRATION_VERSION = "20260715_11_material_types"
 
 
 def columns(path, table: str) -> set[str]:
@@ -28,7 +32,13 @@ def test_receipt_completion_migration_backfills_signed_order_and_round_trips(tmp
     OrderService(db_path)
     AssessmentRepository(db_path)
     upgrade("sqlite", db_path)
-    assert downgrade("sqlite", db_path, steps=1) == [MIGRATION_VERSION]
+    assert downgrade("sqlite", db_path, steps=5) == [
+        MATERIAL_TYPES_MIGRATION_VERSION,
+        MATERIAL_PHYSICAL_SPECS_MIGRATION_VERSION,
+        AFTER_SALE_RETURN_MIGRATION_VERSION,
+        AFTER_SALE_MIGRATION_VERSION,
+        MIGRATION_VERSION,
+    ]
     assert "logistics_signed_at" not in columns(db_path, "orders")
     assert "auto_complete_at" not in columns(db_path, "orders")
 
@@ -55,7 +65,13 @@ def test_receipt_completion_migration_backfills_signed_order_and_round_trips(tmp
             (timestamp, timestamp, timestamp, json.dumps(logistics, ensure_ascii=False)),
         )
 
-    assert upgrade("sqlite", db_path) == [MIGRATION_VERSION]
+    assert upgrade("sqlite", db_path) == [
+        MIGRATION_VERSION,
+        AFTER_SALE_MIGRATION_VERSION,
+        AFTER_SALE_RETURN_MIGRATION_VERSION,
+        MATERIAL_PHYSICAL_SPECS_MIGRATION_VERSION,
+        MATERIAL_TYPES_MIGRATION_VERSION,
+    ]
     assert {"logistics_signed_at", "auto_complete_at"} <= columns(db_path, "orders")
     assert "idx_orders_auto_complete" in indexes(db_path, "orders")
     with sqlite3.connect(db_path) as connection:
@@ -73,6 +89,12 @@ def test_receipt_completion_migration_backfills_signed_order_and_round_trips(tmp
     assert migrated["auto_complete_at"] == row["auto_complete_at"]
     assert upgrade("sqlite", db_path) == []
 
-    assert downgrade("sqlite", db_path, steps=1) == [MIGRATION_VERSION]
+    assert downgrade("sqlite", db_path, steps=5) == [
+        MATERIAL_TYPES_MIGRATION_VERSION,
+        MATERIAL_PHYSICAL_SPECS_MIGRATION_VERSION,
+        AFTER_SALE_RETURN_MIGRATION_VERSION,
+        AFTER_SALE_MIGRATION_VERSION,
+        MIGRATION_VERSION,
+    ]
     assert "idx_orders_auto_complete" not in indexes(db_path, "orders")
     assert "auto_complete_at" not in columns(db_path, "orders")

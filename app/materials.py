@@ -7,6 +7,7 @@ from urllib.parse import quote, urlsplit, urlunsplit
 
 from .database import connect_database, use_mysql
 from .material_knowledge import enrich_materials_with_knowledge, material_code_from_payload
+from .material_options import normalize_sku_physical_specs
 from .money import cents_to_text, stored_cents
 
 
@@ -45,6 +46,8 @@ INTERNAL_MATERIAL_FIELDS = {
     "purchase_note",
     "purchase_remark",
     "price_cents",
+    "physical_specs_json",
+    "image_urls_json",
 }
 
 
@@ -272,9 +275,32 @@ def clean_image_urls(value, primary_url: str = "", image_path: str = "") -> list
     return result
 
 
+def material_image_identity(url: str | None) -> str:
+    """Compare material assets without cache-busting query strings."""
+    normalized = normalize_material_image_url(url)
+    if not normalized:
+        return ""
+    parts = urlsplit(normalized)
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))
+
+
+def clean_gallery_image_urls(value, primary_url: str = "", *, top: str = "") -> list[str]:
+    """Keep accessory cover images separate from their random-placement gallery."""
+    image_urls = clean_image_urls(value)
+    if str(top or "").strip() != "accessory":
+        return image_urls
+    primary_identity = material_image_identity(primary_url)
+    if not primary_identity:
+        return image_urls
+    return [url for url in image_urls if material_image_identity(url) != primary_identity]
+
+
 def with_cdn_url(item: dict) -> dict:
     image_url = normalize_material_image_url(item.get("image_url")) or material_url_from_path(item.get("image_path"))
-    image_urls = clean_image_urls(item.get("image_urls"), image_url, item.get("image_path") or "")
+    if item.get("top") == "accessory":
+        image_urls = clean_gallery_image_urls(item.get("image_urls"), image_url, top="accessory")
+    else:
+        image_urls = clean_image_urls(item.get("image_urls"), image_url, item.get("image_path") or "")
     return {
         **item,
         "image_url": image_url or (image_urls[0] if image_urls else ""),
@@ -318,10 +344,10 @@ def slim_material(item: dict) -> dict:
         or item.get("image_url")
         or ""
     )
-    image_urls = clean_image_urls(
+    image_urls = clean_gallery_image_urls(
         visual.get("image_urls") or item.get("image_urls") or item.get("image_pool"),
         image_url,
-        item.get("image_path") or "",
+        top=sku.get("top") or item.get("top") or "",
     )
     effects = energy.get("effects") or item.get("effects") or []
     if isinstance(effects, str):
@@ -333,6 +359,11 @@ def slim_material(item: dict) -> dict:
     price = sku.get("price_per_bead") if sku else None
     size = sku.get("size_mm") if sku else None
     weight = sku.get("weight_g") if sku else None
+    physical_specs = normalize_sku_physical_specs(item.get("physical_specs"))
+    material_params = {
+        **(visual.get("material_params") or item.get("material_params") or {}),
+        **physical_specs,
+    }
     return {
         "id": sku.get("id") or item.get("id") or "",
         "skuId": sku.get("sku_id") or item.get("skuId") or item.get("sku_id") or "",
@@ -358,7 +389,8 @@ def slim_material(item: dict) -> dict:
         "image_url": image_url,
         "image_urls": image_urls,
         "thumbnail_url": image_url,
-        "material_params": visual.get("material_params") or item.get("material_params") or {},
+        "material_params": material_params,
+        "physical_specs": physical_specs,
     }
 
 
@@ -419,6 +451,7 @@ def list_materials(
         )
         if db_page is not None:
             materials, pagination = db_page
+            materials = enrich_materials_with_knowledge(materials)
             payload = {"materials": [slim_material(item) for item in materials], "pagination": pagination}
             if not compact:
                 payload = {**build_material_payload(payload["materials"], version), "pagination": pagination}
@@ -432,7 +465,7 @@ def list_materials(
         category=category,
         series=series,
         ids=material_ids,
-        enrich=not slim,
+        enrich=True,
     )
     if db_materials is not None:
         materials = db_materials
@@ -748,9 +781,11 @@ def fetch_db_series_assets(connection, rows: list[dict]) -> dict[tuple[str, str,
         row = dict(raw)
         image_path = row.get("image_path") or ""
         image_url = normalize_material_image_url(row.get("image_url") or "") or material_url_from_path(image_path)
-        image_urls = clean_image_urls(row.get("image_urls_json") or row.get("image_urls"), image_url, image_path)
-        if not image_url and image_urls:
-            image_url = image_urls[0]
+        image_urls = clean_gallery_image_urls(
+            row.get("image_urls_json") or row.get("image_urls"),
+            image_url,
+            top=row.get("top") or "bead",
+        )
         result[(row.get("top") or "bead", row.get("category_name") or "", row.get("name") or "")] = {
             "material_code": row.get("material_code") or "",
             "color": row.get("color") or "",
@@ -765,24 +800,29 @@ def fetch_db_series_assets(connection, rows: list[dict]) -> dict[tuple[str, str,
 def normalize_db_material(row: dict, series_assets: dict[tuple[str, str, str], dict] | None = None) -> dict:
     public_row = {key: value for key, value in row.items() if key not in INTERNAL_MATERIAL_FIELDS}
     series_asset = (series_assets or {}).get(series_asset_key(row), {})
-    image_url = series_asset.get("image_url") or normalize_material_image_url(row.get("image_url") or "")
-    image_path = series_asset.get("image_path") or row.get("image_path") or ""
+    image_path = series_asset.get("image_path") or ""
+    image_url = series_asset.get("image_url") or ""
     if image_path:
         normalized_path = normalize_material_image_path(image_path)
         old_suffix = f"/materials/{normalized_path}"
         if not image_url or "cdn.yustream.cn/materials/" in image_url or image_url.endswith(old_suffix):
             image_url = material_url_from_path(image_path)
-    image_urls = series_asset.get("image_urls") or clean_image_urls(
-        row.get("image_urls_json") or row.get("image_urls"),
+    image_urls = clean_gallery_image_urls(
+        series_asset.get("image_urls") or [],
         image_url,
-        image_path,
+        top=row.get("top") or "bead",
     )
-    if not image_url and image_urls:
-        image_url = image_urls[0]
     try:
         display_price = float(cents_to_text(stored_cents(row.get("price_cents"), field_name="材料价格")))
     except ValueError:
         display_price = float(row.get("price") or 0)
+    raw_physical_specs = row.get("physical_specs_json")
+    if isinstance(raw_physical_specs, str):
+        try:
+            raw_physical_specs = json.loads(raw_physical_specs or "{}")
+        except json.JSONDecodeError:
+            raw_physical_specs = {}
+    physical_specs = normalize_sku_physical_specs(raw_physical_specs)
     return {
         **public_row,
         "price": display_price,
@@ -792,7 +832,9 @@ def normalize_db_material(row: dict, series_assets: dict[tuple[str, str, str], d
         "grade": row.get("grade") or "",
         "color": series_asset.get("color") or row.get("color") or "",
         "shine": series_asset.get("shine") or row.get("shine") or "",
+        "image_path": image_path,
         "image_url": image_url,
         "image_urls": image_urls,
         "image_pool": image_urls,
+        "physical_specs": physical_specs,
     }

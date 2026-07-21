@@ -89,7 +89,7 @@ test('order detail hides internal material classification and recommendation fie
   assert.doesNotMatch(template, /item\.tags|item\.effect|material-tags|material-effect/);
 });
 
-test('order detail keeps packing and waiting-pickup stages before carrier updates', () => {
+test('order detail keeps one pending-shipment stage before waiting for pickup', () => {
   const page = loadOrderDetailPage();
   const history = [
     { status: 'pending_ship', time: '2026-07-13T11:58:26+00:00' },
@@ -98,8 +98,9 @@ test('order detail keeps packing and waiting-pickup stages before carrier update
 
   const packing = page.normalizeLogistics({}, history.slice(0, 1), 'ship');
   assert.equal(packing.show, true);
-  assert.equal(packing.statusText, '商家打包中');
-  assert.deepEqual(packing.traces.map(item => item.desc), ['商家打包中']);
+  assert.equal(packing.isFulfillmentProgress, true);
+  assert.equal(packing.statusText, '待发货');
+  assert.deepEqual(packing.traces.map(item => item.desc), ['工作室正在制作与打包，完成后将填写快递单号。']);
 
   const waitingPickup = page.normalizeLogistics({
     carrier: '顺丰速运',
@@ -113,11 +114,11 @@ test('order detail keeps packing and waiting-pickup stages before carrier update
       { time: '2026-07-13T12:08:20+00:00', desc: '商家已填写发货信息，等待物流公司更新轨迹' }
     ]
   }, history, 'receive');
-  assert.equal(waitingPickup.statusText, '已发货，等待揽收');
+  assert.equal(waitingPickup.statusText, '已发货待揽收');
+  assert.equal(waitingPickup.isFulfillmentProgress, false);
   assert.equal(waitingPickup.hasCarrierUpdates, false);
   assert.deepEqual(waitingPickup.traces.map(item => item.desc), [
-    '商家已发货，等待快递揽收',
-    '商家打包中'
+    '商家已发货，等待快递揽收'
   ]);
 
   const steps = page.buildStatusSteps('receive', {
@@ -128,7 +129,7 @@ test('order detail keeps packing and waiting-pickup stages before carrier update
   });
   assert.deepEqual(steps.map(item => item.label), [
     '已支付',
-    '打包完成',
+    '待发货',
     '已发货待揽收',
     '运输中',
     '待签收'
@@ -161,8 +162,7 @@ test('carrier traces retain merchant stages and mark the full signed journey', (
   assert.deepEqual(detail.traces.map(item => item.desc), [
     '您的快件已派送成功',
     '正在派送途中',
-    '商家已发货，等待快递揽收',
-    '商家打包中'
+    '商家已发货，等待快递揽收'
   ]);
 
   const steps = page.buildStatusSteps('done', {
@@ -173,7 +173,7 @@ test('carrier traces retain merchant stages and mark the full signed journey', (
   });
   assert.deepEqual(steps.map(item => item.label), [
     '已支付',
-    '打包完成',
+    '待发货',
     '已揽收',
     '运输中',
     '已签收',
@@ -220,7 +220,7 @@ test('signed delivery stays waiting for user receipt and keeps transport in the 
   assert.match(order.etaText, /自动完成/);
   assert.deepEqual(order.statusSteps.map(item => item.label), [
     '已支付',
-    '打包完成',
+    '待发货',
     '已揽收',
     '运输中',
     '已签收',
@@ -275,6 +275,17 @@ test('refunded order keeps the full shipped journey from status history', () => 
 
 test('refund before shipping does not invent shipping and long after-sale history scrolls', () => {
   const page = loadOrderDetailPage();
+  const beforeShippingLogistics = page.normalizeLogistics({}, [], 'after');
+  const beforeShippingActions = page.buildFooterActions({
+    statusKey: 'after',
+    paymentStatus: 'paid',
+    logisticsCard: beforeShippingLogistics,
+    afterSaleStatus: 'refund_pending',
+    refundStatus: 'requested'
+  });
+  assert.equal(beforeShippingLogistics.show, false);
+  assert.equal(beforeShippingActions.canViewLogistics, false);
+
   const beforeShipping = page.buildStatusSteps('refunded', {
     createdAt: '2026-07-13T11:58:15+00:00',
     paidAt: '2026-07-13T11:58:26+00:00',
@@ -295,6 +306,23 @@ test('refund before shipping does not invent shipping and long after-sale histor
     '已退款'
   ]);
 
+  const afterShippingLogistics = page.normalizeLogistics({
+    tracking_no: 'SF_AFTER_SALE_001',
+    source: 'kuaidi100',
+    status: 'in_transit',
+    status_text: '运输中',
+    traces: [{ time: '2026-07-13T12:08:20+00:00', desc: '快件正在运输途中' }]
+  }, [{ status: 'shipped', time: '2026-07-13T12:08:20+00:00' }], 'after');
+  const afterShippingActions = page.buildFooterActions({
+    statusKey: 'after',
+    paymentStatus: 'paid',
+    logisticsCard: afterShippingLogistics,
+    afterSaleStatus: 'returning',
+    refundStatus: 'requested'
+  });
+  assert.equal(afterShippingLogistics.show, true);
+  assert.equal(afterShippingActions.canViewLogistics, true);
+
   const longHistory = page.buildStatusSteps('refunded', {
     rawStatus: 'refunded',
     statusHistory: [
@@ -302,7 +330,6 @@ test('refund before shipping does not invent shipping and long after-sale histor
       { status: 'pending_ship', time: '2026-07-13T11:58:26+00:00' },
       { status: 'shipped', time: '2026-07-13T12:08:20+00:00' },
       { status: 'completed', time: '2026-07-13T12:18:20+00:00' },
-      { status: 'after_sale', time: '2026-07-13T12:28:20+00:00' },
       { status: 'refund_requested', time: '2026-07-13T12:38:20+00:00' },
       { status: 'refunded', time: '2026-07-13T12:48:20+00:00' }
     ],
@@ -314,15 +341,16 @@ test('refund before shipping does not invent shipping and long after-sale histor
     '已支付',
     '已发货',
     '已完成',
-    '售后申请',
     '退款申请',
     '已退款'
   ]);
   assert.equal(layout.statusStepsScrollable, true);
-  assert.match(layout.statusStepsStyle, /min-width:784rpx/);
+  assert.equal(layout.statusStepsScrollLeft, 99999);
+  assert.match(layout.statusStepsStyle, /min-width:792rpx/);
 
   const template = fs.readFileSync(detailTemplatePath, 'utf8');
   assert.match(template, /class="status-steps-scroll"/);
+  assert.match(template, /scroll-left="\{\{order\.statusStepsScrollLeft\}\}"/);
   assert.match(template, /style="\{\{order\.statusStepsStyle\}\}"/);
 });
 
@@ -376,7 +404,7 @@ test('opening a shipped order silently refreshes logistics once', async () => {
   assert.equal(page.data.order.logisticsCard.hasCarrierUpdates, true);
   assert.deepEqual(page.data.order.statusSteps.map(item => item.label), [
     '已支付',
-    '打包完成',
+    '待发货',
     '已揽收',
     '运输中',
     '待签收'

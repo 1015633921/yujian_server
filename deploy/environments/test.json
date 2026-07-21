@@ -1,0 +1,22 @@
+{
+  "environment": "test",
+  "publicHealthUrl": "https://api.yustream.cn/test-api/health/ready",
+  "runtimeEnvFile": "/opt/yujian/config/test.env",
+  "releaseEnvDir": "/opt/yujian/runtime/test",
+  "certsDir": "/opt/yujian_server/certs",
+  "imageRepository": "ghcr.io/1015633921/yujian_server/api",
+  "backendNetwork": "yujian_server_backend",
+  "releaseStateDir": "/opt/yujian/releases/state/test",
+  "nginxConfigFile": "/etc/nginx/conf.d/yujian-api.conf",
+  "nginxUpstreamFile": "/etc/nginx/conf.d/10-yujian-test-upstream.conf",
+  "nginxUpstreamName": "yujian_test_active",
+  "nginxLocation": "/test-api/",
+  "nginxStripPrefix": true,
+  "bootstrapActivePort": 8001,
+  "slots": {
+    "blue": 8011,
+    "green": 8012
+  },
+  "backupAppDir": "/opt/yujian_server",
+  "mysqlContainer": "yujian-mysql"
+}

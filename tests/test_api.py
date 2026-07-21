@@ -486,6 +486,46 @@ def test_admin_material_spu_pagination_keeps_legacy_list_response(tmp_path):
     assert [item["sku"]["enabled"] for item in disabled_page["items"][0]["items"]] == [False]
 
 
+def test_admin_material_spu_search_has_stable_tie_breakers(tmp_path):
+    from app.admin_service import AdminService
+
+    service = AdminService(tmp_path / "material-spu-stable-search.db")
+    for index, series in enumerate(("Zulu Phantom", "Alpha Phantom", "Middle Phantom"), start=1):
+        ensure_material_taxonomy(service, "stable-search", series)
+        service.save_material(
+            {
+                "id": f"stable_search_{index}",
+                "skuId": f"stable_search_{index}",
+                "material_code": f"stable_search_{index}",
+                "top": "bead",
+                "category": "stable-search",
+                "series": series,
+                "name": series,
+                "primary_element": "water",
+                "effects": ["focus"],
+                "price_per_bead": 10,
+                "size_mm": 8,
+                "weight_g": 1,
+                "stock": 10,
+                "sort_order": 0,
+            }
+        )
+
+    with service.connect() as connection:
+        connection.execute(
+            "UPDATE managed_materials SET updated_at = ? WHERE category = ?",
+            ("2026-07-17T00:00:00+00:00", "stable-search"),
+        )
+
+    first = service.list_material_spus(keyword="Phantom", category="stable-search", page=1, page_size=2)
+    second = service.list_material_spus(keyword="Phantom", category="stable-search", page=2, page_size=2)
+    repeated = service.list_material_spus(keyword="Phantom", category="stable-search", page=1, page_size=2)
+
+    assert [item["sku"]["series"] for item in first["items"]] == ["Alpha Phantom", "Middle Phantom"]
+    assert [item["sku"]["series"] for item in second["items"]] == ["Zulu Phantom"]
+    assert [item["key"] for item in repeated["items"]] == [item["key"] for item in first["items"]]
+
+
 def test_admin_material_saves_structured_knowledge_without_legacy_required_fields(tmp_path):
     from app.admin_service import AdminService
 
@@ -523,7 +563,7 @@ def test_admin_material_saves_structured_knowledge_without_legacy_required_field
     assert saved["rules"]["allowed_roles"] == ["primary", "support"]
 
 
-def test_admin_material_prefers_sku_image_over_shared_knowledge_asset(tmp_path):
+def test_admin_material_ignores_legacy_sku_image_when_series_is_unavailable(tmp_path):
     import json
 
     from app.admin_service import AdminService
@@ -597,9 +637,9 @@ def test_admin_material_prefers_sku_image_over_shared_knowledge_asset(tmp_path):
             connection,
         )
 
-    assert material["visual"]["thumbnail_url"] == sku_image
-    assert material["thumbnail_url"] == sku_image
-    assert material["visual"]["asset"]["thumbnail_url"] == sku_image
+    assert material["visual"]["thumbnail_url"] == shared_image
+    assert material["thumbnail_url"] == shared_image
+    assert material["visual"]["asset"]["thumbnail_url"] == shared_image
 
 
 def test_admin_material_keeps_ops_fields_internal_to_admin(tmp_path):
@@ -1629,8 +1669,13 @@ def test_sync_wechat_refund_accepts_query_status_field(tmp_path, monkeypatch):
     monkeypatch.setattr("app.order_service.WechatPayConfig", FakeWechatPayConfig)
     monkeypatch.setattr(
         service,
-        "query_wechat_refund",
-        lambda out_refund_no, config: {
+        "create_wechat_refund",
+        lambda *_args, **_kwargs: {"status": "PROCESSING", "refund_id": "wx-refund-processing"},
+    )
+    service.approve_refund(order_id, operator="admin", note="同意退款")
+
+    def valid_query_result(out_refund_no):
+        return {
             "mchid": "1746874094",
             "out_trade_no": paid["out_trade_no"],
             "transaction_id": paid["payment"]["transaction_id"],
@@ -1643,7 +1688,31 @@ def test_sync_wechat_refund_accepts_query_status_field(tmp_path, monkeypatch):
                 "refund": requested["total_fee"],
                 "payer_refund": requested["total_fee"],
             },
+        }
+
+    monkeypatch.setattr(
+        service,
+        "query_wechat_refund",
+        lambda out_refund_no, _config: {**valid_query_result(out_refund_no), "mchid": ""},
+    )
+    with pytest.raises(ValueError, match="商户号不匹配"):
+        service.sync_wechat_refund(order_id, operator="admin")
+
+    monkeypatch.setattr(
+        service,
+        "query_wechat_refund",
+        lambda out_refund_no, _config: {
+            **valid_query_result(out_refund_no),
+            "out_refund_no": "RF-WRONG-ORDER",
         },
+    )
+    with pytest.raises(ValueError, match="退款单号不匹配"):
+        service.sync_wechat_refund(order_id, operator="admin")
+
+    monkeypatch.setattr(
+        service,
+        "query_wechat_refund",
+        lambda out_refund_no, _config: valid_query_result(out_refund_no),
     )
 
     synced = service.sync_wechat_refund(order_id, operator="admin")
@@ -1755,6 +1824,14 @@ def test_diy_share_requires_published_token_and_revocation_invalidates_it(tmp_pa
                     "id": "clearQuartz8", "dx": 12, "dy": -8,
                     "looseX": 280, "looseY": 410, "rotation": 24,
                     "beadSize": 58, "private_note": "must not leak",
+                    "bead_caps": {"right": {
+                        "id": "cap-8", "skuId": "CAP-8", "name": "包珠隔片",
+                        "image_url": "https://cdn.example/cap.webp",
+                        "material_params": {
+                            "bead_shape": "bead_cap", "placement_mode": "attached_side"
+                        },
+                        "stock": 9,
+                    }},
                 }],
             },
             "sequence": [
@@ -1764,6 +1841,19 @@ def test_diy_share_requires_published_token_and_revocation_invalidates_it(tmp_pa
                     "size": 8,
                     "price": 128,
                     "placement": {"x": 1, "y": 2, "internal_price": 128},
+                },
+                {
+                    "id": "cap-8",
+                    "name": "包珠隔片",
+                    "price": 2.5,
+                    "top": "accessory",
+                    "placement_mode": "attached_side",
+                    "attachment_mode": "bead_cap",
+                    "attachment": {"mode": "bead_cap", "host_index": 1, "side": "right"},
+                    "material_params": {
+                        "bead_shape": "bead_cap", "placement_mode": "attached_side"
+                    },
+                    "placement": {"host_index": 1, "side": "right", "x": 1, "y": 2},
                 }
             ],
         }
@@ -1797,9 +1887,20 @@ def test_diy_share_requires_published_token_and_revocation_invalidates_it(tmp_pa
     assert public_data["design"]["placements"] == [{
         "id": "clearQuartz8", "dx": 12, "dy": -8,
         "looseX": 280, "looseY": 410, "rotation": 24, "beadSize": 58,
+        "bead_caps": {"right": {
+            "id": "cap-8", "skuId": "CAP-8", "name": "包珠隔片",
+            "image_url": "https://cdn.example/cap.webp",
+            "material_params": {
+                "bead_shape": "bead_cap", "placement_mode": "attached_side"
+            },
+        }},
     }]
     assert "price" not in public_data["sequence"][0]
     assert "internal_price" not in public_data["sequence"][0]["placement"]
+    assert public_data["sequence"][1]["attachment"] == {
+        "mode": "bead_cap", "host_index": 1, "side": "right"
+    }
+    assert public_data["sequence"][1]["placement_mode"] == "attached_side"
 
     revoked = client.delete(f"/api/v1/diy-designs/{saved['design_id']}/share", headers=owner_headers)
     assert revoked.status_code == 200

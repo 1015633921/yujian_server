@@ -37,7 +37,7 @@ docker buildx build "${ROOT}" \
 
 echo "built ${IMAGE_TAG} from ${VCS_REF}"
 if [[ "${MODE}" == "--push" ]]; then
-  python3 - "${METADATA_FILE}" "${IMAGE_REPOSITORY}" <<'PY'
+  immutable_image="$(python3 - "${METADATA_FILE}" "${IMAGE_REPOSITORY}" <<'PY'
 import json
 import sys
 
@@ -47,4 +47,10 @@ if not digest:
     raise SystemExit("registry digest missing from build metadata")
 print(f"immutable image: {sys.argv[2]}@{digest}")
 PY
+)"
+  echo "${immutable_image}"
+  if [[ -n "${IMAGE_REF_FILE:-}" ]]; then
+    umask 077
+    printf '%s\n' "${immutable_image#immutable image: }" > "${IMAGE_REF_FILE}"
+  fi
 fi

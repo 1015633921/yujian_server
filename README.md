@@ -26,6 +26,19 @@ pip install -r requirements-dev.txt
 - 存活检查：`http://127.0.0.1:8000/health/live`
 - 就绪检查：`http://127.0.0.1:8000/health/ready`
 
+## 统一部署
+
+测试和正式环境共用同一套 Docker 蓝绿发布命令，操作者只声明目标环境：
+
+```bash
+python scripts/deploy.py test
+python scripts/deploy.py prod
+```
+
+镜像摘要和发布号由 CI 注入，运行配置来自部署机上的单一环境文件。发布过程自动完成
+数据库备份、幂等迁移、候选健康检查、Nginx 原子切流和失败回滚。完整说明见
+[`docs/deployment/docker-blue-green.md`](docs/deployment/docker-blue-green.md)。
+
 ## 运行进程与观测
 
 FastAPI 进程只处理 HTTP，不再启动物流线程。物流同步必须作为独立进程运行：

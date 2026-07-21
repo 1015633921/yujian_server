@@ -520,7 +520,11 @@ def enrich_materials_with_knowledge(
         knowledge = knowledge_map.get(code) or fallback_knowledge_for_material(item)
         asset = clean_dict(knowledge.get("asset"))
         thumbnail_url = item.get("image_url") or asset.get("thumbnail_url") or ""
-        material_params = clean_dict(knowledge.get("material_params"))
+        physical_specs = clean_dict(item.get("physical_specs"))
+        material_params = {
+            **clean_dict(knowledge.get("material_params")),
+            **physical_specs,
+        }
         sizes = size_map.get(code) or unique_list([item.get("size")])
         top = str(item.get("top") or "")
         has_energy = top != "pendant"
@@ -599,6 +603,7 @@ def enrich_materials_with_knowledge(
                 "thumbnail_url": thumbnail_url,
                 "asset": visual["asset"],
                 "material_params": material_params,
+                "physical_specs": physical_specs,
                 "knowledge": knowledge,
             }
         )

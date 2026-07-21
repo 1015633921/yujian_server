@@ -689,11 +689,45 @@ function updateOrderReceiver(orderId, userId, receiver) {
   });
 }
 
-function requestAfterSale(orderId, userId, reason = '') {
-  return request(`/api/v1/orders/${encodeURIComponent(orderId)}/after-sale`, {
+function getAfterSaleCases(orderId, userId, options = {}) {
+  return request(
+    `/api/v1/orders/${encodeURIComponent(orderId)}/after-sales?user_id=${encodeURIComponent(userId)}`,
+    {
+      silent: !!options.silent,
+      showModal: options.showModal !== false,
+      timeout: options.timeout || 10000
+    }
+  );
+}
+
+function createAfterSaleCase(orderId, payload, options = {}) {
+  return request(`/api/v1/orders/${encodeURIComponent(orderId)}/after-sales`, {
+    ...options,
     method: 'POST',
-    data: { user_id: userId, reason }
+    data: payload
   });
+}
+
+function submitAfterSaleReturnShipment(orderId, caseId, payload, options = {}) {
+  return request(
+    `/api/v1/orders/${encodeURIComponent(orderId)}/after-sales/${encodeURIComponent(caseId)}/return-shipment`,
+    {
+      ...options,
+      method: 'POST',
+      data: payload
+    }
+  );
+}
+
+function cancelAfterSaleCase(orderId, caseId, userId, reason = '', options = {}) {
+  return request(
+    `/api/v1/orders/${encodeURIComponent(orderId)}/after-sales/${encodeURIComponent(caseId)}/cancel`,
+    {
+      ...options,
+      method: 'POST',
+      data: { user_id: userId, reason }
+    }
+  );
 }
 
 function refundOrder(orderId, userId, reason = '') {
@@ -763,7 +797,10 @@ module.exports = {
   confirmReceipt,
   cancelOrder,
   updateOrderReceiver,
-  requestAfterSale,
+  getAfterSaleCases,
+  createAfterSaleCase,
+  submitAfterSaleReturnShipment,
+  cancelAfterSaleCase,
   refundOrder,
   getOrderLogistics
 };

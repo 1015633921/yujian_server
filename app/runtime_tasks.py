@@ -23,6 +23,7 @@ import logging
 
 LOGGER = logging.getLogger("yujian.logistics")
 TASK_NAME = "logistics_sync"
+COMMERCE_TASK_NAME = "commerce_maintenance"
 
 
 def utc_now() -> datetime:
@@ -35,6 +36,12 @@ def iso(value: datetime) -> str:
 
 def logistics_enabled() -> bool:
     return str(os.getenv("LOGISTICS_SYNC_ENABLED", "false")).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def commerce_maintenance_enabled() -> bool:
+    return str(os.getenv("COMMERCE_MAINTENANCE_ENABLED", "false")).strip().lower() in {
+        "1", "true", "yes", "on"
+    }
 
 
 class RuntimeTaskStore:
@@ -237,6 +244,104 @@ class LogisticsTaskRunner:
             log_event(
                 LOGGER,
                 "logistics.sync.failed",
+                level=logging.ERROR,
+                result="failed",
+                error_type=type(exc).__name__,
+                stack=safe_exception_frames(exc),
+            )
+            return {"status": "failed", "executed": True, "run_id": run_id, "error_type": type(exc).__name__}
+        finally:
+            reset_request_id(request_token)
+
+
+class CommerceMaintenanceTaskRunner:
+    def __init__(
+        self,
+        db_path: Path | None = None,
+        order_service: OrderService | None = None,
+        owner_id: str | None = None,
+    ) -> None:
+        self.db_path = db_path
+        self.store = RuntimeTaskStore(db_path)
+        self.order_service = order_service or OrderService(db_path or DEFAULT_SQLITE_PATH)
+        self.owner_id = owner_id or f"commerce-{secrets.token_hex(12)}"
+
+    @staticmethod
+    def interval_seconds() -> int:
+        return max(60, int(os.getenv("COMMERCE_MAINTENANCE_INTERVAL_SECONDS", "300")))
+
+    @classmethod
+    def lease_seconds(cls) -> int:
+        configured = int(os.getenv("COMMERCE_MAINTENANCE_LEASE_SECONDS", "900"))
+        return max(cls.interval_seconds() * 2, configured, 120)
+
+    @staticmethod
+    def batch_size() -> int:
+        return max(1, min(int(os.getenv("COMMERCE_MAINTENANCE_BATCH_SIZE", "100")), 1000))
+
+    def run_once(self) -> dict[str, Any]:
+        if not commerce_maintenance_enabled():
+            return {"status": "disabled", "executed": False}
+        started_at = utc_now()
+        run_id = f"cmr_{secrets.token_hex(16)}"
+        if not self.store.acquire(COMMERCE_TASK_NAME, self.owner_id, self.lease_seconds(), started_at):
+            log_event(LOGGER, "commerce.maintenance.skipped_locked", result="skipped")
+            return {"status": "skipped_locked", "executed": False}
+        request_token = bind_request_id(run_id)
+        run_recorded = False
+        try:
+            self.store.start_run(run_id, COMMERCE_TASK_NAME, self.owner_id, started_at)
+            run_recorded = True
+            payments = self.order_service.reconcile_processing_payments(limit=self.batch_size())
+            expired = self.order_service.release_expired_reservations(limit=self.batch_size())
+            checked = int(expired.get("processed_orders") or 0) + int(payments.get("checked") or 0)
+            deferred_processing = int(expired.get("deferred_processing") or 0)
+            reconciliation_blocked = deferred_processing > 0 and not payments.get("configured", False)
+            failed = int(payments.get("failed") or 0) + int(reconciliation_blocked)
+            status = "completed" if failed == 0 else "partial_failed"
+            self.store.finish_run(
+                run_id,
+                status=status,
+                attempts=1,
+                checked=checked,
+                failed=failed,
+            )
+            log_event(
+                LOGGER,
+                "commerce.maintenance.finished",
+                result=status,
+                checked=checked,
+                failed=failed,
+                released_reservations=int(expired.get("released_reservations") or 0),
+                deferred_processing=deferred_processing,
+                reconciliation_blocked=reconciliation_blocked,
+                payment_compensations=int(payments.get("compensation_required") or 0),
+            )
+            return {
+                "status": status,
+                "executed": True,
+                "run_id": run_id,
+                "checked": checked,
+                "failed": failed,
+                "expired": expired,
+                "payments": payments,
+            }
+        except Exception as exc:
+            if run_recorded:
+                try:
+                    self.store.finish_run(
+                        run_id,
+                        status="failed",
+                        attempts=1,
+                        checked=0,
+                        failed=1,
+                        error_type=type(exc).__name__,
+                    )
+                except Exception:
+                    pass
+            log_event(
+                LOGGER,
+                "commerce.maintenance.failed",
                 level=logging.ERROR,
                 result="failed",
                 error_type=type(exc).__name__,

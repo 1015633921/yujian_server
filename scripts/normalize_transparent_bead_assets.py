@@ -10,9 +10,13 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
-import cv2
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter, ImageOps
+
+try:
+    import cv2
+except ModuleNotFoundError:  # Transparent WPS cutouts do not require OpenCV.
+    cv2 = None
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -52,6 +56,41 @@ CATEGORY_SLUG_OVERRIDES = {
     "黑发晶": "black-rutilated-quartz",
 }
 CATEGORY_TOP_OVERRIDES = {"合金配件": "accessory"}
+CATEGORY_CODE_OVERRIDES = {
+    "银发晶": "mat_4ffa5cb3f1f4c2a1",
+    "蓝发晶": "mat_d089b55624fb8ca2",
+    "蓝黑发晶": "mat_a50f6eb6bc50cbce",
+    "抹茶幽灵": "mat_b8d9bee6111cd50a",
+    "墨绿幽灵": "mat_6aa273296f4b8f65",
+    "翠绿幽灵": "mat_47abfda87e45a7a5",
+    "紫幽灵": "purple_phantom",
+    "白兔毛": "mat_8e7dc55827380eb0",
+    "蓝兔毛": "mat_8473b30abbf3b22f",
+    "灰兔毛": "mat_59d092b8cc2ddf67",
+    "草莓晶": "mat_cab639dcfd02656c",
+    "黑金超七": "mat_ef719bf5625d38ba",
+    "白月光石": "mat_80f63cbc71044d77",
+    "蓝月光石": "mat_16e0856d813de99c",
+    "灰月光石": "mat_0c1cecb90bd5acfd",
+    "绿萤石": "mat_18f42ff558b62f11",
+    "蓝堇青石": "mat_e79567fbf5bbb463",
+    "猫眼紫锂辉": "mat_4734efd6c326e1fb",
+    "紫锂辉": "mat_4d7bffa8d4af25cd",
+    "天河石": "mat_9c46e803c52855b0",
+    "冰川蓝": "mat_126ef9a5ac2a5cf3",
+    "蓝天白云": "mat_80fcbd028681addc",
+    "岛屿": "mat_ad98a7cbbf626e11",
+    "圣蓝": "mat_3eb34db6058d4c31",
+    "黑芝麻": "mat_44adfbcabddecd1e",
+    "海绿宝": "mat_abe62f5b37cf8b35",
+    "南红玛瑙": "mat_432a92eb5ae7991a",
+    "盐源玛瑙": "mat_1916da255d584978",
+    "红胶花": "mat_0f1c2bad93a2b5ad",
+    "小树胶花": "mat_794edbdd0f9aba10",
+    "和田玉": "mat_987ba13fba878ca1",
+    "药王石": "mat_94495722cdabde33",
+    "魔鬼蓝": "mat_dd0f228569f9284d",
+}
 CATEGORY_PARENT_OVERRIDES = {
     "一线天幽灵": "幽灵水晶",
     "千层幽灵": "幽灵水晶",
@@ -74,6 +113,39 @@ CATEGORY_PARENT_OVERRIDES = {
     "钛晶": "发晶",
     "黑发晶": "发晶",
     "胶花": "胶花水晶",
+    "银发晶": "发晶",
+    "蓝发晶": "发晶",
+    "蓝黑发晶": "发晶",
+    "抹茶幽灵": "幽灵水晶",
+    "墨绿幽灵": "幽灵水晶",
+    "翠绿幽灵": "幽灵水晶",
+    "紫幽灵": "幽灵水晶",
+    "白兔毛": "兔毛水晶",
+    "蓝兔毛": "兔毛水晶",
+    "灰兔毛": "兔毛水晶",
+    "草莓晶": "草莓晶系",
+    "黑金超七": "超七",
+    "白月光石": "月光石系",
+    "蓝月光石": "月光石系",
+    "灰月光石": "月光石系",
+    "绿萤石": "萤石",
+    "蓝堇青石": "堇青石",
+    "猫眼紫锂辉": "紫锂辉石",
+    "紫锂辉": "紫锂辉石",
+    "天河石": "天河石",
+    "冰川蓝": "海蓝宝",
+    "蓝天白云": "海蓝宝",
+    "岛屿": "海蓝宝",
+    "圣蓝": "海蓝宝",
+    "黑芝麻": "海蓝宝",
+    "海绿宝": "海蓝宝",
+    "南红玛瑙": "玛瑙",
+    "盐源玛瑙": "玛瑙",
+    "红胶花": "胶花水晶",
+    "小树胶花": "胶花水晶",
+    "和田玉": "玉石",
+    "药王石": "玉石",
+    "魔鬼蓝": "海蓝宝",
 }
 
 
@@ -100,6 +172,9 @@ def digest_token(value: str, length: int = 10) -> str:
 
 
 def material_code_for(category: str) -> str:
+    override = CATEGORY_CODE_OVERRIDES.get(category)
+    if override:
+        return override
     slug = CATEGORY_SLUG_OVERRIDES.get(category)
     if slug:
         return slug.replace("-", "_")
@@ -153,6 +228,8 @@ def category_for(source_root: Path, path: Path) -> str:
 def components_mask(mask: np.ndarray) -> np.ndarray:
     if not np.any(mask):
         return mask
+    if cv2 is None:
+        return mask
     count, labels, stats, _ = cv2.connectedComponentsWithStats(
         mask.astype(np.uint8), connectivity=8
     )
@@ -200,6 +277,8 @@ def border_background_color(rgb: Image.Image) -> tuple[int, int, int]:
 
 
 def connected_background_mask(close_to_bg: np.ndarray) -> np.ndarray:
+    if cv2 is None:
+        return close_to_bg
     count, labels, _, _ = cv2.connectedComponentsWithStats(
         close_to_bg.astype(np.uint8), connectivity=8
     )
@@ -226,7 +305,15 @@ def foreground_from_flat_background(
     close_to_bg = diff <= threshold
     bg_connected = connected_background_mask(close_to_bg)
     mask = components_mask(~bg_connected)
-    mask = cv2.morphologyEx(mask.astype(np.uint8), cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8)) > 0
+    if cv2 is not None:
+        mask = cv2.morphologyEx(
+            mask.astype(np.uint8), cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8)
+        ) > 0
+    else:
+        mask_image = Image.fromarray(mask.astype(np.uint8) * 255, "L")
+        mask = np.asarray(
+            mask_image.filter(ImageFilter.MaxFilter(5)).filter(ImageFilter.MinFilter(5))
+        ) > 0
     return components_mask(mask), f"flat_background:{bg}"
 
 
@@ -251,15 +338,30 @@ def fit_on_canvas(
 ) -> Image.Image:
     crop_box = padded_bbox(bbox, image.size, padding)
     crop = image.crop(crop_box).convert("RGBA")
-    max_edge = max(crop.width, crop.height)
     target_edge = max(1, round(size * target_fill))
-    scale = target_edge / max_edge
+    subject_width = bbox[2] - bbox[0]
+    subject_height = bbox[3] - bbox[1]
+    scale = target_edge / max(subject_width, subject_height)
     resized = crop.resize(
         (max(1, round(crop.width * scale)), max(1, round(crop.height * scale))),
         Image.Resampling.LANCZOS,
     )
+    subject_center_x = ((bbox[0] + bbox[2]) / 2 - crop_box[0]) * scale
+    subject_center_y = ((bbox[1] + bbox[3]) / 2 - crop_box[1]) * scale
+    paste_x = round(size / 2 - subject_center_x)
+    paste_y = round(size / 2 - subject_center_y)
     canvas = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    canvas.alpha_composite(resized, ((size - resized.width) // 2, (size - resized.height) // 2))
+    canvas.alpha_composite(resized, (paste_x, paste_y))
+    canvas_bbox = canvas.getchannel("A").point(
+        lambda value: 255 if value > 8 else 0
+    ).getbbox()
+    if canvas_bbox:
+        offset_x = round(size / 2 - (canvas_bbox[0] + canvas_bbox[2]) / 2)
+        offset_y = round(size / 2 - (canvas_bbox[1] + canvas_bbox[3]) / 2)
+        if offset_x or offset_y:
+            centered = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
+            centered.alpha_composite(canvas, (offset_x, offset_y))
+            canvas = centered
     return canvas
 
 

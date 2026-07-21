@@ -16,6 +16,7 @@
     <scroll-view
       class="status-steps-scroll"
       scroll-x="{{order.statusStepsScrollable}}"
+      scroll-left="{{order.statusStepsScrollLeft}}"
       show-scrollbar="{{false}}"
     >
       <view class="status-steps {{order.statusStepsClass}}" style="{{order.statusStepsStyle}}">
@@ -36,12 +37,16 @@
   <view class="card logistics-card compact-logistics-card" wx:if="{{logisticsDetail && logisticsDetail.show}}">
     <view class="card-head logistics-head">
       <view class="head-left">
-        <text class="card-title">物流信息</text>
-        <view class="carrier-badge">{{logisticsDetail.carrierShort}}</view>
-        <text class="carrier-text">{{logisticsDetail.carrier}}</text>
-        <text class="tracking-text" bindtap="copyTrackingNo">{{logisticsDetail.trackingNo}}</text>
+        <text class="card-title">{{logisticsDetail.isFulfillmentProgress ? '制作进度' : '物流信息'}}</text>
+        <block wx:if="{{!logisticsDetail.isFulfillmentProgress}}">
+          <view class="carrier-badge">{{logisticsDetail.carrierShort}}</view>
+          <text class="carrier-text">{{logisticsDetail.carrier}}</text>
+          <text class="tracking-text" bindtap="copyTrackingNo">{{logisticsDetail.trackingNo}}</text>
+        </block>
       </view>
-      <view class="head-action" data-action="logistics" bindtap="handleAction">查看物流 <text>›</text></view>
+      <view class="head-action" data-action="logistics" bindtap="handleAction">
+        {{logisticsDetail.isFulfillmentProgress ? '查看进度' : '查看物流'}} <text>›</text>
+      </view>
     </view>
 
     <view class="logistics-summary" data-action="logistics" bindtap="handleAction">
@@ -63,8 +68,10 @@
       <view class="modal-grip"></view>
       <view class="modal-head">
         <view>
-          <view class="modal-title">物流轨迹</view>
-          <view class="modal-sub">{{logisticsDetail.carrier}} {{logisticsDetail.trackingNo}}</view>
+          <view class="modal-title">{{logisticsDetail.isFulfillmentProgress ? '制作进度' : '物流轨迹'}}</view>
+          <view class="modal-sub">
+            {{logisticsDetail.isFulfillmentProgress ? '宇涧水晶工作室' : (logisticsDetail.carrier + ' ' + logisticsDetail.trackingNo)}}
+          </view>
         </view>
         <button class="modal-close" bindtap="closeLogisticsModal">×</button>
       </view>
@@ -165,12 +172,15 @@
   <view class="action-bar {{order.actionBarClass}}" wx:if="{{order.hasFooterAction}}">
     <button wx:if="{{order.canCancel}}" class="plain-action" data-action="cancel" bindtap="handleAction">取消订单</button>
     <button wx:elif="{{order.canRefund}}" class="plain-action" data-action="refund" bindtap="handleAction">申请退款</button>
+    <button wx:elif="{{order.canViewAfterSale}}" class="plain-action" data-action="afterSale" bindtap="handleAction">查看售后进度</button>
     <button wx:elif="{{order.canAfterSale}}" class="plain-action" data-action="afterSale" bindtap="handleAction">申请售后</button>
     <button class="plain-action" open-type="contact">联系客服</button>
     <button wx:if="{{order.canPay}}" class="primary-action" data-action="pay" bindtap="handleAction">继续支付</button>
     <button wx:elif="{{order.canMockShip}}" class="primary-action" data-action="mockShip" bindtap="handleAction">模拟发货</button>
     <button wx:elif="{{order.canReceive}}" class="primary-action" data-action="receive" bindtap="handleAction">确认收货</button>
-    <button wx:elif="{{order.canViewLogistics}}" class="primary-action" data-action="logistics" bindtap="handleAction">查看物流</button>
+    <button wx:elif="{{order.canViewLogistics}}" class="primary-action" data-action="logistics" bindtap="handleAction">
+      {{order.logisticsCard.isFulfillmentProgress ? '查看进度' : '查看物流'}}
+    </button>
   </view>
 </view>
 

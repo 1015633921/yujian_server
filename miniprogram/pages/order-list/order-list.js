@@ -10,6 +10,20 @@ const STATUS_TITLE = {
   after: '售后退款',
   done: '已完成'
 };
+const ACTIVE_AFTER_SALE_STATUSES = [
+  'requested', 'approved', 'awaiting_return', 'returning', 'service_processing',
+  'refund_pending', 'refund_submitting', 'refunding'
+];
+const AFTER_SALE_STATUS_TEXT = {
+  requested: '售后待审核',
+  approved: '售后已同意',
+  awaiting_return: '等待寄回',
+  returning: '寄回中',
+  service_processing: '售后处理中',
+  refund_pending: '待确认退款',
+  refund_submitting: '退款提交中',
+  refunding: '退款处理中'
+};
 const ORDER_TRAY_IMAGES = {
   white: assetUrl('workspace/tray-yustream-white-transparent-user-20260701.webp'),
   warm: assetUrl('workspace/tray-yustream-transparent-user-20260701-v6.webp'),
@@ -92,9 +106,17 @@ Page({
       || item.tray_image_url
       || ORDER_TRAY_IMAGES[trayTheme]
       || ORDER_TRAY_IMAGES.white;
-    const statusText = item.status_text
+    const fulfillmentStatusText = item.status_text
       || item.statusText
       || (/[\u4e00-\u9fff]/.test(String(item.status || '')) ? item.status : this.statusText(rawStatus));
+    const afterSaleStatus = item.after_sale_status || item.afterSaleStatus || '';
+    const refundStatus = item.refund_status || item.refundStatus || '';
+    const afterSaleText = AFTER_SALE_STATUS_TEXT[afterSaleStatus]
+      || ({ requested: '退款待审核', approved: '待确认退款', submitting: '退款提交中', processing: '退款处理中' })[refundStatus]
+      || '';
+    const statusText = rawStatus === 'refunded' || paymentStatus === 'refunded'
+      ? '已退款'
+      : ([fulfillmentStatusText, afterSaleText].filter(Boolean).join(' · ') || fulfillmentStatusText);
     return {
       id: item.order_id || item.id,
       createdAt,
@@ -118,21 +140,30 @@ Page({
       logistics: item.logistics || {},
       statusHistory: item.status_history || [],
       remark: item.remark || '',
-      afterSaleStatus: item.after_sale_status || '',
-      refundStatus: item.refund_status || ''
+      afterSaleStatus,
+      refundStatus
     };
   },
 
   statusKey(order) {
     const status = order.rawStatus || order.status;
+    const afterSaleStatus = order.after_sale_status || order.afterSaleStatus || '';
+    const refundStatus = order.refund_status || order.refundStatus || '';
+    if (
+      ACTIVE_AFTER_SALE_STATUSES.includes(afterSaleStatus)
+      || ['requested', 'approved', 'submitting', 'processing'].includes(refundStatus)
+      || status === 'refund_requested'
+      || status === 'refunded'
+      || order.payment_status === 'refunded'
+      || order.paymentStatus === 'refunded'
+    ) return 'after';
     if (status === 'pending_ship') return 'ship';
     if (status === 'shipped') return 'receive';
-    if (status === 'after_sale' || status === 'refund_requested') return 'after';
     if (status === '待付款') return 'pay';
     if (status === '待发货') return 'ship';
     if (status === '待收货') return 'receive';
-    if (status === '售后中' || status === '退款中') return 'after';
-    if (status === '已完成' || status === '已退款' || status === '已关闭') return 'done';
+    if (status === '售后中' || status === '退款中' || status === '已退款') return 'after';
+    if (status === '已完成' || status === '已关闭') return 'done';
     if (order.payment_status === 'unpaid' || order.paymentStatus === 'unpaid' || status === 'pending_payment') return 'pay';
     return 'done';
   },
@@ -143,7 +174,6 @@ Page({
       pending_ship: '待发货',
       shipped: '待收货',
       completed: '已完成',
-      after_sale: '售后中',
       refund_requested: '退款中',
       refunded: '已退款',
       closed: '已关闭'

@@ -24,12 +24,51 @@ def test_money_parser_uses_exact_integer_cents():
             stored_cents(invalid)
 
 
+def test_two_single_side_bead_caps_are_priced_as_two_independent_sku_lines():
+    sequence = [
+        {"id": "bead-8", "sku": "bead-8", "unit_price_cents": 1000, "subtotal_cents": 1000},
+        {"id": "cap-8", "sku": "cap-8", "unit_price_cents": 250, "subtotal_cents": 250},
+        {"id": "cap-8", "sku": "cap-8", "unit_price_cents": 250, "subtotal_cents": 250},
+    ]
+
+    bom = OrderService.rebuild_bom_from_sequence(sequence)
+    cap_line = next(item for item in bom if item["sku"] == "cap-8")
+
+    assert cap_line["qty"] == 2
+    assert cap_line["subtotal_cents"] == 500
+    assert OrderService.calculate_sequence_total(sequence) == 15
+
+
+def test_bead_cap_attachment_slots_reject_invalid_and_duplicate_sides():
+    bead = {"id": "bead-8", "sku": "bead-8"}
+    cap = {
+        "id": "cap-8",
+        "sku": "cap-8",
+        "placement_mode": "attached_side",
+        "attachment_mode": "bead_cap",
+        "attachment": {"mode": "bead_cap", "host_index": 1, "side": "right"},
+    }
+
+    OrderService.validate_attachment_sequence([bead, cap])
+    with pytest.raises(ValueError, match="不能重复安装"):
+        OrderService.validate_attachment_sequence([bead, cap, dict(cap)])
+    with pytest.raises(ValueError, match="主珠位置无效"):
+        OrderService.validate_attachment_sequence([
+            bead,
+            {**cap, "attachment": {"mode": "bead_cap", "host_index": 2, "side": "left"}},
+        ])
+
+
 def test_price_cents_migration_backfills_only_exact_positive_legacy_prices(tmp_path):
     db_path = tmp_path / "price-migration.db"
     AdminService(db_path)
     OrderService(db_path)
     upgrade("sqlite", db_path)
-    assert downgrade("sqlite", db_path, steps=2) == [
+    assert downgrade("sqlite", db_path, steps=6) == [
+        "20260715_11_material_types",
+        "20260714_10_material_physical_specs",
+        "20260714_09_after_sale_return_flow",
+        "20260713_08_after_sale_cases",
         "20260713_07_order_receipt_completion",
         "20260712_06_p1_material_price_cents",
     ]
@@ -44,6 +83,10 @@ def test_price_cents_migration_backfills_only_exact_positive_legacy_prices(tmp_p
     assert upgrade("sqlite", db_path) == [
         "20260712_06_p1_material_price_cents",
         "20260713_07_order_receipt_completion",
+        "20260713_08_after_sale_cases",
+        "20260714_09_after_sale_return_flow",
+        "20260714_10_material_physical_specs",
+        "20260715_11_material_types",
     ]
     assert upgrade("sqlite", db_path) == []
     with sqlite3.connect(db_path) as connection:
@@ -57,7 +100,11 @@ def test_price_cents_migration_backfills_only_exact_positive_legacy_prices(tmp_p
     assert values[ids[1]] is None
     assert values[ids[2]] is None
 
-    assert downgrade("sqlite", db_path, steps=2) == [
+    assert downgrade("sqlite", db_path, steps=6) == [
+        "20260715_11_material_types",
+        "20260714_10_material_physical_specs",
+        "20260714_09_after_sale_return_flow",
+        "20260713_08_after_sale_cases",
         "20260713_07_order_receipt_completion",
         "20260712_06_p1_material_price_cents",
     ]

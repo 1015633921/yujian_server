@@ -22,7 +22,8 @@
     "pages/checkout/checkout",
     "pages/order-success/order-success",
     "pages/order-list/order-list",
-    "pages/order-detail/order-detail"
+    "pages/order-detail/order-detail",
+    "pages/after-sale-apply/after-sale-apply"
   ],
   "window": {
     "navigationBarTextStyle": "black",

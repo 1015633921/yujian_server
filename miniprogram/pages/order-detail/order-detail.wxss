@@ -206,6 +206,13 @@
   word-break: break-all;
 }
 
+.status-steps.steps-6 .step-label {
+  padding-right: 0;
+  padding-left: 0;
+  font-size: 20rpx;
+  letter-spacing: 0;
+}
+
 .step-item.active .step-label {
   color: #303230;
 }

@@ -1,13 +1,20 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, File, Form, Header, HTTPException, Query, Request, UploadFile
 from pydantic import BaseModel, Field
 
 from .admin_service import AdminService
 from .avatar_storage import AvatarStorage
-from .order_service import OrderService
+from .material_asset_upload import (
+    MATERIAL_ASSET_PREFIX,
+    MAX_MATERIAL_ASSET_BYTES,
+    MAX_MATERIAL_ASSET_COUNT,
+    validate_material_asset_key,
+    validate_material_ready_webp,
+)
+from .order_service import OrderConflictError, OrderService
 
 admin_router = APIRouter(prefix="/api/v1/admin", tags=["后台管理"])
 admin_service = AdminService()
@@ -61,6 +68,7 @@ class MaterialPayload(BaseModel):
     match_rules: list[str] = Field(default_factory=list)
     care_tags: list[str] = Field(default_factory=list)
     material_params: dict = Field(default_factory=dict)
+    physical_specs: dict = Field(default_factory=dict)
     bead_shape: str | None = ""
     surface_finish: str | None = ""
     transparency_level: str | None = ""
@@ -97,6 +105,23 @@ class MaterialBatchPayload(BaseModel):
     value: float | int | str | None = None
 
 
+class MaterialAssetBindPayload(BaseModel):
+    series_id: str = Field(min_length=1, max_length=120)
+    asset_keys: list[str] = Field(min_length=1, max_length=MAX_MATERIAL_ASSET_COUNT)
+    mode: Literal["replace", "append"] = "replace"
+    # Kept for older admin clients; series assets are now always authoritative.
+    sync_sku_images: bool = True
+
+
+class MaterialTypePayload(BaseModel):
+    id: str | None = None
+    code: str | None = Field(default="", max_length=40)
+    name: str = Field(min_length=1, max_length=160)
+    description: str | None = Field(default="", max_length=500)
+    sort_order: int = 0
+    enabled: bool = True
+
+
 class MaterialCategoryPayload(BaseModel):
     id: str | None = None
     top: str = "bead"
@@ -115,6 +140,7 @@ class MaterialSeriesPayload(BaseModel):
     image_path: str | None = ""
     image_url: str | None = ""
     image_urls: list[str] = Field(default_factory=list)
+    sync_sku_images: bool = False
     primary_element: str | None = ""
     secondary_elements: list[str] = Field(default_factory=list)
     chakras: list[str] = Field(default_factory=list)
@@ -225,13 +251,29 @@ class OrderShipPayload(BaseModel):
     phone_tail: str = Field(default="", max_length=8)
 
 
-class OrderStatusPayload(BaseModel):
-    status: str
-    note: str = ""
-
-
 class OrderRefundReviewPayload(BaseModel):
     note: str = Field(default="", max_length=300)
+
+
+class AfterSaleReviewPayload(BaseModel):
+    action: Literal[
+        "reject",
+        "approve_service",
+        "request_return",
+        "prepare_direct_refund",
+        "confirm_return",
+        "complete",
+    ]
+    note: str = Field(default="", max_length=500)
+
+
+class AfterSaleRefundPayload(BaseModel):
+    note: str = Field(default="", max_length=500)
+
+
+class PaymentCompensationResolvePayload(BaseModel):
+    action: Literal["refund_verified", "manual_settlement_verified"]
+    note: str = Field(min_length=5, max_length=300)
 
 
 class WechatOrderPathPayload(BaseModel):
@@ -463,6 +505,68 @@ async def upload_admin_media(
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
+@admin_router.post("/material-assets/upload", summary="上传已标准化的材料透明图")
+async def upload_material_asset(
+    file: UploadFile = File(...),
+    authorization: str | None = Header(default=None),
+):
+    actor = require_admin(authorization)
+    if actor.get("role") == "viewer":
+        raise HTTPException(status_code=403, detail="只读账号不能上传材料素材")
+    try:
+        content = await file.read(MAX_MATERIAL_ASSET_BYTES + 1)
+        inspection = validate_material_ready_webp(content)
+        result = media_storage.upload_media(
+            prefix=MATERIAL_ASSET_PREFIX,
+            user_id=actor.get("admin_id") or actor.get("username") or "operator",
+            content=content,
+            content_type="image/webp",
+            filename=file.filename or "material.webp",
+            max_bytes=MAX_MATERIAL_ASSET_BYTES,
+            label="材料透明图",
+        )
+        return success(
+            {
+                "image_url": result.url,
+                "url": result.url,
+                "key": result.key,
+                "inspection": inspection.as_dict(),
+            },
+            "材料图片已上传",
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@admin_router.post("/material-assets/bind", summary="绑定处理后的图片到材料品种")
+def bind_material_assets(
+    payload: MaterialAssetBindPayload,
+    authorization: str | None = Header(default=None),
+):
+    actor = require_admin(authorization)
+    if actor.get("role") == "viewer":
+        raise HTTPException(status_code=403, detail="只读账号不能修改材料素材")
+    try:
+        keys = list(dict.fromkeys(validate_material_asset_key(value) for value in payload.asset_keys))
+        urls = [media_storage.public_url(key) for key in keys]
+        return success(
+            admin_service.bind_material_series_images(
+                payload.series_id,
+                urls,
+                mode=payload.mode,
+                sync_sku_images=True,
+                actor=actor,
+            ),
+            "材料图片已绑定",
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @admin_router.get("/users", summary="小程序用户列表")
 def users(
     keyword: str = Query(default="", max_length=80),
@@ -572,6 +676,119 @@ def orders(
     return success(admin_service.list_orders(keyword=keyword, status=status, limit=limit))
 
 
+@admin_router.get("/after-sales", summary="后台售后工单列表")
+def after_sale_cases(
+    keyword: str = Query(default="", max_length=100),
+    status: str = Query(default="", max_length=40),
+    case_type: str = Query(default="", max_length=40),
+    limit: int = Query(default=100, ge=1, le=500),
+    authorization: str | None = Header(default=None),
+):
+    require_admin(authorization)
+    try:
+        return success(
+            order_service.admin_list_after_sale_cases(
+                keyword=keyword,
+                status=status,
+                case_type=case_type,
+                limit=limit,
+            )
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@admin_router.get("/after-sales/{case_id}", summary="后台售后工单详情")
+def after_sale_case_detail(case_id: str, authorization: str | None = Header(default=None)):
+    require_admin(authorization)
+    try:
+        return success(order_service.admin_get_after_sale_case(case_id))
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@admin_router.post("/after-sales/{case_id}/review", summary="后台审核售后工单")
+def review_after_sale_case(
+    case_id: str,
+    payload: AfterSaleReviewPayload,
+    authorization: str | None = Header(default=None),
+):
+    actor = require_admin(authorization)
+    operator = actor.get("username") or actor.get("display_name") or actor.get("admin_id") or "admin"
+    try:
+        result = order_service.review_after_sale_case(
+            case_id,
+            payload.action,
+            operator=operator,
+            note=payload.note,
+        )
+        return success(result, "售后工单已更新")
+    except OrderConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@admin_router.post("/after-sales/{case_id}/refund", summary="售后工单确认微信原路退款")
+def refund_after_sale_case(
+    case_id: str,
+    payload: AfterSaleRefundPayload,
+    authorization: str | None = Header(default=None),
+):
+    actor = require_admin(authorization)
+    operator = actor.get("username") or actor.get("display_name") or actor.get("admin_id") or "admin"
+    try:
+        return success(
+            order_service.submit_after_sale_refund(case_id, operator=operator, note=payload.note),
+            "已提交微信原路退款",
+        )
+    except OrderConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@admin_router.post("/after-sales/{case_id}/refund/sync", summary="同步售后工单微信退款状态")
+def sync_after_sale_case_refund(
+    case_id: str,
+    authorization: str | None = Header(default=None),
+):
+    actor = require_admin(authorization)
+    operator = actor.get("username") or actor.get("display_name") or actor.get("admin_id") or "admin"
+    try:
+        return success(
+            order_service.sync_after_sale_refund(case_id, operator=operator),
+            "微信退款状态已同步",
+        )
+    except OrderConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@admin_router.post("/after-sales/{case_id}/refund/retry", summary="核对并恢复售后工单微信退款")
+def retry_after_sale_case_refund(
+    case_id: str,
+    payload: AfterSaleRefundPayload,
+    authorization: str | None = Header(default=None),
+):
+    actor = require_admin(authorization)
+    operator = actor.get("username") or actor.get("display_name") or actor.get("admin_id") or "admin"
+    try:
+        return success(
+            order_service.retry_after_sale_refund(
+                case_id,
+                operator=operator,
+                note=payload.note,
+            ),
+            "退款状态已核对并恢复",
+        )
+    except OrderConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @admin_router.get("/orders/{order_id}", summary="后台订单详情")
 def order_detail(order_id: str, authorization: str | None = Header(default=None)):
     require_admin(authorization)
@@ -579,6 +796,37 @@ def order_detail(order_id: str, authorization: str | None = Header(default=None)
         return success(admin_service.get_order(order_id))
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@admin_router.get("/payments/compensations", summary="支付补偿待办列表")
+def payment_compensations(
+    limit: int = Query(default=100, ge=1, le=500),
+    authorization: str | None = Header(default=None),
+):
+    require_admin(authorization)
+    return success(order_service.list_payment_compensations(limit=limit))
+
+
+@admin_router.post("/payments/compensations/{event_id}/resolve", summary="确认支付补偿已处理")
+def resolve_payment_compensation(
+    event_id: str,
+    payload: PaymentCompensationResolvePayload,
+    authorization: str | None = Header(default=None),
+):
+    actor = require_admin(authorization)
+    operator = actor.get("username") or actor.get("display_name") or actor.get("admin_id") or "admin"
+    try:
+        return success(
+            order_service.resolve_payment_compensation(
+                event_id,
+                action=payload.action,
+                operator=operator,
+                note=payload.note,
+            ),
+            "支付补偿记录已确认",
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @admin_router.post("/orders/{order_id}/ship", summary="后台订单发货")
@@ -601,6 +849,8 @@ def ship_order(
         result["logistics_subscription"] = subscription
         message = "订单已发货" if subscription.get("status") != "failed" else "订单已发货，物流订阅待重试"
         return success(result, message)
+    except OrderConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -648,19 +898,6 @@ def sync_wechat_shipping(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@admin_router.post("/orders/{order_id}/status", summary="后台调整订单状态")
-def update_order_status(
-    order_id: str,
-    payload: OrderStatusPayload,
-    authorization: str | None = Header(default=None),
-):
-    require_admin(authorization)
-    try:
-        return success(admin_service.update_order_status(order_id, payload.status, payload.note), "订单状态已更新")
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-
 @admin_router.post("/orders/{order_id}/refund/approve", summary="后台同意退款并原路退回微信支付")
 def approve_order_refund(
     order_id: str,
@@ -672,6 +909,8 @@ def approve_order_refund(
     try:
         order_service.approve_refund(order_id, operator=operator, note=payload.note)
         return success(admin_service.get_order(order_id), "已提交微信原路退款")
+    except OrderConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -687,6 +926,8 @@ def reject_order_refund(
     try:
         order_service.reject_refund(order_id, operator=operator, note=payload.note)
         return success(admin_service.get_order(order_id), "已拒绝退款申请")
+    except OrderConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -701,6 +942,25 @@ def sync_order_refund(
     try:
         order_service.sync_wechat_refund(order_id, operator=operator)
         return success(admin_service.get_order(order_id), "微信退款状态已同步")
+    except OrderConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@admin_router.post("/orders/{order_id}/refund/retry", summary="核对并恢复微信退款提交")
+def retry_order_refund(
+    order_id: str,
+    payload: OrderRefundReviewPayload,
+    authorization: str | None = Header(default=None),
+):
+    actor = require_admin(authorization)
+    operator = actor.get("username") or actor.get("display_name") or actor.get("admin_id") or ""
+    try:
+        order_service.retry_refund_submission(order_id, operator=operator, note=payload.note)
+        return success(admin_service.get_order(order_id), "退款状态已核对并恢复")
+    except OrderConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -970,6 +1230,33 @@ def material_options(authorization: str | None = Header(default=None)):
     return success(admin_service.material_options_payload())
 
 
+@admin_router.get("/material-types", summary="后台材料类型")
+def material_types(
+    include_disabled: bool = Query(default=True),
+    authorization: str | None = Header(default=None),
+):
+    require_admin(authorization)
+    return success(admin_service.list_material_types(include_disabled=include_disabled))
+
+
+@admin_router.post("/material-types", summary="新增或更新材料类型")
+def save_material_type(payload: MaterialTypePayload, authorization: str | None = Header(default=None)):
+    actor = require_admin(authorization)
+    try:
+        return success(admin_service.save_material_type(payload.model_dump(exclude_unset=True), actor=actor), "材料类型已保存")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@admin_router.delete("/material-types/{type_code}", summary="停用材料类型")
+def disable_material_type(type_code: str, authorization: str | None = Header(default=None)):
+    actor = require_admin(authorization)
+    try:
+        return success(admin_service.disable_material_type(type_code, actor=actor), "材料类型已停用")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @admin_router.get("/material-refs", summary="后台材料轻量引用列表")
 def material_refs(
     keyword: str = Query(default="", max_length=80),
@@ -1003,7 +1290,7 @@ def save_material_category(payload: MaterialCategoryPayload, authorization: str 
 def save_material_series(payload: MaterialSeriesPayload, authorization: str | None = Header(default=None)):
     actor = require_admin(authorization)
     try:
-        return success(admin_service.save_material_series(payload.model_dump(), actor=actor), "品种已保存")
+        return success(admin_service.save_material_series(payload.model_dump(exclude_unset=True), actor=actor), "品种已保存")
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

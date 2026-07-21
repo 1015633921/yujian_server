@@ -284,15 +284,16 @@ def test_user_confirmation_completes_signed_order_before_deadline(tmp_path, monk
     assert [item["label"] for item in completion_events] == ["用户确认收货"]
 
 
-def test_admin_generic_status_update_cannot_force_order_completed(tmp_path):
+def test_admin_generic_status_update_route_is_absent(tmp_path):
     database = tmp_path / "orders.db"
     service = OrderService(database)
     seed_shipped_order(service)
     admin = AdminService(database)
 
-    with pytest.raises(ValueError, match="只能由用户确认收货"):
-        admin.update_order_status("ORDER-KD100-1", "completed")
-
+    assert not hasattr(admin, "update_order_status")
+    assert "/api/v1/admin/orders/{order_id}/status" not in {
+        route.path for route in app.routes if hasattr(route, "path")
+    }
     assert service.get_order("ORDER-KD100-1")["status"] == "shipped"
 
 

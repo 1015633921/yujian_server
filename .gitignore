@@ -21,8 +21,13 @@ data/
 tools/
 outputs/
 miniprogram/assets/
+miniprogram/config/env.current.js
 miniprogram/project.private.config.json
 miniprogram/node_modules/
+deploy/secrets/
+.kube/
+.DS_Store
+.playwright-cli/
 # CDN-hosted media assets. Keep code in Git, keep generated/material images in COS/CDN.
 static/materials/
 static/uploads/

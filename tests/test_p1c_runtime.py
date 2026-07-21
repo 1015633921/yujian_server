@@ -18,7 +18,7 @@ from app.observability import JsonLogFormatter, bind_request_id, metrics, reset_
 from app.order_service import Kuaidi100Config, OrderService
 from app.repository import AssessmentRepository
 from app.runtime_health import readiness
-from app.runtime_tasks import LogisticsTaskRunner
+from app.runtime_tasks import CommerceMaintenanceTaskRunner, LogisticsTaskRunner
 
 
 client = TestClient(app, raise_server_exceptions=False)
@@ -144,6 +144,88 @@ def test_disabled_logistics_worker_does_not_construct_runner(monkeypatch):
         lambda: (_ for _ in ()).throw(AssertionError("disabled worker must not touch the database")),
     )
     assert logistics_worker.run(once=True) == 0
+
+
+def test_disabled_commerce_worker_does_not_construct_runner(monkeypatch):
+    from app import commerce_worker
+
+    monkeypatch.setenv("COMMERCE_MAINTENANCE_ENABLED", "false")
+    monkeypatch.setattr(
+        commerce_worker,
+        "CommerceMaintenanceTaskRunner",
+        lambda: (_ for _ in ()).throw(AssertionError("disabled worker must not touch the database")),
+    )
+    assert commerce_worker.run(once=True) == 0
+
+
+def test_commerce_maintenance_reconciles_processing_payments_before_expiry(tmp_path, monkeypatch):
+    db_path = runtime_db(tmp_path)
+    monkeypatch.setenv("COMMERCE_MAINTENANCE_ENABLED", "true")
+    calls: list[str] = []
+
+    class FakeOrders:
+        def reconcile_processing_payments(self, limit=100):
+            calls.append("reconcile")
+            return {
+                "configured": True,
+                "checked": 1,
+                "updated": 1,
+                "compensation_required": 0,
+                "failed": 0,
+                "results": [],
+            }
+
+        def release_expired_reservations(self, limit=100):
+            calls.append("expire")
+            return {
+                "processed_orders": 1,
+                "released_reservations": 0,
+                "deferred_processing": 0,
+                "results": [],
+            }
+
+    result = CommerceMaintenanceTaskRunner(
+        db_path,
+        order_service=FakeOrders(),
+        owner_id="commerce-ordering-worker",
+    ).run_once()
+
+    assert result["status"] == "completed"
+    assert calls == ["reconcile", "expire"]
+    assert result["checked"] == 2
+
+
+def test_commerce_maintenance_reports_blocked_reconciliation(tmp_path, monkeypatch):
+    db_path = runtime_db(tmp_path)
+    monkeypatch.setenv("COMMERCE_MAINTENANCE_ENABLED", "true")
+
+    class FakeOrders:
+        def reconcile_processing_payments(self, limit=100):
+            return {
+                "configured": False,
+                "checked": 0,
+                "updated": 0,
+                "compensation_required": 0,
+                "failed": 0,
+                "results": [],
+            }
+
+        def release_expired_reservations(self, limit=100):
+            return {
+                "processed_orders": 1,
+                "released_reservations": 0,
+                "deferred_processing": 1,
+                "results": [],
+            }
+
+    result = CommerceMaintenanceTaskRunner(
+        db_path,
+        order_service=FakeOrders(),
+        owner_id="commerce-blocked-worker",
+    ).run_once()
+
+    assert result["status"] == "partial_failed"
+    assert result["failed"] == 1
 
 
 def test_request_id_is_generated_propagated_and_repeatable():
@@ -340,7 +422,11 @@ def test_p1c_runtime_migration_round_trip(tmp_path):
     with sqlite3.connect(db_path) as connection:
         tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     assert {"runtime_task_leases", "runtime_task_runs"}.issubset(tables)
-    assert downgrade("sqlite", db_path, steps=3) == [
+    assert downgrade("sqlite", db_path, steps=7) == [
+        "20260715_11_material_types",
+        "20260714_10_material_physical_specs",
+        "20260714_09_after_sale_return_flow",
+        "20260713_08_after_sale_cases",
         "20260713_07_order_receipt_completion",
         "20260712_06_p1_material_price_cents",
         "20260712_05_p1c_runtime_tasks",
@@ -349,4 +435,8 @@ def test_p1c_runtime_migration_round_trip(tmp_path):
         "20260712_05_p1c_runtime_tasks",
         "20260712_06_p1_material_price_cents",
         "20260713_07_order_receipt_completion",
+        "20260713_08_after_sale_cases",
+        "20260714_09_after_sale_return_flow",
+        "20260714_10_material_physical_specs",
+        "20260715_11_material_types",
     ]

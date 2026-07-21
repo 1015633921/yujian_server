@@ -8,7 +8,6 @@ const {
   mockPayOrder,
   mockShipOrder,
   confirmReceipt,
-  requestAfterSale,
   refundOrder,
   getOrderLogistics,
   getCartItems,
@@ -22,10 +21,14 @@ const ORDER_TABS = [
   { key: 'done', icon: '✓', label: '已完成', count: 0, showCount: false },
   { key: 'after', icon: '售', label: '售后退款', count: 0 }
 ];
+const ACTIVE_AFTER_SALE_STATUSES = [
+  'requested', 'approved', 'awaiting_return', 'returning', 'service_processing',
+  'refund_pending', 'refund_submitting', 'refunding'
+];
 const TAB_BAR_PAGES = ['/pages/home/home', '/pages/assessment/assessment', '/pages/workspace/workspace', '/pages/profile/profile'];
 const PROFILE_MENU_ICONS = {
   favorite: assetUrl('profile/menu-favorite.png'),
-  plans: '/images/workspace-icons/workspace-save-pastel.png',
+  plans: assetUrl('workspace-icons/workspace-save-pastel.png'),
   address: assetUrl('profile/menu-address.png'),
   help: assetUrl('profile/menu-help.png'),
   settings: assetUrl('profile/menu-settings.png'),
@@ -217,9 +220,18 @@ Page({
 
   statusKey(order) {
     const status = order.rawStatus || order.status;
+    const afterSaleStatus = order.after_sale_status || order.afterSaleStatus || '';
+    const refundStatus = order.refund_status || order.refundStatus || '';
+    if (
+      ACTIVE_AFTER_SALE_STATUSES.includes(afterSaleStatus)
+      || ['requested', 'approved', 'submitting', 'processing'].includes(refundStatus)
+      || status === 'refund_requested'
+      || status === 'refunded'
+      || order.payment_status === 'refunded'
+      || order.paymentStatus === 'refunded'
+    ) return 'after';
     if (status === 'pending_ship') return 'ship';
     if (status === 'shipped') return 'receive';
-    if (status === 'after_sale' || status === 'refund_requested') return 'after';
     if (order.payment_status === 'unpaid' || order.paymentStatus === 'unpaid' || status === 'pending_payment') return 'pay';
     return 'done';
   },
@@ -230,7 +242,6 @@ Page({
       pending_ship: '待发货',
       shipped: '待收货',
       completed: '已完成',
-      after_sale: '售后中',
       refund_requested: '退款中',
       refunded: '已退款',
       closed: '已关闭'
@@ -458,15 +469,8 @@ Page({
   },
 
   confirmAfterSale(orderId, userId) {
-    wx.showModal({
-      title: '申请售后',
-      content: '提交后订单会进入售后中，后台可继续处理退换货。',
-      confirmText: '提交',
-      success: async res => {
-        if (res.confirm) {
-          await this.runOrderAction(() => requestAfterSale(orderId, userId, '用户在小程序发起售后'), '售后已提交');
-        }
-      }
+    wx.navigateTo({
+      url: `/pages/after-sale-apply/after-sale-apply?id=${encodeURIComponent(orderId)}`
     });
   },
 

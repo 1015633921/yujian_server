@@ -1,0 +1,119 @@
+name: deploy-docker-blue-green
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Choose the target; every other deployment step is identical"
+        required: true
+        type: choice
+        options:
+          - test
+          - prod
+
+permissions:
+  actions: read
+  contents: read
+  packages: write
+
+concurrency:
+  group: deploy-docker-${{ inputs.environment }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    environment: ${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12.13"
+
+      - name: Require the quality gate for this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          successful_runs="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${GITHUB_SHA}&status=success" --jq '.workflow_runs | length')"
+          test "${successful_runs}" -gt 0
+
+      - name: Validate repository and CDN manifest
+        env:
+          TARGET_ENVIRONMENT: ${{ inputs.environment }}
+        run: |
+          python scripts/check_repository.py
+          python scripts/scan_secrets.py
+          python scripts/miniprogram_assets.py verify "${TARGET_ENVIRONMENT}"
+          python scripts/deploy.py "${TARGET_ENVIRONMENT}" plan
+
+      - name: Create an immutable release identifier
+        id: release
+        env:
+          TARGET_ENVIRONMENT: ${{ inputs.environment }}
+        run: |
+          release="v$(date -u +%Y%m%d)-001-${GITHUB_RUN_ID}-${TARGET_ENVIRONMENT}"
+          echo "release=${release}" >> "${GITHUB_OUTPUT}"
+
+      - name: Authenticate to GHCR
+        run: echo "${{ github.token }}" | docker login ghcr.io --username "${{ github.actor }}" --password-stdin
+
+      - name: Build and push the immutable image
+        id: image
+        env:
+          RELEASE_VERSION: ${{ steps.release.outputs.release }}
+          IMAGE_REPOSITORY: ghcr.io/${{ github.repository }}/api
+          VCS_REF: ${{ github.sha }}
+          IMAGE_REF_FILE: ${{ runner.temp }}/image-ref
+        run: |
+          scripts/release/build_image.sh --push
+          echo "ref=$(cat "${IMAGE_REF_FILE}")" >> "${GITHUB_OUTPUT}"
+
+      - name: Package the Docker deployment control plane
+        env:
+          RELEASE_VERSION: ${{ steps.release.outputs.release }}
+        run: |
+          tar -czf "${RUNNER_TEMP}/yujian-docker-${RELEASE_VERSION}.tar.gz" \
+            compose.release.yaml \
+            deploy/environments \
+            scripts/deploy.py \
+            scripts/release_state.py \
+            scripts/validate_image_ref.py \
+            scripts/validate_release_env.py \
+            scripts/backup_mysql.sh
+
+      - name: Configure pinned SSH host identity
+        env:
+          DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
+          DEPLOY_SSH_KNOWN_HOSTS: ${{ secrets.DEPLOY_SSH_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d "${HOME}/.ssh"
+          printf '%s' "${DEPLOY_SSH_PRIVATE_KEY}" > "${HOME}/.ssh/yujian-deploy"
+          chmod 600 "${HOME}/.ssh/yujian-deploy"
+          printf '%s\n' "${DEPLOY_SSH_KNOWN_HOSTS}" > "${HOME}/.ssh/known_hosts"
+          chmod 600 "${HOME}/.ssh/known_hosts"
+
+      - name: Upload and run the same deployment command
+        env:
+          TARGET_ENVIRONMENT: ${{ inputs.environment }}
+          RELEASE_VERSION: ${{ steps.release.outputs.release }}
+          APP_IMAGE: ${{ steps.image.outputs.ref }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          GHCR_TOKEN: ${{ github.token }}
+          GHCR_USER: ${{ github.actor }}
+        run: |
+          archive="${RUNNER_TEMP}/yujian-docker-${RELEASE_VERSION}.tar.gz"
+          remote_archive="/tmp/yujian-docker-${RELEASE_VERSION}.tar.gz"
+          release_dir="/opt/yujian/deployer/releases/${RELEASE_VERSION}"
+          auth_dir="/tmp/yujian-docker-auth-${GITHUB_RUN_ID}"
+          target="${DEPLOY_USER}@${DEPLOY_HOST}"
+          ssh_args=(-i "${HOME}/.ssh/yujian-deploy")
+
+          scp "${ssh_args[@]}" "${archive}" "${target}:${remote_archive}"
+          ssh "${ssh_args[@]}" "${target}" \
+            "set -e; umask 077; mkdir -p '${release_dir}'; tar -xzf '${remote_archive}' -C '${release_dir}'; rm -f '${remote_archive}'; mkdir -p '${auth_dir}'"
+          printf '%s' "${GHCR_TOKEN}" | ssh "${ssh_args[@]}" "${target}" \
+            "DOCKER_CONFIG='${auth_dir}' docker login ghcr.io --username '${GHCR_USER}' --password-stdin"
+          ssh "${ssh_args[@]}" "${target}" \
+            "set -e; trap 'rm -rf \"${auth_dir}\"' EXIT; export DOCKER_CONFIG='${auth_dir}'; cd '${release_dir}'; APP_IMAGE='${APP_IMAGE}' RELEASE_VERSION='${RELEASE_VERSION}' python3 scripts/deploy.py '${TARGET_ENVIRONMENT}'"

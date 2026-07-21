@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import sqlite3
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
@@ -15,6 +17,7 @@ from app.order_service import (
     OrderPriceChangedError,
     OrderPricingError,
     OrderService,
+    WechatPayRequestError,
 )
 from app.main import app
 from app.money import money_to_cents
@@ -322,6 +325,35 @@ def test_cancel_timeout_and_repeated_release_are_idempotent(tmp_path):
     assert service.get_order(second_id)["status"] == "closed"
 
 
+def test_expired_processing_payment_keeps_inventory_reserved_until_reconciled(tmp_path):
+    service = build_service(tmp_path)
+    add_sku(service, "processing-expiry", stock=2)
+    result = service.create_order(
+        order_payload("processing-expiry", key="processing-expiry-key", quantity=2)
+    )
+    order_id = result["order"]["order_id"]
+    with service.connect() as connection:
+        connection.execute(
+            "UPDATE orders SET payment_status = 'processing' WHERE order_id = ?",
+            (order_id,),
+        )
+        connection.execute(
+            "UPDATE inventory_reservations SET expires_at = '2000-01-01T00:00:00+00:00' "
+            "WHERE order_id = ?",
+            (order_id,),
+        )
+
+    first = service.release_expired_reservations(timestamp=now_iso_for_test())
+    second = service.release_expired_reservations(timestamp=now_iso_for_test())
+
+    assert first["released_reservations"] == 0
+    assert first["deferred_processing"] == 1
+    assert second["released_reservations"] == 0
+    assert inventory(service, "processing-expiry") == (2, 2)
+    assert service.get_order(order_id)["status"] == "pending_payment"
+    assert service.get_order(order_id)["payment_status"] == "processing"
+
+
 def test_admin_cannot_reduce_or_delete_stock_with_active_reservation(tmp_path):
     service = build_service(tmp_path)
     admin = AdminService(service.db_path)
@@ -363,6 +395,176 @@ def test_payment_confirmation_is_idempotent_and_stock_never_negative(tmp_path, m
             "SELECT status FROM inventory_reservations WHERE order_id = ?", (order_id,)
         ).fetchone()["status"]
     assert status == "confirmed"
+
+
+def test_refund_submission_is_claimed_once_and_restock_is_idempotent(tmp_path, monkeypatch):
+    monkeypatch.setenv("WECHAT_PAY_TEST_MODE", "true")
+    service = build_service(tmp_path)
+    add_sku(service, "refund-race", stock=2)
+    result = service.create_order(
+        order_payload("refund-race", key="refund-race-key", quantity=2)
+    )
+    order_id = result["order"]["order_id"]
+    service.mark_paid_for_dev(order_id, "p0b-user")
+    service.request_refund(order_id, "p0b-user", "不再需要")
+    assert inventory(service, "refund-race") == (0, 0)
+
+    class FakeWechatPayConfig:
+        ready = True
+        missing: list[str] = []
+
+    started = threading.Event()
+    release = threading.Event()
+    calls: list[str] = []
+
+    def fake_refund(order, *_args, **_kwargs):
+        calls.append(order["order_id"])
+        started.set()
+        assert release.wait(timeout=3)
+        return {"status": "SUCCESS", "refund_id": "refund-race-success"}
+
+    monkeypatch.setattr("app.order_service.WechatPayConfig", FakeWechatPayConfig)
+    monkeypatch.setattr(service, "create_wechat_refund", fake_refund)
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        first = executor.submit(service.approve_refund, order_id, "admin-a", "审核通过")
+        assert started.wait(timeout=3)
+        with pytest.raises(OrderConflictError, match="退款已提交"):
+            service.approve_refund(order_id, "admin-b", "重复点击")
+        release.set()
+        refunded = first.result(timeout=3)
+
+    assert refunded["status"] == "refunded"
+    assert refunded["refund"]["inventory_disposition"] == "restocked"
+    assert calls == [order_id]
+    assert inventory(service, "refund-race") == (2, 0)
+    with service.connect() as connection:
+        reservation = connection.execute(
+            "SELECT status FROM inventory_reservations WHERE order_id = ?",
+            (order_id,),
+        ).fetchone()
+    assert reservation["status"] == "restocked"
+    with pytest.raises(ValueError, match="仅退款申请中的订单"):
+        service.approve_refund(order_id, "admin-c", "完成后重复点击")
+    assert calls == [order_id]
+    assert inventory(service, "refund-race") == (2, 0)
+
+
+def test_uncertain_refund_submission_reuses_same_merchant_refund_number_after_safe_query(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("WECHAT_PAY_TEST_MODE", "true")
+    service = build_service(tmp_path)
+    add_sku(service, "refund-recover", stock=1)
+    result = service.create_order(
+        order_payload("refund-recover", key="refund-recover-key", quantity=1)
+    )
+    order_id = result["order"]["order_id"]
+    service.mark_paid_for_dev(order_id, "p0b-user")
+    service.request_refund(order_id, "p0b-user", "退款恢复测试")
+
+    class FakeWechatPayConfig:
+        ready = True
+        missing: list[str] = []
+
+    calls: list[str] = []
+
+    def fake_refund(_order, out_refund_no, *_args, **_kwargs):
+        calls.append(out_refund_no)
+        if len(calls) == 1:
+            raise WechatPayRequestError("微信退款申请失败：网络超时", retryable=True)
+        return {"status": "SUCCESS", "refund_id": "WX-RECOVER-SUCCESS"}
+
+    monkeypatch.setattr("app.order_service.WechatPayConfig", FakeWechatPayConfig)
+    monkeypatch.setattr(service, "create_wechat_refund", fake_refund)
+
+    with pytest.raises(WechatPayRequestError, match="网络超时"):
+        service.approve_refund(order_id, "admin-a", "首次提交")
+
+    uncertain = service.get_order(order_id)
+    original_refund_no = uncertain["refund"]["out_refund_no"]
+    assert uncertain["refund_status"] == "submitting"
+    assert uncertain["refund"]["submission_attempts"] == 1
+
+    stale_started_at = (datetime.now(timezone.utc) - timedelta(minutes=2)).replace(microsecond=0).isoformat()
+    with service.connect() as connection:
+        row = connection.execute(
+            "SELECT refund_json FROM orders WHERE order_id = ?",
+            (order_id,),
+        ).fetchone()
+        refund = json.loads(row["refund_json"])
+        refund["submission_started_at"] = stale_started_at
+        connection.execute(
+            "UPDATE orders SET refund_json = ? WHERE order_id = ?",
+            (json.dumps(refund, ensure_ascii=False), order_id),
+        )
+
+    monkeypatch.setattr(
+        service,
+        "query_wechat_refund",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            WechatPayRequestError(
+                "微信退款查询失败：HTTP 404",
+                status_code=404,
+                provider_code="RESOURCE_NOT_EXISTS",
+            )
+        ),
+    )
+
+    recovered = service.retry_refund_submission(order_id, "admin-b", "确认原退款不存在")
+
+    assert recovered["status"] == "refunded"
+    assert recovered["refund_status"] == "success"
+    assert recovered["refund"]["out_refund_no"] == original_refund_no
+    assert recovered["refund"]["submission_attempts"] == 2
+    assert calls == [original_refund_no, original_refund_no]
+    assert inventory(service, "refund-recover") == (1, 0)
+
+
+def test_uncertain_refund_submission_cannot_retry_during_protection_window(tmp_path, monkeypatch):
+    monkeypatch.setenv("WECHAT_PAY_TEST_MODE", "true")
+    service = build_service(tmp_path)
+    add_sku(service, "refund-protection", stock=1)
+    result = service.create_order(
+        order_payload("refund-protection", key="refund-protection-key", quantity=1)
+    )
+    order_id = result["order"]["order_id"]
+    service.mark_paid_for_dev(order_id, "p0b-user")
+    service.request_refund(order_id, "p0b-user", "保护期测试")
+
+    class FakeWechatPayConfig:
+        ready = True
+        missing: list[str] = []
+
+    calls = 0
+
+    def timeout_refund(*_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+        raise WechatPayRequestError("微信退款申请失败：网络超时", retryable=True)
+
+    monkeypatch.setattr("app.order_service.WechatPayConfig", FakeWechatPayConfig)
+    monkeypatch.setattr(service, "create_wechat_refund", timeout_refund)
+    monkeypatch.setattr(
+        service,
+        "query_wechat_refund",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            WechatPayRequestError(
+                "微信退款查询失败：HTTP 404",
+                status_code=404,
+                provider_code="RESOURCE_NOT_EXISTS",
+            )
+        ),
+    )
+
+    with pytest.raises(WechatPayRequestError, match="网络超时"):
+        service.approve_refund(order_id, "admin-a")
+    with pytest.raises(OrderConflictError, match="保护期"):
+        service.retry_refund_submission(order_id, "admin-b")
+
+    assert calls == 1
+    assert service.get_order(order_id)["refund_status"] == "submitting"
 
 
 def test_mid_transaction_failure_rolls_back_order_claim_and_reservation(tmp_path, monkeypatch):

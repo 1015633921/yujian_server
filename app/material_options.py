@@ -235,7 +235,17 @@ BEAD_SHAPE_OPTIONS: tuple[dict[str, str], ...] = (
     {"key": "faceted_round", "label": "切面圆珠"},
     {"key": "rondelle", "label": "算盘珠"},
     {"key": "barrel", "label": "桶珠"},
+    {"key": "cube", "label": "方糖"},
+    {"key": "nugget", "label": "随形"},
+    {"key": "double_terminated", "label": "双尖"},
+    {"key": "single_terminated", "label": "单尖"},
+    {"key": "triangle", "label": "三角形"},
     {"key": "disc", "label": "隔片"},
+    {"key": "bead_cap", "label": "包珠隔片/花托"},
+    {"key": "curved_tube", "label": "弯管"},
+    {"key": "connector", "label": "连接扣"},
+    {"key": "clasp", "label": "扣件"},
+    {"key": "charm", "label": "挂坠"},
     {"key": "special", "label": "异形"},
 )
 
@@ -276,6 +286,32 @@ BEAD_SHAPE_ALIASES = {
     **{item["label"]: item["key"] for item in BEAD_SHAPE_OPTIONS},
     "圆形": "round",
     "切面": "faceted_round",
+    "方形": "cube",
+    "方糖珠": "cube",
+    "随形": "nugget",
+    "随型": "nugget",
+    "随性": "nugget",
+    "异形珠": "nugget",
+    "不规则": "nugget",
+    "单尖": "single_terminated",
+    "吊坠": "charm",
+    "花托": "special",
+    "包珠隔片": "bead_cap",
+    "成对花托": "bead_cap",
+    "bead_cap_pair": "bead_cap",
+}
+
+PLACEMENT_MODE_ALIASES = {
+    "threaded": "threaded",
+    "穿线": "threaded",
+    "串珠": "threaded",
+    "hanging": "hanging",
+    "悬挂": "hanging",
+    "挂坠": "hanging",
+    "attached_side": "attached_side",
+    "单边吸附": "attached_side",
+    "吸附主珠": "attached_side",
+    "attached_pair": "attached_side",
 }
 
 SURFACE_FINISH_ALIASES = {
@@ -596,6 +632,21 @@ def normalize_optional_positive_float(value: Any) -> float | None:
     return round(number, 3)
 
 
+def normalize_optional_dimension(value: Any) -> float | None:
+    number = normalize_optional_positive_float(value)
+    return number if number is not None and number > 0 else None
+
+
+def normalize_image_axis_angle(value: Any) -> float | None:
+    if value in (None, ""):
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return round(number % 180, 3)
+
+
 def normalize_material_params(value: Any) -> dict[str, Any]:
     params = dict(value) if isinstance(value, dict) else {}
     for key, option_type in (
@@ -620,7 +671,44 @@ def normalize_material_params(value: Any) -> dict[str, Any]:
             params.pop(key, None)
         else:
             params[key] = number
+    placement_mode = PLACEMENT_MODE_ALIASES.get(str(params.get("placement_mode") or "").strip())
+    if placement_mode:
+        params["placement_mode"] = placement_mode
+    else:
+        params.pop("placement_mode", None)
+    for key in (
+        "string_axis_width_mm",
+        "body_width_mm",
+        "body_height_mm",
+        "compatible_bead_size_mm",
+        "compatible_size_tolerance_mm",
+    ):
+        number = normalize_optional_dimension(params.get(key))
+        if number is None:
+            params.pop(key, None)
+        else:
+            params[key] = number
+    image_axis_angle = normalize_image_axis_angle(params.get("image_string_axis_deg"))
+    if image_axis_angle is None:
+        params.pop("image_string_axis_deg", None)
+    else:
+        params["image_string_axis_deg"] = image_axis_angle
     return params
+
+
+def normalize_sku_physical_specs(value: Any) -> dict[str, float]:
+    params = normalize_material_params(value)
+    return {
+        key: params[key]
+        for key in (
+            "string_axis_width_mm",
+            "body_width_mm",
+            "body_height_mm",
+            "compatible_bead_size_mm",
+            "compatible_size_tolerance_mm",
+        )
+        if key in params
+    }
 
 
 def public_material_field_specs() -> dict[str, Any]:

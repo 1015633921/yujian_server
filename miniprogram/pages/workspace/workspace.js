@@ -13,6 +13,19 @@ const {
   recommendBeadCount
 } = require('../../utils/braceletSizing');
 const { buildFreshWorkspaceDraft } = require('../../utils/workspaceImport');
+const {
+  resolveMaterialGeometry,
+  stringedMaterialOffset,
+  stringedMaterialRotationDeg
+} = require('../../utils/materialGeometry');
+const {
+  attachmentFromMaterial,
+  beadCapCompatibility,
+  beadCapItemsFromPlacements,
+  beadCapSlotsFromPlacement,
+  beadCapSprite,
+  isBeadCap
+} = require('../../utils/materialAttachments');
 
 let Body;
 let Bodies;
@@ -23,7 +36,8 @@ let Sleeping;
 
 const MATERIAL_PAGE_SIZE = 24;
 const MATERIAL_CACHE_TTL = 30 * 60 * 1000;
-const MATERIAL_CACHE_KEY = 'workspaceMaterialCatalogV7';
+const MATERIAL_CACHE_KEY = 'workspaceMaterialCatalogV9';
+const MATERIAL_BACKGROUND_REFRESH_INTERVAL = 5000;
 const ALL_OPTION_LABEL = '\u5168\u90e8';
 const LEGACY_ALL_OPTION_LABELS = [ALL_OPTION_LABEL, '鍏ㄩ儴'];
 const TRAY_THEME_STORAGE_KEY = 'workspaceTrayThemeV1';
@@ -117,6 +131,15 @@ const WORKSPACE_DEBUG_LOGS = false;
 const WORKSPACE_SOUND_URLS = {
   collisionSoft: assetUrl('sounds/bead-duang-soft-quick.wav'),
   shuffle: assetUrl('sounds/string-shuffle.wav')
+};
+const WORKSPACE_ICON_URLS = {
+  undo: assetUrl('workspace-icons/workspace-undo.png'),
+  wrist: assetUrl('workspace-icons/workspace-wrist.png'),
+  share: assetUrl('workspace-icons/share-button-gold.png'),
+  save: assetUrl('workspace-icons/workspace-save-download.png'),
+  energy: assetUrl('workspace-icons/workspace-energy-five-elements.png'),
+  clear: assetUrl('workspace-icons/workspace-clear-pastel.png'),
+  string: assetUrl('workspace-icons/workspace-string-dice.png')
 };
 const WORKSPACE_SOUND_POOL_SIZE = {
   collisionSoft: 1,
@@ -425,21 +448,6 @@ function recommendedStringedBeadCount(itemsOrSizes = [], wristSize = 16) {
   });
 }
 
-function normalizeRotationDeg(value) {
-  let rotation = Number(value) || 0;
-  while (rotation > 180) rotation -= 360;
-  while (rotation <= -180) rotation += 360;
-  return rotation;
-}
-
-function stringedBeadRotationDeg(angleRad) {
-  return normalizeRotationDeg(angleRad * 180 / Math.PI);
-}
-
-function stringedBeadRotationFromPoint(x, y, center) {
-  return stringedBeadRotationDeg(Math.atan2(y - center, x - center));
-}
-
 function filterWorkspaceTopTabs(list = []) {
   return (list || []).filter(item => item && item.key !== 'incense' && item.key !== 'pendant');
 }
@@ -452,6 +460,14 @@ function firstWorkspaceImageUrl(entry = {}) {
 
 function sequenceItemIsPendant(item = {}) {
   return String(item.top || item.item_type || item.type || '').trim().toLowerCase() === 'pendant';
+}
+
+function sequenceItemIsBeadCap(item = {}) {
+  const params = item.material_params || {};
+  return item.attachment_mode === 'bead_cap'
+    || item.attachment && item.attachment.mode === 'bead_cap'
+    || item.placement_mode === 'attached_side'
+    || params.placement_mode === 'attached_side';
 }
 
 function materialContributesEnergy(material = {}) {
@@ -521,13 +537,13 @@ const WORKSPACE_USAGE_GUIDE = [
 ];
 
 const WORKSPACE_USAGE_GUIDE_WITH_ICONS = [
-  { tag: '撤回', iconUrl: '/images/workspace-icons/workspace-undo.png', previewClass: 'preview-square', title: '撤回上一步', desc: '误加、误删或移动珠子后，点它回到上一步。' },
-  { tag: '腕围', iconUrl: '/images/workspace-icons/workspace-wrist.png', previewClass: 'preview-wrist', buttonText: '腕围16cm', title: '设置腕围', desc: '调整当前手围，系统会同步重算串长和适配。' },
-  { tag: '分享', iconUrl: '/images/workspace-icons/share-button-gold.png', previewClass: 'preview-share', title: '分享方案', desc: '生成当前方案分享入口，好友打开后可直接查看。' },
-  { tag: '保存', iconUrl: '/images/workspace-icons/workspace-save-download.png', previewClass: 'preview-square preview-save', title: '保存方案', desc: '把当前搭配保存为草稿，之后可以继续编辑。' },
-  { tag: '五行', iconUrl: '/images/workspace-icons/workspace-energy-five-elements.png', previewClass: 'preview-square preview-energy', title: '五行图', desc: '查看当前方案的五行元素占比。' },
-  { tag: '清空', iconUrl: '/images/workspace-icons/workspace-clear-pastel.png', previewClass: 'preview-square preview-clear', title: '清空盘面', desc: '移除当前盘面所有珠子，重新开始搭配。' },
-  { tag: '成串', iconUrl: '/images/workspace-icons/workspace-string-dice.png', previewClass: 'preview-dark preview-string', buttonText: '随机成串', title: '随机成串 / 解除成串', desc: '在自由摆放和圆串整理之间切换，快速预览佩戴效果。' },
+  { tag: '撤回', iconUrl: WORKSPACE_ICON_URLS.undo, previewClass: 'preview-square', title: '撤回上一步', desc: '误加、误删或移动珠子后，点它回到上一步。' },
+  { tag: '腕围', iconUrl: WORKSPACE_ICON_URLS.wrist, previewClass: 'preview-wrist', buttonText: '腕围16cm', title: '设置腕围', desc: '调整当前手围，系统会同步重算串长和适配。' },
+  { tag: '分享', iconUrl: WORKSPACE_ICON_URLS.share, previewClass: 'preview-share', title: '分享方案', desc: '生成当前方案分享入口，好友打开后可直接查看。' },
+  { tag: '保存', iconUrl: WORKSPACE_ICON_URLS.save, previewClass: 'preview-square preview-save', title: '保存方案', desc: '把当前搭配保存为草稿，之后可以继续编辑。' },
+  { tag: '五行', iconUrl: WORKSPACE_ICON_URLS.energy, previewClass: 'preview-square preview-energy', title: '五行图', desc: '查看当前方案的五行元素占比。' },
+  { tag: '清空', iconUrl: WORKSPACE_ICON_URLS.clear, previewClass: 'preview-square preview-clear', title: '清空盘面', desc: '移除当前盘面所有珠子，重新开始搭配。' },
+  { tag: '成串', iconUrl: WORKSPACE_ICON_URLS.string, previewClass: 'preview-dark preview-string', buttonText: '随机成串', title: '随机成串 / 解除成串', desc: '在自由摆放和圆串整理之间切换，快速预览佩戴效果。' },
   { tag: '托盘', previewClass: 'preview-tray', buttonText: '托盘颜色', showSwatch: true, title: '切换托盘颜色', desc: '顺序切换托盘底色，方便看清不同颜色的珠子。' },
   { tag: '结算', previewClass: 'preview-dark preview-cart', buttonText: '去结算', title: '去结算', desc: '确认方案后直接进入订单确认页。' }
 ];
@@ -567,6 +583,7 @@ Page({
     showTip: true,
     showWorkspaceGuide: false,
     workspaceGuideItems: WORKSPACE_GUIDE_ITEMS,
+    workspaceIcons: WORKSPACE_ICON_URLS,
     wristSize: 16,
     wearStyle: 'single',
     selected: [],
@@ -574,8 +591,8 @@ Page({
     attachedPendants: [],
     selectedItems: [],
     attachedPendantItems: [],
-    useCanvasRenderer: true,
     workspaceCanvasVisible: true,
+    canvasRenderError: false,
     trayImageUrl: TRAY_THEMES[0].imageUrl,
     trayTheme: 'warm',
     trayThemeItems: [],
@@ -671,6 +688,7 @@ Page({
     this.lastMaterialTapAt = 0;
     this.lastQueueToastAt = 0;
     this.physicsBodies = [];
+    this.canvasRecoveryAttempts = 0;
     this.physicsFramePending = false;
     this.soundEnabled = true;
     this.audioPlayers = {};
@@ -683,6 +701,9 @@ Page({
     this.pendingSharedDesign = null;
     this.pendingShareToken = '';
     this.materialPayloadReady = false;
+    this.materialPayloadVersion = '';
+    this.lastMaterialRefreshAt = 0;
+    this.workspaceHasShown = false;
     this.useServerMaterialPagination = true;
     this.materialPageState = { page: 0, pageSize: MATERIAL_PAGE_SIZE, total: 0, hasMore: false, key: '' };
     this.deferFirstShowProfileEnergy = true;
@@ -812,7 +833,7 @@ Page({
       : (Array.isArray(design.sequence) ? design.sequence : []);
     const selectedFromDesign = Array.isArray(design.selected) ? design.selected : [];
     const selectedFromSequence = sequence
-      .filter(item => !sequenceItemIsPendant(item || {}))
+      .filter(item => !sequenceItemIsPendant(item || {}) && !sequenceItemIsBeadCap(item || {}))
       .map(item => item && (item.id || item.material_id || item.materialId || item.sku || item.skuId || item.sku_id))
       .filter(Boolean);
     const selected = (selectedFromDesign.length ? selectedFromDesign : selectedFromSequence)
@@ -1542,13 +1563,15 @@ Page({
         hasMore: false,
         key: currentKey
       };
-      this.setData({
-        visibleMaterials: [],
-        hasMoreMaterials: false,
-        materialsLoading: true,
-        materialsLoadingMore: false,
-        materialsErrorText: ''
-      });
+      if (!options.background) {
+        this.setData({
+          visibleMaterials: [],
+          hasMoreMaterials: false,
+          materialsLoading: true,
+          materialsLoadingMore: false,
+          materialsErrorText: ''
+        });
+      }
     } else {
       this.setData({ materialsLoadingMore: true, materialsErrorText: '' });
     }
@@ -1556,7 +1579,7 @@ Page({
     let cachedPayload = null;
     let cachedPayloadSignature = '';
     let cachedAppendBaseMaterials = null;
-    if (materialCache[cacheKey] && Date.now() - Number(materialCacheAt[cacheKey] || 0) < MATERIAL_CACHE_TTL) {
+    if (!options.force && materialCache[cacheKey] && Date.now() - Number(materialCacheAt[cacheKey] || 0) < MATERIAL_CACHE_TTL) {
       cachedPayload = materialCache[cacheKey];
       cachedPayloadSignature = this.materialPagePayloadSignature(cachedPayload);
       if (!reset) cachedAppendBaseMaterials = (this.data.visibleMaterials || []).slice();
@@ -1566,7 +1589,7 @@ Page({
         fromCache: true,
         autoTargetSearch: options.autoTargetSearch
       });
-    } else if (options.useStorage && page === 1) {
+    } else if (!options.force && options.useStorage && page === 1) {
       cachedPayload = await this.readStoredMaterialPage(cacheKey);
       if (cachedPayload) {
         if (this.materialPageRequesting !== cacheKey) return;
@@ -1594,6 +1617,7 @@ Page({
       });
       if (this.materialPageRequesting !== cacheKey) return;
       const optimized = this.optimizeMaterialPayload(data);
+      this.lastMaterialRefreshAt = Date.now();
       this.storeMaterialPage(cacheKey, optimized);
       if (cachedPayload && cachedPayloadSignature === this.materialPagePayloadSignature(optimized)) {
         this.setData({
@@ -1610,6 +1634,7 @@ Page({
       });
     } catch (error) {
       logWorkspaceWarning('load materials fallback:', error.message || error);
+      if (options.background) return;
       this.setData({
         materialsLoading: false,
         materialsLoadingMore: false,
@@ -1656,7 +1681,12 @@ Page({
     const normalizedEnergy = contributesEnergy
       ? energy
       : { ...energy, primary_element: '', secondary_elements: [] };
-    return {
+    const materialParams = {
+      ...(item.material_params || {}),
+      ...(visual.material_params || {}),
+      ...(item.physical_specs || {})
+    };
+    const normalized = {
       ...item,
       sku,
       energy: normalizedEnergy,
@@ -1691,13 +1721,23 @@ Page({
       image_pool: imageUrls,
       allowed_roles: rules.allowed_roles || item.allowed_roles || [],
       conflict_codes: rules.conflict_codes || item.conflict_codes || [],
-      material_params: visual.material_params || item.material_params || {},
+      material_params: materialParams,
       string_axis_width_mm: Number(
-        (visual.material_params && visual.material_params.string_axis_width_mm)
-        || (item.material_params && item.material_params.string_axis_width_mm)
+        materialParams.string_axis_width_mm
         || item.string_axis_width_mm
         || 0
       )
+    };
+    const physical = resolveMaterialGeometry(normalized);
+    return {
+      ...normalized,
+      bead_shape: physical.shape,
+      placement_mode: physical.placementMode,
+      physical_spec_complete: physical.specComplete,
+      physical_spec_text: physical.specText,
+      card_spec_text: physical.cardSpecText,
+      display_size_rpx: physical.displaySizeRpx,
+      material_shape_class: physical.shapeClass
     };
   },
 
@@ -1710,6 +1750,7 @@ Page({
   },
 
   applyMaterialPayload(data, options = {}) {
+    this.applyMaterialPayloadVersion(data);
     const previousCatalog = this.materialCatalog || DEFAULT_MATERIALS;
     const rawCatalog = data.materials && data.materials.length ? data.materials : DEFAULT_MATERIALS;
     const unsupportedIds = unsupportedWorkspaceMaterialIds(rawCatalog);
@@ -1814,6 +1855,7 @@ Page({
   },
 
   applyPagedMaterialPayload(data, options = {}) {
+    const materialVersionChanged = this.applyMaterialPayloadVersion(data);
     const materials = filterWorkspaceMaterials(data.materials && data.materials.length ? data.materials : []);
     const pagination = data.pagination || {};
     const selectedDependencyBefore = this.selectedMaterialDependencySignature();
@@ -1901,6 +1943,18 @@ Page({
       materialsErrorText: '',
       filterSummary
     };
+    if (materialVersionChanged || selectedDependencyChanged) {
+      updates.placements = (this.data.placements || []).map((placement, index) => {
+        const id = (this.data.selected || [])[index] || placement.id;
+        const material = this.findMaterialById(id) || {};
+        return {
+          ...placement,
+          id,
+          image_url: this.findCurrentMaterialImageUrl(id, placement.image_url)
+            || this.pickMaterialImageUrl(material)
+        };
+      });
+    }
     if (options.append && options.appendBaseMaterials) {
       updates.visibleMaterials = visibleMaterials;
     } else if (options.append) {
@@ -1912,6 +1966,10 @@ Page({
       this.scheduleMaterialPreload(options.append ? newVisibleMaterials : visibleMaterials);
       this.markWorkspaceReady('materials');
     });
+
+    if (materialVersionChanged) {
+      this.refreshSelectedMaterialDetails();
+    }
 
     if (this.pendingSharedDesign || this.pendingBackendRecommendation || this.pendingRecommendedRecipe) {
       this.ensurePendingMaterialDetails({ silent: true, keepPendingOnEmpty: true });
@@ -1994,23 +2052,47 @@ Page({
     return true;
   },
 
+  async refreshSelectedMaterialDetails() {
+    const ids = Array.from(new Set((this.data.selected || []).map(id => String(id || '').trim()).filter(Boolean)));
+    if (!ids.length) return false;
+    const refreshed = await this.fetchMaterialsByIds(ids, { force: true });
+    if (!refreshed) return false;
+    const placements = (this.data.placements || []).map((placement, index) => {
+      const id = (this.data.selected || [])[index] || placement.id;
+      const material = this.findMaterialById(id) || {};
+      return {
+        ...placement,
+        id,
+        image_url: this.findCurrentMaterialImageUrl(id, placement.image_url)
+          || this.pickMaterialImageUrl(material)
+      };
+    });
+    this.setData({ placements }, () => this.recalculate());
+    return true;
+  },
+
   hasMissingSelectedMaterials() {
     return (this.data.selected || []).some(id => !this.hasMaterial(id));
   },
 
-  async fetchMaterialsByIds(ids = []) {
-    const missing = Array.from(new Set((ids || []).filter(Boolean))).filter(id => !this.hasResolvableMaterialIdentifier(id));
-    if (!missing.length) return;
-    const requestKey = missing.sort().join(',');
+  async fetchMaterialsByIds(ids = [], options = {}) {
+    const requested = Array.from(new Set((ids || []).map(id => String(id || '').trim()).filter(Boolean)));
+    const targets = options.force
+      ? requested
+      : requested.filter(id => !this.hasResolvableMaterialIdentifier(id));
+    if (!targets.length) return false;
+    const requestKey = targets.slice().sort().join(',');
     if (this.materialDetailsRequesting === requestKey) return;
     this.materialDetailsRequesting = requestKey;
     try {
-      const data = await getMaterials({ ids: missing, slim: true, silent: true, timeout: 8000 });
+      const data = await getMaterials({ ids: targets, slim: true, silent: true, timeout: 8000 });
       const optimized = this.optimizeMaterialPayload(data);
       this.dropUnsupportedSelectedMaterials(optimized.materials || []);
       this.mergeMaterialCatalog(optimized.materials || []);
+      return true;
     } catch (error) {
       logWorkspaceWarning('load selected material details fallback:', error.message || error);
+      return false;
     } finally {
       this.materialDetailsRequesting = '';
     }
@@ -2064,6 +2146,30 @@ Page({
     this.selectedBeadInfoCache = null;
     this.selectedItemStylePatchCache = null;
     this.clearLivePlacements();
+  },
+
+  applyMaterialPayloadVersion(data = {}) {
+    const nextVersion = String(data.version || data.updated_at || '');
+    const previousVersion = String(this.materialPayloadVersion || '');
+    const changed = Boolean(previousVersion && nextVersion && previousVersion !== nextVersion);
+    if (nextVersion) this.materialPayloadVersion = nextVersion;
+    if (!changed) return false;
+    this.canvasImageCache = {};
+    this.canvasTextureCache = {};
+    this.materialImagePreloadSet = {};
+    this.invalidateDesignMaterialCaches();
+    return true;
+  },
+
+  refreshMaterialCatalogInBackground() {
+    const now = Date.now();
+    if (now - Number(this.lastMaterialRefreshAt || 0) < MATERIAL_BACKGROUND_REFRESH_INTERVAL) return;
+    this.loadMaterialPage(1, {
+      reset: true,
+      useStorage: false,
+      force: true,
+      background: true
+    });
   },
 
   rebuildMaterialLookup(materials = this.materialCatalog || DEFAULT_MATERIALS, options = {}) {
@@ -2162,9 +2268,18 @@ Page({
   materialOwnImageUrls(material = {}) {
     const urls = material.image_urls || material.image_pool || [];
     const list = Array.isArray(urls) ? urls : [urls];
-    return list
-      .concat(material.image_url || [])
-      .filter(Boolean);
+    const seen = Object.create(null);
+    const gallery = list.filter(url => {
+      const key = this.normalizeImageUrlIdentity(url);
+      if (!key || seen[key]) return false;
+      seen[key] = true;
+      return true;
+    });
+    if (materialTop(material) === 'accessory') {
+      const primaryKey = this.normalizeImageUrlIdentity(material.image_url);
+      return gallery.filter(url => this.normalizeImageUrlIdentity(url) !== primaryKey);
+    }
+    return gallery.length ? gallery : [material.image_url].filter(Boolean);
   },
 
   buildMaterialImagePoolIndex(materials = []) {
@@ -2216,11 +2331,13 @@ Page({
   mergeMaterialImagePool(material = {}) {
     const payload = this.optimizeMaterialPayload({ materials: [material] });
     const hydrated = payload.materials && payload.materials[0];
-    if (!hydrated || this.materialOwnImageUrls(hydrated).length <= 1) {
+    const hydratedImageUrls = hydrated ? this.materialOwnImageUrls(hydrated) : [];
+    const accessoryGalleryReady = hydrated && materialTop(hydrated) === 'accessory' && hydratedImageUrls.length > 0;
+    if (!hydrated || (!accessoryGalleryReady && hydratedImageUrls.length <= 1)) {
       return this.findMaterialById(material.id || material.skuId || material.sku_id) || material;
     }
     const groupKey = this.materialImageGroupKey(hydrated);
-    const imageUrls = this.materialOwnImageUrls(hydrated);
+    const imageUrls = hydratedImageUrls;
     const mergeItem = item => {
       if (!item) return item;
       const sameGroup = this.materialImageGroupKey(item) === groupKey;
@@ -2244,7 +2361,8 @@ Page({
   },
 
   async ensureMaterialImagePool(material = {}) {
-    if (this.materialOwnImageUrls(material).length > 1) return material;
+    const ownImageUrls = this.materialOwnImageUrls(material);
+    if (materialTop(material) === 'accessory' ? ownImageUrls.length > 0 : ownImageUrls.length > 1) return material;
     const groupKey = this.materialImageGroupKey(material);
     this.materialImagePoolHydrated = this.materialImagePoolHydrated || {};
     this.materialImagePoolHydrating = this.materialImagePoolHydrating || {};
@@ -2292,7 +2410,7 @@ Page({
       delete this.materialImagePoolWarmTimers[groupKey];
       this.ensureMaterialImagePool(material).then(hydrated => {
         const imageUrl = this.pickMaterialImageUrl(hydrated || material);
-        if (imageUrl && this.data.useCanvasRenderer && this.braceletCanvasState) {
+        if (imageUrl && this.braceletCanvasState) {
           this.getCanvasImage(imageUrl);
         }
       });
@@ -2394,7 +2512,9 @@ Page({
   sharedDesignMaterialCandidates(sharedDesign = {}) {
     const normalized = this.normalizeSharedDesignPayload(sharedDesign);
     const ids = [...(normalized.selected || [])];
-    (normalized.sequence || []).filter(item => !sequenceItemIsPendant(item || {})).forEach(item => {
+    (normalized.sequence || []).filter(item => (
+      !sequenceItemIsPendant(item || {}) && !sequenceItemIsBeadCap(item || {})
+    )).forEach(item => {
       this.sharedSequenceMaterialIdentifiers(item).forEach(id => ids.push(id));
     });
     return Array.from(new Set(ids.map(id => String(id || '').trim()).filter(Boolean)));
@@ -2403,7 +2523,9 @@ Page({
   resolveSharedDesignSelectedIds(normalized = {}) {
     const selected = [];
     const rawSelected = normalized.selected || [];
-    const sequence = normalized.sequence || [];
+    const sequence = (normalized.sequence || []).filter(item => (
+      !sequenceItemIsPendant(item || {}) && !sequenceItemIsBeadCap(item || {})
+    ));
     const total = Math.max(rawSelected.length, sequence.length);
     for (let index = 0; index < total; index += 1) {
       const candidates = [];
@@ -2666,9 +2788,14 @@ Page({
 
   onShow() {
     wx.hideTabBar({ animation: false });
+    if (this.workspaceHasShown) {
+      this.refreshMaterialCatalogInBackground();
+    } else {
+      this.workspaceHasShown = true;
+    }
     if (this.data.workspaceCanvasVisible === false) {
       this.restoreWorkspaceCanvasAfterOverlay();
-    } else if (this.data.useCanvasRenderer && this.braceletCanvasState) {
+    } else if (this.braceletCanvasState) {
       this.scheduleMaterialPreload(this.data.visibleMaterials);
     }
     if (this.deferFirstShowProfileEnergy) {
@@ -2676,7 +2803,7 @@ Page({
     } else {
       this.loadProfileEnergy();
     }
-    if (this.data.useCanvasRenderer) this.scheduleCanvasRender();
+    this.scheduleCanvasRender();
     if (this.data.isLooseMode && !this.data.sharedDesignFrozen && this.physicsEngine) this.runPhysics();
     if (wx.getStorageSync('workspaceOpenDesign')) {
       wx.removeStorageSync('workspaceOpenDesign');
@@ -2735,10 +2862,12 @@ Page({
     clearTimeout(this.canvasFlightRetryTimer);
     clearTimeout(this.shuffleTimer);
     clearTimeout(this.canvasResizeTimer);
+    clearTimeout(this.canvasRecoveryTimer);
     clearTimeout(this.physicsFrameRetryTimer);
     clearTimeout(this.dragPhysicsSyncTimer);
     this.flightAnimationTimer = null;
     this.canvasFlightRetryTimer = null;
+    this.canvasRecoveryTimer = null;
     this.physicsFrameRetryTimer = null;
     this.dragPhysicsSyncTimer = null;
     clearTimeout(this.audioPrewarmTimer);
@@ -3008,6 +3137,13 @@ Page({
         || snapshot.priceText
         || snapshot.amount
         || '';
+      const beadCaps = beadCapSlotsFromPlacement({
+        bead_caps: (previous && (previous.bead_caps || previous.beadCaps))
+          || (snapshot.placement && (snapshot.placement.bead_caps || snapshot.placement.beadCaps))
+          || snapshot.bead_caps
+          || snapshot.beadCaps
+          || {}
+      });
       normalized.push({
         id,
         image_url: this.findCurrentMaterialImageUrl(id, previous && previous.image_url)
@@ -3023,9 +3159,20 @@ Page({
           || '',
         category: material.category || previous && previous.category || snapshot.category || '',
         series: material.series || previous && previous.series || snapshot.series || '',
+        top: material.top || previous && previous.top || snapshot.top || 'bead',
         size,
         diameter: size,
+        material_params: {
+          ...(snapshot.material_params || {}),
+          ...((previous && previous.material_params) || {}),
+          ...(material.material_params || {})
+        },
+        string_axis_width_mm: material.string_axis_width_mm
+          || previous && previous.string_axis_width_mm
+          || snapshot.string_axis_width_mm
+          || 0,
         price,
+        bead_caps: beadCaps,
         dx: Number(loose.dx) || 0,
         dy: Number(loose.dy) || 0,
         looseX: loose.looseX,
@@ -3039,7 +3186,7 @@ Page({
 
   getMaterialDisplaySize(id) {
     const material = this.findMaterialById(id);
-    return material ? Math.max(42, Math.min(78, material.size * 5.4)) : 54;
+    return material ? resolveMaterialGeometry(material).displaySizeRpx : 54;
   },
 
   createLoosePlacement(index, id, existingPlacements = []) {
@@ -3571,13 +3718,13 @@ Page({
 
   onResize() {
     this.initDeviceLayout({ preserveActionState: true });
-    if (!this.data.useCanvasRenderer || this.data.workspaceCanvasVisible === false) return;
+    if (this.data.workspaceCanvasVisible === false) return;
     clearTimeout(this.canvasResizeTimer);
     this.canvasResizeTimer = setTimeout(() => this.initWorkspaceCanvases(), 120);
   },
 
   initWorkspaceCanvases() {
-    if (!this.data.useCanvasRenderer || this.data.workspaceCanvasVisible === false) return;
+    if (this.data.workspaceCanvasVisible === false) return;
     const query = wx.createSelectorQuery().in(this);
     query.select('#braceletCanvas').fields({ node: true, size: true });
     query.select('#workspaceFlightCanvas').fields({ node: true, size: true });
@@ -3588,8 +3735,7 @@ Page({
       const circleRect = res && res[2];
       const braceletCanvasState = this.setupCanvasNode(braceletInfo, circleRect);
       if (!braceletCanvasState || !braceletCanvasState.ctx) {
-        this.switchToDomRendererFallback('bracelet canvas unavailable');
-        this.markWorkspaceReady('canvas');
+        this.handleCanvasRendererFailure('bracelet canvas unavailable');
         return;
       }
       this.braceletCanvasState = braceletCanvasState;
@@ -3601,15 +3747,16 @@ Page({
       });
       this.canvasImageCache = this.canvasImageCache || {};
       this.materialImagePreloadSet = this.materialImagePreloadSet || {};
+      if (this.data.canvasRenderError) this.setData({ canvasRenderError: false });
       this.scheduleCanvasRender();
       this.scheduleMaterialPreload(this.data.visibleMaterials);
       this.markWorkspaceReady('canvas');
+      if (this.flightQueue && this.flightQueue.length) this.processCanvasFlightQueue();
     });
   },
 
-  switchToDomRendererFallback(reason = '') {
-    if (!this.data.useCanvasRenderer) return;
-    logWorkspaceWarning('workspace canvas fallback:', reason);
+  handleCanvasRendererFailure(reason = '') {
+    logWorkspaceWarning('workspace canvas unavailable:', reason);
     this.stopCanvasRenderLoop();
     this.braceletCanvasState = null;
     this.flightCanvasState = null;
@@ -3618,12 +3765,38 @@ Page({
     this.canvasShadowCache = {};
     this.materialImagePreloadSet = {};
     this.canvasFlight = null;
+    clearTimeout(this.canvasRecoveryTimer);
+    const attempt = Number(this.canvasRecoveryAttempts || 0) + 1;
+    this.canvasRecoveryAttempts = attempt;
+    if (attempt <= 3 && this.data.workspaceCanvasVisible !== false) {
+      this.setData({ canvasFlightActive: false }, () => {
+        this.canvasRecoveryTimer = setTimeout(() => {
+          this.canvasRecoveryTimer = null;
+          wx.nextTick(() => this.initWorkspaceCanvases());
+        }, attempt * 140);
+      });
+      return;
+    }
     this.setData({
-      useCanvasRenderer: false,
-      canvasFlightActive: false
+      canvasFlightActive: false,
+      canvasRenderError: true
+    }, () => this.markWorkspaceReady('canvas'));
+  },
+
+  retryCanvasRenderer() {
+    clearTimeout(this.canvasRecoveryTimer);
+    this.canvasRecoveryTimer = null;
+    this.canvasRecoveryAttempts = 0;
+    this.setData({
+      canvasRenderError: false,
+      workspaceLoading: true,
+      workspaceLoadingClass: '',
+      workspaceLoadingText: '正在重新加载工作台',
+      workspaceLoadingSubtext: '恢复盘面与珠材...'
     }, () => {
-      this.recalculate({ persist: false });
-      this.markWorkspaceReady('canvas');
+      this.workspaceBootStartedAt = Date.now();
+      this.armWorkspaceLoadingFallback();
+      wx.nextTick(() => this.initWorkspaceCanvases());
     });
   },
 
@@ -3696,7 +3869,7 @@ Page({
   },
 
   scheduleCanvasRender(keepLoop = false, options = {}) {
-    if (!this.data.useCanvasRenderer || this.data.workspaceCanvasVisible === false) return;
+    if (this.data.workspaceCanvasVisible === false || this.data.canvasRenderError) return;
     if (options.markDirty !== false) this.braceletCanvasDirty = true;
     this.canvasKeepLoop = this.canvasKeepLoop || keepLoop;
     if (this.canvasFramePending) return;
@@ -3759,7 +3932,7 @@ Page({
     this.setData({ workspaceCanvasVisible: true }, () => {
       wx.nextTick(() => {
         this.initWorkspaceCanvases();
-        if (this.data.useCanvasRenderer) this.scheduleCanvasRender();
+        this.scheduleCanvasRender();
       });
     });
   },
@@ -3857,6 +4030,8 @@ Page({
         this.lastBraceletCanvasRenderSignature = sceneSignature || renderedSignature || this.buildCanvasEmptySceneSignature();
         this.lastBraceletCanvasRenderSnapshot = renderedSnapshot;
       }
+      this.canvasRecoveryAttempts = 0;
+      if (this.data.canvasRenderError) this.setData({ canvasRenderError: false });
     } catch (error) {
       if (!restored) {
         try {
@@ -3864,7 +4039,7 @@ Page({
         } catch (restoreError) {}
       }
       logWorkspaceWarning('workspace canvas render failed:', error);
-      this.switchToDomRendererFallback('bracelet canvas render failed');
+      this.handleCanvasRendererFailure('bracelet canvas render failed');
     }
   },
 
@@ -3908,7 +4083,10 @@ Page({
     const key = [
       layout.center,
       layout.radius,
-      (items || []).map(item => `${item.id}:${item.size}`).join('|')
+      (items || []).map(item => {
+        const physical = resolveMaterialGeometry(item);
+        return `${item.id}:${physical.displaySizeRpx}:${physical.spacingSizeRpx}:${physical.shape}:${physical.placementMode}:${physical.imageStringAxisDeg}`;
+      }).join('|')
     ].join('::');
     if (this.braceletGeometryCache && this.braceletGeometryCache.key === key) {
       return this.braceletGeometryCache.geometry;
@@ -4009,9 +4187,7 @@ Page({
 
   buildPhysicsPlacementsSnapshot(basePlacements = null) {
     const selected = this.data.selected || [];
-    const source = basePlacements || (this.data.useCanvasRenderer
-      ? this.getCachedCanvasPlacements(selected, this.data.placements)
-      : this.normalizePlacements(selected, this.data.placements));
+    const source = basePlacements || this.getCachedCanvasPlacements(selected, this.data.placements);
     const placements = source.slice();
     this.sanitizePhysicsBodies(this.getStageLayout());
     (this.physicsBodies || []).forEach(body => {
@@ -4050,10 +4226,6 @@ Page({
       clearTimeout(this.dragPhysicsSyncTimer);
       this.dragPhysicsSyncTimer = null;
       this.lastDragPhysicsSyncAt = Date.now();
-      this.syncPhysicsFrame(onSynced);
-      return;
-    }
-    if (!this.data.useCanvasRenderer) {
       this.syncPhysicsFrame(onSynced);
       return;
     }
@@ -4189,7 +4361,7 @@ Page({
   },
 
   scheduleCanvasImageReadyRender(url) {
-    if (!this.data.useCanvasRenderer || this.data.workspaceCanvasVisible === false) return;
+    if (this.data.workspaceCanvasVisible === false) return;
     if (this.isCanvasImageUsedByActiveScene(url)) {
       this.scheduleCanvasRender();
     }
@@ -4387,7 +4559,7 @@ Page({
     const batchSize = busy ? 1 : (this.isLowPerformanceDevice ? 2 : MATERIAL_PRELOAD_BATCH_SIZE);
     queue.splice(0, batchSize).forEach(task => {
       if (!task || !task.url) return;
-      if (task.preloadCanvas && this.data.useCanvasRenderer && this.braceletCanvasState && this.braceletCanvasState.canvas) {
+      if (task.preloadCanvas && this.braceletCanvasState && this.braceletCanvasState.canvas) {
         this.getCanvasImage(task.url);
       }
       if (task.preloadInfo && wx.getImageInfo) {
@@ -4585,23 +4757,176 @@ Page({
     this.drawCanvasBeadShadowFallback(ctx, radius, hasImage);
   },
 
+  drawCanvasNonRoundShadow(ctx, width, height) {
+    const radiusX = Math.max(6, width * 0.48);
+    const radiusY = Math.max(3, height * 0.18);
+    ctx.save();
+    ctx.translate(width * 0.10, height * 0.48);
+    ctx.scale(radiusX, radiusY);
+    const shadow = ctx.createRadialGradient(0, 0, 0.08, 0, 0, 1);
+    shadow.addColorStop(0, 'rgba(35,29,23,.26)');
+    shadow.addColorStop(0.58, 'rgba(35,29,23,.10)');
+    shadow.addColorStop(1, 'rgba(35,29,23,0)');
+    ctx.fillStyle = shadow;
+    ctx.beginPath();
+    ctx.arc(0, 0, 1, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  },
+
+  isSilverToneMetalMaterial(item = {}) {
+    const sku = item.sku || {};
+    const fields = [
+      item.id,
+      item.skuId,
+      item.material_code,
+      item.name,
+      item.category,
+      item.series,
+      item.grade,
+      item.color_name,
+      sku.id,
+      sku.sku_id,
+      sku.material_code,
+      sku.name,
+      sku.category,
+      sku.series,
+      sku.grade
+    ];
+    const text = fields.map(value => repairMaybeMojibakeText(value)).filter(Boolean).join(' ').toLowerCase();
+    if (!text) return false;
+    if (/金色|黄金|亮金|古金|玫瑰金|黄铜|红铜|古铜|gold|rose[ _-]?gold|brass|bronze|copper/.test(text)) return false;
+    const isExplicitSilver = /银色|纯银|银隔|s925|925银|silver|white[ _-]?metal/.test(text);
+    const isMetalAccessory = /合金|alloy|accessory[_-]?metal|metal[_-]?(?:spacer|accessory)/.test(text)
+      && String(sku.top || item.top || '') === 'accessory';
+    return isExplicitSilver || isMetalAccessory;
+  },
+
+  getStudioMetalLightIntensity(sprite = {}) {
+    const state = sprite.screenSpace ? this.flightCanvasState : this.braceletCanvasState;
+    const width = Math.max(1, Number(state && state.width) || Number(this.stageLayout && this.stageLayout.size) || 600);
+    const height = Math.max(1, Number(state && state.height) || Number(this.stageLayout && this.stageLayout.size) || 600);
+    const x = Number.isFinite(Number(sprite.x)) ? Number(sprite.x) : width / 2;
+    const y = Number.isFinite(Number(sprite.y)) ? Number(sprite.y) : height / 2;
+    const vertical = 1 - Math.max(0, Math.min(1, y / height));
+    const centerProximity = 1 - Math.max(0, Math.min(1, Math.abs(x - width / 2) / (width * 0.62)));
+    return Math.max(0.68, Math.min(1, 0.68 + vertical * 0.22 + centerProximity * 0.10));
+  },
+
+  drawStudioMetalLightMask(ctx, width, height, rotationDeg = 0, mirrorX = false) {
+    if (!ctx || !ctx.createLinearGradient || !ctx.createRadialGradient) return;
+    const safeWidth = Math.max(1, Number(width) || 1);
+    const safeHeight = Math.max(1, Number(height) || 1);
+    const centerX = safeWidth / 2;
+    const centerY = safeHeight / 2;
+    const rotation = Number(rotationDeg || 0) * Math.PI / 180;
+    const sin = Math.sin(rotation);
+    const cos = Math.cos(rotation);
+    const inverseScreenPoint = (screenX, screenY) => {
+      let localX = cos * screenX + sin * screenY;
+      const localY = -sin * screenX + cos * screenY;
+      if (mirrorX) localX *= -1;
+      return { x: centerX + localX, y: centerY + localY };
+    };
+    const lightStart = inverseScreenPoint(0, -safeHeight * 0.58);
+    const lightEnd = inverseScreenPoint(0, safeHeight * 0.58);
+    const highlightCenter = inverseScreenPoint(-safeWidth * 0.16, -safeHeight * 0.28);
+
+    const silverLift = ctx.createLinearGradient(lightStart.x, lightStart.y, lightEnd.x, lightEnd.y);
+    silverLift.addColorStop(0, 'rgba(252, 254, 255, 0.66)');
+    silverLift.addColorStop(0.30, 'rgba(232, 239, 244, 0.38)');
+    silverLift.addColorStop(0.64, 'rgba(255, 255, 255, 0.18)');
+    silverLift.addColorStop(1, 'rgba(209, 219, 226, 0.12)');
+    ctx.fillStyle = silverLift;
+    ctx.fillRect(0, 0, safeWidth, safeHeight);
+
+    const specular = ctx.createRadialGradient(
+      highlightCenter.x,
+      highlightCenter.y,
+      0,
+      highlightCenter.x,
+      highlightCenter.y,
+      Math.max(safeWidth, safeHeight) * 0.42
+    );
+    specular.addColorStop(0, 'rgba(255, 255, 255, 0.98)');
+    specular.addColorStop(0.14, 'rgba(255, 255, 255, 0.76)');
+    specular.addColorStop(0.46, 'rgba(246, 250, 252, 0.26)');
+    specular.addColorStop(1, 'rgba(255, 255, 255, 0)');
+    ctx.fillStyle = specular;
+    ctx.fillRect(0, 0, safeWidth, safeHeight);
+  },
+
+  getCanvasMetalLightTexture(item = {}, size = 64, rotationDeg = 0, mirrorX = false) {
+    if (!this.isSilverToneMetalMaterial(item) || !item.image_url || !wx.createOffscreenCanvas) return null;
+    const sourceImage = this.getCanvasImage(item.image_url);
+    if (!sourceImage) return null;
+    const dpr = (this.braceletCanvasState && this.braceletCanvasState.dpr) || 1;
+    const bucket = this.canvasRenderBucket(Math.round(Number(size) || 64) * dpr, 64, 256, CANVAS_TEXTURE_BUCKET_STEP);
+    const rotationStep = this.isLowPerformanceDevice ? 90 : 45;
+    let rotationBucket = Math.round((Number(rotationDeg) || 0) / rotationStep) * rotationStep;
+    rotationBucket = ((rotationBucket % 360) + 360) % 360;
+    const key = `studio-light::${item.id || item.skuId || item.image_url || item.name || 'metal'}::${item.image_url}::${bucket}::${rotationBucket}::${mirrorX ? 1 : 0}`;
+    this.canvasTextureCache = this.canvasTextureCache || {};
+    const cached = this.canvasTextureCache[key];
+    if (cached && cached.ready) {
+      cached.lastUsedAt = Date.now();
+      return cached.canvas;
+    }
+    if (cached && cached.failed) return null;
+    try {
+      const canvas = wx.createOffscreenCanvas({ type: '2d', width: bucket, height: bucket });
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return null;
+      ctx.clearRect(0, 0, bucket, bucket);
+      this.drawStudioMetalLightMask(ctx, bucket, bucket, rotationBucket, mirrorX);
+      ctx.globalCompositeOperation = 'destination-in';
+      ctx.drawImage(sourceImage, 0, 0, bucket, bucket);
+      ctx.globalCompositeOperation = 'source-over';
+      this.canvasTextureCache[key] = { ready: true, canvas, lastUsedAt: Date.now() };
+      this.trimCanvasTextureCache();
+      return canvas;
+    } catch (error) {
+      this.canvasTextureCache[key] = { ready: false, failed: true, lastUsedAt: Date.now() };
+      this.trimCanvasTextureCache();
+      return null;
+    }
+  },
+
   drawCanvasBead(ctx, sprite) {
     if (!ctx || !sprite || !sprite.item) return;
     const size = Math.max(8, Number(sprite.size) || 48);
+    const drawWidth = Math.max(8, Number(sprite.drawWidth) || size);
+    const drawHeight = Math.max(8, Number(sprite.drawHeight) || size);
     const radius = size / 2;
+    const physical = resolveMaterialGeometry(sprite.item);
+    const displayScale = size / Math.max(1, physical.displaySizeRpx);
+    const collisionWidth = Math.max(8, physical.collisionWidthRpx * displayScale);
+    const collisionHeight = Math.max(8, physical.collisionHeightRpx * displayScale);
     ctx.save();
     const opacity = Number.isFinite(Number(sprite.opacity)) ? Math.max(0, Math.min(1, Number(sprite.opacity))) : 1;
     ctx.globalAlpha = (sprite.deleteReady ? 0.58 : 1) * opacity;
     ctx.translate(sprite.x, sprite.y);
     const hasImage = Boolean(sprite.item.image_url);
-    if (!sprite.screenSpace) {
-      this.drawCanvasBeadShadow(ctx, radius, hasImage);
+    if (!sprite.screenSpace && !sprite.noShadow) {
+      if (physical.isRound) this.drawCanvasBeadShadow(ctx, radius, hasImage);
+      else this.drawCanvasNonRoundShadow(ctx, collisionWidth, collisionHeight);
     }
     ctx.rotate((Number(sprite.rotation) || 0) * Math.PI / 180);
+    if (sprite.mirrorX) ctx.scale(-1, 1);
     if (sprite.active || sprite.deleteReady) {
       ctx.save();
       ctx.beginPath();
-      ctx.arc(0, 0, radius + (sprite.deleteReady ? 5 : 4), 0, Math.PI * 2);
+      if (physical.isRound) {
+        ctx.arc(0, 0, radius + (sprite.deleteReady ? 5 : 4), 0, Math.PI * 2);
+      } else {
+        const padding = sprite.deleteReady ? 5 : 4;
+        ctx.rect(
+          -collisionWidth / 2 - padding,
+          -collisionHeight / 2 - padding,
+          collisionWidth + padding * 2,
+          collisionHeight + padding * 2
+        );
+      }
       ctx.strokeStyle = sprite.deleteReady
         ? 'rgba(188, 62, 55, 0.86)'
         : (hasImage ? 'rgba(196, 151, 78, 0.88)' : 'rgba(18, 18, 18, 0.82)');
@@ -4610,17 +4935,22 @@ Page({
       ctx.restore();
     }
     ctx.save();
-    if (!hasImage) {
+    if (!hasImage && physical.isRound) {
       ctx.beginPath();
       ctx.arc(0, 0, radius, 0, Math.PI * 2);
       ctx.clip();
+    } else if (!hasImage) {
+      ctx.beginPath();
+      ctx.rect(-collisionWidth / 2, -collisionHeight / 2, collisionWidth, collisionHeight);
+      ctx.clip();
     }
-    const texture = this.getCanvasBeadTexture(sprite.item, size);
+    const textureSize = Math.max(drawWidth, drawHeight);
+    const texture = this.getCanvasBeadTexture(sprite.item, textureSize);
     const image = texture ? null : this.getCanvasImage(sprite.item.image_url);
     if (texture) {
-      ctx.drawImage(texture, -radius, -radius, size, size);
+      ctx.drawImage(texture, -drawWidth / 2, -drawHeight / 2, drawWidth, drawHeight);
     } else if (image) {
-      ctx.drawImage(image, -radius, -radius, size, size);
+      ctx.drawImage(image, -drawWidth / 2, -drawHeight / 2, drawWidth, drawHeight);
     } else {
       const gradient = ctx.createRadialGradient(-radius * 0.28, -radius * 0.34, radius * 0.06, 0, 0, radius);
       gradient.addColorStop(0, sprite.item.shine || '#ffffff');
@@ -4628,11 +4958,23 @@ Page({
       gradient.addColorStop(0.72, sprite.item.color || '#d8d2c8');
       gradient.addColorStop(1, 'rgba(32,24,18,0.34)');
       ctx.fillStyle = gradient;
-      ctx.fillRect(-radius, -radius, size, size);
+      ctx.fillRect(-drawWidth / 2, -drawHeight / 2, drawWidth, drawHeight);
       ctx.fillStyle = 'rgba(255,255,255,0.52)';
       ctx.beginPath();
       ctx.arc(-radius * 0.24, -radius * 0.30, radius * 0.20, 0, Math.PI * 2);
       ctx.fill();
+    }
+    const metalLightTexture = this.getCanvasMetalLightTexture(
+      sprite.item,
+      textureSize,
+      Number(sprite.rotation) || 0,
+      Boolean(sprite.mirrorX)
+    );
+    if (metalLightTexture) {
+      ctx.save();
+      ctx.globalAlpha = (sprite.deleteReady ? 0.58 : 1) * opacity * this.getStudioMetalLightIntensity(sprite);
+      ctx.drawImage(metalLightTexture, -drawWidth / 2, -drawHeight / 2, drawWidth, drawHeight);
+      ctx.restore();
     }
     if (!hasImage) {
       const shade = ctx.createRadialGradient(-radius * 0.24, -radius * 0.28, radius * 0.08, 0, 0, radius);
@@ -4640,7 +4982,7 @@ Page({
       shade.addColorStop(0.64, 'rgba(255,255,255,0)');
       shade.addColorStop(1, 'rgba(0,0,0,0.20)');
       ctx.fillStyle = shade;
-      ctx.fillRect(-radius, -radius, size, size);
+      ctx.fillRect(-drawWidth / 2, -drawHeight / 2, drawWidth, drawHeight);
     }
     ctx.restore();
     if (!hasImage) {
@@ -4702,6 +5044,9 @@ Page({
     const angle = geometry.angles[index] || 0;
     const body = bodyByIndex ? bodyByIndex[index] : null;
     const beadSize = geometry.beadSizes[index] || this.getMaterialDisplaySize(item.id);
+    const physical = (geometry.materialGeometries || [])[index] || resolveMaterialGeometry(item);
+    const displayScale = beadSize / Math.max(1, physical.displaySizeRpx);
+    const stringedOffset = stringedMaterialOffset(physical, displayScale);
     let x;
     let y;
     let rotation;
@@ -4710,14 +5055,17 @@ Page({
       y = body && body.position ? body.position.y : Number(placement.looseY || layout.center);
       rotation = body && body.angle != null ? body.angle * 180 / Math.PI : Number(placement.rotation || 0);
     } else {
-      x = layout.center + Math.cos(angle) * geometry.radius;
-      y = layout.center + Math.sin(angle) * geometry.radius;
-      rotation = stringedBeadRotationDeg(angle);
+      x = layout.center + Math.cos(angle) * geometry.radius + stringedOffset.x;
+      y = layout.center + Math.sin(angle) * geometry.radius + stringedOffset.y;
+      rotation = stringedMaterialRotationDeg(angle, physical);
     }
     x += Number(placement.dx || 0);
     y += Number(placement.dy || 0);
     if (!isLooseMode) {
-      rotation = stringedBeadRotationFromPoint(x, y, layout.center);
+      rotation = stringedMaterialRotationDeg(
+        Math.atan2(y - stringedOffset.y - layout.center, x - stringedOffset.x - layout.center),
+        physical
+      );
     }
     let dragging = false;
     let deleteReady = false;
@@ -4731,7 +5079,7 @@ Page({
     if (this.ringDragState && this.ringDragState.currentIndex === index && this.ringDragState.draggingX != null) {
       x = this.ringDragState.draggingX;
       y = this.ringDragState.draggingY;
-      rotation = stringedBeadRotationFromPoint(x, y, layout.center);
+      rotation = stringedMaterialRotationDeg(Math.atan2(y - layout.center, x - layout.center), physical);
       dragging = true;
       deleteReady = !!context.dragDeleteArmed;
     }
@@ -4744,6 +5092,10 @@ Page({
     target.logicalY = y;
     target.logicalSize = beadSize;
     target.rotation = rotation;
+    target.attachmentAxisRotation = isLooseMode
+      ? rotation
+      : (Number(angle || 0) * 180 / Math.PI + 90);
+    target.beadCaps = beadCapSlotsFromPlacement(placement);
     target.active = index === context.selectedBeadIndex;
     target.dragging = dragging;
     target.deleteReady = deleteReady;
@@ -4779,7 +5131,9 @@ Page({
       Math.round((Number(sprite.rotation) || 0) * 2),
       sprite.active ? 1 : 0,
       sprite.dragging ? 1 : 0,
-      sprite.deleteReady ? 1 : 0
+      sprite.deleteReady ? 1 : 0,
+      sprite.attachedAccessory ? 1 : 0,
+      sprite.attachmentSide || ''
     ].join(',');
   },
 
@@ -4813,17 +5167,28 @@ Page({
     const normalSprites = [];
     const overlaySprites = [];
     const sprite = {};
+    const hostSprites = [];
     for (let index = 0; index < context.items.length; index += 1) {
       const nextSprite = this.fillCanvasBeadSprite(sprite, context, index);
       if (!nextSprite) continue;
       parts.push(this.canvasSpriteSignaturePart(nextSprite));
       const snapshotSprite = { ...nextSprite };
+      hostSprites.push(snapshotSprite);
       if (nextSprite.dragging || nextSprite.deleteReady) {
         overlaySprites.push(snapshotSprite);
       } else {
         normalSprites.push(snapshotSprite);
       }
     }
+    hostSprites.forEach(hostSprite => {
+      const slots = hostSprite.beadCaps || {};
+      ['left', 'right'].forEach(side => {
+        const capSprite = beadCapSprite(hostSprite, slots[side], side);
+        if (!capSprite) return;
+        parts.push(this.canvasSpriteSignaturePart(capSprite));
+        overlaySprites.push(capSprite);
+      });
+    });
     return {
       signature: parts.join('|'),
       normalSprites,
@@ -5054,16 +5419,17 @@ Page({
   createPhysicsBody(id, placement, index, options = {}) {
     if (!this.physicsEngine) this.createPhysicsEngine();
     const beadSize = Number(placement.beadSize) || this.getMaterialDisplaySize(id);
-    const bodyRadius = Math.max(19, beadSize * 0.5 - 0.2);
+    const material = this.findMaterialById(id) || {};
+    const physical = resolveMaterialGeometry(material);
+    const displayScale = beadSize / Math.max(1, physical.displaySizeRpx);
+    const bodyWidth = Math.max(10, physical.collisionWidthRpx * displayScale - 0.4);
+    const bodyHeight = Math.max(10, physical.collisionHeightRpx * displayScale - 0.4);
+    const bodyRadius = Math.max(bodyWidth, bodyHeight) * 0.5;
     const initialPoint = this.constrainPointInsideTray({
       x: options.x == null ? placement.looseX : options.x,
       y: options.y == null ? placement.looseY : options.y
     }, beadSize, this.getStageLayout(), 12);
-    const body = Bodies.circle(
-      initialPoint.x,
-      initialPoint.y,
-      bodyRadius,
-      {
+    const bodyOptions = {
         isStatic: !!options.isStatic,
         restitution: options.restitution == null ? BILLIARD_BEAD_RESTITUTION : options.restitution,
         friction: options.friction == null ? BILLIARD_FRICTION : options.friction,
@@ -5073,13 +5439,21 @@ Page({
         slop: options.slop == null ? 0.006 : options.slop,
         sleepThreshold: 44,
         label: `bead-${index}`
-      }
-    );
+      };
+    const body = physical.collisionShape === 'rectangle'
+      ? Bodies.rectangle(initialPoint.x, initialPoint.y, bodyWidth, bodyHeight, {
+        ...bodyOptions,
+        chamfer: { radius: Math.min(6, bodyWidth * 0.18, bodyHeight * 0.18) }
+      })
+      : Bodies.circle(initialPoint.x, initialPoint.y, bodyRadius, bodyOptions);
     body.plugin = {
       designIndex: index,
       materialId: id,
       beadSize,
       bodyRadius,
+      bodyWidth,
+      bodyHeight,
+      collisionShape: physical.collisionShape,
       isLauncher: !!options.isLauncher,
       frozenUntilImpact: !!options.frozenUntilImpact,
       billiardDamping: options.billiardDamping,
@@ -5589,7 +5963,7 @@ Page({
     this.physicsLastTime = Date.now();
     this.physicsLastRender = 0;
     this.physicsStillFrames = 0;
-    if (this.data.useCanvasRenderer) this.scheduleCanvasRender(true);
+    this.scheduleCanvasRender(true);
     this.physicsTimer = setInterval(() => {
       try {
         const now = Date.now();
@@ -5866,31 +6240,6 @@ Page({
     this.addBodySpin(body, spin, { maxDelta: 0.065, limit: 0.13 });
   },
 
-  buildSelectedItemStylePatchUpdates(selectedItems = []) {
-    const selectedKey = (this.data.selected || []).join('|');
-    const cache = this.selectedItemStylePatchCache;
-    const canReuseCache = cache
-      && cache.selectedKey === selectedKey
-      && cache.length === selectedItems.length;
-    const styles = canReuseCache ? cache.styles.slice() : [];
-    const updates = {};
-    let changed = false;
-    (selectedItems || []).forEach((item, index) => {
-      const style = item && item.style || '';
-      if (!canReuseCache || styles[index] !== style) {
-        updates[`selectedItems[${index}].style`] = style;
-        changed = true;
-      }
-      styles[index] = style;
-    });
-    this.selectedItemStylePatchCache = {
-      selectedKey,
-      length: selectedItems.length,
-      styles
-    };
-    return { updates, changed };
-  },
-
   syncPhysicsFrame(onSynced) {
     const hasSyncedCallback = typeof onSynced === 'function';
     if (this.physicsFramePending) {
@@ -5909,59 +6258,24 @@ Page({
     }
     this.physicsFramePending = true;
     this.physicsFrameSequence = (this.physicsFrameSequence || 0) + 1;
-    if (this.data.useCanvasRenderer) {
-      this.scheduleCanvasRender(true);
-      const shouldPersistFrame = hasSyncedCallback || this.physicsFrameSequence % 10 === 0;
-      if (!shouldPersistFrame) {
-        this.physicsFramePending = false;
-        return;
-      }
-      const placements = this.buildPhysicsPlacementsSnapshot();
-      this.setLivePlacements(placements);
-      const shouldSyncPlacements = shouldPersistFrame
-        && this.shouldSyncPhysicsPlacements(placements, hasSyncedCallback);
-      if (shouldSyncPlacements) {
-        this.setData({ placements }, () => {
-          this.physicsFramePending = false;
-          if (hasSyncedCallback) onSynced();
-        });
-      } else {
-        this.physicsFramePending = false;
-        if (hasSyncedCallback) onSynced();
-      }
+    this.scheduleCanvasRender(true);
+    const shouldPersistFrame = hasSyncedCallback || this.physicsFrameSequence % 10 === 0;
+    if (!shouldPersistFrame) {
+      this.physicsFramePending = false;
       return;
     }
     const placements = this.buildPhysicsPlacementsSnapshot();
     this.setLivePlacements(placements);
-    const items = this.getCachedSelectedMaterials(this.data.selected).filter(Boolean);
-    const geometry = this.getCachedBraceletGeometry(items);
-    const selectedItems = this.layoutSelectedItems(items, placements, geometry);
-    const canPatchStyles = (this.data.selectedItems || []).length === selectedItems.length;
-    const updates = {};
-    let hasUpdates = false;
-    if (canPatchStyles) {
-      const stylePatch = this.buildSelectedItemStylePatchUpdates(selectedItems);
-      Object.assign(updates, stylePatch.updates);
-      hasUpdates = stylePatch.changed;
-      if (onSynced || this.physicsFrameSequence % 4 === 0) {
-        updates.placements = placements;
-        hasUpdates = true;
-      }
+    const shouldSyncPlacements = this.shouldSyncPhysicsPlacements(placements, hasSyncedCallback);
+    if (shouldSyncPlacements) {
+      this.setData({ placements }, () => {
+        this.physicsFramePending = false;
+        if (hasSyncedCallback) onSynced();
+      });
     } else {
-      this.selectedItemStylePatchCache = null;
-      updates.placements = placements;
-      updates.selectedItems = selectedItems;
-      hasUpdates = true;
-    }
-    if (!hasUpdates) {
       this.physicsFramePending = false;
       if (hasSyncedCallback) onSynced();
-      return;
     }
-    this.setData(updates, () => {
-      this.physicsFramePending = false;
-      if (hasSyncedCallback) onSynced();
-    });
   },
 
   applyStringingForces(layout = this.getStageLayout()) {
@@ -6530,6 +6844,7 @@ Page({
         ...item,
         baseCardClass: `material-card-${displayIndex}`,
         cardClass: this.materialCardClass(item, displayIndex, launchingMaterialId),
+        materialToneClass: this.isSilverToneMetalMaterial(item) ? 'material-tone-silver' : '',
         effectText: [
           seriesText && seriesText !== item.name && !isMaterialGradeText(seriesText) ? seriesText : '',
           effectsText
@@ -6905,25 +7220,13 @@ Page({
         };
       });
       this.setLivePlacements(nextPlacements);
-      const updates = {};
-      if (!this.data.useCanvasRenderer) {
-        updates.placements = nextPlacements;
-        updates.selectedItems = this.layoutSelectedItems(items, nextPlacements, geometry);
-      }
       const isComplete = elapsed >= totalDuration;
       if (isComplete) {
         clearInterval(this.releaseStringTimer);
         this.releaseStringTimer = null;
       }
-      if (this.data.useCanvasRenderer) {
-        this.scheduleCanvasRender(true);
-        if (isComplete) this.completeReleaseString(targetPlacements);
-        return;
-      }
-      this.setData(updates, () => {
-        if (!isComplete) return;
-        this.completeReleaseString(targetPlacements);
-      });
+      this.scheduleCanvasRender(true);
+      if (isComplete) this.completeReleaseString(targetPlacements);
     }, interval);
   },
 
@@ -6966,13 +7269,13 @@ Page({
       const angle = Number((geometry.angles || [])[index]) || 0;
       const x = center + Math.cos(angle) * Number(geometry.radius || 0);
       const y = center + Math.sin(angle) * Number(geometry.radius || 0);
-      const visualX = x + Number(placement.dx || 0);
-      const visualY = y + Number(placement.dy || 0);
+      const physical = (geometry.materialGeometries || [])[index]
+        || resolveMaterialGeometry((context.items || [])[index] || {});
       return {
         ...placement,
         x,
         y,
-        rotation: stringedBeadRotationFromPoint(visualX, visualY, center),
+        rotation: stringedMaterialRotationDeg(angle, physical),
         beadSize: Number((geometry.beadSizes || [])[index])
           || Number(placement.beadSize)
           || this.getMaterialDisplaySize(selected[index])
@@ -6985,11 +7288,13 @@ Page({
     const beadSequence = (this.data.selected || []).map((id, index) => {
       const material = this.findMaterialById(id) || {};
       const placement = (persistedPlacements || [])[index] || {};
-      const imageUrls = (material.image_urls || material.image_pool || [])
-        .concat(material.image_url || [])
-        .filter(Boolean);
+      const imageUrls = this.materialOwnImageUrls(material);
       const size = material.size || material.diameter || placement.diameter || '';
       const price = Number(material.price ?? material.priceText ?? material.amount ?? material.sale_price ?? 0);
+      const materialParams = {
+        ...(placement.material_params || {}),
+        ...(material.material_params || {})
+      };
       const contributesEnergy = materialContributesEnergy(material);
       const primaryElement = contributesEnergy ? (material.primary_element || material.element || '') : '';
       const elementKey = contributesEnergy ? this.materialElementKey(material) : '';
@@ -7012,6 +7317,10 @@ Page({
         color: material.color || '',
         size,
         diameter: size,
+        bead_shape: material.bead_shape || materialParams.bead_shape || '',
+        placement_mode: material.placement_mode || materialParams.placement_mode || 'threaded',
+        material_params: materialParams,
+        string_axis_width_mm: material.string_axis_width_mm || materialParams.string_axis_width_mm || 0,
         price: Number.isFinite(price) ? price : 0,
         weight: Number(material.weight || 0),
         image_url: placement.image_url || imageUrls[0] || '',
@@ -7027,12 +7336,59 @@ Page({
           beadSize: placement.beadSize,
           angle: placement.angle,
           diameter: placement.diameter,
-          image_url: placement.image_url || ''
+          image_url: placement.image_url || '',
+          bead_caps: beadCapSlotsFromPlacement(placement)
         },
         snapshot_at: timestamp
       };
     });
-    return beadSequence;
+    const capSequence = [];
+    (persistedPlacements || []).forEach((placement, hostIndex) => {
+      const slots = beadCapSlotsFromPlacement(placement);
+      ['left', 'right'].forEach(side => {
+        const cap = slots[side];
+        if (!cap) return;
+        const materialParams = cap.material_params || {};
+        const id = cap.id || cap.material_id || cap.skuId || '';
+        capSequence.push({
+          index: beadSequence.length + capSequence.length + 1,
+          id,
+          material_id: cap.material_id || id,
+          sku: cap.skuId || id,
+          top: cap.top || 'accessory',
+          item_type: cap.top || 'accessory',
+          name: this.displayMaterialName(cap, '包珠隔片'),
+          category: repairMaybeMojibakeText(cap.category) || '',
+          series: repairMaybeMojibakeText(cap.series) || '',
+          size: cap.size || '',
+          diameter: cap.size || '',
+          bead_shape: materialParams.bead_shape || 'bead_cap',
+          placement_mode: 'attached_side',
+          attachment_mode: 'bead_cap',
+          attachment: {
+            mode: 'bead_cap',
+            host_index: hostIndex + 1,
+            side
+          },
+          material_params: materialParams,
+          price: Number(cap.price || 0),
+          weight: Number(cap.weight || 0),
+          image_url: cap.image_url || '',
+          image_urls: cap.image_urls || [],
+          placement: {
+            host_index: hostIndex + 1,
+            side,
+            x: placement.x,
+            y: placement.y,
+            looseX: placement.looseX,
+            looseY: placement.looseY,
+            rotation: placement.rotation
+          },
+          snapshot_at: timestamp
+        });
+      });
+    });
+    return [...beadSequence, ...capSequence];
   },
 
   validateStringedDesignForCheckout() {
@@ -7053,7 +7409,12 @@ Page({
       return false;
     }
     const selectedMaterials = this.getCachedSelectedMaterials(this.data.selected).filter(Boolean);
-    const unavailable = selectedMaterials.find(material => (
+    const attachmentMaterials = (this.data.placements || []).flatMap(placement => {
+      const slots = beadCapSlotsFromPlacement(placement);
+      return ['left', 'right'].map(side => slots[side]).filter(Boolean);
+    });
+    const purchasableMaterials = [...selectedMaterials, ...attachmentMaterials];
+    const unavailable = purchasableMaterials.find(material => (
       material.enabled === false
       || String(material.stock_status || (material.sku && material.sku.stock_status) || '').toLowerCase() === 'out'
     ));
@@ -7061,7 +7422,7 @@ Page({
       wx.showToast({ title: `${this.displayMaterialName(unavailable)}暂不可售，请更换后重试`, icon: 'none' });
       return false;
     }
-    const invalidPrice = selectedMaterials.find(material => {
+    const invalidPrice = purchasableMaterials.find(material => {
       const price = Number(material.price);
       return !Number.isFinite(price) || price < 0;
     });
@@ -7257,7 +7618,7 @@ Page({
 
   resolveFlightStartRect(cardRect, tapPoint, drawerRect, material = {}) {
     if (this.isValidRect(cardRect)) return cardRect;
-    const size = Math.max(38, Math.min(72, Number(material.size || 8) * 5.4));
+    const size = resolveMaterialGeometry(material, { maxDisplayRpx: 72 }).displaySizeRpx;
     if (tapPoint && Number.isFinite(tapPoint.x) && Number.isFinite(tapPoint.y)) {
       return {
         left: tapPoint.x - size / 2,
@@ -7278,7 +7639,7 @@ Page({
   },
 
   resolveMaterialFlightTarget(task = {}, material = {}, layout = this.getStageLayout()) {
-    const beadSize = Math.max(42, Math.min(78, Number(material.size || 8) * 5.4));
+    const beadSize = resolveMaterialGeometry(material).displaySizeRpx;
     const center = layout.center || 300;
     const rawX = Number(task.placement && task.placement.looseX);
     const rawY = Number(task.placement && task.placement.looseY);
@@ -7403,6 +7764,10 @@ Page({
   },
 
   async addMaterial(e) {
+    if (this.data.canvasRenderError) {
+      this.showMaterialQueueToast('请先重新加载工作台');
+      return;
+    }
     if (this.data.isShuffling || this.data.isStringingFinishing || this.data.isReleasingString) {
       this.showMaterialQueueToast(this.data.isReleasingString ? '正在散开，请稍候' : '正在成串，请稍候');
       return;
@@ -7422,12 +7787,23 @@ Page({
       this.showMaterialQueueToast('吊坠功能暂未开放');
       return;
     }
+    const physical = resolveMaterialGeometry(material);
+    if (!physical.specComplete) {
+      this.showMaterialQueueToast('该配饰规格待补充，暂不可加入');
+      return;
+    }
     this.ensureAudioPlayers();
     let currentMaterial = material;
-    if (this.canUseHydratedMaterialImagePool(material)) {
+    if (materialTop(material) === 'accessory') {
+      currentMaterial = await this.ensureMaterialImagePool(material);
+    } else if (this.canUseHydratedMaterialImagePool(material)) {
       currentMaterial = await this.ensureMaterialImagePool(material);
     } else {
       this.warmMaterialImagePool(material);
+    }
+    if (isBeadCap(currentMaterial)) {
+      this.promptBeadCapPlacement(currentMaterial);
+      return;
     }
     const pendingCount = this.data.selected.length + this.flightQueue.length;
     if (pendingCount >= MAX_WORKSPACE_BEADS) {
@@ -7445,9 +7821,13 @@ Page({
       id,
       [...this.data.placements, ...queuedPlacements]
     );
-    const imageUrl = placement.image_url || this.pickMaterialImageUrl(currentMaterial) || currentMaterial.image_url || '';
+    const imageUrl = placement.image_url || this.pickMaterialImageUrl(currentMaterial) || '';
+    if (materialTop(currentMaterial) === 'accessory' && !imageUrl) {
+      this.showMaterialQueueToast('该配饰暂无图库图片，暂不可加入');
+      return;
+    }
     placement.image_url = imageUrl;
-    if (imageUrl && this.data.useCanvasRenderer && this.braceletCanvasState) {
+    if (imageUrl && this.braceletCanvasState) {
       this.getCanvasImage(imageUrl);
     }
     this.flightQueue.push({
@@ -7460,86 +7840,84 @@ Page({
     this.processFlightQueue();
   },
 
-  processFlightQueue() {
-    if (this.data.useCanvasRenderer) {
-      this.processCanvasFlightQueue();
+  compatibleBeadCapHostIndices(cap) {
+    const selected = this.data.selected || [];
+    const placements = this.normalizePlacements(selected, this.data.placements || []);
+    return selected.map((id, index) => {
+      const material = this.findMaterialById(id) || {};
+      const host = { ...placements[index], ...material };
+      return beadCapCompatibility(cap, host).compatible ? index : -1;
+    }).filter(index => index >= 0);
+  },
+
+  promptBeadCapPlacement(cap) {
+    const compatibleIndices = this.compatibleBeadCapHostIndices(cap);
+    if (!compatibleIndices.length) {
+      const physical = resolveMaterialGeometry(cap);
+      const target = physical.compatibleBeadSizeMm
+        ? `${physical.compatibleBeadSizeMm}mm`
+        : '对应珠径';
+      this.showMaterialQueueToast(`当前盘面没有适配 ${target} 的圆珠`);
       return;
     }
-    if (this.flightActive || !this.flightQueue.length) return;
-    const task = this.flightQueue.shift();
-    const material = this.findMaterialById(task.id);
-    if (!material) {
-      this.processFlightQueue();
+    const selectedIndex = Number(this.data.selectedBeadIndex);
+    const hostIndex = compatibleIndices.includes(selectedIndex)
+      ? selectedIndex
+      : (compatibleIndices.length === 1 ? compatibleIndices[0] : -1);
+    if (hostIndex < 0) {
+      this.showMaterialQueueToast('先点选要包裹的主珠');
       return;
     }
-    this.flightActive = true;
-    this.armFlightSafetyTimer();
-    const query = wx.createSelectorQuery();
-    query.select(`.material-card-${task.cardIndex} .material-sphere`).boundingClientRect();
-    query.select('.bracelet-circle').boundingClientRect();
-    query.exec(rects => {
-      const cardRect = rects && rects[0];
-      const circleRect = rects && rects[1];
-      if (!cardRect || !circleRect) {
-        this.commitMaterial(task.id, task.placement, {}, () => this.finishFlight());
-        return;
+    const placement = (this.data.placements || [])[hostIndex] || {};
+    const slots = beadCapSlotsFromPlacement(placement);
+    const itemList = [
+      slots.left ? '替换左侧包珠隔片' : '包左侧',
+      slots.right ? '替换右侧包珠隔片' : '包右侧',
+      slots.left || slots.right ? '左右两侧都替换' : '左右各装一个'
+    ];
+    wx.showActionSheet({
+      itemList,
+      success: result => {
+        const sides = result.tapIndex === 0
+          ? ['left']
+          : (result.tapIndex === 1 ? ['right'] : ['left', 'right']);
+        this.attachBeadCapToHost(cap, hostIndex, sides);
       }
-      const layout = this.getStageLayout();
-      const logicalSize = layout.center * 2;
-      const scale = circleRect.width / logicalSize;
-      const startX = cardRect.left + cardRect.width / 2;
-      const startY = cardRect.top + cardRect.height / 2;
-      const target = this.resolveMaterialFlightTarget(task, material, layout);
-      const launchPhysics = this.resolveMaterialLaunchPhysics({
-        startX,
-        startY,
-        circleRect,
-        target,
-        layout,
-        scale,
-        previousCount: this.data.selected.length
-      });
-      const beadSize = target.beadSize;
-      const endX = circleRect.left + launchPhysics.x * scale;
-      const endY = circleRect.top + launchPhysics.y * scale;
-      const sourceSize = Math.min(cardRect.width, cardRect.height);
-      const targetSize = beadSize * scale;
-      const animation = wx.createAnimation({ transformOrigin: '50% 50%' });
-      const flightDelay = 4;
-      const flightDuration = this.getMaterialFlightDuration(startX, startY, endX, endY);
-      this.setData({
-        flightBead: {
-          id: `${task.id}-${Date.now()}`,
-          image_url: task.image_url || material.image_url || '',
-          color: material.color,
-          shine: material.shine,
-          style: `left:${(startX - sourceSize / 2).toFixed(1)}px;top:${(startY - sourceSize / 2).toFixed(1)}px;width:${sourceSize.toFixed(1)}px;height:${sourceSize.toFixed(1)}px;`,
-          animation: {}
-        }
-      }, () => {
-        // 先确保飞行替身已经在素材珠子上方完成首帧绘制，再隐藏原珠。
-        // 多留一个绘制帧后才启动动画，避免繁忙设备直接跳到圆盘入口。
-        this.setLaunchingMaterialState(task.id, {}, () => {
-          clearTimeout(this.flightAnimationTimer);
-          this.flightAnimationTimer = setTimeout(() => {
-            this.flightAnimationTimer = null;
-            animation
-              .translate(endX - startX, endY - startY)
-              .scale(targetSize / sourceSize)
-              .step({ duration: flightDuration, timingFunction: 'linear' });
-            this.setData({ 'flightBead.animation': animation.export() });
-          }, flightDelay);
-        });
-      });
-      this.flightTimer = setTimeout(() => {
-        const launchPlacement = {
-          ...task.placement,
-          looseX: launchPhysics.x,
-          looseY: launchPhysics.y
-        };
-        this.commitMaterial(task.id, launchPlacement, launchPhysics, () => this.finishFlight());
-      }, flightDelay + flightDuration + 4);
     });
+  },
+
+  attachBeadCapToHost(material, hostIndex, sides = []) {
+    if (!Number.isInteger(hostIndex) || hostIndex < 0 || hostIndex >= this.data.selected.length) return;
+    const validSides = Array.from(new Set(sides)).filter(side => side === 'left' || side === 'right');
+    if (!validSides.length) return;
+    const placements = this.normalizePlacements(this.data.selected, this.data.placements);
+    const placement = placements[hostIndex] || {};
+    const slots = beadCapSlotsFromPlacement(placement);
+    const imageUrl = this.pickMaterialImageUrl(material) || '';
+    if (!imageUrl) {
+      this.showMaterialQueueToast('该配饰暂无图库图片，暂不可加入');
+      return;
+    }
+    validSides.forEach(side => {
+      slots[side] = {
+        ...attachmentFromMaterial(material, imageUrl),
+        side
+      };
+    });
+    placements[hostIndex] = { ...placement, bead_caps: slots };
+    this.pushHistory();
+    this.setData({
+      placements,
+      selectedBeadIndex: hostIndex,
+      selectedBeadInfo: null
+    }, () => {
+      this.recalculate({ persistDelay: 180 });
+      wx.showToast({ title: validSides.length === 2 ? '已包裹左右两侧' : '包珠隔片已吸附', icon: 'success' });
+    });
+  },
+
+  processFlightQueue() {
+    this.processCanvasFlightQueue();
   },
 
   processCanvasFlightQueue() {
@@ -7556,6 +7934,8 @@ Page({
         return;
       }
       this.canvasFlightReadyRetries = 0;
+      this.handleCanvasRendererFailure('workspace flight canvas unavailable');
+      return;
     }
     const task = this.flightQueue.shift();
     const material = this.findMaterialById(task.id);
@@ -7746,7 +8126,7 @@ Page({
             Body.setAngularVelocity(launchedBody, launchAngularVelocity);
           }
           this.runPhysics();
-          if (this.data.useCanvasRenderer) this.scheduleCanvasRender(true);
+          this.scheduleCanvasRender(true);
           if (onReady) onReady();
         });
       });
@@ -7831,12 +8211,17 @@ Page({
         };
       });
       const geometry = this.getCachedBraceletGeometry(items);
-      const targets = geometry.angles.map((angle, index) => ({
-        x: geometry.center + Math.cos(angle) * geometry.radius,
-        y: geometry.center + Math.sin(angle) * geometry.radius,
-        rotation: stringedBeadRotationDeg(angle),
-        beadSize: geometry.beadSizes[index] || this.getMaterialDisplaySize(selected[index])
-      }));
+      const targets = geometry.angles.map((angle, index) => {
+        const physical = (geometry.materialGeometries || [])[index] || resolveMaterialGeometry(items[index] || {});
+        const beadSize = geometry.beadSizes[index] || this.getMaterialDisplaySize(selected[index]);
+        const offset = stringedMaterialOffset(physical, beadSize / Math.max(1, physical.displaySizeRpx));
+        return {
+          x: geometry.center + Math.cos(angle) * geometry.radius + offset.x,
+          y: geometry.center + Math.sin(angle) * geometry.radius + offset.y,
+          rotation: stringedMaterialRotationDeg(angle, physical),
+          beadSize
+        };
+      });
       if (!targets.length || targets.length !== selected.length) {
         this.completeStringing();
         return;
@@ -7903,25 +8288,13 @@ Page({
           };
         });
         this.setLivePlacements(nextPlacements);
-        const updates = {};
-        if (!this.data.useCanvasRenderer) {
-          updates.placements = nextPlacements;
-          updates.selectedItems = this.layoutSelectedItems(items, nextPlacements, geometry);
-        }
         const isComplete = elapsed >= totalDuration;
         if (isComplete) {
           clearInterval(this.stringingFinishTimer);
           this.stringingFinishTimer = null;
         }
-        if (this.data.useCanvasRenderer) {
-          this.scheduleCanvasRender(true);
-          if (isComplete) finishStringingFrame();
-          return;
-        }
-        this.setData(updates, () => {
-          if (!isComplete) return;
-          finishStringingFrame();
-        });
+        this.scheduleCanvasRender(true);
+        if (isComplete) finishStringingFrame();
       }, interval);
     } catch (error) {
       this.suppressStringingSounds = false;
@@ -8021,9 +8394,7 @@ Page({
         updates[`selectedItems[${itemIndex}].className`] = nextClassName;
       }
     });
-    this.setData(updates, () => {
-      if (this.data.useCanvasRenderer) this.scheduleCanvasRender(true);
-    });
+    this.setData(updates, () => this.scheduleCanvasRender(true));
   },
 
   closeSelectedBeadInfo() {
@@ -8039,8 +8410,23 @@ Page({
         updates[`selectedItems[${itemIndex}].className`] = nextClassName;
       }
     });
-    this.setData(updates, () => {
-      if (this.data.useCanvasRenderer) this.scheduleCanvasRender(true);
+    this.setData(updates, () => this.scheduleCanvasRender(true));
+  },
+
+  removeSelectedBeadCap(e) {
+    const hostIndex = Number(this.data.selectedBeadIndex);
+    const side = e.currentTarget.dataset.side;
+    if (!Number.isInteger(hostIndex) || hostIndex < 0 || !['left', 'right'].includes(side)) return;
+    const placements = this.normalizePlacements(this.data.selected, this.data.placements);
+    const placement = placements[hostIndex] || {};
+    const slots = beadCapSlotsFromPlacement(placement);
+    if (!slots[side]) return;
+    this.pushHistory();
+    delete slots[side];
+    placements[hostIndex] = { ...placement, bead_caps: slots };
+    this.setData({ placements, selectedBeadInfo: null }, () => {
+      this.recalculate({ persistDelay: 120 });
+      wx.showToast({ title: '已移除包珠隔片', icon: 'none' });
     });
   },
 
@@ -8258,12 +8644,16 @@ Page({
     return Array.from({ length: count }).map((_, index) => {
       const angle = geometry.angles[index] || 0;
       const placement = placements[index] || {};
-      const x = center + Math.cos(angle) * geometry.radius + Number(placement.dx || 0);
-      const y = center + Math.sin(angle) * geometry.radius + Number(placement.dy || 0);
+      const physical = (geometry.materialGeometries || [])[index]
+        || resolveMaterialGeometry((items || [])[index] || {});
+      const beadSize = (geometry.beadSizes || [])[index] || physical.displaySizeRpx;
+      const offset = stringedMaterialOffset(physical, beadSize / Math.max(1, physical.displaySizeRpx));
+      const x = center + Math.cos(angle) * geometry.radius + offset.x + Number(placement.dx || 0);
+      const y = center + Math.sin(angle) * geometry.radius + offset.y + Number(placement.dy || 0);
       return {
         x,
         y,
-        angle: Math.atan2(y - center, x - center)
+        angle
       };
     });
   },
@@ -8394,13 +8784,7 @@ Page({
       selectedBeadInfo: null,
       dragDeleteArmed: false
     };
-    if (!this.data.useCanvasRenderer) {
-      updates.placements = placements;
-      updates.selectedItems = this.layoutSelectedItems(state.items || [], placements, geometry);
-    }
-    this.setData(updates, () => {
-      if (this.data.useCanvasRenderer) this.scheduleCanvasRender(true);
-    });
+    this.setData(updates, () => this.scheduleCanvasRender(true));
     return true;
   },
 
@@ -8455,12 +8839,7 @@ Page({
     if (Math.abs(state.totalDelta) > RING_SLIDE_MIN_MOVE_RAD) state.moved = true;
     const placements = this.buildRingSlidePlacements(state.basePlacements, state.totalDelta, geometry);
     this.setLivePlacements(placements);
-    if (this.data.useCanvasRenderer) {
-      this.scheduleCanvasRender(true);
-      return;
-    }
-    const selectedItems = this.layoutSelectedItems(state.items || [], placements, geometry);
-    this.setData({ placements, selectedItems });
+    this.scheduleCanvasRender(true);
   },
 
   onRingReorderMove(e) {
@@ -8550,21 +8929,7 @@ Page({
 
   patchRingDraggingBeadPosition(state) {
     if (!state || state.currentIndex == null || state.draggingX == null || state.draggingY == null) return;
-    if (this.data.useCanvasRenderer) {
-      this.scheduleCanvasRender(true);
-      return;
-    }
-    const items = this.getCachedSelectedMaterials(this.data.selected).filter(Boolean);
-    const geometry = this.getCachedBraceletGeometry(items);
-    const beadSize = Number(state.beadSize || geometry.beadSizes[state.currentIndex] || 54);
-    const left = state.draggingX - beadSize / 2;
-    const top = state.draggingY - beadSize / 2;
-    const rotation = stringedBeadRotationFromPoint(state.draggingX, state.draggingY, geometry.center);
-    const updates = {};
-    updates[`selectedItems[${state.currentIndex}].style`] = `left:0;top:0;width:${beadSize}rpx;height:${beadSize}rpx;background:${this.buildBeadBackground(items[state.currentIndex])};transform:translate3d(${left.toFixed(1)}rpx,${top.toFixed(1)}rpx,0) rotate(${rotation.toFixed(1)}deg);`;
-    const baseClass = state.currentIndex === this.data.selectedBeadIndex ? 'active' : '';
-    updates[`selectedItems[${state.currentIndex}].className`] = `${baseClass} dragging${state.deleteArmed ? ' delete-ready' : ''}`.trim();
-    this.setData(updates);
+    this.scheduleCanvasRender(true);
   },
 
   onBeadTouchEnd() {
@@ -8588,7 +8953,7 @@ Page({
         if (state.moved) {
           this.recalculate({ persist: false });
           this.scheduleDraftPersistence();
-        } else if (this.data.useCanvasRenderer) {
+        } else {
           this.scheduleCanvasRender(true);
         }
       });
@@ -8730,13 +9095,10 @@ Page({
         image_url: placement.image_url || (material && material.image_url) || ''
       };
     }).filter(Boolean);
-    const attachedPendants = [];
-    const summaryMetrics = this.getCachedWorkspaceSummary(items);
+    const attachedPendants = beadCapItemsFromPlacements(placements);
+    const summaryMetrics = this.getCachedWorkspaceSummary(items, attachedPendants);
     const { summary, length } = summaryMetrics;
     const braceletGeometry = this.getCachedBraceletGeometry(items);
-    const selectedItems = this.data.useCanvasRenderer
-      ? []
-      : this.layoutSelectedItems(items, placements, braceletGeometry);
     const stringStyle = this.buildStringStyle(braceletGeometry);
     _energySvgCache = '';
     var energyChartSvgUrl = '';
@@ -8759,19 +9121,10 @@ Page({
       ...actionState,
       energyChartSvgUrl
     };
-    if (this.data.useCanvasRenderer) {
-      this.setLivePlacements(placements);
-      this.selectedItemStylePatchCache = null;
-      updates.selectedItems = [];
-      updates.attachedPendantItems = [];
-    } else {
-      this.selectedItemStylePatchCache = null;
-      updates.selectedItems = selectedItems;
-      updates.attachedPendantItems = [];
-    }
-    this.setData(updates, () => {
-      if (this.data.useCanvasRenderer) this.scheduleCanvasRender();
-    });
+    this.setLivePlacements(placements);
+    updates.selectedItems = [];
+    updates.attachedPendantItems = attachedPendants;
+    this.setData(updates, () => this.scheduleCanvasRender());
     if (options.persist !== false) this.scheduleDraftPersistence(options.persistDelay);
   },
 
@@ -8805,7 +9158,7 @@ Page({
     if (!Number.isInteger(beadIndex) || beadIndex < 0 || beadIndex >= (selected || []).length) return null;
     const id = selected[beadIndex];
     const placement = (placements || [])[beadIndex] || {};
-    const selectedItem = (this.data.selectedItems || [])[beadIndex] || {};
+    const beadCaps = beadCapSlotsFromPlacement(placement);
     const cacheKey = [
       this.materialCatalogDesignVersion || 0,
       beadIndex,
@@ -8814,9 +9167,8 @@ Page({
       placement.size || placement.size_mm || placement.diameter || '',
       placement.price || placement.priceText || '',
       placement.name || '',
-      selectedItem.name || '',
-      selectedItem.price || '',
-      selectedItem.diameter || selectedItem.size || ''
+      beadCaps.left && `${beadCaps.left.id}:${beadCaps.left.price}` || '',
+      beadCaps.right && `${beadCaps.right.id}:${beadCaps.right.price}` || '',
     ].join('::');
     if (this.selectedBeadInfoCache && this.selectedBeadInfoCache.key === cacheKey) {
       return this.selectedBeadInfoCache.value;
@@ -8824,20 +9176,31 @@ Page({
     const material = this.findMaterialById(id) || {};
     const source = {
       ...placement,
-      ...selectedItem,
       ...material
     };
     const name = this.displayMaterialName(source, id);
     const diameter = source.size || source.size_mm || source.diameter || (source.sku && source.sku.size_mm) || '';
     const price = Number(source.price || 0);
     const priceText = Number.isFinite(price) && price > 0 ? `¥${price.toFixed(2).replace(/\.00$/, '')}` : '--';
+    const capItems = ['left', 'right'].map(side => {
+      const cap = beadCaps[side];
+      if (!cap) return null;
+      const capPrice = Number(cap.price || 0);
+      return {
+        side,
+        sideLabel: side === 'left' ? '左侧' : '右侧',
+        name: this.displayMaterialName(cap, '包珠隔片'),
+        priceText: capPrice > 0 ? `¥${capPrice.toFixed(2).replace(/\.00$/, '')}` : '--'
+      };
+    }).filter(Boolean);
     const info = {
       index: beadIndex,
       position: beadIndex + 1,
       id,
       name,
       diameterText: this.formatBeadDiameter(diameter),
-      priceText
+      priceText,
+      capItems
     };
     this.selectedBeadInfoCache = { key: cacheKey, value: info };
     return info;
@@ -8876,7 +9239,11 @@ Page({
         size: Number(Number(placement && (placement.size || placement.size_mm || placement.diameter)).toFixed(2)) || 0,
         price: Number(Number(placement && (placement.price || placement.priceText)).toFixed(2)) || 0,
         img: placement && placement.image_url || '',
-        name: placement && placement.name || ''
+        name: placement && placement.name || '',
+        caps: ['left', 'right'].map(side => {
+          const cap = beadCapSlotsFromPlacement(placement)[side];
+          return cap ? `${side}:${cap.id || cap.skuId || ''}:${cap.price || 0}` : '';
+        }).filter(Boolean).join('|')
       }));
       const summary = payload.summary || {};
       return JSON.stringify({
@@ -8920,49 +9287,12 @@ Page({
     }, Math.max(80, delay));
   },
 
-  layoutSelectedItems(items, placements, geometry) {
-    const center = geometry.center;
-    return items.map((item, index) => {
-      const beadSize = geometry.beadSizes[index];
-      const placement = placements[index] || { dx: 0, dy: 0 };
-      const rad = geometry.angles[index];
-      const targetX = this.data.isLooseMode ? placement.looseX : center + Math.cos(rad) * geometry.radius;
-      const targetY = this.data.isLooseMode ? placement.looseY : center + Math.sin(rad) * geometry.radius;
-      const left = targetX - beadSize / 2 + placement.dx;
-      const top = targetY - beadSize / 2 + placement.dy;
-      const visualX = targetX + Number(placement.dx || 0);
-      const visualY = targetY + Number(placement.dy || 0);
-      const containerRotation = this.data.isLooseMode
-        ? Number(placement.rotation || 0)
-        : stringedBeadRotationFromPoint(visualX, visualY, center);
-      const faceRotation = 0;
-      const background = item.image_url ? 'transparent' : this.buildBeadBackground(item);
-      const classes = [];
-      if (item.image_url) classes.push('has-image');
-      if (index === this.data.selectedBeadIndex) classes.push('active');
-      if (index === this.data.draggingBeadIndex) classes.push('dragging');
-      if (index === this.data.draggingBeadIndex && this.data.dragDeleteArmed) classes.push('delete-ready');
-      return {
-        ...item,
-        index,
-        selected: index === this.data.selectedBeadIndex,
-        className: classes.join(' '),
-        beadSize,
-        shortName: item.name.slice(0, 1),
-        imageStyle: `transform:scale(1.02) rotate(${faceRotation}deg);`,
-        style: `left:0;top:0;width:${beadSize}rpx;height:${beadSize}rpx;background:${background};transform:translate3d(${left.toFixed(1)}rpx,${top.toFixed(1)}rpx,0) rotate(${containerRotation.toFixed(1)}deg);`
-      };
-    });
-  },
-
-  buildBeadBackground(item = {}) {
-    return `radial-gradient(circle at 32% 28%, ${item.shine || '#fff'} 0 10%, ${item.color || '#d8d2c8'} 12% 58%, rgba(0,0,0,.22) 100%)`;
-  },
-
   calculateBraceletGeometry(items) {
     const layout = this.getStageLayout();
     const center = layout.center;
-    let beadSizes = items.map(item => Math.max(42, Math.min(78, item.size * 5.4)));
+    const materialGeometries = items.map(item => resolveMaterialGeometry(item));
+    let beadSizes = materialGeometries.map(item => item.displaySizeRpx);
+    let spacingSizes = materialGeometries.map(item => item.spacingSizeRpx);
     const largestBeadRadius = beadSizes.length ? Math.max(...beadSizes) / 2 : 0;
     const safeOuterRadius = Math.max(
       largestBeadRadius + 8,
@@ -8974,27 +9304,30 @@ Page({
         center,
         radius: Math.max(0, safeOuterRadius - largestBeadRadius),
         beadSizes,
+        spacingSizes,
+        materialGeometries,
         angles: items.map((item, index) => (-90 + (360 / count) * index) * Math.PI / 180)
       };
     }
 
-    let radius = this.solveTangentRingRadius(beadSizes);
+    let radius = this.solveTangentRingRadius(spacingSizes);
     // 物理盘壁的内缘约为 center - 22rpx；额外留 3rpx 安全间距，
     // 避免成串目标与静态盘壁重叠，造成弹簧和碰撞墙持续对抗。
     const maxOuterRadius = safeOuterRadius;
     if (radius + largestBeadRadius > maxOuterRadius) {
       const scale = maxOuterRadius / (radius + largestBeadRadius);
       beadSizes = beadSizes.map(size => size * scale);
-      radius = this.solveTangentRingRadius(beadSizes);
+      spacingSizes = spacingSizes.map(size => size * scale);
+      radius = this.solveTangentRingRadius(spacingSizes);
     }
 
     const angles = [-Math.PI / 2];
-    for (let index = 1; index < beadSizes.length; index += 1) {
-      const centerDistance = (beadSizes[index - 1] + beadSizes[index]) / 2 + STRINGED_BEAD_GAP_RPX;
+    for (let index = 1; index < spacingSizes.length; index += 1) {
+      const centerDistance = (spacingSizes[index - 1] + spacingSizes[index]) / 2 + STRINGED_BEAD_GAP_RPX;
       const step = 2 * Math.asin(Math.min(1, centerDistance / (2 * radius)));
       angles.push(angles[index - 1] + step);
     }
-    return { center, radius, beadSizes, angles };
+    return { center, radius, beadSizes, spacingSizes, materialGeometries, angles };
   },
 
   solveTangentRingRadius(beadSizes) {
@@ -9024,7 +9357,7 @@ Page({
     return `left:${offset}rpx;top:${offset}rpx;width:${diameter}rpx;height:${diameter}rpx;`;
   },
 
-  workspaceSummaryCacheKey(items = []) {
+  workspaceSummaryCacheKey(items = [], attachments = []) {
     const wristSize = Number(this.data.wristSize || 16);
     const itemKey = (items || []).map(item => [
       item.id,
@@ -9045,22 +9378,30 @@ Page({
       item.series,
       Array.isArray(item.effects) ? item.effects.join('|') : item.effects
     ].map(value => String(value || '').trim()).join('~')).join('||');
+    const attachmentKey = (attachments || []).map(item => [
+      item.id,
+      item.skuId,
+      item.price,
+      item.weight,
+      item.side
+    ].map(value => String(value || '').trim()).join('~')).join('||');
     return [
       this.materialCatalogDesignVersion || 0,
       wristSize,
-      itemKey
+      itemKey,
+      attachmentKey
     ].join('::');
   },
 
-  getCachedWorkspaceSummary(items = []) {
-    const key = this.workspaceSummaryCacheKey(items);
+  getCachedWorkspaceSummary(items = [], attachments = []) {
+    const key = this.workspaceSummaryCacheKey(items, attachments);
     if (this.workspaceSummaryCache && this.workspaceSummaryCache.key === key) {
       return this.workspaceSummaryCache.value;
     }
-    const price = items.reduce((sum, item) => sum + Number(item.price || 0), 0);
+    const price = [...items, ...attachments].reduce((sum, item) => sum + Number(item.price || 0), 0);
     const effectiveLengthMm = estimateStringedLengthMm(items);
     const length = effectiveLengthMm / 10;
-    const weight = items.reduce((sum, item) => sum + item.weight, 0);
+    const weight = [...items, ...attachments].reduce((sum, item) => sum + Number(item.weight || 0), 0);
     const wristSize = Number(this.data.wristSize || 16);
     const targetLength = wristSize + 0.8;
     const recommendedCount = recommendedStringedBeadCount(items, wristSize);
@@ -9309,7 +9650,7 @@ Page({
   captureDesignPreviewFile() {
     return new Promise(resolve => {
       const state = this.braceletCanvasState;
-      if (!this.data.useCanvasRenderer || !state || !state.canvas) {
+      if (!state || !state.canvas) {
         resolve('');
         return;
       }

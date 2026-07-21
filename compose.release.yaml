@@ -10,7 +10,8 @@ services:
     volumes:
       - "${CERTS_DIR:?CERTS_DIR is required}:/opt/yujian_server/certs:ro"
     env_file:
-      - "${ENV_FILE:?ENV_FILE is required}"
+      - path: "${ENV_FILE:?ENV_FILE is required}"
+        format: raw
     environment:
       RELEASE_VERSION: "${RELEASE_VERSION:?RELEASE_VERSION is required}"
       SERVICE_NAME: "yujian-api-${APP_SLOT:?APP_SLOT is required}"
@@ -36,12 +37,35 @@ services:
     volumes:
       - "${CERTS_DIR:?CERTS_DIR is required}:/opt/yujian_server/certs:ro"
     env_file:
-      - "${ENV_FILE:?ENV_FILE is required}"
+      - path: "${ENV_FILE:?ENV_FILE is required}"
+        format: raw
     environment:
       RELEASE_VERSION: "${RELEASE_VERSION:?RELEASE_VERSION is required}"
       SERVICE_NAME: "yujian-logistics-worker"
       ALLOW_RUNTIME_SCHEMA_MUTATION: "false"
       WECHAT_PAY_TEST_MODE: "false"
+    networks:
+      - backend
+
+  commerce-worker:
+    profiles: ["commerce-worker"]
+    image: "${APP_IMAGE:?APP_IMAGE must be an immutable digest reference}"
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    command: ["python", "-m", "app.commerce_worker"]
+    volumes:
+      - "${CERTS_DIR:?CERTS_DIR is required}:/opt/yujian_server/certs:ro"
+    env_file:
+      - path: "${ENV_FILE:?ENV_FILE is required}"
+        format: raw
+    environment:
+      RELEASE_VERSION: "${RELEASE_VERSION:?RELEASE_VERSION is required}"
+      SERVICE_NAME: "yujian-commerce-worker"
+      ALLOW_RUNTIME_SCHEMA_MUTATION: "false"
+      WECHAT_PAY_TEST_MODE: "false"
+      COMMERCE_MAINTENANCE_ENABLED: "${COMMERCE_MAINTENANCE_ENABLED:-false}"
     networks:
       - backend
 

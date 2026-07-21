@@ -1,0 +1,327 @@
+Window: "抖音", App: 抖音.
+0 标准窗口 抖音, Secondary Actions: Raise
+	1 container (settable, string)
+		2 HTML 内容 about:blank
+		3 HTML 内容 发现更多精彩视频 - 抖音搜索, URL: douyin.com/jingxuan/search/%E9%87%91%E5%85%94%E6%AF%9B%20%E9%93%B6%E5%85%94%E6%AF%9B%20%E5%BD%A9%E5%85%94%E6%AF%9B%20%E7%B4%AB%E6%B0%B4%E6%99%B6%20%E6%B5%B7%E8%93%9D%E5%AE%9D%20%E6%89%8B%E4%B8%B2?aid=0764b588-ce86-4e37-951b-0bf867ad9704&type=general
+			4 container
+				5 按钮 开启读屏标签
+				6 文本 读屏标签已关闭
+				7 container
+					8 container
+						9 container
+							10 文本栏 (settable, string) Value: 金兔毛 银兔毛 彩兔毛 紫水晶 海蓝宝 手串, Placeholder: 搜索你感兴趣的内容
+							11 按钮 搜索
+								12 图像
+								13 文本 搜索
+						14 container
+							15 container
+								16 图像
+								17 文本 壁纸
+							18 内容列表
+								19 container
+									20 图像
+									21 文本 通知
+							22 内容列表
+								23 container
+									24 文本 消息
+							25 container
+								26 图像
+								27 文本 投稿
+							28 link douyin.com/user/self
+							29 图像
+						30 图像
+						31 图像
+					32 container
+						33 container
+							34 text 综合 视频 用户 直播
+							35 图像
+							36 文本 多列
+							37 图像
+							38 文本 单列
+							39 container
+								40 文本 筛选
+								41 图像
+						42 container
+							43 文本 为你找到以下结果，问问AI智能总结内容
+							44 图像
+							45 文本 问问AI
+						46 container
+							47 container
+								48 container
+									49 未加标签的图片 /9afb5967da94400b90a7daddb4c96963~tplv-dy-cropcenter:323:430.jpeg?biz_tag=pcweb_cover&from=327834062&lk3s=138a59ce&s=PackSourceEnum_SEARCH&sc=cover&se=true&sh=323_430&x-expires=2099448000&x-signature=2QDOlEI9Azq9v0vRuOfvFrBgwcs%3D
+									50 container
+										51 文本 00:18
+										52 图像
+										53 文本 3
+								54 container
+									55 文本 小众不撞款！海蓝宝 + 紫水晶+兔毛#水晶#水晶回血#东海水晶#水晶手串#水晶手串diy
+									56 container
+										57 text @ 水晶回收-大杨哥
+									58 文本 · 3月1日
+							59 container
+								60 container
+									61 未加标签的图片 /ocrX52A6EEKad0AAgDpA2DlC9ITeDLAfgAzFD9~noop.jpeg?biz_tag=pcweb_cover&card_type=303&column_n=0&from=327834062&lk3s=138a59ce&s=PackSourceEnum_SEARCH&se=false&x-expires=1785297600&x-signature=B3YqaWORMee3xBvYecLjOktXHng%3D
+									62 container
+										63 图像
+										64 文本 图文
+										65 图像
+										66 文本 31
+								67 container
+									68 文本 钢丝彩兔毛水晶手串单珠-科普与分享。#手串搭配 #水晶科普 #彩兔毛 #彩兔毛手链 #兔毛水晶
+									69 container
+										70 text @ 云尚水晶批发商行
+									71 文本 · 5月2日
+							72 container
+								73 container
+									74 未加标签的图片 /oQTXJBET1vNPYiIaITGb4AQmiizZzIBAdEUxY~tplv-dy-cropcenter:323:430.jpeg?biz_tag=pcweb_cover&from=327834062&lk3s=138a59ce&s=PackSourceEnum_SEARCH&sc=cover&se=true&sh=323_430&x-expires=2099448000&x-signature=6wCza%2BBgkSHhXtkrzG4q0gjwV4I%3D
+									75 container
+										76 文本 05:07
+										77 图像
+										78 文本 2539
+								79 container
+									80 文本 水晶知识100篇，兔毛水晶 兔毛水晶等级分类，常见颜色，怎么看真假看好坏#天然水晶 #兔毛水晶 #彩兔毛 #水晶 #水晶手链
+									81 container
+										82 text @ 卖水晶的小梁
+									83 文本 · 2025年12月4日
+							84 container
+								85 container
+									86 未加标签的图片 /osEAQNff1P8I52A96r5pSAFZkAjDTHgAAP8QOC~tplv-dy-cropcenter:323:430.jpeg?biz_tag=pcweb_cover&from=327834062&lk3s=138a59ce&s=PackSourceEnum_SEARCH&sc=cover&se=true&sh=323_430&x-expires=2099448000&x-signature=rSi1ZbawErlLjHxjYCYR11cgHQM%3D
+									87 container
+										88 文本 00:19
+										89 图像
+										90 文本 3
+								91 container
+									92 文本 【茸茸】好糯！！ #水晶#手串#水晶手串#紫兔毛#海蓝宝
+									93 container
+										94 text @ GOOD LUCK饰品(妮妮版)
+									95 文本 · 4月21日
+							96 container
+								97 container
+									98 未加标签的图片 /oU491yivWJZnsKDsAY5fH4gEBfAviABKVBMohI~tplv-dy-cropcenter:323:430.jpeg?biz_tag=pcweb_cover&from=327834062&lk3s=138a59ce&s=PackSourceEnum_SEARCH&sc=cover&se=true&sh=323_430&x-expires=2099448000&x-signature=u9zgXVvjZte4oco6tm2%2FPa7K%2FWU%3D
+									99 container
+										100 文本 00:26
+										101 图像
+										102 文本 3
+								103 container
+									104 文本 新品来袭 海蓝宝 紫水晶 兔毛水晶 小众设计款 依旧在用心的出品呢#手工diy制作 #珠宝首饰 #手作diy #超好看 #水晶手链
+									105 container
+										106 text @ 鲸灵水晶
+									107 文本 · 2025年9月17日
+							108 container
+								109 container
+									110 未加标签的图片 /ooADAAHnCEoBN9BIRmwfBFJMsDSXtCEiDAGwfg~tplv-dy-cropcenter:323:430.jpeg?biz_tag=pcweb_cover&from=327834062&lk3s=138a59ce&s=PackSourceEnum_SEARCH&sc=cover&se=true&sh=323_430&x-expires=2099448000&x-signature=sR37fvJxtSZgpI08E5cEQdfFYVM%3D
+									111 container
+										112 文本 00:25
+										113 图像
+										114 文本 1
+								115 container
+									116 文本 今天的最爱款 💛💙 特意出个视频 奶呼呼の彩兔毛 金发配海蓝宝 叠戴 单戴都美窒息🥱🥱#天然水晶 #水晶手串 #仙女必备 #五行 #美爆了
+									117 container
+										118 text @ Fairy's （疗愈水晶）🔮
+									119 文本 · 2024年11月10日
+							120 container
+								121 container
+									122 未加标签的图片 /ogAf5F7KAsY9UDsFIunEFAAfDMEAxplewAEHEA~tplv-dy-cropcenter:323:430.jpeg?biz_tag=pcweb_cover&from=327834062&lk3s=138a59ce&s=PackSourceEnum_SEARCH&sc=cover&se=true&sh=323_430&x-expires=2099448000&x-signature=Ftft%2FwSBBiG0x65kboGoBLkrlVE%3D
+									123 container
+										124 文本 00:19
+										125 图像
+										126 文本 6
+								127 container
+									128 文本 天然水晶手串｜彩兔毛&海蓝宝 颜值与寓意并存，上手超显气质 颗颗精选，品质看得见 现货不多，喜欢直接私～#彩兔毛 #海蓝宝
+									129 container
+										130 text @ JIA.
+									131 文本 · 3月28日
+							132 文本 相关搜索
+							133 container
+								134 图像
+								135 文本 金兔手串
+							136 container
+								137 图像
+								138 文本 施华洛世奇紫水晶手串
+							139 container
+								140 图像
+								141 文本 紫水晶手串配饰小零件
+							142 container
+								143 图像
+								144 文本 紫水晶手串单数还是双数
+							145 container
+								146 图像
+								147 文本 紫水晶手串的功效与作用
+							148 container
+								149 图像
+								150 文本 紫水晶手串可以碰水吗
+							151 container
+								152 图像
+								153 文本 紫水晶手串最贵的一般价格是多少
+							154 container
+								155 图像
+								156 文本 紫水晶手串戴哪个手上好
+							157 container
+								158 container
+									159 未加标签的图片 /ocdwLAcLA2gAz9o0ewrCE6iXBiIaEAimADA8fB~noop.jpeg?biz_tag=pcweb_cover&card_type=303&column_n=0&from=327834062&lk3s=138a59ce&s=PackSourceEnum_SEARCH&se=false&x-expires=1785297600&x-signature=5GM%2FaFL9ppm9MMf4dRi1qrRRGSM%3D
+									160 container
+										161 图像
+										162 文本 图文
+										163 图像
+										164 文本 5
+								165 container
+									166 文本 天然水晶多宝手串。#水晶手链运势
+									167 container
+										168 text @ 星落水晶小助理
+									169 文本 · 4月21日
+							170 container
+								171 container
+									172 未加标签的图片 /b88c0801e2674dd1b0af2ec7ea25a3cb~tplv-dy-cropcenter:323:430.jpeg?biz_tag=pcweb_cover&from=327834062&lk3s=138a59ce&s=PackSourceEnum_SEARCH&sc=cover&se=true&sh=323_430&x-expires=2099448000&x-signature=peh7iBeShASluaDGzOBCxMqgGr4%3D
+									173 container
+										174 文本 03:16
+										175 图像
+										176 文本 555
+								177 container
+									178 文本 挑战最细致水晶科普第十三期-兔毛水晶 #兔毛水晶 #钢丝兔毛 #卷兔毛 #聚宝盆兔毛 #雾境坊
+									179 container
+										180 text @ 雾境坊
+									181 文本 · 3月15日
+							182 container
+								183 container
+									184 未加标签的图片 /oMABe6ReA77PId9BL9ADMEIGLAralAgEZ5ew0q~tplv-dy-cropcenter:323:430.jpeg?biz_tag=pcweb_cover&from=327834062&lk3s=138a59ce&s=PackSourceEnum_SEARCH&sc=cover&se=true&sh=323_430&x-expires=2099448000&x-signature=NEiw4ii38WYuesikuUBVbzE8Cog%3D
+									185 container
+										186 文本 01:08
+										187 图像
+										188 文本 97
+								189 container
+									190 文本 彩兔毛合集🐇 #东海水晶 #兔毛 #兔毛手串 #水晶 #水晶手串
+									191 container
+										192 text @ 呆呆水晶铺
+									193 文本 · 2025年9月18日
+							194 container
+								195 container
+									196 未加标签的图片 /o87MinQBiAAoEhKAMPAB2Ea5pAIzPX10LEyDk~tplv-dy-cropcenter:323:430.jpeg?biz_tag=pcweb_cover&from=327834062&lk3s=138a59ce&s=PackSourceEnum_SEARCH&sc=cover&se=true&sh=323_430&x-expires=2099448000&x-signature=U4ZF8Fw7jktsL%2F6QtBTMrIuD%2Ffs%3D
+									197 container
+										198 文本 01:45
+										199 图像
+										200 文本 13
+								201 container
+									202 文本 【07.06】上新预告碎碎念～ 直播时间早上8点半～明天又是满满当当的一天～不见不散哦👋#水晶 #兔毛水晶 #透闪拉丝彩兔毛 #猫眼兔毛 #绸缎光泽
+									203 container
+										204 text @ 185可塘兔毛水晶1号
+									205 文本 · 7月5日
+							206 container
+								207 container
+									208 未加标签的图片 /oE6c9HBVpEnwAOEfdB3F1vUEIYDBtMAKMwf6Td~tplv-dy-cropcenter:323:430.jpeg?biz_tag=pcweb_cover&from=327834062&lk3s=138a59ce&s=PackSourceEnum_SEARCH&sc=cover&se=true&sh=323_430&x-expires=2099448000&x-signature=fvNQZUJTIQRyVdRpgql2EcJCkug%3D
+									209 container
+										210 文本 03:01
+										211 图像
+										212 文本 474
+								213 container
+									214 文本 如果珠宝贩子都说实话系列之《兔毛》
+									215 container
+										216 text @ 赤焰南红珠宝供应链官方号
+									217 文本 · 4月13日
+							218 container
+								219 container
+									220 未加标签的图片 /oQRiav6BRCfEUAL7rBoI12wA9dBfAteCxXoGIG~tplv-dy-cropcenter:323:430.jpeg?biz_tag=pcweb_cover&from=327834062&lk3s=138a59ce&s=PackSourceEnum_SEARCH&sc=cover&se=true&sh=323_430&x-expires=2099448000&x-signature=CaUTvfeFrN%2BcEDPE%2B7I4KZqTgkI%3D
+									221 container
+										222 文本 00:19
+										223 图像
+										224 文本 47
+								225 container
+									226 文本 彩兔毛水晶手串手链#天然水晶#彩兔毛#手串#水晶手链#美爆了
+									227 container
+										228 text @ 英姐的小店
+									229 文本 · 2025年9月5日
+							230 container
+								231 container
+									232 未加标签的图片 /oo0wiI00PBsAAAiZiVYEKMZxIPAZBgkLLyC1A~tplv-dy-cropcenter:323:430.jpeg?biz_tag=pcweb_cover&from=327834062&lk3s=138a59ce&s=PackSourceEnum_SEARCH&sc=cover&se=true&sh=323_430&x-expires=2099448000&x-signature=a4StrNuKzHVO3nIoZK0dIJCrsrY%3D
+									233 container
+										234 文本 02:59
+										235 图像
+										236 文本 369
+								237 container
+									238 文本 只喜欢稀有水晶 #天然水晶 #兔毛水晶
+									239 container
+										240 text @ 乔梦伊珠宝
+									241 文本 · 2024年12月1日
+							242 container
+								243 container
+									244 未加标签的图片 /44aefbef727c4ad78f412481af28f084~noop.jpeg?biz_tag=pcweb_cover&card_type=303&column_n=0&from=327834062&lk3s=138a59ce&s=PackSourceEnum_SEARCH&se=false&x-expires=1785297600&x-signature=b%2FvMT34G91uza%2BF5tSsK2ikbeK8%3D
+									245 container
+										246 图像
+										247 文本 图文
+										248 图像
+										249 文本 109
+								250 container
+									251 文本 兔毛大家族欣赏～。#水晶 #手串 #珠宝首饰 #彩宝
+									252 container
+										253 text @ ZHENXI侦囍珠宝（脆弱版）
+									254 文本 · 2024年7月1日
+							255 container
+								256 container
+									257 未加标签的图片 /01f21c920c6c410780063e994f6b68ca~tplv-dy-cropcenter:323:430.jpeg?biz_tag=pcweb_cover&from=327834062&lk3s=138a59ce&s=PackSourceEnum_SEARCH&sc=cover&se=true&sh=323_430&x-expires=2099448000&x-signature=EWDG7C%2BZL%2BdiBRdft9sUVhXqNBk%3D
+									258 container
+										259 文本 00:57
+										260 图像
+										261 文本 100
+								262 container
+									263 文本 （8）沉浸式串珠丨灰兔毛搭配海蓝宝真的太好看啦💗自带高级感 #创作灵感 #适合女生的手串推荐 #水晶手链 #仙女饰品 #沉浸式串珠
+									264 container
+										265 text @ 爱串珠的喵喵🐱
+									266 文本 · 2023年6月17日
+							267 container
+								268 container
+									269 未加标签的图片 /owufBAf9iIAykIQoAALeCIAusFOAf2I82AGdD5~tplv-dy-cropcenter:323:430.jpeg?biz_tag=pcweb_cover&from=327834062&lk3s=138a59ce&s=PackSourceEnum_SEARCH&sc=cover&se=true&sh=323_430&x-expires=2099448000&x-signature=BrXitPQGo883157yg9lJGP7i8uQ%3D
+									270 container
+										271 文本 05:51
+										272 图像
+										273 文本 339
+								274 container
+									275 文本 水晶入门100篇之—-兔毛水晶！#兔毛水晶 #蓝兔毛 #彩兔毛 #水晶知识 #水晶避坑
+									276 container
+										277 text @ 清辰珠宝（老赵）
+									278 文本 · 5月10日
+							279 container
+								280 container
+									281 未加标签的图片 /ocResqAAfACRA7DNA8NbPsIwCF907GnANoEEET~tplv-dy-cropcenter:323:430.jpeg?biz_tag=pcweb_cover&from=327834062&lk3s=138a59ce&s=PackSourceEnum_SEARCH&sc=cover&se=true&sh=323_430&x-expires=2099448000&x-signature=cDlnzy1sRySfAa2MDQ2cB27xEw8%3D
+									282 container
+										283 文本 00:36
+										284 图像
+										285 文本 10
+								286 container
+									287 文本 结缘欣赏～ 落日兔毛/蓝天白云海蓝宝/银铜矿#天然水晶手串diy #水晶手串搭配 #蓝色系手串 #多巴胺彩虹手串 #水晶手串分享
+									288 container
+										289 text @ 白芍珠宝饰品
+									290 文本 · 5月31日
+							291 文本 相关搜索
+							292 container
+								293 图像
+								294 文本 金兔手串
+							295 container
+								296 图像
+								297 文本 施华洛世奇紫水晶手串
+							298 container
+								299 图像
+								300 文本 紫水晶手串配饰小零件
+							301 container
+								302 图像
+								303 文本 紫水晶手串单数还是双数
+							304 container
+								305 图像
+								306 文本 紫水晶手串的功效与作用
+							307 container
+								308 图像
+								309 文本 紫水晶手串可以碰水吗
+							310 container
+								311 图像
+								312 文本 紫水晶手串最贵的一般价格是多少
+							313 container
+								314 图像
+								315 文本 紫水晶手串戴哪个手上好
+	316 关闭按钮
+	317 全屏幕按钮 Help: 此按钮也可以执行缩放窗口的操作, Secondary Actions: 缩放窗口
+	318 最小化按钮
+319 menu bar
+	320 抖音
+	321 文件
+	322 编辑
+	323 窗口
+
+The focused UI element is 3 HTML 内容 发现更多精彩视频 - 抖音搜索, URL: douyin.com/jingxuan/search/%E9%87%91%E5%85%94%E6%AF%9B%20%E9%93%B6%E5%85%94%E6%AF%9B%20%E5%BD%A9%E5%85%94%E6%AF%9B%20%E7%B4%AB%E6%B0%B4%E6%99%B6%20%E6%B5%B7%E8%93%9D%E5%AE%9D%20%E6%89%8B%E4%B8%B2?aid=0764b588-ce86-4e37-951b-0bf867ad9704&type=general

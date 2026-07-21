@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>宇涧运营后台</title>
-  <link rel="stylesheet" href="static/admin/admin.css?v=20260701-save-material-1">
+  <link rel="stylesheet" href="static/admin/admin.css?v=20260720-gallery-independent-v4">
 </head>
 <body>
   <section id="authView" class="auth-screen">
@@ -38,7 +38,12 @@
       <nav>
         <button class="nav-item active" data-page="overview" onclick="switchPage('overview')"><i>⌂</i>经营概览</button>
         <button class="nav-item" data-page="orders" onclick="switchPage('orders')"><i>▤</i>订单履约<span id="orderBadge" class="nav-badge hide">0</span></button>
-        <button class="nav-item" data-page="materials" onclick="switchPage('materials')"><i>◇</i>珠材商品</button>
+        <button class="nav-item" data-page="afterSales" onclick="switchPage('afterSales')"><i>↺</i>售后审核<span id="afterSaleBadge" class="nav-badge hide">0</span></button>
+        <button class="nav-item" data-page="materials" onclick="switchPage('materials')"><i>◇</i>SKU 管理</button>
+        <button class="nav-item" data-page="materialTypes" onclick="switchPage('materialTypes')"><i>Ⅰ</i>材料类型</button>
+        <button class="nav-item" data-page="materialCategories" onclick="switchPage('materialCategories')"><i>Ⅱ</i>材料分类</button>
+        <button class="nav-item" data-page="materialVarieties" onclick="switchPage('materialVarieties')"><i>Ⅲ</i>品种 / 款式</button>
+        <button class="nav-item" data-page="materialAssets" onclick="switchPage('materialAssets')"><i>▧</i>素材处理</button>
         <button class="nav-item" data-page="warehouse" onclick="switchPage('warehouse')"><i>▦</i>仓库库存</button>
         <button class="nav-item" data-page="content" onclick="switchPage('content')"><i>✦</i>运营内容</button>
         <button class="nav-item" data-page="bannerContent" onclick="switchPage('bannerContent')"><i>B</i>Home Banner</button>
@@ -93,7 +98,7 @@
             <div class="search-control">⌕<input id="orderKeyword" placeholder="订单号、用户、收货人、快递单号" oninput="debouncedLoadOrders()"></div>
             <select id="orderStatus" onchange="loadOrders()">
               <option value="">全部状态</option><option value="pending_payment">待付款</option><option value="pending_ship">待发货</option>
-              <option value="shipped">待收货</option><option value="completed">已完成</option><option value="after_sale">售后中</option>
+              <option value="shipped">待收货</option><option value="completed">已完成</option>
               <option value="refund_requested">退款中</option><option value="refunded">已退款</option><option value="closed">已关闭</option>
             </select>
           </div>
@@ -102,13 +107,42 @@
         <article class="panel table-panel"><div id="ordersTable"></div></article>
       </section>
 
+      <section id="afterSales" class="page-view hide">
+        <div id="afterSaleSummary" class="after-sale-summary-grid"></div>
+        <div class="page-toolbar after-sale-toolbar">
+          <div class="filter-group">
+            <div class="search-control"><span aria-hidden="true">⌕</span><input id="afterSaleKeyword" placeholder="工单号、订单号、用户、收货人、问题描述" oninput="debouncedLoadAfterSales()"></div>
+            <select id="afterSaleStatus" onchange="loadAfterSales()">
+              <option value="">全部状态</option>
+              <option value="requested">待审核</option>
+              <option value="awaiting_return">等待寄回</option>
+              <option value="service_processing">服务处理中</option>
+              <option value="refund_pending">待确认退款</option>
+              <option value="refunding">退款处理中</option>
+              <option value="resolved">已完成</option>
+              <option value="rejected">已拒绝</option>
+            </select>
+            <select id="afterSaleType" onchange="loadAfterSales()">
+              <option value="">全部诉求</option>
+              <option value="return_refund">退货退款</option>
+              <option value="resize">修改手围</option>
+              <option value="repair">重新穿制／维修</option>
+              <option value="resend">缺件／补发</option>
+              <option value="other">其他问题</option>
+            </select>
+          </div>
+          <button class="btn secondary" onclick="loadAfterSales()">刷新工单</button>
+        </div>
+        <div class="content-hint after-sale-hint">售后审核以用户提交的结构化工单为准。退款审核通过后仍需二次确认，系统才会调用微信支付发起原路退款。</div>
+        <article class="panel table-panel"><div id="afterSalesTable"></div></article>
+      </section>
+
       <section id="materials" class="page-view hide">
         <div class="page-toolbar">
           <div class="filter-group">
-            <div class="search-control">⌕<input id="materialKeyword" placeholder="搜索名称、分类、品种或功效" oninput="debouncedLoadMaterials()"></div>
+            <div class="search-control">⌕<input id="materialKeyword" placeholder="搜索名称、分类、品种或功效" oninput="handleMaterialKeywordInput(event)" oncompositionstart="handleMaterialKeywordCompositionStart()" oncompositionend="handleMaterialKeywordCompositionEnd()"></div>
             <select id="materialTop" onchange="handleMaterialTopChange()">
-              <option value="">全部类型</option><option value="bead">珠珠</option><option value="accessory">配饰</option>
-              <option value="incense">合香珠</option><option value="pendant">花托</option>
+              <option value="">全部类型</option>
             </select>
             <select id="materialCategory" class="material-category-filter" onchange="loadMaterials()">
               <option value="">全部珠珠分类</option>
@@ -158,13 +192,98 @@
             <button class="btn secondary compact bulk-btn" disabled onclick="batchMaterials('safety_stock')">安全库存</button>
             <button class="btn secondary compact danger-outline bulk-btn" disabled onclick="batchMaterials('delete')">批量删除</button>
             <span class="bulk-divider"></span>
-            <button class="btn secondary compact" onclick="openMaterialTaxonomy()">分类/品种维护</button>
+            <button class="btn secondary compact" onclick="switchPage('materialVarieties')">品种 / 款式</button>
             <button class="btn secondary compact" onclick="openMaterialOptionDictionary()">字段字典维护</button>
             <button class="btn secondary compact" onclick="openMaterialAuditLogs()">变更记录</button>
-            <button class="btn primary compact" onclick="newMaterial()">＋ 新增珠材</button>
+            <button class="btn primary compact" onclick="newMaterial()">＋ 新增 SKU</button>
           </div>
         </div>
         <article class="panel table-panel"><div id="materialsTable"></div></article>
+      </section>
+
+      <section id="materialTypes" class="page-view hide">
+        <div class="catalog-intro">
+          <div><span>STEP 1</span><h2>先定义材料类型</h2><p>例如珠子、配饰。类型编码用于关联现有 SKU，创建后保持稳定。</p></div>
+          <button class="btn primary compact" onclick="newMaterialType()">＋ 新增类型</button>
+        </div>
+        <article class="panel table-panel"><div id="materialTypesTable"></div></article>
+      </section>
+
+      <section id="materialCategories" class="page-view hide">
+        <div class="catalog-intro">
+          <div><span>STEP 2</span><h2>在类型下创建材料分类</h2><p>珠子可建幽灵水晶、白水晶；配饰可建幽灵随形、隔珠、花托、吊坠。</p></div>
+          <button class="btn primary compact" onclick="newMaterialCategory()">＋ 新增分类</button>
+        </div>
+        <div class="page-toolbar catalog-toolbar">
+          <div class="filter-group"><select id="catalogCategoryTypeFilter" onchange="renderMaterialCategoriesPage()"></select></div>
+        </div>
+        <article class="panel table-panel"><div id="materialCategoriesTable"></div></article>
+      </section>
+
+      <section id="materialVarieties" class="page-view hide">
+        <div class="catalog-intro">
+          <div><span>STEP 3</span><h2>创建具体品种或款式</h2><p>这里只建立可复用目录资料；尺寸、价格、库存留到 SKU 管理填写。</p></div>
+          <button class="btn primary compact" onclick="newMaterialVariety()">＋ 新增品种 / 款式</button>
+        </div>
+        <div class="page-toolbar catalog-toolbar">
+          <div class="filter-group catalog-variety-filters">
+            <div class="search-control catalog-variety-search">⌕<input id="catalogVarietyKeyword" aria-label="搜索品种或款式" placeholder="搜索品种、分类或形制" oninput="renderMaterialVarietiesPage()"></div>
+            <select id="catalogVarietyTypeFilter" onchange="handleVarietyTypeFilterChange()"></select>
+            <select id="catalogVarietyCategoryFilter" onchange="renderMaterialVarietiesPage()"></select>
+          </div>
+        </div>
+        <article class="panel table-panel"><div id="materialVarietiesTable"></div></article>
+      </section>
+
+      <section id="materialAssets" class="page-view hide">
+        <div class="catalog-intro material-asset-intro">
+          <div><span>ASSET WORKBENCH</span><h2>透明材料图标准化</h2><p>将已抠图的 PNG / WebP 统一处理为小程序材料图库规格，并绑定到具体品种。</p></div>
+          <div class="material-asset-standard" aria-label="输出标准">
+            <b>512 × 512</b><span>透明 WebP</span><span>主体占比 98.5%</span>
+          </div>
+        </div>
+
+        <div class="material-asset-layout">
+          <aside class="panel material-asset-sidebar">
+            <div class="panel-head"><div><h2>绑定位置</h2><p>图片将写入所选品种的共享图库</p></div></div>
+            <label>材料类型<select id="materialAssetTop" onchange="handleMaterialAssetTopChange()"></select></label>
+            <label>材料分类<select id="materialAssetCategory" onchange="handleMaterialAssetCategoryChange()"></select></label>
+            <label>品种 / 款式<select id="materialAssetSeries" onchange="handleMaterialAssetSeriesChange()"></select></label>
+            <label>图库写入方式
+              <select id="materialAssetMode" onchange="handleMaterialAssetModeChange()">
+                <option value="replace">替换当前图库</option>
+                <option value="append">追加到当前图库</option>
+              </select>
+            </label>
+            <small class="help-text">品种图库是全部 SKU 的唯一图片源。绑定后所有规格会自动使用本次图片。</small>
+            <div id="materialAssetTargetSummary" class="material-asset-target-summary">请选择绑定位置</div>
+          </aside>
+
+          <div class="material-asset-main">
+            <div class="material-asset-toolbar">
+              <div>
+                <b id="materialAssetQueueTitle">待处理素材</b>
+                <span id="materialAssetStatus">等待选择图片</span>
+              </div>
+              <div class="table-actions">
+                <button class="btn secondary compact" id="materialAssetClearButton" onclick="clearMaterialAssetQueue()" disabled>清空</button>
+                <button class="btn secondary compact" id="materialAssetUploadButton" onclick="uploadMaterialAssetQueue()" disabled>上传 COS</button>
+                <button class="btn primary compact" id="materialAssetBindButton" onclick="bindMaterialAssetQueue()" disabled>绑定到品种</button>
+              </div>
+            </div>
+
+            <label id="materialAssetDropzone" class="material-asset-dropzone" ondragover="handleMaterialAssetDragOver(event)" ondragleave="handleMaterialAssetDragLeave(event)" ondrop="handleMaterialAssetDrop(event)">
+              <input id="materialAssetFiles" type="file" accept="image/png,image/webp,.png,.webp" multiple onchange="handleMaterialAssetFileInput(event)">
+              <span class="material-asset-drop-icon">＋</span>
+              <b>选择已抠图图片</b>
+              <small>支持批量 PNG / WebP，单次最多 24 张</small>
+            </label>
+
+            <div id="materialAssetQueue" class="material-asset-queue">
+              <div class="material-asset-empty"><b>暂无素材</b><span>处理完成后会同时检查浅色与深色背景效果</span></div>
+            </div>
+          </div>
+        </div>
       </section>
 
       <section id="warehouse" class="page-view hide">
@@ -402,6 +521,6 @@
     <div id="drawerBody" class="drawer-body"></div>
   </aside>
   <div id="toast" class="toast hide"></div>
-  <script src="static/admin/admin.js?v=20260701-save-material-1"></script>
+  <script src="static/admin/admin.js?v=20260720-gallery-independent-v4"></script>
 </body>
 </html>

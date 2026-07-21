@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import json
 import os
+from decimal import Decimal, InvalidOperation
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote
@@ -16,11 +17,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--assets-root", type=Path, required=True)
     parser.add_argument("--manifest-root", type=Path, required=True)
     parser.add_argument("--cos-prefix", required=True)
-    parser.add_argument("--bucket", required=True)
+    parser.add_argument("--bucket", default=os.getenv("TENCENT_COS_BUCKET", ""))
     parser.add_argument("--region", default=os.getenv("TENCENT_COS_REGION", ""))
     parser.add_argument("--secret-id", default=os.getenv("TENCENT_COS_SECRET_ID", ""))
     parser.add_argument("--secret-key", default=os.getenv("TENCENT_COS_SECRET_KEY", ""))
-    parser.add_argument("--cdn-base-url", required=True)
+    parser.add_argument("--cdn-base-url", default=os.getenv("TENCENT_COS_CDN_BASE_URL", ""))
+    parser.add_argument(
+        "--replace-existing-metal-accessories",
+        action="store_true",
+        help="Atomically delete existing accessory rows whose material_code starts with metal_ before import.",
+    )
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args()
 
@@ -36,6 +42,8 @@ def require_test_environment() -> None:
 
 def read_groups(args: argparse.Namespace) -> list[dict[str, object]]:
     groups: list[dict[str, object]] = []
+    seen_codes: set[str] = set()
+    seen_series: set[str] = set()
     for manifest_path in sorted(args.manifest_root.glob("*/manifest.json")):
         rows = json.loads(manifest_path.read_text(encoding="utf-8"))
         if not isinstance(rows, list) or len(rows) != 1 or not isinstance(rows[0], dict):
@@ -47,6 +55,10 @@ def read_groups(args: argparse.Namespace) -> list[dict[str, object]]:
         category = str(row.get("final_category") or row.get("category") or "").strip()
         if top != "accessory" or not code or not series or not category:
             raise SystemExit(f"Invalid reviewed accessory manifest: {manifest_path}")
+        if code in seen_codes or series in seen_series:
+            raise SystemExit(f"Duplicate accessory code or series in {manifest_path}")
+        seen_codes.add(code)
+        seen_series.add(series)
         files = sorted(
             path
             for path in (args.assets_root / code).glob("*.webp")
@@ -75,8 +87,8 @@ def public_url(base_url: str, key: str) -> str:
 
 
 def upload_assets(args: argparse.Namespace, groups: list[dict[str, object]]) -> None:
-    if not args.region or not args.secret_id or not args.secret_key:
-        raise SystemExit("Missing COS region or credentials.")
+    if not args.bucket or not args.region or not args.secret_id or not args.secret_key or not args.cdn_base_url:
+        raise SystemExit("Missing COS bucket, region, CDN base URL, or credentials.")
     from qcloud_cos import CosConfig, CosS3Client
 
     client = CosS3Client(
@@ -106,15 +118,78 @@ def connect_mysql():
     )
 
 
-def bind_database(args: argparse.Namespace, groups: list[dict[str, object]]) -> tuple[int, int]:
+def exact_price(value: object) -> tuple[float, int]:
+    if value is None or isinstance(value, bool):
+        raise ValueError("Accessory price is required.")
+    try:
+        amount = Decimal(str(value))
+    except (InvalidOperation, ValueError) as exc:
+        raise ValueError("Accessory price must be a decimal amount.") from exc
+    if not amount.is_finite() or amount <= 0 or amount.as_tuple().exponent < -2:
+        raise ValueError("Accessory price must be positive and have at most two decimal places.")
+    cents = int(amount * 100)
+    return cents / 100, cents
+
+
+def positive_stock(value: object) -> int:
+    if value is None or isinstance(value, bool):
+        raise ValueError("Accessory stock is required.")
+    try:
+        stock = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Accessory stock must be an integer.") from exc
+    if stock <= 0 or str(stock) != str(value).strip():
+        raise ValueError("Accessory stock must be a positive integer.")
+    return stock
+
+
+def material_values(group: dict[str, object], now: str, sort_order: int) -> dict[str, object]:
+    row = dict(group["row"])
+    urls = list(group["urls"])
+    keys = list(group["keys"])
+    price, price_cents = exact_price(row.get("price"))
+    return {
+        "skuId": deterministic_sku(str(group["code"]), str(group["series"])),
+        "category": group["category"],
+        "material_code": group["code"],
+        "grade": "配件",
+        "name": group["series"],
+        "effect": "focus",
+        "element": str(row.get("element") or "metal"),
+        "price": price,
+        "price_cents": price_cents,
+        "size": 0,
+        "weight": 0,
+        "color": str(row.get("color") or "#9da1a8"),
+        "shine": str(row.get("shine") or "#ffffff"),
+        "image_path": str(keys[0])[len("materials/"):] if str(keys[0]).startswith("materials/") else str(keys[0]),
+        "image_url": urls[0],
+        "image_urls_json": json.dumps(urls, ensure_ascii=False),
+        "stock": positive_stock(row.get("stock")),
+        "enabled": 1,
+        "sort_order": sort_order,
+        "updated_at": now,
+    }
+
+
+def validate_replacement_scope(groups: list[dict[str, object]]) -> None:
+    invalid = sorted(str(group["code"]) for group in groups if not str(group["code"]).startswith("metal_"))
+    if invalid:
+        raise ValueError("Metal replacement includes non-metal material codes: " + ", ".join(invalid))
+
+
+def bind_database(args: argparse.Namespace, groups: list[dict[str, object]]) -> tuple[int, int, int]:
     required_columns = {
         "id", "skuId", "top", "category", "series", "material_code", "grade", "name", "effect", "element",
-        "price", "size", "weight", "color", "shine", "image_path", "image_url", "image_urls_json", "stock",
+        "price", "price_cents", "size", "weight", "color", "shine", "image_path", "image_url", "image_urls_json", "stock",
         "enabled", "sort_order", "created_at", "updated_at",
     }
     now = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
     created = 0
     updated = 0
+    deleted = 0
+    if args.replace_existing_metal_accessories:
+        validate_replacement_scope(groups)
     with connect_mysql() as connection:
         with connection.cursor() as cursor:
             cursor.execute("SHOW COLUMNS FROM managed_materials")
@@ -122,46 +197,26 @@ def bind_database(args: argparse.Namespace, groups: list[dict[str, object]]) -> 
             missing = sorted(required_columns - columns)
             if missing:
                 raise RuntimeError("managed_materials is missing required columns: " + ", ".join(missing))
-            for offset, group in enumerate(groups, start=1):
-                row = dict(group["row"])
-                urls = list(group["urls"])
-                keys = list(group["keys"])
-                price = float(row.get("price") or 0)
-                stock = int(row.get("stock") or 0)
-                if price <= 0 or stock <= 0:
-                    raise RuntimeError(f"Invalid sellable price or stock for {group['code']}")
+            if args.replace_existing_metal_accessories:
                 cursor.execute(
-                    "SELECT id FROM managed_materials WHERE top=%s AND series=%s LIMIT 1",
-                    ("accessory", group["series"]),
+                    "DELETE FROM managed_materials WHERE top=%s AND material_code LIKE %s",
+                    ("accessory", "metal\\_%"),
+                )
+                deleted = cursor.rowcount
+            for offset, group in enumerate(groups, start=1):
+                values = material_values(group, now, 900 + offset)
+                cursor.execute(
+                    "SELECT id FROM managed_materials WHERE top=%s AND material_code=%s LIMIT 1",
+                    ("accessory", group["code"]),
                 )
                 existing = cursor.fetchone()
-                values = {
-                    "skuId": deterministic_sku(str(group["code"]), str(group["series"])),
-                    "category": group["category"],
-                    "material_code": group["code"],
-                    "grade": "配件",
-                    "name": group["series"],
-                    "effect": "focus",
-                    "element": str(row.get("element") or "metal"),
-                    "price": price,
-                    "size": 0,
-                    "weight": 0,
-                    "color": str(row.get("color") or "#9da1a8"),
-                    "shine": str(row.get("shine") or "#ffffff"),
-                    "image_path": str(keys[0])[len("materials/"):] if str(keys[0]).startswith("materials/") else str(keys[0]),
-                    "image_url": urls[0],
-                    "image_urls_json": json.dumps(urls, ensure_ascii=False),
-                    "stock": stock,
-                    "enabled": 1,
-                    "sort_order": 900 + offset,
-                    "updated_at": now,
-                }
                 if existing:
                     values["id"] = existing[0]
                     cursor.execute(
                         """
                         UPDATE managed_materials SET skuId=%(skuId)s, category=%(category)s, material_code=%(material_code)s,
                         grade=%(grade)s, name=%(name)s, effect=%(effect)s, element=%(element)s, price=%(price)s,
+                        price_cents=%(price_cents)s,
                         size=%(size)s, weight=%(weight)s, color=%(color)s, shine=%(shine)s, image_path=%(image_path)s,
                         image_url=%(image_url)s, image_urls_json=%(image_urls_json)s, stock=%(stock)s, enabled=%(enabled)s,
                         sort_order=%(sort_order)s, updated_at=%(updated_at)s WHERE id=%(id)s
@@ -176,10 +231,10 @@ def bind_database(args: argparse.Namespace, groups: list[dict[str, object]]) -> 
                     cursor.execute(
                         """
                         INSERT INTO managed_materials
-                        (id, skuId, top, category, series, material_code, grade, name, effect, element, price, size, weight,
+                        (id, skuId, top, category, series, material_code, grade, name, effect, element, price, price_cents, size, weight,
                          color, shine, image_path, image_url, image_urls_json, stock, enabled, sort_order, created_at, updated_at)
                         VALUES (%(id)s, %(skuId)s, %(top)s, %(category)s, %(name)s, %(material_code)s, %(grade)s, %(name)s,
-                                %(effect)s, %(element)s, %(price)s, %(size)s, %(weight)s, %(color)s, %(shine)s,
+                                %(effect)s, %(element)s, %(price)s, %(price_cents)s, %(size)s, %(weight)s, %(color)s, %(shine)s,
                                 %(image_path)s, %(image_url)s, %(image_urls_json)s, %(stock)s, %(enabled)s, %(sort_order)s,
                                 %(created_at)s, %(updated_at)s)
                         """,
@@ -187,19 +242,24 @@ def bind_database(args: argparse.Namespace, groups: list[dict[str, object]]) -> 
                     )
                     created += 1
         connection.commit()
-    return created, updated
+    return created, updated, deleted
 
 
 def main() -> None:
     args = parse_args()
     require_test_environment()
     groups = read_groups(args)
-    print(f"groups={len(groups)} assets={sum(len(group['files']) for group in groups)} dry_run={args.dry_run}")
+    if args.replace_existing_metal_accessories:
+        validate_replacement_scope(groups)
+    print(
+        f"groups={len(groups)} assets={sum(len(group['files']) for group in groups)} "
+        f"replace_metal={args.replace_existing_metal_accessories} dry_run={args.dry_run}"
+    )
     if args.dry_run:
         return
     upload_assets(args, groups)
-    created, updated = bind_database(args, groups)
-    print(f"created={created} updated={updated}")
+    created, updated, deleted = bind_database(args, groups)
+    print(f"created={created} updated={updated} deleted={deleted}")
 
 
 if __name__ == "__main__":

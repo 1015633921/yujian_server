@@ -163,6 +163,18 @@ MYSQL_SCHEMA = [
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     """,
     """
+    CREATE TABLE IF NOT EXISTS material_types (
+      type_code VARCHAR(40) PRIMARY KEY,
+      name VARCHAR(160) NOT NULL,
+      description VARCHAR(500) NOT NULL DEFAULT '',
+      sort_order INT NOT NULL DEFAULT 0,
+      enabled TINYINT NOT NULL DEFAULT 1,
+      created_at VARCHAR(40) NOT NULL,
+      updated_at VARCHAR(40) NOT NULL,
+      INDEX idx_material_types_enabled_sort (enabled, sort_order)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """,
+    """
     CREATE TABLE IF NOT EXISTS managed_materials (
       id VARCHAR(160) PRIMARY KEY, skuId VARCHAR(160) NOT NULL, top VARCHAR(40) NOT NULL,
       category VARCHAR(100) NOT NULL, series VARCHAR(160) NOT NULL DEFAULT '',
@@ -172,7 +184,8 @@ MYSQL_SCHEMA = [
       cost_price DOUBLE NOT NULL DEFAULT 0, safety_stock INT NOT NULL DEFAULT 0,
       supplier_name VARCHAR(255) NOT NULL DEFAULT '', purchase_note TEXT,
       color VARCHAR(40) NOT NULL, shine VARCHAR(40) NOT NULL, image_path VARCHAR(1000),
-      image_url VARCHAR(2000), image_urls_json LONGTEXT, stock INT NOT NULL DEFAULT 0, enabled TINYINT NOT NULL DEFAULT 1, sort_order INT NOT NULL DEFAULT 0,
+      image_url VARCHAR(2000), image_urls_json LONGTEXT, physical_specs_json LONGTEXT,
+      stock INT NOT NULL DEFAULT 0, enabled TINYINT NOT NULL DEFAULT 1, sort_order INT NOT NULL DEFAULT 0,
       created_at VARCHAR(40) NOT NULL, updated_at VARCHAR(40) NOT NULL
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     """,
@@ -363,6 +376,32 @@ MYSQL_SCHEMA = [
       INDEX idx_orders_user_created (user_id, created_at),
       INDEX idx_orders_status (status, payment_status),
       INDEX idx_orders_auto_complete (status, auto_complete_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS after_sale_cases (
+      case_id VARCHAR(80) PRIMARY KEY, order_id VARCHAR(40) NOT NULL, user_id VARCHAR(100) NOT NULL,
+      case_type VARCHAR(40) NOT NULL, reason_code VARCHAR(60) NOT NULL, reason VARCHAR(500) NOT NULL,
+      evidence_json LONGTEXT NOT NULL, order_snapshot_json LONGTEXT NOT NULL, status VARCHAR(40) NOT NULL,
+      requested_refund_fee BIGINT NOT NULL DEFAULT 0, approved_refund_fee BIGINT NOT NULL DEFAULT 0,
+      resolution_type VARCHAR(40) NOT NULL DEFAULT '', review_note VARCHAR(500) NOT NULL DEFAULT '',
+      reviewed_by VARCHAR(100) NOT NULL DEFAULT '', reviewed_at VARCHAR(40), resolved_at VARCHAR(40),
+      idempotency_key VARCHAR(128) NOT NULL, request_hash VARCHAR(64) NOT NULL,
+      return_carrier VARCHAR(50) NOT NULL DEFAULT '', return_tracking_no VARCHAR(80) NOT NULL DEFAULT '',
+      return_submitted_at VARCHAR(40), canceled_at VARCHAR(40),
+      created_at VARCHAR(40) NOT NULL, updated_at VARCHAR(40) NOT NULL,
+      UNIQUE KEY uq_after_sale_user_idempotency (user_id, idempotency_key),
+      INDEX idx_after_sale_order_created (order_id, created_at),
+      INDEX idx_after_sale_status_created (status, created_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS after_sale_events (
+      event_id VARCHAR(80) PRIMARY KEY, case_id VARCHAR(80) NOT NULL, event_type VARCHAR(40) NOT NULL,
+      from_status VARCHAR(40) NOT NULL DEFAULT '', to_status VARCHAR(40) NOT NULL,
+      operator_type VARCHAR(20) NOT NULL, operator_id VARCHAR(100) NOT NULL,
+      note VARCHAR(500) NOT NULL DEFAULT '', created_at VARCHAR(40) NOT NULL,
+      INDEX idx_after_sale_events_case_created (case_id, created_at)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     """,
     """

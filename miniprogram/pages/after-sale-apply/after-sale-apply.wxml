@@ -1,0 +1,159 @@
+<view class="after-sale-page yu-page">
+  <view wx:if="{{loading}}" class="page-state yu-loading">
+    <view class="yu-spinner"></view>
+    <view>正在读取订单与售后状态</view>
+  </view>
+
+  <view wx:elif="{{loadError}}" class="page-state yu-empty">
+    <view class="state-code">LOAD ERROR</view>
+    <view class="yu-empty-title">暂时无法申请售后</view>
+    <view class="yu-empty-desc">{{loadError}}</view>
+    <button class="yu-button yu-button-primary state-button" bindtap="retryLoad">重新加载</button>
+    <button class="yu-button yu-button-secondary state-button" bindtap="goOrderDetail">返回订单详情</button>
+  </view>
+
+  <view wx:elif="{{submittedCase}}" class="submitted-view">
+    <view class="submitted-mark">✓</view>
+    <view class="yu-eyebrow">AFTER-SALE CASE</view>
+    <view class="submitted-title">{{isExistingCase ? '已有售后正在处理' : '售后申请已提交'}}</view>
+    <view class="submitted-desc">{{submittedCase.nextStepText}}</view>
+
+    <view class="case-card yu-card yu-card-lg">
+      <view class="case-head">
+        <view>
+          <view class="case-label">售后单号</view>
+          <view class="case-id">{{submittedCase.case_id}}</view>
+        </view>
+        <view class="case-status">{{submittedCase.status_text}}</view>
+      </view>
+      <view class="case-row"><text>服务类型</text><view>{{submittedCase.type_text}}</view></view>
+      <view class="case-row"><text>申请时间</text><view>{{submittedCase.createdAtText || '-'}}</view></view>
+      <view class="case-row"><text>关联订单</text><view>{{submittedCase.order_id}}</view></view>
+      <view wx:if="{{submittedCase.return_tracking_no}}" class="case-row"><text>退回物流</text><view>{{submittedCase.return_carrier}} · {{submittedCase.return_tracking_no}}</view></view>
+      <view wx:if="{{submittedCase.type === 'return_refund'}}" class="refund-explain">
+        退款金额与退回方式需审核确认，提交售后不会立即发起微信退款。
+      </view>
+
+      <view wx:if="{{submittedCase.canSubmitReturn}}" class="return-shipment-form">
+        <view class="return-form-title">填写退回物流</view>
+        <input
+          value="{{returnCarrier}}"
+          maxlength="50"
+          placeholder="快递公司，例如顺丰速运"
+          bindinput="onReturnCarrierInput"
+        />
+        <input
+          value="{{returnTrackingNo}}"
+          maxlength="80"
+          placeholder="退回快递单号"
+          bindinput="onReturnTrackingInput"
+        />
+        <button
+          class="yu-button yu-button-primary return-submit-button"
+          loading="{{returnSubmitting}}"
+          disabled="{{returnSubmitting}}"
+          bindtap="submitReturnShipment"
+        >{{returnSubmitting ? '正在提交' : '提交退回物流'}}</button>
+      </view>
+    </view>
+
+    <button class="yu-button yu-button-primary result-button" bindtap="goOrderDetail">返回订单详情</button>
+    <button
+      wx:if="{{submittedCase.canCancel}}"
+      class="yu-button yu-button-secondary cancel-case-button"
+      loading="{{canceling}}"
+      disabled="{{canceling}}"
+      bindtap="cancelApplication"
+    >取消本次售后</button>
+  </view>
+
+  <block wx:else>
+    <view class="page-heading">
+      <view class="yu-eyebrow">AFTER-SALE REQUEST</view>
+      <view class="yu-title">申请售后</view>
+      <view class="yu-desc">选择你需要的服务。退款、修改和维修会进入不同的审核流程。</view>
+    </view>
+
+    <view class="order-card yu-card">
+      <view class="order-card-top">
+        <view>
+          <view class="order-label">关联订单</view>
+          <view class="order-id">{{orderSummary.orderId}}</view>
+        </view>
+        <view class="order-status">{{orderSummary.statusText}}</view>
+      </view>
+      <view class="order-meta">
+        <view><text>实付金额</text><strong>¥{{orderSummary.amountText}}</strong></view>
+        <view><text>方案珠数</text><strong>{{orderSummary.materialCount}} 颗</strong></view>
+      </view>
+      <view wx:if="{{!orderSummary.eligible}}" class="eligibility-error">{{orderSummary.eligibilityText}}</view>
+    </view>
+
+    <view class="form-section">
+      <view class="section-heading"><text>01</text><view>选择服务类型</view></view>
+      <view class="type-list">
+        <view
+          wx:for="{{serviceTypes}}"
+          wx:key="key"
+          class="type-card yu-pressable {{selectedType === item.key ? 'selected' : ''}}"
+          data-key="{{item.key}}"
+          bindtap="selectType"
+        >
+          <view class="type-index">{{item.index}}</view>
+          <view class="type-copy"><view>{{item.title}}</view><text>{{item.desc}}</text></view>
+          <view class="type-check">{{selectedType === item.key ? '✓' : ''}}</view>
+        </view>
+      </view>
+    </view>
+
+    <view wx:if="{{selectedType}}" class="form-section">
+      <view class="section-heading"><text>02</text><view>选择问题原因</view></view>
+      <view class="reason-grid">
+        <view
+          wx:for="{{reasonOptions}}"
+          wx:key="key"
+          class="reason-chip yu-pressable {{selectedReason === item.key ? 'selected' : ''}}"
+          data-key="{{item.key}}"
+          bindtap="selectReason"
+        >{{item.label}}</view>
+      </view>
+    </view>
+
+    <view wx:if="{{selectedReason}}" class="form-section">
+      <view class="section-heading"><text>03</text><view>说明具体情况</view></view>
+      <view class="detail-field">
+        <textarea
+          value="{{detail}}"
+          maxlength="500"
+          auto-height="{{false}}"
+          placeholder="请描述出现问题的时间、具体表现和希望如何处理，至少 5 个字"
+          bindinput="onDetailInput"
+        ></textarea>
+        <view class="detail-count {{detailCount > 0 && detailCount < 5 ? 'warn' : ''}}">{{detailCount}} / 500</view>
+      </view>
+      <view class="evidence-note">V1 暂不在此页上传图片。需要凭证时，工作室会在审核过程中联系你补充。</view>
+    </view>
+
+    <view wx:if="{{selectedType === 'return_refund'}}" class="refund-notice">
+      <view class="notice-title">退款申请说明</view>
+      <view>提交后不会立即退款，也请不要自行寄回商品。工作室审核通过后会确认是否需要退回，并按原支付路径处理。</view>
+    </view>
+
+    <view class="agreement-row yu-pressable" bindtap="toggleAgreement">
+      <view class="agreement-box {{agreementChecked ? 'checked' : ''}}">{{agreementChecked ? '✓' : ''}}</view>
+      <view>我已确认以上信息真实，并知晓提交售后不代表退款已经成功。</view>
+    </view>
+
+    <view wx:if="{{submitError}}" class="submit-error">{{submitError}}</view>
+
+    <view class="action-spacer"></view>
+    <view class="action-bar">
+      <button
+        class="yu-button yu-button-primary submit-button"
+        disabled="{{!canSubmit || submitting}}"
+        loading="{{submitting}}"
+        bindtap="submitApplication"
+      >{{submitting ? '正在提交' : '提交售后申请'}}</button>
+    </view>
+  </block>
+</view>

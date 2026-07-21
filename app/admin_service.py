@@ -20,6 +20,7 @@ from .materials import (
     MATERIAL_CATALOG,
     clean_image_urls,
     invalidate_material_cache,
+    material_image_identity,
     material_url_from_path,
     normalize_material_image_url,
 )
@@ -38,6 +39,8 @@ from .material_knowledge import (
 from .material_options import (
     element_label,
     normalize_element_key,
+    normalize_material_params,
+    normalize_sku_physical_specs,
     public_material_field_specs,
     public_material_options,
     stable_key,
@@ -49,7 +52,7 @@ from .wechat_trade_service import WechatTradeService
 
 
 def now_iso() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    return datetime.now(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z")
 
 
 def json_text(value: Any) -> str:
@@ -73,6 +76,13 @@ ADMIN_ALLOWED_ROLES = {"admin", "operator", "viewer"}
 ADMIN_ALLOWED_STATUS = {"active", "disabled"}
 ADMIN_MAX_FAILED_LOGIN = 5
 ADMIN_LOCK_MINUTES = 15
+MATERIAL_TYPE_CODE_RE = re.compile(r"^[a-z][a-z0-9_-]{1,39}$")
+DEFAULT_MATERIAL_TYPES = (
+    ("bead", "珠子", "常规圆珠及按珠径管理的珠材", 10),
+    ("accessory", "配饰", "异形水晶、隔珠、花托、吊坠等配饰", 20),
+    ("incense", "合香珠", "历史合香珠目录", 30),
+    ("pendant", "花托/吊坠", "历史花托与吊坠目录，后续可归入配饰", 40),
+)
 MATERIAL_REQUIRED_BEAD_SIZES = tuple(range(8, 16))
 MATERIAL_OPTION_TYPE_LABELS = {
     "wish_pools": "适用愿景池",
@@ -195,10 +205,12 @@ class AdminService:
                 self._ensure_material_columns(connection)
                 self._ensure_material_knowledge_columns(connection)
                 self._ensure_community_post_columns(connection)
+                self._ensure_material_type_schema(connection)
                 if count == 0:
                     self._seed_materials(connection)
                 self._ensure_material_taxonomy_schema(connection)
                 self._sync_material_taxonomy_from_materials(connection)
+                self._seed_material_types(connection)
                 self._repair_material_code_collisions(connection)
                 self._ensure_material_option_schema(connection)
                 self._seed_material_option_items(connection)
@@ -268,6 +280,7 @@ class AdminService:
                     image_path TEXT,
                     image_url TEXT,
                     image_urls_json TEXT,
+                    physical_specs_json TEXT NOT NULL DEFAULT '{}',
                     stock INTEGER NOT NULL DEFAULT 0,
                     enabled INTEGER NOT NULL DEFAULT 1,
                     sort_order INTEGER NOT NULL DEFAULT 0,
@@ -305,6 +318,7 @@ class AdminService:
                 """
             )
             self._ensure_material_knowledge_columns(connection)
+            self._ensure_material_type_schema(connection)
             self._ensure_material_taxonomy_schema(connection)
             self._ensure_material_option_schema(connection)
             self._ensure_material_audit_schema(connection)
@@ -407,6 +421,7 @@ class AdminService:
             if count == 0:
                 self._seed_materials(connection)
             self._sync_material_taxonomy_from_materials(connection)
+            self._seed_material_types(connection)
             self._repair_material_code_collisions(connection)
             self._seed_material_option_items(connection)
             block_count = connection.execute("SELECT COUNT(*) AS c FROM content_blocks").fetchone()["c"]
@@ -605,6 +620,221 @@ class AdminService:
     def material_option_id(option_type: str, option_key: str) -> str:
         return f"opt_{stable_key(option_type, 'type')}_{stable_key(option_key, 'item')}"[:120]
 
+    def _ensure_material_type_schema(self, connection) -> None:
+        if use_mysql() and not self._force_sqlite:
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS material_types (
+                    type_code VARCHAR(40) PRIMARY KEY,
+                    name VARCHAR(160) NOT NULL,
+                    description VARCHAR(500) NOT NULL DEFAULT '',
+                    sort_order INT NOT NULL DEFAULT 0,
+                    enabled TINYINT NOT NULL DEFAULT 1,
+                    created_at VARCHAR(40) NOT NULL,
+                    updated_at VARCHAR(40) NOT NULL,
+                    INDEX idx_material_types_enabled_sort (enabled, sort_order)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """
+            )
+            return
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS material_types (
+                type_code TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                description TEXT NOT NULL DEFAULT '',
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+
+    def _seed_material_types(self, connection) -> None:
+        self._ensure_material_type_schema(connection)
+        defaults = {
+            code: {"name": name, "description": description, "sort_order": sort_order}
+            for code, name, description, sort_order in DEFAULT_MATERIAL_TYPES
+        }
+        codes = set(defaults)
+        for table in ("managed_materials", "material_taxonomy"):
+            if not self.table_exists(connection, table):
+                continue
+            rows = connection.execute(
+                f"SELECT DISTINCT top FROM {table} WHERE COALESCE(top, '') <> ''"
+            ).fetchall()
+            codes.update(str(row["top"] or "").strip() for row in rows)
+        timestamp = now_iso()
+        for index, code in enumerate(sorted(code for code in codes if code)):
+            existing = connection.execute(
+                "SELECT type_code FROM material_types WHERE type_code = ?",
+                (code,),
+            ).fetchone()
+            if existing:
+                continue
+            fallback = {"name": code, "description": "由现有材料目录迁移", "sort_order": 100 + index}
+            item = defaults.get(code, fallback)
+            connection.execute(
+                """
+                INSERT INTO material_types
+                (type_code, name, description, sort_order, enabled, created_at, updated_at)
+                VALUES (?, ?, ?, ?, 1, ?, ?)
+                """,
+                (code, item["name"], item["description"], item["sort_order"], timestamp, timestamp),
+            )
+
+    def list_material_types(
+        self,
+        include_disabled: bool = False,
+        connection: Any | None = None,
+    ) -> list[dict[str, Any]]:
+        def run(conn) -> list[dict[str, Any]]:
+            self._ensure_material_type_schema(conn)
+            self._seed_material_types(conn)
+            where = "" if include_disabled else "WHERE enabled = 1"
+            rows = conn.execute(
+                f"SELECT * FROM material_types {where} ORDER BY sort_order ASC, name ASC"
+            ).fetchall()
+            category_counts: dict[str, int] = {}
+            variety_counts: dict[str, int] = {}
+            sku_counts: dict[str, int] = {}
+            if self.table_exists(conn, "material_taxonomy"):
+                for row in conn.execute(
+                    "SELECT top, kind, COUNT(*) AS c FROM material_taxonomy GROUP BY top, kind"
+                ).fetchall():
+                    target = category_counts if row["kind"] == "category" else variety_counts
+                    target[str(row["top"] or "")] = int(row["c"] or 0)
+            if self.table_exists(conn, "managed_materials"):
+                for row in conn.execute(
+                    "SELECT top, COUNT(*) AS c FROM managed_materials GROUP BY top"
+                ).fetchall():
+                    sku_counts[str(row["top"] or "")] = int(row["c"] or 0)
+            return [
+                {
+                    "id": row["type_code"],
+                    "code": row["type_code"],
+                    "name": row["name"],
+                    "description": row["description"] or "",
+                    "sort_order": int(row["sort_order"] or 0),
+                    "enabled": bool(row["enabled"]),
+                    "category_count": category_counts.get(row["type_code"], 0),
+                    "variety_count": variety_counts.get(row["type_code"], 0),
+                    "sku_count": sku_counts.get(row["type_code"], 0),
+                }
+                for row in rows
+            ]
+
+        if connection is not None:
+            return run(connection)
+        with self.connect() as conn:
+            return run(conn)
+
+    def save_material_type(self, payload: dict[str, Any], actor: dict[str, Any] | None = None) -> dict[str, Any]:
+        name = str(payload.get("name") or "").strip()
+        if not name:
+            raise ValueError("材料类型名称不能为空")
+        existing_id = str(payload.get("id") or "").strip().lower()
+        explicit_code = str(payload.get("code") or payload.get("type_code") or "").strip().lower()
+        if existing_id and explicit_code and existing_id != explicit_code:
+            raise ValueError("材料类型编码创建后不可修改")
+        requested_code = explicit_code or existing_id
+        if not requested_code:
+            known_codes = {item[1]: item[0] for item in DEFAULT_MATERIAL_TYPES}
+            requested_code = known_codes.get(name) or stable_key(name, "type")
+        if not MATERIAL_TYPE_CODE_RE.fullmatch(requested_code):
+            raise ValueError("类型编码需以小写字母开头，只能包含小写字母、数字、下划线或短横线")
+        description = str(payload.get("description") or "").strip()
+        sort_order = int(payload.get("sort_order") or 0)
+        enabled = 1 if payload.get("enabled", True) else 0
+        timestamp = now_iso()
+        with self.connect() as connection:
+            self._ensure_material_type_schema(connection)
+            existing = connection.execute(
+                "SELECT * FROM material_types WHERE type_code = ?",
+                (requested_code,),
+            ).fetchone()
+            duplicate = connection.execute(
+                "SELECT type_code FROM material_types WHERE name = ? AND type_code <> ?",
+                (name, requested_code),
+            ).fetchone()
+            if duplicate:
+                raise ValueError(f"材料类型名称已存在：{name}")
+            before = dict(existing) if existing else None
+            if existing:
+                connection.execute(
+                    """
+                    UPDATE material_types
+                    SET name=?, description=?, sort_order=?, enabled=?, updated_at=?
+                    WHERE type_code=?
+                    """,
+                    (name, description, sort_order, enabled, timestamp, requested_code),
+                )
+            else:
+                connection.execute(
+                    """
+                    INSERT INTO material_types
+                    (type_code, name, description, sort_order, enabled, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (requested_code, name, description, sort_order, enabled, timestamp, timestamp),
+                )
+            after = {
+                "type_code": requested_code,
+                "name": name,
+                "description": description,
+                "sort_order": sort_order,
+                "enabled": enabled,
+            }
+            self.record_material_audit(
+                connection,
+                action="type_update" if before else "type_create",
+                target_type="material_type",
+                target_id=requested_code,
+                before=before,
+                after=after,
+                actor=actor,
+                summary=("更新材料类型：" if before else "新增材料类型：") + name,
+            )
+        return {
+            "id": requested_code,
+            "code": requested_code,
+            "name": name,
+            "description": description,
+            "sort_order": sort_order,
+            "enabled": bool(enabled),
+        }
+
+    def disable_material_type(self, type_code: str, actor: dict[str, Any] | None = None) -> dict[str, Any]:
+        code = str(type_code or "").strip().lower()
+        if not code:
+            raise ValueError("请选择要停用的材料类型")
+        with self.connect() as connection:
+            self._ensure_material_type_schema(connection)
+            row = connection.execute(
+                "SELECT * FROM material_types WHERE type_code = ?",
+                (code,),
+            ).fetchone()
+            if not row:
+                raise ValueError("材料类型不存在")
+            before = dict(row)
+            timestamp = now_iso()
+            connection.execute(
+                "UPDATE material_types SET enabled=0, updated_at=? WHERE type_code=?",
+                (timestamp, code),
+            )
+            self.record_material_audit(
+                connection,
+                action="type_disable",
+                target_type="material_type",
+                target_id=code,
+                before=before,
+                after={**before, "enabled": 0, "updated_at": timestamp},
+                actor=actor,
+                summary=f"停用材料类型：{before.get('name') or code}",
+            )
+        return {"disabled": code}
+
     def _ensure_material_taxonomy_schema(self, connection) -> None:
         if use_mysql() and not self._force_sqlite:
             connection.execute(
@@ -727,7 +957,7 @@ class AdminService:
                 sort_order=sort_order,
             )
             if series:
-                self._upsert_taxonomy_if_missing(
+                series_id = self._upsert_taxonomy_if_missing(
                     connection,
                     kind="series",
                     top=top,
@@ -735,13 +965,111 @@ class AdminService:
                     parent_id=category_id,
                     sort_order=sort_order,
                 )
+                series_row = connection.execute(
+                    "SELECT * FROM material_taxonomy WHERE item_id=?",
+                    (series_id,),
+                ).fetchone()
+                series_visual = self.public_taxonomy_visual(dict(series_row) if series_row else {})
+                if not series_visual.get("image_url") and not series_visual.get("image_urls"):
+                    image_path, image_url, image_urls = self._legacy_sku_series_images(
+                        connection,
+                        top=top,
+                        category=category,
+                        series=series,
+                    )
+                    if image_url or image_urls:
+                        connection.execute(
+                            """
+                            UPDATE material_taxonomy
+                            SET image_path=?, image_url=?, image_urls_json=?, updated_at=?
+                            WHERE item_id=?
+                            """,
+                            (image_path, image_url, json_text(image_urls), now_iso(), series_id),
+                        )
+                connection.execute(
+                    """
+                    UPDATE managed_materials
+                    SET image_path='', image_url='', image_urls_json='[]'
+                    WHERE top=? AND category=? AND COALESCE(NULLIF(series, ''), name, '')=?
+                      AND (
+                        COALESCE(image_path, '') <> ''
+                        OR COALESCE(image_url, '') <> ''
+                        OR COALESCE(image_urls_json, '') NOT IN ('', '[]', '{}', 'null')
+                      )
+                    """,
+                    (top, category, series),
+                )
+
+    def _legacy_sku_series_images(
+        self,
+        connection,
+        *,
+        top: str,
+        category: str,
+        series: str,
+    ) -> tuple[str, str, list[str]]:
+        rows = connection.execute(
+            """
+            SELECT image_path, image_url, image_urls_json
+            FROM managed_materials
+            WHERE top=? AND category=? AND COALESCE(NULLIF(series, ''), name, '')=?
+            ORDER BY sort_order ASC, updated_at DESC, id ASC
+            """,
+            (top, category, series),
+        ).fetchall()
+        image_path = ""
+        image_urls: list[str] = []
+        for raw in rows:
+            row = dict(raw)
+            row_path = str(row.get("image_path") or "").strip()
+            row_url = normalize_material_image_url(row.get("image_url") or "")
+            urls = clean_image_urls(row.get("image_urls_json"), row_url, row_path)
+            if not image_path and row_path:
+                image_path = row_path
+            for url in urls:
+                if url and url not in image_urls:
+                    image_urls.append(url)
+                if len(image_urls) >= 24:
+                    break
+            if len(image_urls) >= 24:
+                break
+        image_url = image_urls[0] if image_urls else material_url_from_path(image_path)
+        return image_path, image_url, image_urls
+
+    def _promote_payload_images_to_series(self, payload: dict[str, Any], connection, timestamp: str) -> None:
+        image_path = str(payload.get("image_path") or "").strip()
+        image_url = normalize_material_image_url(payload.get("thumbnail_url") or payload.get("image_url") or "")
+        image_urls = clean_image_urls(
+            payload.get("image_urls") or payload.get("image_pool") or payload.get("image_urls_json"),
+            image_url,
+            image_path,
+        )
+        if not image_url and image_urls:
+            image_url = image_urls[0]
+        if not image_path and not image_url and not image_urls:
+            return
+        series = self.get_series_taxonomy(
+            connection,
+            top=payload.get("top") or "bead",
+            category=payload.get("category") or "",
+            series=payload.get("series") or payload.get("name") or "",
+            include_disabled=True,
+        )
+        if not series:
+            raise ValueError("品种不存在，图片无法绑定到品种图库")
+        connection.execute(
+            """
+            UPDATE material_taxonomy
+            SET image_path=?, image_url=?, image_urls_json=?, updated_at=?
+            WHERE item_id=?
+            """,
+            (image_path, image_url, json_text(image_urls), timestamp, series["item_id"]),
+        )
 
     def public_taxonomy_visual(self, row: dict[str, Any]) -> dict[str, Any]:
         image_path = row.get("image_path") or ""
         image_url = normalize_material_image_url(row.get("image_url")) or material_url_from_path(image_path)
-        image_urls = clean_image_urls(row.get("image_urls_json") or row.get("image_urls"), image_url, image_path)
-        if not image_url and image_urls:
-            image_url = image_urls[0]
+        image_urls = clean_image_urls(row.get("image_urls_json") or row.get("image_urls"))
         return {
             "material_code": row.get("material_code") or "",
             "color": row.get("color") or "",
@@ -810,6 +1138,8 @@ class AdminService:
 
     def material_options_payload(self) -> dict[str, Any]:
         with self.connect() as connection:
+            self._ensure_material_type_schema(connection)
+            self._seed_material_types(connection)
             self._ensure_material_taxonomy_schema(connection)
             self._sync_material_taxonomy_from_materials(connection)
             self._ensure_material_option_schema(connection)
@@ -829,6 +1159,7 @@ class AdminService:
             option_type_specs = {item.get("key"): item for item in field_specs.get("option_types", [])}
             return {
                 **options,
+                "material_types": self.list_material_types(connection=connection, include_disabled=True),
                 "taxonomy": self.list_material_taxonomy(connection=connection, include_disabled=True),
                 "option_items": option_items,
                 "option_types": [
@@ -922,7 +1253,13 @@ class AdminService:
             raise ValueError(f"{label} 不能为空")
         return result
 
-    def canonicalize_material_payload_options(self, payload: dict[str, Any], connection) -> dict[str, Any]:
+    def canonicalize_material_payload_options(
+        self,
+        payload: dict[str, Any],
+        connection,
+        *,
+        require_primary_element: bool = True,
+    ) -> dict[str, Any]:
         lookup = self.material_option_lookup(connection)
         clean = dict(payload)
         has_energy = str(clean.get("top") or "").strip() != "pendant"
@@ -931,7 +1268,7 @@ class AdminService:
             "elements",
             lookup,
             "主五行",
-            required=True,
+            required=require_primary_element,
         )
         if "secondary_elements" in clean or "secondary_element" in clean:
             clean["secondary_elements"] = [] if not has_energy else self.canonical_material_option_list(
@@ -1015,6 +1352,7 @@ class AdminService:
         return clean
 
     def canonicalize_material_payload_taxonomy(self, payload: dict[str, Any], connection) -> dict[str, Any]:
+        self._ensure_material_type_schema(connection)
         self._ensure_material_taxonomy_schema(connection)
         clean = dict(payload)
         top = str(clean.get("top") or "bead").strip()
@@ -1024,6 +1362,12 @@ class AdminService:
             raise ValueError("分类不能为空，请先到分类/品种维护")
         if not series_name:
             raise ValueError("品种不能为空，请先到分类/品种维护")
+        material_type = connection.execute(
+            "SELECT * FROM material_types WHERE type_code=? AND enabled=1",
+            (top,),
+        ).fetchone()
+        if not material_type:
+            raise ValueError(f"材料类型未维护或已停用：{top}，请先到材料类型管理")
         category = connection.execute(
             """
             SELECT * FROM material_taxonomy
@@ -1055,6 +1399,10 @@ class AdminService:
         clean["category"] = category["name"]
         clean["series"] = series["name"]
         clean["material_code"] = material_code
+        clean["material_params"] = {
+            **(knowledge.get("material_params") or {}),
+            **(clean.get("material_params") or {}),
+        }
         clean["primary_element"] = clean.get("primary_element") or knowledge.get("primary_element") or ""
         clean["element"] = clean.get("element") or clean["primary_element"]
         if not clean.get("effects"):
@@ -1162,7 +1510,16 @@ class AdminService:
         enabled = 1 if payload.get("enabled", True) else 0
         timestamp = now_iso()
         with self.connect() as connection:
+            self._ensure_material_type_schema(connection)
             self._ensure_material_taxonomy_schema(connection)
+            material_type = connection.execute(
+                "SELECT * FROM material_types WHERE type_code = ?",
+                (top,),
+            ).fetchone()
+            if not material_type:
+                raise ValueError(f"材料类型不存在：{top}")
+            if enabled and not bool(material_type["enabled"]):
+                raise ValueError(f"材料类型已停用：{material_type['name']}")
             existing = connection.execute("SELECT * FROM material_taxonomy WHERE item_id = ?", (item_id,)).fetchone()
             before = dict(existing) if existing else None
             before_top = str((before or {}).get("top") or top).strip()
@@ -1256,6 +1613,8 @@ class AdminService:
             ).fetchone()
             if not category:
                 raise ValueError("分类不存在")
+            if enabled and not bool(category["enabled"]):
+                raise ValueError("所属分类已停用")
             top = category["top"] or str(payload.get("top") or "bead").strip()
             item_id = str(payload.get("id") or self.material_taxonomy_id("series", top, name, category_id)).strip()
             existing = connection.execute("SELECT * FROM material_taxonomy WHERE item_id = ?", (item_id,)).fetchone()
@@ -1266,17 +1625,47 @@ class AdminService:
                     "SELECT * FROM material_taxonomy WHERE item_id = ? AND kind = 'category'",
                     (before.get("parent_id") or "",),
                 ).fetchone()
-            image_path = str(payload.get("image_path") or "").strip()
-            primary_image_url = normalize_material_image_url(
-                payload.get("thumbnail_url") or payload.get("image_url") or ""
+            has_explicit_images = any(
+                key in payload
+                for key in ("image_path", "thumbnail_url", "image_url", "image_urls", "image_pool", "image_urls_json")
             )
-            image_urls = clean_image_urls(
-                payload.get("image_urls") or payload.get("image_pool") or payload.get("image_urls_json"),
-                primary_image_url,
-                image_path,
+            has_explicit_primary_image = any(
+                key in payload for key in ("image_path", "thumbnail_url", "image_url")
             )
-            if not primary_image_url and image_urls:
-                primary_image_url = image_urls[0]
+            has_explicit_gallery = any(
+                key in payload for key in ("image_urls", "image_pool", "image_urls_json")
+            )
+            if has_explicit_images:
+                image_path = (
+                    str(payload.get("image_path") or "").strip()
+                    if "image_path" in payload
+                    else str((before or {}).get("image_path") or "").strip()
+                )
+                primary_image_url = (
+                    normalize_material_image_url(
+                        payload.get("thumbnail_url") or payload.get("image_url") or ""
+                    )
+                    if has_explicit_primary_image
+                    else normalize_material_image_url((before or {}).get("image_url") or "")
+                )
+                if has_explicit_gallery:
+                    gallery_value = next(
+                        (payload[key] for key in ("image_urls", "image_pool", "image_urls_json") if key in payload),
+                        [],
+                    )
+                    image_urls = clean_image_urls(gallery_value)
+                else:
+                    image_urls = clean_image_urls((before or {}).get("image_urls_json"))
+            else:
+                image_path = str((before or {}).get("image_path") or "").strip()
+                primary_image_url = normalize_material_image_url((before or {}).get("image_url") or "")
+                image_urls = clean_image_urls((before or {}).get("image_urls_json"))
+            if top == "accessory" and primary_image_url:
+                primary_identity = material_image_identity(primary_image_url)
+                image_urls = [
+                    url for url in image_urls
+                    if material_image_identity(url) != primary_identity
+                ]
             material_code = str(payload.get("material_code") or (before or {}).get("material_code") or "").strip()
             if not material_code:
                 material_code = material_code_from_payload(
@@ -1335,7 +1724,7 @@ class AdminService:
                 knowledge_payload,
                 {"top": top, "category": category["name"], "series": name, "name": name, "material_code": material_code},
                 connection=connection,
-                force_update=has_explicit_knowledge(knowledge_payload),
+                force_update=has_explicit_knowledge(payload),
             )
             primary_element = "" if top == "pendant" else (
                 knowledge.get("primary_element") or normalize_element_key(payload.get("primary_element")) or ""
@@ -1345,6 +1734,17 @@ class AdminService:
             old_category = (dict(before_category).get("name") if before_category else category["name"]) if before else category["name"]
             old_series = (before or {}).get("name") or name
             old_top = (before or {}).get("top") or top
+            matching_sku_count = int(
+                connection.execute(
+                    """
+                    SELECT COUNT(*) AS total
+                    FROM managed_materials
+                    WHERE top=? AND category=? AND COALESCE(NULLIF(series, ''), name, '')=?
+                    """,
+                    (old_top, old_category, old_series),
+                ).fetchone()["total"]
+                or 0
+            )
             connection.execute(
                 """
                     UPDATE managed_materials
@@ -1352,9 +1752,9 @@ class AdminService:
                         name=CASE WHEN COALESCE(name, '') = '' OR name = ? THEN ? ELSE name END,
                         element=CASE WHEN ? = 'pendant' THEN '' WHEN ? <> '' THEN ? ELSE element END,
                         effect=CASE WHEN ? <> '' THEN ? ELSE effect END,
-                    color=CASE WHEN ? <> '' THEN ? ELSE color END,
-                    shine=CASE WHEN ? <> '' THEN ? ELSE shine END,
-                    updated_at=?
+                        color=CASE WHEN ? <> '' THEN ? ELSE color END,
+                        shine=CASE WHEN ? <> '' THEN ? ELSE shine END,
+                        image_path='', image_url='', image_urls_json='[]', updated_at=?
                 WHERE top=? AND category=? AND COALESCE(NULLIF(series, ''), name, '')=?
                 """,
                 (
@@ -1369,6 +1769,24 @@ class AdminService:
                     old_top, old_category, old_series,
                 ),
             )
+            remaining_sku_images = int(
+                connection.execute(
+                    """
+                    SELECT COUNT(*) AS total
+                    FROM managed_materials
+                    WHERE top=? AND category=? AND COALESCE(NULLIF(series, ''), name, '')=?
+                      AND (
+                        COALESCE(image_path, '') <> ''
+                        OR COALESCE(image_url, '') <> ''
+                        OR COALESCE(image_urls_json, '') NOT IN ('', '[]', '{}', 'null')
+                      )
+                    """,
+                    (top, category["name"], name),
+                ).fetchone()["total"]
+                or 0
+            )
+            if remaining_sku_images:
+                raise ValueError("SKU 图片清理失败，品种图片未能保持唯一数据源")
             after = {
                 "item_id": item_id,
                 "parent_id": category_id,
@@ -1394,6 +1812,7 @@ class AdminService:
                 actor=actor,
                 summary=("更新材料品种：" if before else "新增材料品种：") + name,
             )
+        invalidate_material_cache()
         return {
             "id": item_id,
             "category_id": category_id,
@@ -1404,8 +1823,91 @@ class AdminService:
             "shine": shine,
             "image_url": primary_image_url,
             "image_urls": image_urls,
+            "synced_sku_count": matching_sku_count,
+            "cleared_sku_image_count": matching_sku_count,
+            "image_source": "series",
             "sort_order": sort_order,
             "enabled": bool(enabled),
+        }
+
+    def bind_material_series_images(
+        self,
+        item_id: str,
+        image_urls: list[str],
+        *,
+        mode: str = "replace",
+        sync_sku_images: bool = True,
+        actor: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        # The asset lab owns only the gallery.  The profile page is the sole
+        # place where an operator may set the independent primary image.
+        if (actor or {}).get("role") == "viewer":
+            raise PermissionError("只读账号不能修改材料素材")
+        clean_id = str(item_id or "").strip()
+        if not clean_id:
+            raise ValueError("请选择要绑定的材料品种")
+        if mode not in {"replace", "append"}:
+            raise ValueError("不支持的图片绑定方式")
+        normalized_urls = [normalize_material_image_url(value) for value in image_urls]
+        incoming = list(dict.fromkeys(value for value in normalized_urls if value))
+        if not incoming:
+            raise ValueError("没有可绑定的材料图片")
+        if len(incoming) > 24:
+            raise ValueError("单次最多绑定 24 张材料图片")
+
+        with self.connect() as connection:
+            self._ensure_material_taxonomy_schema(connection)
+            row = connection.execute(
+                """
+                SELECT s.*, c.name AS category_name
+                FROM material_taxonomy s
+                JOIN material_taxonomy c ON c.item_id=s.parent_id
+                WHERE s.item_id=? AND s.kind='series' AND c.kind='category'
+                """,
+                (clean_id,),
+            ).fetchone()
+            if not row:
+                raise ValueError("材料品种不存在")
+            item = dict(row)
+            current = clean_image_urls(item.get("image_urls_json"))
+            final_urls = list(dict.fromkeys([*current, *incoming])) if mode == "append" else incoming
+            if item.get("top") == "accessory":
+                primary_identity = material_image_identity(item.get("image_url") or "")
+                final_urls = [
+                    url for url in final_urls
+                    if material_image_identity(url) != primary_identity
+                ]
+            if len(final_urls) > 24:
+                raise ValueError("品种图库最多保留 24 张图片")
+            timestamp = now_iso()
+            connection.execute(
+                "UPDATE material_taxonomy SET image_urls_json=?, updated_at=? WHERE item_id=?",
+                (json_text(final_urls), timestamp, item["item_id"]),
+            )
+            self.record_material_audit(
+                connection,
+                action="series_gallery_update",
+                target_type="material_taxonomy",
+                target_id=item["item_id"],
+                before={"image_urls_json": item.get("image_urls_json") or "[]"},
+                after={"image_urls_json": json_text(final_urls)},
+                actor=actor,
+                summary=f"更新材料品种图库：{item['name']}",
+            )
+        # This is deliberately outside the transaction: the public material
+        # endpoint must not retain a pre-update gallery in its process cache.
+        invalidate_material_cache()
+        return {
+            "id": item["item_id"],
+            "category_id": item["parent_id"],
+            "top": item.get("top") or "",
+            "name": item["name"],
+            "image_url": normalize_material_image_url(item.get("image_url") or ""),
+            "image_urls": final_urls,
+            "mode": mode,
+            "bound_count": len(final_urls),
+            "image_source": "series",
+            "synced_sku_count": 0,
         }
 
     def disable_material_taxonomy_item(self, item_id: str, actor: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -3321,8 +3823,7 @@ class AdminService:
                     """
                     SELECT COUNT(*) AS total,
                            COALESCE(SUM(CASE WHEN payment_status = 'paid' THEN total_amount ELSE 0 END), 0) AS revenue,
-                           SUM(CASE WHEN status = 'pending_ship' THEN 1 ELSE 0 END) AS pending_ship,
-                           SUM(CASE WHEN status IN ('after_sale', 'refund_requested') THEN 1 ELSE 0 END) AS after_sale
+                           SUM(CASE WHEN status = 'pending_ship' THEN 1 ELSE 0 END) AS pending_ship
                     FROM orders
                     """
                 ).fetchone()
@@ -3350,10 +3851,30 @@ class AdminService:
                     """
                 ).fetchall()
             else:
-                order_row = {"total": 0, "revenue": 0, "pending_ship": 0, "after_sale": 0}
+                order_row = {"total": 0, "revenue": 0, "pending_ship": 0}
                 today_order_row = {"total": 0, "revenue": 0}
                 yesterday_order_row = {"revenue": 0}
                 recent_orders = []
+            if self.table_exists(connection, "after_sale_cases"):
+                after_sale_row = connection.execute(
+                    """
+                    SELECT COUNT(*) AS total
+                    FROM after_sale_cases
+                    WHERE status IN ('requested', 'approved', 'awaiting_return', 'returning',
+                                     'service_processing', 'refund_pending',
+                                     'refund_submitting', 'refunding')
+                    """
+                ).fetchone()
+                after_sale_count = after_sale_row["total"] or 0
+            else:
+                after_sale_count = 0
+            if self.table_exists(connection, "payment_webhook_events"):
+                compensation_count = connection.execute(
+                    "SELECT COUNT(*) AS total FROM payment_webhook_events "
+                    "WHERE processing_status = 'compensation_required'"
+                ).fetchone()["total"] or 0
+            else:
+                compensation_count = 0
             if self.table_exists(connection, "users"):
                 user_row = connection.execute(
                     """
@@ -3400,7 +3921,8 @@ class AdminService:
                 "orders": order_row["total"] or 0,
                 "revenue": round(float(order_row["revenue"] or 0), 2),
                 "pending_ship": order_row["pending_ship"] or 0,
-                "after_sale": order_row["after_sale"] or 0,
+                "after_sale": after_sale_count,
+                "payment_compensations": compensation_count,
                 "metric_deltas": {
                     "users": {"today": user_row["today"] or 0},
                     "orders": {"today": today_order_row["total"] or 0},
@@ -3944,9 +4466,9 @@ class AdminService:
                 series=row.get("series") or row.get("name") or "",
             )
         series_visual = self.public_taxonomy_visual(series_row or {}) if series_row else {}
-        image_path = series_visual.get("image_path") or row.get("image_path") or ""
-        image_url = series_visual.get("image_url") or normalize_material_image_url(row.get("image_url")) or material_url_from_path(image_path)
-        image_urls = series_visual.get("image_urls") or clean_image_urls(row.get("image_urls_json") or row.get("image_urls"), image_url, image_path)
+        image_path = series_visual.get("image_path") or ""
+        image_url = series_visual.get("image_url") or ""
+        image_urls = series_visual.get("image_urls") or []
         if not image_url and image_urls:
             image_url = image_urls[0]
         material_code = row.get("material_code") or series_visual.get("material_code") or material_code_from_payload(row)
@@ -3967,11 +4489,31 @@ class AdminService:
             "grade": row.get("grade") or "",
             "color": series_visual.get("color") or row.get("color") or "",
             "shine": series_visual.get("shine") or row.get("shine") or "",
+            "image_path": image_path,
             "image_url": image_url,
             "image_urls": image_urls,
+            "image_urls_json": json_text(image_urls),
             "image_pool": image_urls,
         }
         result = enrich_material_with_knowledge(material, connection)
+        sku_physical_specs = normalize_sku_physical_specs(
+            json_value(row.get("physical_specs_json"), {})
+        )
+        merged_material_params = normalize_material_params(
+            {
+                **((result.get("visual") or {}).get("material_params") or {}),
+                **sku_physical_specs,
+            }
+        )
+        result["material_params"] = merged_material_params
+        result["physical_specs"] = sku_physical_specs
+        result["visual"] = {
+            **(result.get("visual") or {}),
+            "material_params": merged_material_params,
+            "image_source": "series",
+            "sku_image_url": "",
+            "sku_image_urls": [],
+        }
         cost_price = float(row.get("cost_price") or 0)
         price = float((result.get("sku") or {}).get("price_per_bead") or display_price)
         ops = {
@@ -4029,6 +4571,15 @@ class AdminService:
             add("match_rules_missing", "缺少搭配规则", "warning", "rules")
         if not params.get("bead_shape"):
             add("bead_shape_missing", "缺少珠体形制", "warning", "material")
+        elif params.get("bead_shape") not in {"round", "faceted_round"} and not all(
+            float(params.get(key) or 0) > 0
+            for key in ("string_axis_width_mm", "body_width_mm", "body_height_mm")
+        ):
+            add("physical_specs_missing", "异形实物规格不完整", "critical", "material")
+        if params.get("placement_mode") == "attached_side" and float(
+            params.get("compatible_bead_size_mm") or 0
+        ) <= 0:
+            add("compatible_bead_size_missing", "包珠隔片缺少适配珠径", "critical", "material")
         if not params.get("surface_finish"):
             add("surface_finish_missing", "缺少表面工艺", "warning", "material")
         if not params.get("transparency_level"):
@@ -4196,26 +4747,19 @@ class AdminService:
         carrier_code: str = "shunfeng",
         phone_tail: str = "",
     ) -> dict[str, Any]:
-        order = self.get_order(order_id)
-        if order["payment_status"] != "paid":
-            raise ValueError("订单未支付，不能发货")
-        if not tracking_no.strip():
-            raise ValueError("请填写快递单号")
+        from .order_service import OrderService
+
+        order_service = OrderService(self.db_path)
+        order = order_service.ship_paid_order(
+            order_id,
+            carrier=carrier,
+            tracking_no=tracking_no,
+            carrier_code=carrier_code,
+            phone_tail=phone_tail,
+            source="admin",
+        )
+        logistics = dict(order.get("logistics") or {})
         timestamp = now_iso()
-        logistics = {
-            "carrier": carrier.strip() or "顺丰速运",
-            "carrier_code": carrier_code.strip().lower() or "shunfeng",
-            "tracking_no": tracking_no.strip(),
-            "phone_tail": phone_tail.strip(),
-            "status": "in_transit",
-            "status_text": "运输中",
-            "updated_at": timestamp,
-            "source": "admin",
-            "traces": [
-                {"time": timestamp, "location": "宇涧工作室", "desc": "商家已打包，待快递揽收"},
-                {"time": timestamp, "location": "宇涧工作室", "desc": "商家已填写发货信息，等待物流公司更新轨迹"}
-            ],
-        }
         if kuaidi100_subscribe_enabled():
             logistics.update(
                 {
@@ -4229,30 +4773,7 @@ class AdminService:
         except Exception as exc:
             wechat_shipping = {"synced": False, "error": str(exc)}
         logistics["wechat_shipping"] = wechat_shipping
-        history = list(order.get("status_history") or [])
-        history.append(
-            {
-                "status": "shipped",
-                "label": "后台已发货"
-                + ("，发货信息已同步微信" if wechat_shipping.get("synced") else ""),
-                "time": timestamp,
-            }
-        )
-        with self.connect() as connection:
-            connection.execute(
-                """
-                UPDATE orders
-                SET status = 'shipped', logistics_json = ?, status_history_json = ?,
-                    logistics_signed_at = NULL, auto_complete_at = NULL, updated_at = ?
-                WHERE order_id = ?
-                """,
-                (
-                    json.dumps(logistics, ensure_ascii=False),
-                    json.dumps(history, ensure_ascii=False),
-                    timestamp,
-                    order_id,
-                ),
-            )
+        order_service.update_logistics(order_id, logistics)
         return self.get_order(order_id)
 
     def wechat_trade_status(self) -> dict[str, Any]:
@@ -4262,48 +4783,16 @@ class AdminService:
         return self.wechat_trade.configure_order_detail_path(path or None)
 
     def sync_order_shipping_to_wechat(self, order_id: str) -> dict[str, Any]:
+        from .order_service import OrderService
+
         order = self.get_order(order_id)
         logistics = order.get("logistics") or {}
         if not logistics.get("tracking_no"):
             raise ValueError("订单还没有快递单号，无法同步微信发货信息")
         result = self.wechat_trade.upload_shipping(order, logistics)
         logistics["wechat_shipping"] = result
-        with self.connect() as connection:
-            connection.execute(
-                "UPDATE orders SET logistics_json = ?, updated_at = ? WHERE order_id = ?",
-                (json.dumps(logistics, ensure_ascii=False), now_iso(), order_id),
-            )
+        OrderService(self.db_path).update_logistics(order_id, logistics)
         return {"order": self.get_order(order_id), "wechat_shipping": result}
-
-    def update_order_status(self, order_id: str, status: str, note: str = "") -> dict[str, Any]:
-        if status == "completed":
-            raise ValueError("已完成状态只能由用户确认收货，或在快递签收满7天后自动进入")
-        allowed = {
-            "pending_payment", "pending_ship", "shipped",
-            "after_sale", "refund_requested", "refunded", "closed",
-        }
-        if status not in allowed:
-            raise ValueError("不支持的订单状态")
-        order = self.get_order(order_id)
-        timestamp = now_iso()
-        history = list(order.get("status_history") or [])
-        history.append(
-            {
-                "status": status,
-                "label": note.strip() or f"后台调整为{self.order_status_text(status)}",
-                "time": timestamp,
-            }
-        )
-        payment_status = "refunded" if status == "refunded" else order["payment_status"]
-        with self.connect() as connection:
-            connection.execute(
-                """
-                UPDATE orders SET status = ?, payment_status = ?, status_history_json = ?, updated_at = ?
-                WHERE order_id = ?
-                """,
-                (status, payment_status, json.dumps(history, ensure_ascii=False), timestamp, order_id),
-            )
-        return self.get_order(order_id)
 
     def public_order(self, row: dict[str, Any]) -> dict[str, Any]:
         total_fee = int(row.get("total_fee") or 0)
@@ -4345,7 +4834,6 @@ class AdminService:
             "pending_ship": "待发货",
             "shipped": "待收货",
             "completed": "已完成",
-            "after_sale": "售后中",
             "refund_requested": "退款中",
             "refunded": "已退款",
             "closed": "已关闭",
@@ -4833,7 +5321,8 @@ class AdminService:
             group_rows = connection.execute(
                 f"""
                 SELECT * FROM ({grouped_sql}) material_groups
-                ORDER BY {order_by} {direction}, updated_at_value DESC
+                ORDER BY {order_by} {direction}, updated_at_value DESC,
+                         group_top ASC, group_category ASC, group_series ASC, group_material_code ASC
                 LIMIT ? OFFSET ?
                 """,
                 [*params, page_size, offset],
@@ -4864,7 +5353,7 @@ class AdminService:
                 f"""
                 SELECT * FROM managed_materials
                 WHERE {' AND '.join(sku_where)}
-                ORDER BY sort_order ASC, updated_at DESC
+                ORDER BY sort_order ASC, updated_at DESC, size ASC, id ASC
                 """,
                 [*row_params, *params],
             ).fetchall()
@@ -4896,12 +5385,28 @@ class AdminService:
         item_id = material_id or payload.get("id") or self.generate_material_id(payload)
         with self.connect() as connection:
             self._ensure_material_taxonomy_schema(connection)
-            payload = self.canonicalize_material_payload_taxonomy({**payload, "id": item_id}, connection)
-            payload = self.canonicalize_material_payload_options(payload, connection)
-            item = self.normalize_material(payload)
-            item["skuId"] = self.unique_material_sku(connection, item["skuId"], item_id)
             existing = connection.execute("SELECT * FROM managed_materials WHERE id = ?", (item_id,)).fetchone()
             before = dict(existing) if existing else None
+            payload = self.canonicalize_material_payload_taxonomy({**payload, "id": item_id}, connection)
+            same_taxonomy = bool(before) and all(
+                str(payload.get(field) or "").strip() == str(before.get(field) or "").strip()
+                for field in ("top", "category", "series", "material_code")
+            )
+            if same_taxonomy:
+                existing_element = str(before.get("element") or "").strip()
+                if not (payload.get("primary_element") or payload.get("element")) and existing_element:
+                    payload["primary_element"] = existing_element
+                    payload["element"] = existing_element
+                if not (payload.get("effects") or payload.get("effect")) and before.get("effect"):
+                    payload["effect"] = before["effect"]
+            self._promote_payload_images_to_series(payload, connection, timestamp)
+            payload = self.canonicalize_material_payload_options(
+                payload,
+                connection,
+                require_primary_element=False,
+            )
+            item = self.normalize_material(payload)
+            item["skuId"] = self.unique_material_sku(connection, item["skuId"], item_id)
             if existing:
                 reserved_stock = int(dict(existing).get("reserved_stock") or 0)
                 if int(item["stock"]) < reserved_stock:
@@ -4911,7 +5416,7 @@ class AdminService:
                     UPDATE managed_materials SET
                     skuId=?, top=?, category=?, series=?, material_code=?, grade=?, name=?, effect=?, element=?, price=?, price_cents=?, size=?, weight=?,
                     cost_price=?, safety_stock=?, supplier_name=?, purchase_note=?,
-                    color=?, shine=?, image_path=?, image_url=?, image_urls_json=?, stock=?, enabled=?, sort_order=?, updated_at=?
+                    color=?, shine=?, image_path=?, image_url=?, image_urls_json=?, physical_specs_json=?, stock=?, enabled=?, sort_order=?, updated_at=?
                     WHERE id=? AND reserved_stock <= ?
                     """,
                     (
@@ -4919,7 +5424,7 @@ class AdminService:
                         item["name"], item["effect"], item["element"],
                         item["price"], item["price_cents"], item["size"], item["weight"], item["cost_price"], item["safety_stock"],
                         item["supplier_name"], item["purchase_note"], item["color"], item["shine"],
-                        item.get("image_path", ""), item.get("image_url", ""), item["image_urls_json"], item["stock"], item["enabled"],
+                        item.get("image_path", ""), item.get("image_url", ""), item["image_urls_json"], item["physical_specs_json"], item["stock"], item["enabled"],
                         item["sort_order"], timestamp, item_id, item["stock"],
                     ),
                 )
@@ -4938,21 +5443,29 @@ class AdminService:
                     """
                     INSERT INTO managed_materials
                     (id, skuId, top, category, series, material_code, grade, name, effect, element, price, price_cents, size, weight, color, shine,
-                     cost_price, safety_stock, supplier_name, purchase_note, image_path, image_url, image_urls_json, stock, enabled,
+                     cost_price, safety_stock, supplier_name, purchase_note, image_path, image_url, image_urls_json, physical_specs_json, stock, enabled,
                      sort_order, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         item["id"], item["skuId"], item["top"], item["category"], item["series"], item["material_code"], item["grade"],
                         item["name"], item["effect"],
                         item["element"], item["price"], item["price_cents"], item["size"], item["weight"], item["color"], item["shine"],
                         item["cost_price"], item["safety_stock"], item["supplier_name"], item["purchase_note"],
-                        item.get("image_path", ""), item.get("image_url", ""), item["image_urls_json"], item["stock"], item["enabled"],
+                        item.get("image_path", ""), item.get("image_url", ""), item["image_urls_json"], item["physical_specs_json"], item["stock"], item["enabled"],
                         item["sort_order"], timestamp, timestamp,
                     ),
                 )
+            existing_knowledge = fetch_knowledge_map([item["material_code"]], connection).get(item["material_code"]) or {}
+            knowledge_payload = {
+                **payload,
+                "material_params": {
+                    **(existing_knowledge.get("material_params") or {}),
+                    **(payload.get("material_params") or {}),
+                },
+            }
             upsert_material_knowledge(
-                payload,
+                knowledge_payload,
                 item,
                 connection=connection,
                 force_update=has_explicit_knowledge(payload),
@@ -5042,21 +5555,10 @@ class AdminService:
         if not effects:
             effects = knowledge.get("effects") or []
         effect_text = str(payload.get("effect") or (effects[0] if effects else "")).strip()
-        if has_energy and not primary_element:
-            raise ValueError("请先在品种维护里设置主五行")
-        if not effect_text:
-            raise ValueError("请先在品种维护里设置核心功效")
-        image_path = str(payload.get("image_path") or "").strip()
-        primary_image_url = normalize_material_image_url(
-            payload.get("thumbnail_url") or payload.get("image_url") or ""
-        )
-        image_urls = clean_image_urls(
-            payload.get("image_urls") or payload.get("image_pool") or payload.get("image_urls_json"),
-            primary_image_url,
-            image_path,
-        )
-        if not primary_image_url and image_urls:
-            primary_image_url = image_urls[0]
+        # Images belong to the series. SKU rows only store commercial and physical specifications.
+        image_path = ""
+        primary_image_url = ""
+        image_urls: list[str] = []
         stock = max(0, int(float(payload.get("stock") or 0)))
         enabled = 1 if payload.get("enabled", True) and stock > 0 else 0
         raw_sku_id = str(payload.get("skuId") or "").strip()
@@ -5090,6 +5592,12 @@ class AdminService:
             "image_url": primary_image_url,
             "image_urls": image_urls,
             "image_urls_json": json_text(image_urls),
+            "physical_specs": normalize_sku_physical_specs(
+                payload.get("physical_specs") or payload.get("physical_specs_json")
+            ),
+            "physical_specs_json": json_text(
+                normalize_sku_physical_specs(payload.get("physical_specs") or payload.get("physical_specs_json"))
+            ),
             "stock": stock,
             "enabled": enabled,
             "sort_order": int(payload.get("sort_order") or 0),

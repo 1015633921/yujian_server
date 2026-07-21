@@ -26,7 +26,7 @@ services:
       WECHAT_PAY_TEST_MODE: "false"
       REPORT_VERSIONING_V2_ENABLED: "false"
       INVENTORY_RESERVATION_TTL_SECONDS: "900"
-      DIY_PUBLIC_SHARE_ENABLED: "false"
+      DIY_PUBLIC_SHARE_ENABLED: "true"
       REMOTE_AVATAR_FETCH_ENABLED: "false"
       LOGISTICS_SYNC_ENABLED: "false"
       KUAIDI100_SUBSCRIBE_ENABLED: "${KUAIDI100_SUBSCRIBE_ENABLED:-false}"
@@ -105,11 +105,9 @@ services:
       RELEASE_VERSION: "${RELEASE_VERSION:-}"
       DATABASE_BACKEND: mysql
       ALLOW_RUNTIME_SCHEMA_MUTATION: "false"
-      COMMERCE_CHECKOUT_ENABLED: "false"
-      WECHAT_PAYMENT_ENABLED: "false"
       REPORT_VERSIONING_V2_ENABLED: "false"
       INVENTORY_RESERVATION_TTL_SECONDS: "900"
-      DIY_PUBLIC_SHARE_ENABLED: "false"
+      DIY_PUBLIC_SHARE_ENABLED: "true"
       REMOTE_AVATAR_FETCH_ENABLED: "false"
       LOGISTICS_SYNC_ENABLED: "false"
       KUAIDI100_SUBSCRIBE_ENABLED: "false"
@@ -161,6 +159,42 @@ services:
       LOGISTICS_SYNC_LEASE_SECONDS: "${LOGISTICS_SYNC_LEASE_SECONDS:-3600}"
       LOGISTICS_SYNC_MAX_ATTEMPTS: "${LOGISTICS_SYNC_MAX_ATTEMPTS:-3}"
       LOGISTICS_SYNC_BATCH_SIZE: "${LOGISTICS_SYNC_BATCH_SIZE:-50}"
+    networks:
+      - default
+      - backend
+    depends_on:
+      mysql:
+        condition: service_healthy
+    mem_limit: 256m
+
+  commerce-worker:
+    build:
+      context: .
+      args:
+        RELEASE_VERSION: "${RELEASE_VERSION:-dev}"
+        VCS_REF: "${VCS_REF:-unknown}"
+    container_name: yujian-commerce-worker
+    restart: unless-stopped
+    command: ["python", "-m", "app.commerce_worker"]
+    volumes:
+      - ./data:/app/data
+      - ./certs:/opt/yujian_server/certs:ro
+    env_file:
+      - .env
+    environment:
+      TZ: Asia/Shanghai
+      APP_ENV: production
+      SERVICE_NAME: yujian-commerce-worker
+      RELEASE_VERSION: "${RELEASE_VERSION:-}"
+      DATABASE_BACKEND: mysql
+      ALLOW_RUNTIME_SCHEMA_MUTATION: "false"
+      COMMERCE_CHECKOUT_ENABLED: "${COMMERCE_CHECKOUT_ENABLED:-false}"
+      WECHAT_PAYMENT_ENABLED: "${WECHAT_PAYMENT_ENABLED:-false}"
+      WECHAT_PAY_TEST_MODE: "false"
+      COMMERCE_MAINTENANCE_ENABLED: "${COMMERCE_MAINTENANCE_ENABLED:-false}"
+      COMMERCE_MAINTENANCE_INTERVAL_SECONDS: "${COMMERCE_MAINTENANCE_INTERVAL_SECONDS:-300}"
+      COMMERCE_MAINTENANCE_LEASE_SECONDS: "${COMMERCE_MAINTENANCE_LEASE_SECONDS:-900}"
+      COMMERCE_MAINTENANCE_BATCH_SIZE: "${COMMERCE_MAINTENANCE_BATCH_SIZE:-100}"
     networks:
       - default
       - backend

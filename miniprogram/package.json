@@ -10,9 +10,12 @@
     "env:test": "node ../scripts/select_miniprogram_env.js test",
     "env:prod": "node ../scripts/select_miniprogram_env.js prod",
     "env:check": "node ../scripts/check_miniprogram_env.js",
+    "assets:verify:test": "python3 ../scripts/miniprogram_assets.py verify test",
+    "assets:verify:prod": "python3 ../scripts/miniprogram_assets.py verify prod",
     "check:syntax": "node ../scripts/check_miniprogram_syntax.js",
+    "check:package-size": "node ../scripts/check_miniprogram_package_size.js",
     "test": "node --test ../tests/js/*.test.js",
-    "build:check": "npm run env:check && npm run check:syntax"
+    "build:check": "npm run env:check && npm run check:syntax && npm run check:package-size"
   },
   "dependencies": {}
 }

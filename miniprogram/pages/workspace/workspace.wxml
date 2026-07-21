@@ -43,7 +43,7 @@
         ></image>
         <view class="bracelet-string {{braceletStringClass}}" style="{{stringStyle}}"></view>
         <canvas
-          wx:if="{{useCanvasRenderer && workspaceCanvasVisible}}"
+          wx:if="{{workspaceCanvasVisible}}"
           id="braceletCanvas"
           class="bracelet-canvas"
           type="2d"
@@ -54,61 +54,48 @@
           catchtouchcancel="onBraceletCanvasTouchEnd"
         ></canvas>
         <view
-          wx:if="{{useCanvasRenderer && workspaceCanvasVisible}}"
+          wx:if="{{workspaceCanvasVisible && !canvasRenderError}}"
           class="bracelet-touch-layer"
           catchtouchstart="onBraceletCanvasTouchStart"
           catchtouchmove="onBraceletCanvasTouchMove"
           catchtouchend="onBraceletCanvasTouchEnd"
           catchtouchcancel="onBraceletCanvasTouchEnd"
         ></view>
+        <view wx:if="{{canvasRenderError}}" class="canvas-error-state">
+          <view class="canvas-error-title">工作台画布加载失败</view>
+          <view class="canvas-error-subtitle">请重新加载后继续设计</view>
+          <button class="canvas-error-retry" bindtap="retryCanvasRenderer">重新加载</button>
+        </view>
         <view class="completion-watermark {{completionWatermarkClass}}">
           <view class="studio-compass">✦</view>
           <view class="completion-sub"></view>
-        </view>
-        <view
-          wx:if="{{!useCanvasRenderer}}"
-          wx:for="{{selectedItems}}"
-          wx:key="index"
-          class="circle-bead {{item.className}}"
-          style="{{item.style}}"
-          data-index="{{index}}"
-          bindtap="selectBead"
-          bindlongpress="removeItem"
-          catchtouchstart="onBeadTouchStart"
-          catchtouchmove="onBeadTouchMove"
-          catchtouchend="onBeadTouchEnd"
-          catchtouchcancel="onBeadTouchEnd"
-        >
-          <view class="circle-bead-hit"></view>
-          <image wx:if="{{item.image_url}}" class="circle-bead-image" src="{{item.image_url}}" mode="aspectFit" data-id="{{item.id}}" binderror="onMaterialImageError"></image>
-          <view wx:else class="bead-glow"></view>
         </view>
       </view>
     </view>
 
     <view class="plate-tool plate-tool-left-one {{canUndo ? '' : 'disabled'}}" catchtap="undo" hover-class="plate-tool-press" aria-role="button" aria-label="撤回">
-      <image class="plate-tool-icon-image plate-tool-icon-image-undo" src="/images/workspace-icons/workspace-undo.png" mode="aspectFit"></image>
+      <image class="plate-tool-icon-image plate-tool-icon-image-undo" src="{{workspaceIcons.undo}}" mode="aspectFit"></image>
     </view>
     <view class="plate-tool plate-tool-left-two" catchtap="openWristSetting" hover-class="plate-tool-press" aria-role="button" aria-label="调整腕围">
-      <image class="plate-tool-icon-image plate-tool-icon-image-wrist" src="/images/workspace-icons/workspace-wrist.png" mode="aspectFit"></image>
+      <image class="plate-tool-icon-image plate-tool-icon-image-wrist" src="{{workspaceIcons.wrist}}" mode="aspectFit"></image>
       <view class="plate-tool-label">腕围{{wristSize}}cm</view>
     </view>
     <view class="plate-tool plate-tool-share {{sharingDesign ? 'disabled' : ''}}" catchtap="prepareShareDesign" hover-class="plate-tool-press" aria-role="button" aria-label="分享方案">
-      <image class="plate-share-button-image yu-share-button-image" src="/images/workspace-icons/share-button-gold.png" mode="aspectFit"></image>
+      <image class="plate-share-button-image yu-share-button-image" src="{{workspaceIcons.share}}" mode="aspectFit"></image>
     </view>
 
     <view class="plate-tool plate-tool-right-one plate-tool-save" catchtap="saveDraft" hover-class="plate-tool-press" aria-role="button" aria-label="保存方案">
-      <image class="plate-tool-icon-image plate-tool-icon-image-save" src="/images/workspace-icons/workspace-save-download.png" mode="aspectFit"></image>
+      <image class="plate-tool-icon-image plate-tool-icon-image-save" src="{{workspaceIcons.save}}" mode="aspectFit"></image>
     </view>
     <view class="plate-tool plate-tool-right-two {{showEnergyModal ? 'active' : ''}}" catchtap="toggleEnergyPanel" hover-class="plate-tool-press" aria-role="button" aria-label="五行图">
-      <image class="plate-tool-icon plate-tool-icon-image plate-tool-icon-image-energy" src="/images/workspace-icons/workspace-energy-five-elements.png" mode="aspectFit"></image>
+      <image class="plate-tool-icon plate-tool-icon-image plate-tool-icon-image-energy" src="{{workspaceIcons.energy}}" mode="aspectFit"></image>
     </view>
     <view class="plate-tool plate-tool-right-three danger" catchtap="confirmClearDesign" hover-class="plate-tool-press" aria-role="button" aria-label="清空">
-      <image class="plate-tool-icon plate-tool-icon-image plate-tool-icon-image-clear" src="/images/workspace-icons/workspace-clear-pastel.png" mode="aspectFit"></image>
+      <image class="plate-tool-icon plate-tool-icon-image plate-tool-icon-image-clear" src="{{workspaceIcons.clear}}" mode="aspectFit"></image>
     </view>
 
     <view class="plate-random-btn {{shuffleButtonClass}}" catchtap="toggleStringMode" hover-class="plate-random-press" aria-role="button" aria-label="随机成串">
-      <image class="plate-random-icon-image" src="/images/workspace-icons/workspace-string-dice.png" mode="aspectFit"></image>
+      <image class="plate-random-icon-image" src="{{workspaceIcons.string}}" mode="aspectFit"></image>
       <view class="plate-random-text">{{randomTitle}}</view>
     </view>
 
@@ -127,22 +114,27 @@
             <text class="bead-info-value">{{selectedBeadInfo.priceText}}</text>
           </view>
         </view>
+        <view wx:if="{{selectedBeadInfo.capItems.length}}" class="bead-cap-list">
+          <view wx:for="{{selectedBeadInfo.capItems}}" wx:key="side" class="bead-cap-item">
+            <view class="bead-cap-copy">
+              <text class="bead-cap-side">{{item.sideLabel}}</text>
+              <text class="bead-cap-name">{{item.name}}</text>
+              <text class="bead-cap-price">{{item.priceText}}</text>
+            </view>
+            <view class="bead-cap-remove" data-side="{{item.side}}" catchtap="removeSelectedBeadCap">移除</view>
+          </view>
+        </view>
       </view>
     </view>
   </view>
 
   <canvas
-    wx:if="{{useCanvasRenderer && workspaceCanvasVisible}}"
+    wx:if="{{workspaceCanvasVisible}}"
     id="workspaceFlightCanvas"
     class="workspace-flight-canvas {{canvasFlightActive ? 'active' : ''}}"
     type="2d"
     canvas-id="workspaceFlightCanvas"
   ></canvas>
-
-  <view wx:if="{{flightBead && !useCanvasRenderer && workspaceCanvasVisible}}" class="flight-bead" style="{{flightBead.style}}" animation="{{flightBead.animation}}">
-    <image wx:if="{{flightBead.image_url}}" class="flight-bead-image" src="{{flightBead.image_url}}" mode="aspectFit"></image>
-    <view wx:else class="flight-bead-fallback" style="background: radial-gradient(circle at 32% 26%, {{flightBead.shine}} 0 10%, {{flightBead.color}} 12% 58%, rgba(0,0,0,.22) 100%);"></view>
-  </view>
 
   <cover-view wx:if="{{workspaceLoading}}" class="workspace-boot-mask {{workspaceLoadingClass}}">
     <cover-view class="workspace-boot-card">
@@ -237,18 +229,18 @@
               wx:for="{{visibleMaterials}}"
               wx:for-index="index"
               wx:key="id"
-              class="material-card {{item.cardClass}}"
+              class="material-card {{item.cardClass}} {{item.physical_spec_complete ? '' : 'material-card-spec-incomplete'}}"
               data-id="{{item.id}}"
               data-index="{{index}}"
               bindtap="addMaterial"
             >
-              <image wx:if="{{item.image_url}}" class="material-sphere material-image" src="{{item.image_url}}" mode="aspectFit" lazy-load="{{true}}" webp="{{true}}" fade-in="{{false}}" data-id="{{item.id}}" binderror="onMaterialImageError"></image>
+              <image wx:if="{{item.image_url}}" class="material-sphere material-image {{item.material_shape_class}} {{item.materialToneClass}}" src="{{item.image_url}}" mode="aspectFit" lazy-load="{{true}}" webp="{{true}}" fade-in="{{false}}" data-id="{{item.id}}" binderror="onMaterialImageError"></image>
               <view wx:else class="material-sphere" style="background: radial-gradient(circle at 32% 26%, {{item.shine}} 0 10%, {{item.color}} 12% 58%, rgba(0,0,0,.22) 100%);"></view>
               <view class="material-name">{{item.name}}</view>
               <view class="material-effect">{{item.effectText}}</view>
               <view class="material-meta">
                 <view class="material-price">¥{{item.price}}</view>
-                <view class="size-pill">{{item.size}}mm</view>
+                <view class="size-pill {{item.physical_spec_complete ? '' : 'size-pill-warning'}}">{{item.card_spec_text}}</view>
               </view>
             </view>
           </view>
@@ -411,7 +403,7 @@
         </view>
       </view>
       <button class="share-sheet-primary" open-type="share">
-        <image class="share-sheet-primary-icon yu-share-button-image" src="/images/workspace-icons/share-button-gold.png" mode="aspectFit"></image>
+        <image class="share-sheet-primary-icon yu-share-button-image" src="{{workspaceIcons.share}}" mode="aspectFit"></image>
         <text>分享给好友</text>
       </button>
       <button class="share-sheet-secondary" bindtap="closeShareSheet">继续编辑</button>

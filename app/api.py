@@ -35,6 +35,9 @@ from .observability import Timer, current_request_id, log_event, metrics
 from .recommendation import RecommendationEngine
 from .report_repository import ReportConflictError, ReportVersionConflictError
 from .schemas import (
+    AfterSaleCancelRequest,
+    AfterSaleCreateRequest,
+    AfterSaleReturnShipmentRequest,
     AssessmentRequest,
     CartItemCreateRequest,
     CartItemUpdateRequest,
@@ -798,16 +801,102 @@ def update_order_receiver(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@router.post("/orders/{order_id}/after-sale", summary="申请退换货/售后")
-def request_order_after_sale(
+@router.get("/orders/{order_id}/after-sales", summary="查询订单售后工单")
+def list_order_after_sales(
     order_id: str,
-    payload: OrderActionRequest,
+    user_id: str | None = Query(default=None, min_length=1, max_length=100),
+    principal: UserPrincipal = Depends(require_current_user),
+):
+    require_owner(principal, user_id)
+    require_order_owner(order_id, principal)
+    return success(order_service.list_after_sale_cases(order_id, principal.user_id))
+
+
+@router.post("/orders/{order_id}/after-sales", summary="创建结构化售后工单")
+def create_order_after_sale(
+    order_id: str,
+    payload: AfterSaleCreateRequest,
     principal: UserPrincipal = Depends(require_current_user),
 ):
     require_order_owner(order_id, principal)
     try:
-        owned_payload(payload, principal)
-        return success(order_service.request_after_sale(order_id, principal.user_id, payload.reason or ""), "售后申请已提交")
+        safe_payload = owned_payload(payload, principal)
+        result = order_service.create_after_sale_case(
+            order_id=order_id,
+            user_id=principal.user_id,
+            case_type=safe_payload.type,
+            reason_code=safe_payload.reason_code,
+            reason=safe_payload.reason,
+            evidence_urls=safe_payload.evidence_urls,
+            idempotency_key=safe_payload.idempotency_key,
+        )
+        metrics.increment("after_sale_create_total", case_type=safe_payload.type, result="success")
+        log_event(
+            LOGGER,
+            "after_sale.create.succeeded",
+            user_id=principal.user_id,
+            case_type=safe_payload.type,
+            result="success",
+        )
+        return success(result, "售后申请已提交")
+    except OrderConflictError as exc:
+        metrics.increment("after_sale_create_total", case_type=payload.type, result="conflict")
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        metrics.increment("after_sale_create_total", case_type=payload.type, result="failed")
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post(
+    "/orders/{order_id}/after-sales/{case_id}/return-shipment",
+    summary="提交售后退回物流",
+)
+def submit_after_sale_return_shipment(
+    order_id: str,
+    case_id: str,
+    payload: AfterSaleReturnShipmentRequest,
+    principal: UserPrincipal = Depends(require_current_user),
+):
+    require_order_owner(order_id, principal)
+    try:
+        safe_payload = owned_payload(payload, principal)
+        return success(
+            order_service.submit_after_sale_return_shipment(
+                order_id,
+                case_id,
+                principal.user_id,
+                safe_payload.carrier,
+                safe_payload.tracking_no,
+            ),
+            "退回物流已提交",
+        )
+    except OrderConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/orders/{order_id}/after-sales/{case_id}/cancel", summary="取消售后工单")
+def cancel_after_sale_case(
+    order_id: str,
+    case_id: str,
+    payload: AfterSaleCancelRequest,
+    principal: UserPrincipal = Depends(require_current_user),
+):
+    require_order_owner(order_id, principal)
+    try:
+        safe_payload = owned_payload(payload, principal)
+        return success(
+            order_service.cancel_after_sale_case(
+                order_id,
+                case_id,
+                principal.user_id,
+                safe_payload.reason,
+            ),
+            "售后申请已取消",
+        )
+    except OrderConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

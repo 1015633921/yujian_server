@@ -6,13 +6,20 @@ const state = {
   admin: null,
   page: 'overview',
   insight: 'assessments',
-  materialUi: { selected: new Set(), expanded: new Set(), sortBy: 'sort_order', sortOrder: 'asc', page: 1, pageSize: 20, total: 0, totalPages: 1, filterSignature: '' },
+  materialUi: { selected: new Set(), expanded: new Set(), sortBy: 'sort_order', sortOrder: 'asc', page: 1, pageSize: 20, total: 0, totalPages: 1, filterSignature: '', composing: false, requestId: 0, requestController: null },
+  materialAssetUi: { items: [], busy: false, targetTop: 'accessory', targetCategoryId: '', targetSeriesId: '', mode: 'replace', message: '' },
   warehouseTab: 'overview',
-  cache: { materials: [], materialSpus: [], materialRefs: [], materialOptions: null, materialTaxonomy: [], blocks: [], homeBanners: [], orders: [], communityPosts: [], recommendationPlans: [], admins: [], loginLogs: [], dailyRules: null, warehouse: { items: [], options: null, batches: [], movements: [], overview: null } }
+  cache: { materials: [], materialSpus: [], materialRefs: [], materialOptions: null, materialTypes: [], materialTaxonomy: [], blocks: [], homeBanners: [], orders: [], afterSales: [], communityPosts: [], recommendationPlans: [], admins: [], loginLogs: [], dailyRules: null, warehouse: { items: [], options: null, batches: [], movements: [], overview: null } }
 };
 const pageMeta = {
   overview:['BUSINESS OVERVIEW','经营概览'],orders:['ORDER FULFILLMENT','订单履约'],
-  materials:['PRODUCT CATALOG','珠材商品'],content:['CONTENT OPERATIONS','运营内容'],
+  afterSales:['AFTER-SALE REVIEW','售后审核'],
+  materials:['SKU CATALOG','SKU 管理'],
+  materialTypes:['MATERIAL DIRECTORY · STEP 1','材料类型'],
+  materialCategories:['MATERIAL DIRECTORY · STEP 2','材料分类'],
+  materialVarieties:['MATERIAL DIRECTORY · STEP 3','品种 / 款式'],
+  materialAssets:['MATERIAL ASSET LAB','素材处理'],
+  content:['CONTENT OPERATIONS','运营内容'],
   warehouse:['WAREHOUSE INVENTORY','仓库库存'],
   bannerContent:['HOME BANNERS','Home Banner'],
   communityContent:['COMMUNITY CMS','社区灵感'],recommendContent:['RECOMMEND CMS','热门推荐'],
@@ -71,7 +78,10 @@ const DEFAULT_MATERIAL_OPTIONS = {
   ],
   bead_shapes: [
     {key:'round',label:'圆珠'}, {key:'faceted_round',label:'切面圆珠'}, {key:'rondelle',label:'算盘珠'},
-    {key:'barrel',label:'桶珠'}, {key:'disc',label:'隔片'}, {key:'special',label:'异形'}
+    {key:'barrel',label:'桶珠'}, {key:'cube',label:'方糖'}, {key:'nugget',label:'随形'},
+    {key:'double_terminated',label:'双尖'}, {key:'single_terminated',label:'单尖'}, {key:'triangle',label:'三角形'}, {key:'disc',label:'隔片'},
+    {key:'curved_tube',label:'弯管'}, {key:'connector',label:'连接扣'}, {key:'clasp',label:'扣件'},
+    {key:'charm',label:'挂坠'}, {key:'special',label:'异形'}
   ],
   surface_finishes: [
     {key:'glossy',label:'亮面抛光'}, {key:'matte',label:'哑光'}, {key:'frosted',label:'磨砂'},
@@ -123,7 +133,21 @@ const EXPRESS_OPTIONS = [
 let timers = {};
 function debounce(name, fn, wait=280){ clearTimeout(timers[name]); timers[name]=setTimeout(fn,wait); }
 const debouncedLoadOrders=()=>debounce('orders',loadOrders);
-const debouncedLoadMaterials=()=>debounce('materials',loadMaterials);
+const debouncedLoadAfterSales=()=>debounce('afterSales',loadAfterSales);
+const debouncedLoadMaterials=()=>debounce('materials',loadMaterials,360);
+function handleMaterialKeywordCompositionStart(){
+  state.materialUi.composing=true;
+  clearTimeout(timers.materials);
+  delete timers.materials;
+}
+function handleMaterialKeywordCompositionEnd(){
+  state.materialUi.composing=false;
+  debouncedLoadMaterials();
+}
+function handleMaterialKeywordInput(event){
+  if(state.materialUi.composing||event?.isComposing)return;
+  debouncedLoadMaterials();
+}
 const debouncedLoadBlocks=()=>debounce('blocks',loadBlocks);
 const debouncedLoadHomeBanners=()=>debounce('homeBanners',loadHomeBanners);
 const debouncedLoadCommunityPosts=()=>debounce('communityPosts',loadCommunityPosts);
@@ -226,29 +250,32 @@ function switchPage(page){
   state.page=page;document.querySelectorAll('.nav-item').forEach(x=>x.classList.toggle('active',x.dataset.page===page));
   document.querySelectorAll('.page-view').forEach(x=>x.classList.toggle('hide',x.id!==page));
   $('pageEyebrow').textContent=pageMeta[page][0];$('pageTitle').textContent=pageMeta[page][1];
-  ({overview:loadDashboard,orders:loadOrders,materials:loadMaterials,warehouse:loadWarehouse,content:loadBlocks,bannerContent:loadHomeBanners,communityContent:loadCommunityPosts,recommendContent:loadRecommendationPlans,users:loadUsers,insights:loadInsights,dailyRules:loadDailyRules,admins:loadAdmins,system:loadSystemStatus}[page]||(()=>{}))();
+  ({overview:loadDashboard,orders:loadOrders,afterSales:loadAfterSales,materials:loadMaterials,materialTypes:loadMaterialTypesPage,materialCategories:loadMaterialCategoriesPage,materialVarieties:loadMaterialVarietiesPage,materialAssets:loadMaterialAssetsPage,warehouse:loadWarehouse,content:loadBlocks,bannerContent:loadHomeBanners,communityContent:loadCommunityPosts,recommendContent:loadRecommendationPlans,users:loadUsers,insights:loadInsights,dailyRules:loadDailyRules,admins:loadAdmins,system:loadSystemStatus}[page]||(()=>{}))();
 }
 function refreshCurrent(){switchPage(state.page);toast('数据已刷新')}
-function statusPill(status,text){const cls=['refund_requested','after_sale'].includes(status)?'danger':['pending_payment','pending_ship'].includes(status)?'warn':['closed','refunded'].includes(status)?'muted':'';return `<span class="status-pill ${cls}">${esc(text||status)}</span>`}
+function statusPill(status,text){const cls=status==='refund_requested'?'danger':['pending_payment','pending_ship'].includes(status)?'warn':['closed','refunded'].includes(status)?'muted':'';return `<span class="status-pill ${cls}">${esc(text||status)}</span>`}
 function money(v){return `¥${num(v).toFixed(2)}`}
 function table(headers,rows){if(!rows.length)return '<div class="empty-table">暂无数据</div>';return `<table class="data-table"><thead><tr>${headers.map(x=>`<th>${x}</th>`).join('')}</tr></thead><tbody>${rows.map(r=>`<tr>${r.map(c=>`<td>${c}</td>`).join('')}</tr>`).join('')}</tbody></table>`}
 function goOrders(status=''){if($('orderStatus'))$('orderStatus').value=status;switchPage('orders')}
 function metricDelta(value,prefix='今日 +'){return `<em>${prefix}${esc(value||0)}</em>`}
-function canReviewRefund(x){const refund=x.refund||{};return x.status==='refund_requested'&&x.refund_status!=='processing'&&refund.status!=='processing'}
-function canSyncRefund(x){const refund=x.refund||{};return x.status==='refund_requested'&&(x.refund_status==='processing'||refund.status==='processing'||!!refund.out_refund_no)}
+function canReviewRefund(x){const refund=x.refund||{},state=x.refund_status||refund.status||'';return x.status==='refund_requested'&&!refund.after_sale_case_id&&['requested','approved'].includes(state)}
+function canSyncRefund(x){const refund=x.refund||{},state=x.refund_status||refund.status||'';return x.status==='refund_requested'&&!!refund.status&&!refund.after_sale_case_id&&['submitting','processing','abnormal','closed'].includes(state)}
+function canRetryRefund(x){const refund=x.refund||{},state=x.refund_status||refund.status||'';return x.status==='refund_requested'&&!refund.after_sale_case_id&&!!refund.out_refund_no&&['submitting','abnormal','closed'].includes(state)}
 function recentOrderActions(x){
   const id=esc(x.order_id),actions=[];
   if(x.status==='pending_ship')actions.push(`<button class="mini-btn primary" onclick="openShip('${id}')">发货</button>`);
   if(canReviewRefund(x))actions.push(`<button class="mini-btn danger" onclick="openRefundReview('${id}')">退款审核</button>`);
   if(canSyncRefund(x))actions.push(`<button class="mini-btn warn" onclick="submitRefundSync('${id}')">同步退款</button>`);
-  if(x.status==='pending_payment')actions.push(`<button class="mini-btn warn" onclick="openStatus('${id}','${esc(x.status)}')">催付 / 关闭</button>`);
   actions.push(`<button class="mini-btn" onclick="openOrder('${id}')">详情</button>`);
-  if(num(x.total_amount)<=0.011)actions.push(`<button class="mini-btn" onclick="openStatus('${id}','${esc(x.status)}')">备注</button>`);
   return `<div class="table-actions quick-actions">${actions.join('')}</div>`;
 }
 function refundSummary(x){
   const refund=x.refund||{};
-  if(x.refund_status==='processing'||refund.status==='processing')return `<div class="refund-summary warn"><b>退款处理中</b><span>${esc(refund.wechat_status||'已提交微信处理')}</span></div>`;
+  const refundState=x.refund_status||refund.status||'';
+  if(x.status==='refund_requested'&&!refund.status)return `<div class="refund-summary warn"><b>退款状态数据不完整</b><span>缺少真实退款申请，已阻止审核操作；退款中和已退款状态只能由真实售后工单及微信退款结果产生</span></div>`;
+  if(refund.after_sale_case_id)return `<div class="refund-summary warn"><b>售后工单退款</b><span>${esc(refund.after_sale_case_id)} · 请到售后审核处理</span></div>`;
+  if(['submitting','processing'].includes(refundState))return `<div class="refund-summary warn"><b>${refundState==='submitting'?'退款提交待核对':'退款处理中'}</b><span>${esc(refund.wechat_status||'请同步微信退款状态')}</span></div>`;
+  if(['abnormal','closed'].includes(refundState))return `<div class="refund-summary warn"><b>原退款未生效</b><span>请先同步微信结果，再使用退款恢复入口</span></div>`;
   if(x.status==='refund_requested')return `<div class="refund-summary"><b>待审核退款</b><span>${esc(refund.reason||'用户申请退款')}</span></div>`;
   if(x.status==='refunded'||x.payment_status==='refunded')return `<div class="refund-summary muted"><b>已退款</b><span>${esc(refund.wechat_status||refund.status||'success')}</span></div>`;
   return '';
@@ -277,14 +304,37 @@ async function loadDashboard(){
   $('stats').innerHTML=cards.map(x=>`<div class="stat-card"><span>${x[0]}</span><strong>${x[1]}</strong>${x[2]}<small>${x[3]}</small></div>`).join('');
   $('todoCards').innerHTML=[
     `<button class="todo-card warn action" onclick="goOrders('pending_ship')"><b>${d.pending_ship}</b><span>待发货订单</span><small>点击筛选处理 →</small></button>`,
-    `<button class="todo-card danger action" onclick="goOrders('after_sale')"><b>${d.after_sale}</b><span>退款与售后</span><small>进入售后订单 →</small></button>`,
+    `<button class="todo-card danger action" onclick="switchPage('afterSales')"><b>${d.after_sale}</b><span>售后待办</span><small>进入工单审核 →</small></button>`,
+    `<button class="todo-card danger action" onclick="openPaymentCompensations()"><b>${d.payment_compensations||0}</b><span>支付补偿待办</span><small>核对晚到支付 →</small></button>`,
     `<button class="todo-card action" onclick="switchPage('content')"><b>${d.content_blocks}</b><span>运营内容位</span><small>维护首页内容 →</small></button>`
   ].join('');
   $('orderBadge').textContent=d.pending_ship||0;$('orderBadge').classList.toggle('hide',!d.pending_ship);
+  $('afterSaleBadge').textContent=d.after_sale||0;$('afterSaleBadge').classList.toggle('hide',!d.after_sale);
   $('recentOrders').innerHTML=table(['订单号','收货人','状态','金额','创建时间','操作'],(d.recent_orders||[]).map(x=>[
     `<button class="text-button" onclick="openOrder('${esc(x.order_id)}')">${esc(x.order_id)}</button>`,
     esc(x.receiver?.name||'-'),statusPill(x.status,x.status_text),money(x.total_amount),fmtTime(x.created_at),recentOrderActions(x)
   ]));
+}
+async function openPaymentCompensations(){
+  const rows=await api('/api/v1/admin/payments/compensations');
+  const content=rows.length?table(['事件','订单','交易号','原因','时间','操作'],rows.map(x=>[
+    `<b>${esc(x.id)}</b>`,
+    `<button class="text-button" onclick="openOrder('${esc(x.order_id||'')}')">${esc(x.order_id||x.merchant_order_no||'-')}</button>`,
+    `<small>${esc(x.transaction_id||'-')}</small>`,
+    esc(x.failure_reason||'closed_order_paid'),
+    fmtTime(x.received_at),
+    `<button class="mini-btn danger" onclick="resolvePaymentCompensation('${esc(x.id)}')">确认已处理</button>`
+  ])):'<div class="empty-table">暂无支付补偿待办</div>';
+  openDrawer('PAYMENT COMPENSATION','支付补偿待办',`${content}<div class="content-hint danger-hint">仅在财务已核验退款或人工结算凭证后确认。此操作不会自动调用微信退款。</div>`);
+}
+async function resolvePaymentCompensation(id){
+  const refunded=confirm('是否已核验完成原路退款？\n选择“取消”表示已完成其他人工结算。');
+  const note=prompt('填写至少 5 个字的财务凭证或处理说明：');
+  if(note===null)return;
+  if(String(note).trim().length<5){toast('处理说明至少 5 个字');return}
+  await api(`/api/v1/admin/payments/compensations/${encodeURIComponent(id)}/resolve`,{method:'POST',body:JSON.stringify({action:refunded?'refund_verified':'manual_settlement_verified',note:String(note).trim()})});
+  await Promise.all([loadDashboard(),openPaymentCompensations()]);
+  toast('支付补偿记录已确认');
 }
 async function loadSystemStatus(){
   const d=await api('/api/v1/admin/system-status');
@@ -300,29 +350,248 @@ async function loadOrders(){
     `${statusPill(x.status,x.status_text)}<br><small>${esc(x.payment_status)}</small>${refundSummary(x)}`,
     `<div>${x.design?.summary?.count||x.sequence?.length||0} 颗 · 手围 ${esc(x.design?.wristSize||'-')}cm</div><small>${esc(x.design?.wearStyle==='double'?'双圈':'单圈')} · ${esc(x.design?.summary?.weight||'-')}g</small>`,
     `<b>${money(x.total_amount)}</b>`,
-    x.logistics?.tracking_no?`<div>${esc(x.logistics.carrier)} · ${esc(x.logistics.status_text||'运输中')}</div><small>${esc(x.logistics.tracking_no)}</small>`:'-',
+    x.logistics?.tracking_no?`<div>${esc(x.logistics.carrier)} · ${esc(x.logistics.status_text||'已发货待揽收')}</div><small>${esc(x.logistics.tracking_no)}</small>`:'-',
     fmtTime(x.created_at),
     orderRowActions(x)
   ]));
 }
+function afterSaleStatusPill(status,text){
+  const cls=['requested','refund_pending','refund_submitting','refunding'].includes(status)?'danger':['awaiting_return','returning'].includes(status)?'warn':['resolved','rejected','canceled'].includes(status)?'muted':'';
+  return `<span class="status-pill ${cls}">${esc(text||status||'-')}</span>`;
+}
+function afterSaleStatusText(status){return ({requested:'待审核',approved:'已同意',awaiting_return:'等待寄回',returning:'寄回中',service_processing:'服务处理中',refund_pending:'待确认退款',refund_submitting:'退款提交中',refunding:'退款处理中',resolved:'已完成',rejected:'已拒绝',canceled:'已取消'})[status]||status||'-'}
+function afterSaleEventText(type){return ({submitted:'用户提交售后',reject:'拒绝售后',approve_service:'接受服务处理',request_return:'要求寄回商品',return_shipped:'用户提交退回物流',canceled:'用户取消售后',prepare_direct_refund:'批准免退退款',confirm_return:'确认收到退回商品',complete:'服务处理完成',refund_submitting:'退款指令已登记',refund_submitted:'已提交微信退款',refund_failed:'微信退款未生效',refund_success:'微信原路退款成功'})[type]||type||'状态更新'}
+function afterSaleNextStep(x){
+  if(x.status==='requested')return x.type==='return_refund'?'审核退货或免退退款':'审核是否接受服务';
+  if(['awaiting_return','returning'].includes(x.status))return '等待商品寄回并确认收货';
+  if(x.status==='service_processing')return '完成维修、改手围或补发服务';
+  if(x.status==='refund_pending')return '二次确认后发起微信退款';
+  if(x.status==='refund_submitting')return '同步微信确认退款指令结果';
+  if(x.status==='refunding')return '等待微信退款结果';
+  if(x.status==='resolved')return '工单已闭环';
+  if(x.status==='rejected')return '已记录拒绝原因';
+  return '-';
+}
+function renderAfterSaleSummary(rows){
+  const items=[
+    ['待审核',rows.filter(x=>x.status==='requested').length,'优先处理新申请','danger'],
+    ['等待寄回',rows.filter(x=>['awaiting_return','returning'].includes(x.status)).length,'核对退回商品','warn'],
+    ['服务处理中',rows.filter(x=>x.status==='service_processing').length,'维修 / 改手围 / 补发',''],
+    ['退款待办',rows.filter(x=>['refund_pending','refund_submitting','refunding'].includes(x.status)).length,'确认退款或同步微信结果','danger']
+  ];
+  $('afterSaleSummary').innerHTML=items.map(([label,value,hint,tone])=>`<div class="after-sale-summary-card ${tone}"><span>${label}</span><b>${value}</b><small>${hint}</small></div>`).join('');
+}
+async function loadAfterSales(){
+  const qs=new URLSearchParams({keyword:formValue('afterSaleKeyword'),status:formValue('afterSaleStatus'),case_type:formValue('afterSaleType')});
+  const rows=await api(`/api/v1/admin/after-sales?${qs}`);
+  state.cache.afterSales=rows;
+  renderAfterSaleSummary(rows);
+  $('afterSalesTable').innerHTML=table(['售后工单','用户诉求','问题说明','订单 / 收货人','申请金额','状态与下一步','申请时间','操作'],rows.map(x=>[
+    `<b>${esc(x.case_id)}</b><br><small>订单 ${esc(x.order_id)}</small>`,
+    `<span class="after-sale-type">${esc(x.type_text)}</span><br><small>${esc(x.reason_text||x.reason_code)}</small>`,
+    `<span class="summary-clip" title="${esc(x.reason)}">${esc(x.reason)}</span>`,
+    `<b>${esc(x.order?.receiver?.name||'-')}</b><br><small>${esc(x.order?.receiver?.phone||x.user_id||'-')}</small>`,
+    x.type==='return_refund'?`<b>${money(x.requested_refund_amount)}</b><br><small>按订单实付金额</small>`:'<small>非退款诉求</small>',
+    `${afterSaleStatusPill(x.status,x.status_text)}<br><small class="after-sale-next">${esc(afterSaleNextStep(x))}</small>`,
+    fmtTime(x.created_at),
+    `<button class="mini-btn ${x.status==='requested'?'danger':''}" onclick="openAfterSale('${esc(x.case_id)}')">${x.status==='requested'?'立即审核':'查看工单'}</button>`
+  ]));
+}
+function afterSaleEvidence(urls=[]){
+  if(!urls.length)return '<div class="empty-inline">用户未上传图片凭证</div>';
+  return `<div class="after-sale-evidence">${urls.map((url,index)=>`<a href="${esc(url)}" target="_blank" rel="noopener"><img src="${esc(url)}" alt="售后凭证 ${index+1}"><span>凭证 ${index+1}</span></a>`).join('')}</div>`;
+}
+function afterSaleActions(x){
+  const id=esc(x.case_id),buttons=[`<button class="btn secondary" onclick="openOrder('${esc(x.order_id)}')">查看订单</button>`];
+  if(x.status==='requested'&&x.type==='return_refund'){
+    buttons.push(`<button class="btn secondary danger-outline" onclick="openAfterSaleAction('${id}','reject')">拒绝申请</button>`);
+    buttons.push(`<button class="btn secondary" onclick="openAfterSaleAction('${id}','prepare_direct_refund')">免退并批准退款</button>`);
+    buttons.push(`<button class="btn primary" onclick="openAfterSaleAction('${id}','request_return')">同意并要求寄回</button>`);
+  }else if(x.status==='requested'){
+    buttons.push(`<button class="btn secondary danger-outline" onclick="openAfterSaleAction('${id}','reject')">拒绝申请</button>`);
+    buttons.push(`<button class="btn primary" onclick="openAfterSaleAction('${id}','approve_service')">接受并开始处理</button>`);
+  }else if(['awaiting_return','returning'].includes(x.status)){
+    buttons.push(`<button class="btn primary" onclick="openAfterSaleAction('${id}','confirm_return')">确认收到退回商品</button>`);
+  }else if(x.status==='service_processing'){
+    buttons.push(`<button class="btn primary" onclick="openAfterSaleAction('${id}','complete')">标记服务已完成</button>`);
+  }else if(['refund_pending','refund_submitting','refunding'].includes(x.status)){
+    const refund=x.order?.refund||{},refundStatus=x.order?.refund_status||refund.status||'';
+    if(refundStatus==='approved')buttons.push(`<button class="btn danger" onclick="openAfterSaleRefund('${id}')">确认并原路退款</button>`);
+    else{
+      buttons.push(`<button class="btn secondary" onclick="syncAfterSaleRefund('${id}')">同步微信退款状态</button>`);
+      if(['submitting','abnormal','closed'].includes(refundStatus))buttons.push(`<button class="btn danger" onclick="openAfterSaleRefundRetry('${id}')">核对并恢复退款</button>`);
+    }
+  }else{
+    buttons.push('<button class="btn ghost" onclick="closeDrawer()">关闭</button>');
+  }
+  return `<div class="form-actions sticky-actions after-sale-sticky-actions">${buttons.join('')}</div>`;
+}
+async function openAfterSale(id){
+  const x=await api(`/api/v1/admin/after-sales/${encodeURIComponent(id)}`);
+  state.currentAfterSale=x;
+  const order=x.order||{},snapshot=x.order_snapshot||{},receiver=order.receiver||snapshot.receiver||{},refund=order.refund||{};
+  const events=(x.events||[]).slice().reverse().map(event=>`<div class="timeline-item"><b>${esc(afterSaleEventText(event.event_type))}</b><span>${afterSaleStatusText(event.from_status)} → ${afterSaleStatusText(event.to_status)} · ${esc(event.operator_id||event.operator_type||'-')} · ${fmtTime(event.created_at)}</span>${event.note?`<p>${esc(event.note)}</p>`:''}</div>`).join('');
+  const refundSection=x.type==='return_refund'?`<section class="detail-section after-sale-refund-section">
+    <div class="detail-section-head"><div><span>REFUND CONTROL</span><h3>退款金额与支付状态</h3></div>${afterSaleStatusPill(x.status,x.status_text)}</div>
+    <div class="detail-grid">
+      ${detailItem('用户申请金额',money(x.requested_refund_amount))}${detailItem('审核退款金额',x.approved_refund_fee?money(x.approved_refund_amount):'尚未批准')}
+      ${detailItem('订单实付金额',money(order.total_amount||snapshot.total_amount||0))}${detailItem('订单支付状态',order.payment_status||snapshot.payment_status||'-')}
+      ${detailItem('订单退款状态',order.refund_status||refund.status||'尚未进入退款')}${detailItem('商户退款单号',refund.out_refund_no||'尚未生成')}
+    </div>
+    ${['refund_pending','refund_submitting','refunding'].includes(x.status)?`<div class="refund-confirm-notice"><b>${x.status==='refund_pending'?'已通过售后审核，尚未调用微信退款':x.status==='refund_submitting'?'退款指令已登记，结果待核对':'退款已提交微信处理'}</b><span>${x.status==='refund_pending'?'请再次核对工单和金额，再点击底部操作。':'先同步微信结果；只有确认原退款未生效时，才可使用原退款单号恢复。'}</span></div>`:''}
+  </section>`:'';
+  openDrawer('AFTER-SALE REVIEW',`售后工单 ${x.case_id}`,`
+    <div class="after-sale-hero">
+      <div><span>用户诉求</span><strong>${esc(x.type_text)}</strong><small>${esc(x.reason_text||x.reason_code)} · 申请于 ${fmtTime(x.created_at)}</small></div>
+      <div class="after-sale-hero-state">${afterSaleStatusPill(x.status,x.status_text)}<small>${esc(afterSaleNextStep(x))}</small></div>
+    </div>
+    <section class="detail-section">
+      <div class="detail-section-head"><div><span>APPLICATION</span><h3>用户申请信息</h3></div></div>
+      <div class="detail-grid">
+        ${detailItem('售后类型',x.type_text)}${detailItem('问题分类',x.reason_text||x.reason_code)}
+        ${detailItem('工单编号',x.case_id)}${detailItem('用户 ID',x.user_id)}
+        ${detailItem('关联订单',x.order_id)}${detailItem('最后更新',fmtTime(x.updated_at))}
+        ${x.return_tracking_no?detailItem('退回物流',`${x.return_carrier||'-'} · ${x.return_tracking_no}`):''}
+      </div>
+      <div class="remark-box after-sale-reason"><span>用户问题说明</span><p>${esc(x.reason)}</p></div>
+      <div class="detail-subtitle">图片凭证</div>${afterSaleEvidence(x.evidence_urls)}
+    </section>
+    ${refundSection}
+    <section class="detail-section">
+      <div class="detail-section-head"><div><span>ORDER SNAPSHOT</span><h3>订单与收货信息</h3></div><button class="mini-btn" onclick="openOrder('${esc(x.order_id)}')">查看完整订单</button></div>
+      <div class="detail-grid">
+        ${detailItem('订单履约状态',order.status_text||order.status||'-')}${detailItem('支付状态',order.payment_status||'-')}
+        ${detailItem('收货人',receiver.name||'-')}${detailItem('手机号',receiver.phone||'-')}
+        ${detailItem('订单金额',money(order.total_amount||snapshot.total_amount||0))}${detailItem('DIY 方案',orderDesignLabel(order,snapshot))}
+      </div>
+    </section>
+    <section class="detail-section">
+      <div class="detail-section-head"><div><span>PROCESS LOG</span><h3>工单处理记录</h3></div></div>
+      <div class="timeline after-sale-timeline">${events||'<div class="empty-inline">暂无处理记录</div>'}</div>
+      ${x.review_note?`<div class="remark-box"><span>最近审核备注 · ${esc(x.reviewed_by||'-')}</span><p>${esc(x.review_note)}</p></div>`:''}
+    </section>
+    ${afterSaleActions(x)}`);
+}
+function afterSaleActionConfig(action){return ({
+  reject:['拒绝售后申请','拒绝后工单将关闭，请写明可向用户解释的具体原因。','请输入拒绝原因（必填）','确认拒绝'],
+  approve_service:['接受售后服务','接受后工单进入处理中。请备注处理方式、寄送地址或预计完成时间。','例如：已联系用户确认手围，预计 3 个工作日完成','开始处理'],
+  request_return:['同意退货并要求寄回','本步只同意退货，不会生成退款，更不会调用微信退款。收到商品后需再次确认。','例如：请寄回工作室，收到后核验退款','确认要求寄回'],
+  prepare_direct_refund:['批准免退退款','本步会生成待退款记录，但不会调用微信支付；之后仍需在工单详情二次确认。','例如：低金额质量问题，批准免退处理','批准并生成退款单'],
+  confirm_return:['确认收到退回商品','确认后将按订单实付金额生成待退款记录；之后仍需二次确认才会调用微信退款。','例如：商品已收到并核验无误','确认收货并生成退款单'],
+  complete:['完成售后服务','确认维修、改手围或补发已经实际完成，再关闭工单。','例如：已重新穿制并寄出，单号已同步用户','确认已完成']
+})[action]||['更新售后工单','','','确认']}
+function openAfterSaleAction(id,action){
+  const [title,hint,placeholder,button]=afterSaleActionConfig(action);
+  const isReject=action==='reject';
+  openDrawer('AFTER-SALE ACTION',title,`
+    <div class="content-hint ${isReject?'danger-hint':''}">${esc(hint)}</div>
+    <label>${isReject?'拒绝原因（必填）':'处理备注'}<textarea id="after_sale_note" maxlength="500" placeholder="${esc(placeholder)}"></textarea></label>
+    <div class="form-actions"><button class="btn secondary" onclick="openAfterSale('${esc(id)}')">返回工单</button><button class="btn ${isReject?'danger':'primary'}" onclick="submitAfterSaleAction('${esc(id)}','${esc(action)}')">${esc(button)}</button></div>`);
+}
+async function submitAfterSaleAction(id,action){
+  const note=formValue('after_sale_note');
+  if(action==='reject'&&note.length<2){toast('请填写拒绝原因');return}
+  try{
+    await api(`/api/v1/admin/after-sales/${encodeURIComponent(id)}/review`,{method:'POST',body:JSON.stringify({action,note})});
+    await Promise.all([loadAfterSales(),loadDashboard()]);
+    await openAfterSale(id);
+    toast('售后工单已更新');
+  }catch(e){toast(e.message||'售后审核失败')}
+}
+async function openAfterSaleRefund(id){
+  const x=state.currentAfterSale?.case_id===id?state.currentAfterSale:await api(`/api/v1/admin/after-sales/${encodeURIComponent(id)}`);
+  openDrawer('CONFIRM REFUND','确认微信原路退款',`
+    <div class="refund-risk-card"><span>即将退款</span><strong>${money(x.approved_refund_amount||x.requested_refund_amount)}</strong><small>订单 ${esc(x.order_id)} · 工单 ${esc(x.case_id)}</small></div>
+    <div class="content-hint danger-hint">点击确认后系统会立即调用微信支付退款 API。该操作不可通过后台撤销，请再次核对工单、订单和金额。</div>
+    <label>退款操作备注<textarea id="after_sale_refund_note" maxlength="500" placeholder="例如：已核验退回商品和订单金额，同意原路退款"></textarea></label>
+    <div class="form-actions"><button class="btn secondary" onclick="openAfterSale('${esc(id)}')">返回工单</button><button class="btn danger" onclick="submitAfterSaleRefund('${esc(id)}')">确认发起原路退款</button></div>`);
+}
+async function submitAfterSaleRefund(id){
+  try{
+    toast('正在提交微信原路退款');
+    await api(`/api/v1/admin/after-sales/${encodeURIComponent(id)}/refund`,{method:'POST',body:JSON.stringify({note:formValue('after_sale_refund_note')})});
+    await Promise.all([loadAfterSales(),loadDashboard(),loadOrders()]);
+    await openAfterSale(id);
+    toast('退款已提交微信处理');
+  }catch(e){toast(e.message||'退款失败')}
+}
+async function syncAfterSaleRefund(id){
+  try{
+    toast('正在同步微信退款状态');
+    await api(`/api/v1/admin/after-sales/${encodeURIComponent(id)}/refund/sync`,{method:'POST'});
+    await Promise.all([loadAfterSales(),loadDashboard(),loadOrders()]);
+    await openAfterSale(id);
+    toast('微信退款状态已同步');
+  }catch(e){toast(e.message||'同步失败')}
+}
+async function openAfterSaleRefundRetry(id){
+  const x=state.currentAfterSale?.case_id===id?state.currentAfterSale:await api(`/api/v1/admin/after-sales/${encodeURIComponent(id)}`);
+  const refund=x.order?.refund||{};
+  openDrawer('RECOVER REFUND','核对并恢复退款',`
+    <div class="refund-risk-card"><span>原商户退款单号</span><strong>${esc(refund.out_refund_no||'-')}</strong><small>系统会先查询微信，不会生成新的退款单号</small></div>
+    <div class="content-hint danger-hint">仅当微信明确未找到原退款，或原退款已关闭/异常时，系统才会使用同一退款单号恢复提交。处理中或已成功的退款不会重复发起。</div>
+    <label>恢复备注<textarea id="after_sale_refund_retry_note" maxlength="500" placeholder="例如：已核对微信商户平台，原退款未生效"></textarea></label>
+    <div class="form-actions"><button class="btn secondary" onclick="openAfterSale('${esc(id)}')">返回工单</button><button class="btn danger" onclick="submitAfterSaleRefundRetry('${esc(id)}')">查询并恢复</button></div>`);
+}
+async function submitAfterSaleRefundRetry(id){
+  try{
+    toast('正在核对微信退款状态');
+    await api(`/api/v1/admin/after-sales/${encodeURIComponent(id)}/refund/retry`,{method:'POST',body:JSON.stringify({note:formValue('after_sale_refund_retry_note')})});
+    await Promise.all([loadAfterSales(),loadDashboard(),loadOrders()]);
+    await openAfterSale(id);
+    toast('退款状态已核对并恢复');
+  }catch(e){toast(e.message||'退款恢复失败')}
+}
 async function syncAllLogistics(){try{toast('正在同步运输中订单');const result=await api('/api/v1/admin/orders/logistics/refresh-all',{method:'POST'});await Promise.all([loadOrders(),loadDashboard()]);toast(`已检查 ${result.checked||0} 单，自动完成 ${result.completed||0} 单`)}catch(e){toast(e.message||'批量同步失败')}}
+function renderFulfillmentSteps(steps,terminal=false){
+  return `<div class="fulfillment-steps ${terminal?'terminal':''}" style="--fulfillment-step-count:${steps.length}">${steps.map(([label,done,time,pendingText],index)=>`<div class="fulfillment-step ${done?'done':''}"><i>${done?'✓':index+1}</i><b>${label}</b><span>${done?fmtTime(time):(pendingText||'待处理')}</span></div>`).join('')}</div>`;
+}
 function fulfillmentSteps(x){
   const history=x.status_history||[];
-  const historyTime=status=>((history.find(item=>item.status===status)||{}).time||'');
+  const historyEntry=status=>history.find(item=>item.status===status)||{};
+  const historyTime=status=>historyEntry(status).time||'';
+  const hasHistory=status=>!!history.find(item=>item.status===status);
+  const logistics=x.logistics||{};
+  const traces=Array.isArray(logistics.traces)?logistics.traces:[];
+  const traceTime=pattern=>((traces.find(item=>pattern.test(String(item.desc||'')))||{}).time||'');
+  const paid=x.payment_status==='paid'||!!x.paid_at||hasHistory('pending_ship')||['pending_ship','shipped','completed','refund_requested','refunded'].includes(x.status);
+  const shipped=hasHistory('shipped')||!!logistics.tracking_no;
+  const providerState=String(logistics.kuaidi100_state||'');
+  const hasProviderUpdate=logistics.source==='kuaidi100'||!!providerState;
+  const pickedUp=shipped&&(hasProviderUpdate||logistics.status==='signed');
+  const inTransit=pickedUp&&(logistics.status==='signed'||(logistics.status==='in_transit'&&providerState!=='1'));
+  const signed=logistics.status==='signed';
+  const completed=hasHistory('completed')||x.status==='completed';
+  const refundRequested=hasHistory('refund_requested')||['refund_requested','refunded'].includes(x.status);
+  const refunded=hasHistory('refunded')||x.status==='refunded'||x.payment_status==='refunded';
+  const shippedAt=logistics.shipped_at||historyTime('shipped')||logistics.updated_at;
+  const pickupAt=traceTime(/揽收|收件|取件/)||logistics.latest_event_time||logistics.updated_at;
+  const transitAt=traceTime(/运输|派送|发往|到达|离开|中转/)||logistics.latest_event_time||logistics.updated_at;
+  const signedAt=logistics.signed_at||traceTime(/签收/)||logistics.latest_event_time||logistics.updated_at;
   if(x.status==='closed'){
-    const paid=x.payment_status==='paid'||!!x.paid_at;
-    const steps=[['订单创建',true,x.created_at],['支付成功',paid,x.paid_at],['订单取消',true,historyTime('closed')||x.updated_at]];
-    return `<div class="fulfillment-steps terminal">${steps.map(([label,done,time],index)=>`<div class="fulfillment-step ${done?'done':''}"><i>${done?'✓':index+1}</i><b>${label}</b><span>${done?fmtTime(time):'未支付'}</span></div>`).join('')}</div>`;
+    return renderFulfillmentSteps([
+      ['订单创建',true,x.created_at],
+      ['支付成功',paid,x.paid_at,x.payment_status==='processing'?'支付处理中':'未支付'],
+      ['订单取消',true,historyTime('closed')||x.updated_at],
+    ],true);
   }
-  if(x.status==='refunded'||x.payment_status==='refunded'){
-    const steps=[['订单创建',true,x.created_at],['支付成功',true,x.paid_at],['退款申请',true,historyTime('refund_requested')||historyTime('after_sale')],['已退款',true,historyTime('refunded')||x.updated_at]];
-    return `<div class="fulfillment-steps terminal">${steps.map(([label,done,time],index)=>`<div class="fulfillment-step ${done?'done':''}"><i>${done?'✓':index+1}</i><b>${label}</b><span>${fmtTime(time)}</span></div>`).join('')}</div>`;
+  const journey=[
+    ['订单创建',true,x.created_at],
+    ['支付成功',paid,x.paid_at,x.payment_status==='processing'?'支付处理中':'待支付'],
+    ['待发货',paid,historyTime('pending_ship')||x.paid_at],
+    ['已发货待揽收',shipped,shippedAt],
+    ['快递已揽收',pickedUp,pickupAt],
+    ['运输中',inTransit,transitAt],
+    ['已签收待确认',signed,signedAt],
+    ['订单完成',completed,historyTime('completed')||x.updated_at],
+  ];
+  if(refundRequested||refunded){
+    const occurred=journey.filter((step,index)=>index===0||step[1]);
+    occurred.push(['退款申请',refundRequested,historyTime('refund_requested')||x.updated_at]);
+    if(refunded)occurred.push(['已退款',true,historyTime('refunded')||x.updated_at]);
+    return renderFulfillmentSteps(occurred,true);
   }
-  const paid=x.payment_status==='paid'||['pending_ship','shipped','completed','after_sale','refund_requested'].includes(x.status);
-  const shipped=['shipped','completed','after_sale','refund_requested'].includes(x.status);
-  const signed=x.logistics?.status==='signed'||x.status==='completed';
-  const steps=[['订单创建',true,x.created_at],['支付成功',paid,x.paid_at],['商家发货',shipped,x.logistics?.updated_at],['快递签收',signed,x.logistics?.updated_at],['订单完成',x.status==='completed',x.updated_at]];
-  return `<div class="fulfillment-steps">${steps.map(([label,done,time],index)=>`<div class="fulfillment-step ${done?'done':''}"><i>${done?'✓':index+1}</i><b>${label}</b><span>${done?fmtTime(time):'待处理'}</span></div>`).join('')}</div>`;
+  return renderFulfillmentSteps(journey);
 }
 function braceletPreview(sequence,size=300){
   const items=sequence||[],count=Math.max(items.length,1),center=size/2,radius=size*.34,bead=Math.max(28,Math.min(46,175/count+25));
@@ -336,6 +605,16 @@ function sequenceMaterialGroups(sequence){
   const groups=new Map();
   (sequence||[]).forEach(item=>{const key=item.sku||item.id||item.name;const row=groups.get(key)||{...item,qty:0};row.qty+=1;groups.set(key,row)});
   return [...groups.values()];
+}
+function orderDesignLabel(order={},snapshot={}){
+  const design=order.design||snapshot.design||{};
+  const title=String(design.displayTitle||design.name||design.title||'').trim();
+  const designId=String(order.design_id||snapshot.design_id||design.designId||design.design_id||'').trim();
+  if(title&&designId)return `${title} · ${designId}`;
+  if(title)return `${title} · 订单快照`;
+  if(designId)return designId;
+  const sequence=order.sequence||snapshot.sequence||[];
+  return Array.isArray(sequence)&&sequence.length?`订单快照方案 · ${sequence.length} 颗`:'-';
 }
 function designShowcase(x,withButton=true){
   const design=x.design||x.saved_design?.design||{},summary=design.summary||{},groups=sequenceMaterialGroups(x.sequence||[]);
@@ -359,11 +638,9 @@ function designShowcase(x,withButton=true){
 }
 function refundReviewPanel(x){
   const refund=x.refund||{};
-  if(!refund.status && !['refund_requested','refunded'].includes(x.status))return '';
+  if(!refund.status)return '';
   const amount=refund.refund_fee!=null?money(num(refund.refund_fee)/100):money(x.total_amount);
   const response=refund.wechat_response||{};
-  const canReview=canReviewRefund(x);
-  const canSync=canSyncRefund(x);
   return `<section class="detail-section refund-review-section">
     <div class="detail-section-head">
       <div><span>REFUND</span><h3>退款申请与处理</h3></div>
@@ -377,9 +654,7 @@ function refundReviewPanel(x){
       ${detailItem('申请时间',fmtTime(refund.requested_at))}
       ${detailItem('处理时间',fmtTime(refund.approved_at||refund.rejected_at))}
     </div>
-    <div class="remark-box"><span>退款原因 / 审核备注</span><p>${esc(refund.reason||'用户申请退款')}${refund.approve_note?`\n同意备注：${esc(refund.approve_note)}`:''}${refund.reject_note?`\n拒绝备注：${esc(refund.reject_note)}`:''}</p></div>
-    ${canReview?`<div class="form-actions refund-actions"><button class="btn secondary" onclick="openRefundReject('${esc(x.order_id)}')">拒绝退款</button><button class="btn danger" onclick="openRefundApprove('${esc(x.order_id)}')">同意并原路退款</button></div>`:''}
-    ${!canReview&&canSync?`<div class="form-actions refund-actions"><button class="btn secondary" onclick="submitRefundSync('${esc(x.order_id)}')">同步微信退款状态</button></div>`:''}
+    <div class="remark-box"><span>退款原因 / 审核备注</span><p>${esc(refund.reason||'-')}${refund.approve_note?`\n同意备注：${esc(refund.approve_note)}`:''}${refund.reject_note?`\n拒绝备注：${esc(refund.reject_note)}`:''}</p></div>
   </section>`;
 }
 async function openDesign(id){
@@ -481,7 +756,7 @@ async function openOrder(id){
     </section>
 
     <details class="raw-details"><summary>查看订单原始数据</summary><pre>${esc(JSON.stringify(x,null,2))}</pre></details>
-    <div class="form-actions sticky-actions"><button class="btn secondary" onclick="printPackingSlip('${esc(id)}')">打印配货单</button><button class="btn secondary" onclick="copyReceiverInfo('${esc(id)}')">复制收件信息</button>${x.status==='pending_ship'?`<button class="btn primary" onclick="openShip('${esc(id)}')">填写发货信息</button>`:''}<button class="btn secondary" onclick="openStatus('${esc(id)}','${esc(x.status)}')">调整订单状态</button></div>`);
+    <div class="form-actions sticky-actions"><button class="btn secondary" onclick="printPackingSlip('${esc(id)}')">打印配货单</button><button class="btn secondary" onclick="copyReceiverInfo('${esc(id)}')">复制收件信息</button>${x.status==='pending_ship'?`<button class="btn primary" onclick="openShip('${esc(id)}')">填写发货信息</button>`:''}</div>`);
 }
 async function openShip(id){
   const x=await ensureOrder(id),receiver=x?.receiver||{};
@@ -496,8 +771,6 @@ async function openShip(id){
 }
 async function submitShip(id){const express=selectedExpress();await api(`/api/v1/admin/orders/${encodeURIComponent(id)}/ship`,{method:'POST',body:JSON.stringify({carrier:express.carrier,carrier_code:express.carrier_code,tracking_no:formValue('ship_no'),phone_tail:formValue('ship_phone')})});closeDrawer();await Promise.all([loadOrders(),loadDashboard()]);toast('订单已发货')}
 async function refreshLogistics(id){try{toast('正在查询快递状态');await api(`/api/v1/admin/orders/${encodeURIComponent(id)}/logistics/refresh`,{method:'POST'});await Promise.all([loadOrders(),loadDashboard()]);await openOrder(id);toast('物流状态已更新')}catch(e){toast(e.message||'物流查询失败')}}
-function openStatus(id,status){openDrawer('ORDER STATUS','调整订单状态',`<div class="form-grid"><label class="full">目标状态<select id="order_target">${[['pending_payment','待付款'],['pending_ship','待发货'],['shipped','待收货'],['completed','已完成'],['after_sale','售后中'],['refund_requested','退款中'],['refunded','已退款'],['closed','已关闭']].map(x=>`<option value="${x[0]}" ${x[0]===status?'selected':''}>${x[1]}</option>`).join('')}</select></label><label class="full">操作备注<textarea id="order_note" placeholder="记录本次状态调整原因"></textarea></label></div><div class="form-actions"><button class="btn secondary" onclick="closeDrawer()">取消</button><button class="btn primary" onclick="submitStatus('${esc(id)}')">保存状态</button></div>`)}
-async function submitStatus(id){await api(`/api/v1/admin/orders/${encodeURIComponent(id)}/status`,{method:'POST',body:JSON.stringify({status:formValue('order_target'),note:formValue('order_note')})});closeDrawer();await Promise.all([loadOrders(),loadDashboard()]);toast('订单状态已更新')}
 async function openRefundReview(id){
   const x=await ensureOrder(id);
   state.currentOrder=x;
@@ -513,7 +786,7 @@ async function openRefundReview(id){
       </div>
     </section>
     ${canReview?`<div class="form-actions sticky-actions"><button class="btn secondary" onclick="openRefundReject('${esc(id)}')">拒绝退款</button><button class="btn danger" onclick="openRefundApprove('${esc(id)}')">同意并原路退款</button></div>`:''}
-    ${!canReview&&canSync?`<div class="form-actions sticky-actions"><button class="btn secondary" onclick="submitRefundSync('${esc(id)}')">同步微信退款状态</button></div>`:''}`);
+    ${!canReview&&canSync?`<div class="form-actions sticky-actions"><button class="btn secondary" onclick="submitRefundSync('${esc(id)}')">同步微信退款状态</button>${canRetryRefund(x)?`<button class="btn danger" onclick="openRefundRetry('${esc(id)}')">核对并恢复退款</button>`:''}</div>`:''}`);
 }
 function openRefundApprove(id){
   openDrawer('APPROVE REFUND','确认同意退款',`
@@ -523,7 +796,7 @@ function openRefundApprove(id){
 }
 function openRefundReject(id){
   openDrawer('REJECT REFUND','拒绝退款申请',`
-    <div class="content-hint">拒绝后订单会转入售后中，便于客服继续沟通处理。</div>
+    <div class="content-hint">拒绝后订单会恢复待发货。若商品已发出，应让用户改走退货退款售后工单。</div>
     <label>拒绝原因<textarea id="refund_note" placeholder="例如：商品已发货，需用户拒收/退回后再处理"></textarea></label>
     <div class="form-actions"><button class="btn secondary" onclick="openRefundReview('${esc(id)}')">返回审核</button><button class="btn primary" onclick="submitRefundReject('${esc(id)}')">确认拒绝</button></div>`);
 }
@@ -552,6 +825,23 @@ async function submitRefundSync(id){
     await openOrder(id);
     toast('微信退款状态已同步');
   }catch(e){toast(e.message||'同步失败')}
+}
+function openRefundRetry(id){
+  const refund=state.currentOrder?.refund||{};
+  openDrawer('RECOVER REFUND','核对并恢复退款',`
+    <div class="refund-risk-card"><span>原商户退款单号</span><strong>${esc(refund.out_refund_no||'-')}</strong><small>系统会先查询微信，不会生成新的退款单号</small></div>
+    <div class="content-hint danger-hint">仅当微信明确未找到原退款，或原退款已关闭/异常时，系统才会使用同一退款单号恢复提交。处理中或已成功的退款不会重复发起。</div>
+    <label>恢复备注<textarea id="refund_retry_note" maxlength="500" placeholder="例如：已核对微信商户平台，原退款未生效"></textarea></label>
+    <div class="form-actions"><button class="btn secondary" onclick="openRefundReview('${esc(id)}')">返回审核</button><button class="btn danger" onclick="submitRefundRetry('${esc(id)}')">查询并恢复</button></div>`);
+}
+async function submitRefundRetry(id){
+  try{
+    toast('正在核对微信退款状态');
+    await api(`/api/v1/admin/orders/${encodeURIComponent(id)}/refund/retry`,{method:'POST',body:JSON.stringify({note:formValue('refund_retry_note')})});
+    await Promise.all([loadOrders(),loadDashboard()]);
+    await openOrder(id);
+    toast('退款状态已核对并恢复');
+  }catch(e){toast(e.message||'退款恢复失败')}
 }
 function sortHeader(label,key){const active=state.materialUi.sortBy===key;return `<button class="sort-head ${active?'active':''}" onclick="sortMaterials('${key}')">${label}${active?(state.materialUi.sortOrder==='asc'?' ↑':' ↓'):' ↕'}</button>`}
 function materialThumb(url,name){return url?`<span class="thumb-wrap"><img class="thumb material-thumb" src="${esc(url)}"><span class="thumb-pop"><img src="${esc(url)}"><b>${esc(name||'')}</b></span></span>`:`<span class="thumb material-thumb placeholder-thumb">未传图</span>`}
@@ -634,18 +924,23 @@ function materialMultiImageField(id,value=''){
     <div id="${id}_gallery" class="multi-image-gallery">${materialImageCards(id,list)}</div>
   </section>`;
 }
+function materialPrimaryImageInputId(id){return String(id||'').endsWith('_images')?String(id).slice(0,-1):(id==='tax_series_images'?'tax_series_image':'mat_image')}
 function materialImageCards(id,list=splitList(formValue(id))){
   return list.length?list.map((url,index)=>`<figure class="multi-image-card">
     <img src="${esc(url)}" alt="珠面图 ${index+1}">
-    <figcaption><span>图 ${index+1}</span><button type="button" onclick="removeMaterialImage('${id}',${index})">删除</button></figcaption>
+    <figcaption><span>图 ${index+1}</span><span class="multi-image-actions"><button type="button" class="set-primary" aria-label="将图 ${index+1} 的链接复制到主图" onclick="selectMaterialPrimaryImage('${id}',${index})">用作主图</button><button type="button" class="danger" aria-label="删除图 ${index+1}" onclick="removeMaterialImage('${id}',${index})">删除</button></span></figcaption>
   </figure>`).join(''):'<div class="multi-image-empty">暂无多图。可上传多张实拍珠面图，工作台弹射入盘时会随机使用。</div>';
 }
 function setMaterialImageList(id,list){
   const clean=[...new Set((list||[]).map(x=>String(x||'').trim()).filter(Boolean))];
   if($(id))$(id).value=clean.join('\n');
   const gallery=$(`${id}_gallery`);if(gallery)gallery.innerHTML=materialImageCards(id,clean);
-  const primaryId=id==='tax_series_images'?'tax_series_image':'mat_image';
-  if($(primaryId)&&!formValue(primaryId)&&clean[0]){$(primaryId).value=clean[0];updateImagePreview(primaryId)}
+}
+function selectMaterialPrimaryImage(id,index){
+  const list=splitList(formValue(id)),selected=list[index],primaryId=materialPrimaryImageInputId(id);
+  if(!selected||!$(primaryId))return;
+  $(primaryId).value=selected;updateImagePreview(primaryId);
+  toast('已复制到主图链接，保存资料后生效');
 }
 function addMaterialImageUrl(id){
   const input=$(`${id}_url`),url=String(input?.value||'').trim();
@@ -654,11 +949,9 @@ function addMaterialImageUrl(id){
   input.value='';toast('图片已追加');
 }
 function removeMaterialImage(id,index){
-  const list=splitList(formValue(id));const removed=list.splice(index,1)[0];
+  const list=splitList(formValue(id));list.splice(index,1);
   setMaterialImageList(id,list);
-  const primaryId=id==='tax_series_images'?'tax_series_image':'mat_image';
-  if(removed&&formValue(primaryId)===removed&&$(primaryId)){$(primaryId).value=list[0]||'';updateImagePreview(primaryId)}
-  toast('图片已删除');
+  toast('已从图库移除，主图链接不受影响');
 }
 async function uploadMaterialMultiImages(id,files=[],category='material'){
   const images=(files||[]).filter(file=>String(file?.type||'').startsWith('image/'));
@@ -749,7 +1042,8 @@ function selectOptions(options=[],selected='',placeholder='请选择'){
   const hasCurrent=!current||options.some(item=>item.key===current||item.label===current);
   return `<option value="">${esc(placeholder)}</option>${!hasCurrent?`<option value="${esc(current)}" selected>${esc(current)}</option>`:''}${options.map(item=>`<option value="${esc(item.key)}" ${item.key===current||item.label===current?'selected':''}>${esc(item.label)}</option>`).join('')}`;
 }
-const STRUCTURED_MATERIAL_PARAM_KEYS=['bead_shape','surface_finish','transparency_level','texture_features','batch_variation','hole_diameter_mm','size_tolerance_mm'];
+const STRUCTURED_MATERIAL_PARAM_KEYS=['bead_shape','surface_finish','transparency_level','texture_features','batch_variation','hole_diameter_mm','size_tolerance_mm','placement_mode','image_string_axis_deg','string_axis_width_mm','body_width_mm','body_height_mm','compatible_bead_size_mm','compatible_size_tolerance_mm'];
+const MATERIAL_PLACEMENT_MODES=[['threaded','穿线安装'],['hanging','悬挂安装'],['attached_side','吸附主珠（单边）']];
 function materialParamSelect(id,label,optionKey,value='',placeholder='请选择'){
   return `<label>${fieldLabel(label,false)}<select id="${id}">${selectOptions(optionList(optionKey),value,placeholder)}</select></label>`;
 }
@@ -763,6 +1057,30 @@ function optionalNumberPayload(id){
   if(!text)return null;
   const value=num(text,NaN);
   return Number.isFinite(value)&&value>=0?value:null;
+}
+function setOptionalMaterialParam(params,key,id){
+  const value=optionalNumberPayload(id);
+  if(value!==null&&value>0)params[key]=value;else delete params[key];
+}
+function skuPhysicalSpecsPayload(){
+  const specs={};
+  setOptionalMaterialParam(specs,'string_axis_width_mm','mat_string_axis_width');
+  setOptionalMaterialParam(specs,'body_width_mm','mat_body_width');
+  setOptionalMaterialParam(specs,'body_height_mm','mat_body_height');
+  setOptionalMaterialParam(specs,'compatible_bead_size_mm','mat_compatible_bead_size');
+  setOptionalMaterialParam(specs,'compatible_size_tolerance_mm','mat_compatible_size_tolerance');
+  return specs;
+}
+function seriesMaterialParamsPayload(){
+  const current=findTaxonomyItem(formValue('tax_series_id'))?.material_params||{};
+  const params={...current};
+  const shape=formValue('tax_series_bead_shape');
+  const placementMode=formValue('tax_series_placement_mode');
+  const axisText=formValue('tax_series_image_axis');
+  if(shape)params.bead_shape=shape;else delete params.bead_shape;
+  if(placementMode)params.placement_mode=placementMode;else delete params.placement_mode;
+  if(axisText!=='')params.image_string_axis_deg=((num(axisText)%180)+180)%180;else delete params.image_string_axis_deg;
+  return params;
 }
 function materialParamPayload(){
   const params=parseJsonField('mat_material_params_extra');
@@ -787,7 +1105,13 @@ function multiSelectField(id,label,options=[],selected=[]){
 }
 function multiSelectValues(id){return [...($(id)?.selectedOptions||[])].map(x=>x.value)}
 function activeTaxonomy(){return state.cache.materialTaxonomy||materialOptions().taxonomy||[]}
-function materialTopOptions(){return [['bead','珠珠'],['accessory','配饰'],['pendant','花托/吊坠']]}
+function materialTypes(includeDisabled=false){
+  const source=(state.cache.materialTypes&&state.cache.materialTypes.length)?state.cache.materialTypes:(materialOptions().material_types||[
+    {code:'bead',name:'珠子',enabled:true,sort_order:10},{code:'accessory',name:'配饰',enabled:true,sort_order:20}
+  ]);
+  return source.filter(x=>includeDisabled||x.enabled!==false);
+}
+function materialTopOptions(includeDisabled=false){return materialTypes(includeDisabled).map(x=>[x.code||x.id,x.name||x.code||x.id])}
 function taxonomyCategories(includeDisabled=false){return activeTaxonomy().filter(x=>x.kind==='category'&&(includeDisabled||x.enabled!==false))}
 function categoriesForTop(top='bead',includeDisabled=false){return activeTaxonomy().filter(x=>x.kind==='category'&&(x.top||'bead')===(top||'bead')&&(includeDisabled||x.enabled!==false))}
 function categoryForName(top,name){return categoriesForTop(top,true).find(x=>x.name===name)}
@@ -799,9 +1123,23 @@ async function ensureMaterialAdminMeta(){
   if(!state.cache.materialOptions){
     const data=await api('/api/v1/admin/material-options');
     state.cache.materialOptions={...DEFAULT_MATERIAL_OPTIONS,...data};
+    state.cache.materialTypes=data.material_types||[];
     state.cache.materialTaxonomy=data.taxonomy||[];
   }
+  populateMaterialDirectoryControls();
   populateMaterialCategoryFilter();
+}
+function setMaterialTypeSelectOptions(id,{includeAll=false,includeDisabled=false,selected}={}){
+  const select=$(id);if(!select)return;
+  const current=selected!==undefined?selected:select.value;
+  const items=materialTypes(includeDisabled);
+  select.innerHTML=`${includeAll?'<option value="">全部类型</option>':''}${items.map(x=>`<option value="${esc(x.code||x.id)}" ${String(x.code||x.id)===String(current)?'selected':''} ${x.enabled===false?'disabled':''}>${esc(x.name||x.code||x.id)}${x.enabled===false?'（已停用）':''}</option>`).join('')}`;
+  if(!select.value&&!includeAll&&items.length)select.value=items[0].code||items[0].id;
+}
+function populateMaterialDirectoryControls(){
+  setMaterialTypeSelectOptions('materialTop',{includeAll:true});
+  setMaterialTypeSelectOptions('catalogCategoryTypeFilter',{includeAll:true});
+  setMaterialTypeSelectOptions('catalogVarietyTypeFilter',{includeAll:true});
 }
 function populateMaterialCategoryFilter(){
   const select=$('materialCategory');if(!select)return;
@@ -818,12 +1156,12 @@ async function handleMaterialTopChange(){populateMaterialCategoryFilter();await 
 function categorySelectField(top,selected){
   const categories=categoriesForTop(top,true);
   const exists=categories.some(x=>x.name===selected);
-  return `<label>${fieldLabel('分类',true)}<select id="mat_category" onchange="updateMaterialSeriesOptions()"><option value="">请选择分类</option>${selected&&!exists?`<option value="${esc(selected)}" selected>${esc(selected)}</option>`:''}${categories.map(x=>`<option value="${esc(x.name)}" ${x.name===selected?'selected':''} ${x.enabled===false?'disabled':''}>${esc(x.name)}${x.enabled===false?'（已停用）':''}</option>`).join('')}</select></label>`;
+  return `<label>${fieldLabel('材料分类',true)}<select id="mat_category" onchange="updateMaterialSeriesOptions()"><option value="">请选择材料分类</option>${selected&&!exists?`<option value="${esc(selected)}" selected>${esc(selected)}</option>`:''}${categories.map(x=>`<option value="${esc(x.name)}" ${x.name===selected?'selected':''} ${x.enabled===false?'disabled':''}>${esc(x.name)}${x.enabled===false?'（已停用）':''}</option>`).join('')}</select></label>`;
 }
 function seriesSelectField(top,categoryName,selected){
   const list=seriesForCategoryName(top,categoryName,true);
   const exists=list.some(x=>x.name===selected);
-  return `<div class="form-field material-series-field"><label for="mat_series">${fieldLabel('品种',true)}</label><div class="inline-field-action"><select id="mat_series" onchange="syncMaterialSeriesEditButton()"><option value="">请选择品种</option>${selected&&!exists?`<option value="${esc(selected)}" selected>${esc(selected)}</option>`:''}${list.map(x=>`<option value="${esc(x.name)}" ${x.name===selected?'selected':''} ${x.enabled===false?'disabled':''}>${esc(x.name)}${x.enabled===false?'（已停用）':''}</option>`).join('')}</select><button id="mat_series_edit_btn" class="mini-btn primary" type="button" onclick="quickEditSelectedMaterialSeries()">编辑品种</button></div></div>`;
+  return `<label>${fieldLabel('品种 / 款式',true)}<select id="mat_series"><option value="">请选择品种 / 款式</option>${selected&&!exists?`<option value="${esc(selected)}" selected>${esc(selected)}</option>`:''}${list.map(x=>`<option value="${esc(x.name)}" ${x.name===selected?'selected':''} ${x.enabled===false?'disabled':''}>${esc(x.name)}${x.enabled===false?'（已停用）':''}</option>`).join('')}</select></label>`;
 }
 function updateMaterialCategoryOptions(selected=''){
   const top=formValue('mat_top')||'bead',select=$('mat_category');
@@ -840,8 +1178,7 @@ function updateMaterialSeriesOptions(selected=''){
   const list=seriesForCategoryName(top,categoryName,true);
   const current=selected||select.value;
   const exists=list.some(x=>x.name===current);
-  select.innerHTML=`<option value="">请选择品种</option>${current&&!exists?`<option value="${esc(current)}" selected>${esc(current)}</option>`:''}${list.map(x=>`<option value="${esc(x.name)}" ${x.name===current?'selected':''} ${x.enabled===false?'disabled':''}>${esc(x.name)}${x.enabled===false?'（已停用）':''}</option>`).join('')}`;
-  syncMaterialSeriesEditButton();
+  select.innerHTML=`<option value="">请选择品种 / 款式</option>${current&&!exists?`<option value="${esc(current)}" selected>${esc(current)}</option>`:''}${list.map(x=>`<option value="${esc(x.name)}" ${x.name===current?'selected':''} ${x.enabled===false?'disabled':''}>${esc(x.name)}${x.enabled===false?'（已停用）':''}</option>`).join('')}`;
 }
 function findMaterialSeriesTaxonomy(top='bead',categoryName='',seriesName=''){
   const category=categoryForName(top,categoryName);
@@ -851,6 +1188,11 @@ function findMaterialSeriesTaxonomy(top='bead',categoryName='',seriesName=''){
 function selectedMaterialSeriesTaxonomy(){
   return findMaterialSeriesTaxonomy(formValue('mat_top')||'bead',formValue('mat_category'),formValue('mat_series'));
 }
+function selectedMaterialShape(){return selectedMaterialSeriesTaxonomy().series?.material_params?.bead_shape||''}
+function materialRequiresMeasuredSpecs(){
+  const top=formValue('mat_top')||'bead',shape=selectedMaterialShape();
+  return top!=='bead'||(shape&&!['round','faceted_round'].includes(shape));
+}
 function syncMaterialSeriesEditButton(){
   const btn=$('mat_series_edit_btn');if(!btn)return;
   const {series}=selectedMaterialSeriesTaxonomy();
@@ -859,24 +1201,21 @@ function syncMaterialSeriesEditButton(){
 async function quickEditSelectedMaterialSeries(){
   const {category,series}=selectedMaterialSeriesTaxonomy();
   if(!category||!series){toast('请先选择要编辑的品种');return}
-  await Promise.all([ensureMaterialAdminMeta(),ensureMaterialRefs()]);
-  renderMaterialTaxonomy({focusSeriesId:series.id,focusCategoryId:category.id});
+  await ensureMaterialAdminMeta();switchPage('materialVarieties');openMaterialVarietyProfile(series.id,category.id);
 }
 async function quickEditMaterialSeriesFromGroup(key){
   const group=materialGroups().find(x=>x.key===key);
   const sku=group?.sku||{};
   const {category,series}=findMaterialSeriesTaxonomy(sku.top||'bead',sku.category||'',sku.series||sku.name||'');
   if(!category||!series){toast('未找到对应品种，请先到分类 / 品种维护中确认');return}
-  await Promise.all([ensureMaterialAdminMeta(),ensureMaterialRefs()]);
-  renderMaterialTaxonomy({focusSeriesId:series.id,focusCategoryId:category.id});
+  await ensureMaterialAdminMeta();switchPage('materialVarieties');openMaterialVarietyProfile(series.id,category.id);
 }
 async function quickEditMaterialCategoryFromGroup(key){
   const group=materialGroups().find(x=>x.key===key);
   const sku=group?.sku||{};
   const category=categoryForName(sku.top||'bead',sku.category||'');
-  if(!category){toast('未找到对应一级分类，请先到分类 / 品种维护中确认');return}
-  await Promise.all([ensureMaterialAdminMeta(),ensureMaterialRefs()]);
-  renderMaterialTaxonomy({focusCategoryId:category.id});
+  if(!category){toast('未找到对应材料分类，请先到材料分类页面确认');return}
+  await ensureMaterialAdminMeta();switchPage('materialCategories');editMaterialCategory(category.id);
 }
 function validateMaterialTaxonomySelection(){
   const top=formValue('mat_top')||'bead';
@@ -920,26 +1259,41 @@ function materialFilterParams(){
 }
 function materialFilterSignature(params=materialFilterParams()){return JSON.stringify(params)}
 async function loadMaterials(){
-  await ensureMaterialAdminMeta();
-  const params=materialFilterParams(),signature=materialFilterSignature(params);
-  if(signature!==state.materialUi.filterSignature){
-    state.materialUi.page=1;state.materialUi.selected.clear();state.materialUi.expanded.clear();state.materialUi.filterSignature=signature;
+  const ui=state.materialUi;
+  const requestId=++ui.requestId;
+  if(ui.requestController)ui.requestController.abort();
+  const controller=typeof AbortController==='function'?new AbortController():null;
+  ui.requestController=controller;
+  try{
+    await ensureMaterialAdminMeta();
+    if(requestId!==ui.requestId)return;
+    const params=materialFilterParams(),signature=materialFilterSignature(params);
+    if(signature!==ui.filterSignature){
+      ui.page=1;ui.selected.clear();ui.expanded.clear();ui.filterSignature=signature;
+    }
+    const requestedPage=ui.page;
+    const qs=new URLSearchParams({...params,page:requestedPage,page_size:ui.pageSize});
+    const payload=await api(`/api/v1/admin/material-spus?${qs}`,controller?{signal:controller.signal}:{});
+    if(requestId!==ui.requestId||signature!==materialFilterSignature())return;
+    const groups=Array.isArray(payload)?payload:(payload.items||[]);
+    const pagination=payload.pagination||{page:requestedPage,page_size:ui.pageSize,total:groups.length,total_pages:1};
+    if(!groups.length&&pagination.total&&requestedPage>pagination.total_pages){
+      ui.page=Math.max(1,pagination.total_pages||1);
+      return loadMaterials();
+    }
+    ui.page=pagination.page||requestedPage;
+    ui.pageSize=pagination.page_size||ui.pageSize;
+    ui.total=pagination.total??groups.length;
+    ui.totalPages=pagination.total_pages||1;
+    state.cache.materialSpus=groups;
+    state.cache.materials=state.cache.materialSpus.flatMap(g=>Array.isArray(g.items)?g.items:[]);
+    renderMaterialsTable();
+  }catch(error){
+    if(error?.name==='AbortError'||requestId!==ui.requestId)return;
+    toast(error?.message||'材料列表加载失败，请重试');
+  }finally{
+    if(requestId===ui.requestId)ui.requestController=null;
   }
-  const qs=new URLSearchParams({...params,page:state.materialUi.page,page_size:state.materialUi.pageSize});
-  const payload=await api(`/api/v1/admin/material-spus?${qs}`);
-  const groups=Array.isArray(payload)?payload:(payload.items||[]);
-  const pagination=payload.pagination||{page:state.materialUi.page,page_size:state.materialUi.pageSize,total:groups.length,total_pages:1};
-  if(!groups.length&&pagination.total&&state.materialUi.page>pagination.total_pages){
-    state.materialUi.page=Math.max(1,pagination.total_pages||1);
-    return loadMaterials();
-  }
-  state.materialUi.page=pagination.page||state.materialUi.page;
-  state.materialUi.pageSize=pagination.page_size||state.materialUi.pageSize;
-  state.materialUi.total=pagination.total??groups.length;
-  state.materialUi.totalPages=pagination.total_pages||1;
-  state.cache.materialSpus=groups;
-  state.cache.materials=state.cache.materialSpus.flatMap(g=>Array.isArray(g.items)?g.items:[]);
-  renderMaterialsTable();
 }
 function materialGroups(){
   if((state.cache.materialSpus||[]).length){
@@ -1110,7 +1464,7 @@ function renderMaterialsTable(){
       <td class="col-element">${materialEnergyTags(g.items[0]||{})}</td>
       <td class="col-quality">${groupQualityBadge(g)}</td>
       <td class="col-status">${statusPill(g.enabledCount?'enabled':'closed',`${g.enabledCount}/${g.items.length} 启用`)}</td>
-      <td class="col-actions"><div class="table-actions spu-actions"><button class="mini-btn" onclick="quickEditMaterialCategoryFromGroup('${esc(g.key)}')">编辑分类</button><button class="mini-btn primary" onclick="quickEditMaterialSeriesFromGroup('${esc(g.key)}')">编辑品种</button><button class="mini-btn" onclick="toggleMaterialExpand('${esc(g.key)}')">${expanded?'收起':'展开'}</button></div></td>
+      <td class="col-actions"><div class="table-actions spu-actions"><button class="mini-btn" onclick="quickEditMaterialCategoryFromGroup('${esc(g.key)}')">查看分类</button><button class="mini-btn primary" onclick="quickEditMaterialSeriesFromGroup('${esc(g.key)}')">完善品种</button><button class="mini-btn" onclick="toggleMaterialExpand('${esc(g.key)}')">${expanded?'收起':'展开'}</button></div></td>
     </tr>`;
     const children=expanded?g.items.map(x=>{
       const sx=matSku(x),ex=matEnergy(x),vx=matVisual(x);
@@ -1134,34 +1488,42 @@ function renderMaterialsTable(){
 function toggleMaterialGroup(key,checked){const g=materialGroups().find(x=>x.key===key);(g?.items||[]).forEach(x=>checked?state.materialUi.selected.add(matSku(x).id):state.materialUi.selected.delete(matSku(x).id));renderMaterialsTable()}
 function toggleAllMaterials(checked){(state.cache.materials||[]).forEach(x=>checked?state.materialUi.selected.add(matSku(x).id):state.materialUi.selected.delete(matSku(x).id));renderMaterialsTable()}
 function selectedMaterialIds(){return [...state.materialUi.selected].filter(id=>(state.cache.materials||[]).some(x=>matSku(x).id===id))}
-async function newMaterial(){await Promise.all([ensureMaterialAdminMeta(),ensureMaterialRefs()]);renderMaterial({sku:{top:'bead',size_mm:8,weight_g:1,price_per_bead:0.01,cost_price:0,safety_stock:0,supplier_name:'',purchase_note:'',stock:0,enabled:false,sort_order:0},energy:{primary_element:'water',secondary_elements:[],effects:[],chakras:[],wish_pools:[],mood_tags:[],visual_tags:[]},visual:{color_hex:'#dfe3e5',shine_hex:'#ffffff',image_urls:[]},rules:{allowed_roles:['primary','support','accent'],match_rules:['no_limit'],care_tags:[],conflict_codes:[]}})}
+async function newMaterial(){await Promise.all([ensureMaterialAdminMeta(),ensureMaterialRefs()]);renderMaterial({sku:{top:materialTypes()[0]?.code||'bead',size_mm:8,weight_g:1,price_per_bead:0.01,cost_price:0,safety_stock:0,supplier_name:'',purchase_note:'',stock:0,enabled:false,sort_order:0},energy:{primary_element:'water',secondary_elements:[],effects:[],chakras:[],wish_pools:[],mood_tags:[],visual_tags:[]},visual:{color_hex:'#dfe3e5',shine_hex:'#ffffff',image_urls:[]},rules:{allowed_roles:['primary','support','accent'],match_rules:['no_limit'],care_tags:[],conflict_codes:[]}})}
 async function editMaterial(id){await Promise.all([ensureMaterialAdminMeta(),ensureMaterialRefs()]);renderMaterial((state.cache.materials||[]).find(x=>matSku(x).id===id))}
 function renderMaterial(x={}){
   const s=matSku(x),isEdit=!!s.id;
+  const physical=x.physical_specs||{};
   const top=s.top||'bead';
   const category=s.category||'';
   const series=s.series||s.name||'';
-  openDrawer('MATERIAL KNOWLEDGE',isEdit?'编辑材料':'新增材料',`<div class="form-grid material-form material-knowledge-form">
+  openDrawer('MATERIAL SKU',isEdit?'编辑 SKU':'新增 SKU',`<div class="form-grid material-form material-knowledge-form">
     <section class="full">${materialGovernanceGuide()}</section>
-    <section class="full material-form-notice">图片、能量知识、规则约束统一在「分类 / 品种维护」中设置；这里仅维护不同珠径 SKU 的规格、价格、库存和启停。</section>
+    <section class="full material-form-notice">请先在独立目录页面创建材料类型、材料分类和品种 / 款式。这里仅选择目录路径并维护 SKU 规格、价格、库存和启停。</section>
     <section class="full material-form-section"><h3>基础 SKU</h3><div class="form-grid">
       <label>ID<input id="mat_id" class="readonly-input" value="${esc(s.id||'')}" readonly></label>
       <label>SKU<input id="mat_sku" class="readonly-input" value="${esc(s.sku_id||'')}" readonly></label>
       <label>材料编码<input id="mat_code" class="readonly-input" value="${esc(s.material_code||'')}" placeholder="保存时自动生成" readonly></label>
-      <label>类型<select id="mat_top" onchange="updateMaterialCategoryOptions()"><option value="bead" ${top==='bead'?'selected':''}>珠珠</option><option value="accessory" ${top==='accessory'?'selected':''}>配饰</option><option value="pendant" ${top==='pendant'?'selected':''}>花托/吊坠</option></select></label>
+      <label>${fieldLabel('材料类型',true)}<select id="mat_top" onchange="updateMaterialCategoryOptions()">${materialTopOptions(isEdit).map(([code,label])=>`<option value="${esc(code)}" ${code===top?'selected':''}>${esc(label)}</option>`).join('')}</select></label>
       ${categorySelectField(top,category)}
       ${seriesSelectField(top,category,series)}
       <label>等级<select id="mat_grade">${selectOptions(optionList('grades'),s.grade||'','请选择等级')}</select></label>
       <label>${fieldLabel('展示名称',true)}<input id="mat_name" value="${esc(s.name||'')}" placeholder="绿幽灵"></label>
       <label>${fieldLabel('单颗价格',true)}<input id="mat_price" type="number" step="0.01" min="0" value="${esc(s.price_per_bead??0)}" oninput="syncSpecDefaults()"></label>
-      <label>${fieldLabel('珠径 mm',true)}<input id="mat_size" type="number" min="1" step="0.1" value="${esc(s.size_mm||8)}"></label>
+      <label>${fieldLabel('珠径 / 外观最大尺寸 mm',true)}<input id="mat_size" type="number" min="0.1" step="0.1" value="${esc(s.size_mm??8)}"></label>
       <label>${fieldLabel('重量 g',true)}<input id="mat_weight" type="number" min="0" step="0.01" value="${esc(s.weight_g||1)}" oninput="syncSpecDefaults()"></label>
       <label>${fieldLabel('库存',true)}<input id="mat_stock" type="number" min="0" step="1" value="${esc(s.stock||0)}" oninput="syncSpecDefaults();guardMaterialEnabled()"></label>
       <label>排序<input id="mat_sort" type="number" value="${esc(s.sort_order||0)}"></label>
       ${selectField('mat_enabled','状态',String(!!s.enabled&&num(s.stock)>0),[['true','启用'],['false','停用']])}
     </div></section>
+    <section class="full material-form-section"><h3>工作台实物规格</h3><div class="content-hint">圆珠可留空并沿用珠径；随形、桶珠、隔片和合金配饰请按实物测量。穿线占位决定成串间距，外观宽高决定显示比例和碰撞范围。</div><div class="form-grid">
+      <label>穿线方向占位 mm<input id="mat_string_axis_width" type="number" min="0.1" step="0.1" value="${esc(physical.string_axis_width_mm||'')}" placeholder="如 3.2"></label>
+      <label>外观宽度 mm<input id="mat_body_width" type="number" min="0.1" step="0.1" value="${esc(physical.body_width_mm||'')}" placeholder="如 10"></label>
+      <label>外观高度 mm<input id="mat_body_height" type="number" min="0.1" step="0.1" value="${esc(physical.body_height_mm||'')}" placeholder="如 6"></label>
+      <label>适配主珠珠径 mm<input id="mat_compatible_bead_size" type="number" min="0.1" step="0.1" value="${esc(physical.compatible_bead_size_mm||'')}" placeholder="包珠隔片如 8"></label>
+      <label>适配误差 ±mm<input id="mat_compatible_size_tolerance" type="number" min="0.1" step="0.1" value="${esc(physical.compatible_size_tolerance_mm||'')}" placeholder="默认 0.6"></label>
+    </div></section>
     ${isEdit?'':materialSpecConfig({size:s.size_mm,price:s.price_per_bead,stock:s.stock,weight:s.weight_g})}
-  </div><div class="form-actions"><button class="btn secondary" onclick="closeDrawer()">取消</button><button class="btn primary" onclick="saveMaterial()">保存材料</button></div>`);
+  </div><div class="form-actions"><button class="btn secondary" onclick="closeDrawer()">取消</button><button class="btn primary" onclick="saveMaterial()">保存 SKU</button></div>`);
   updateMaterialSeriesOptions(series);
   guardMaterialEnabled();
 }
@@ -1171,11 +1533,22 @@ function parseJsonField(id){
   try{return JSON.parse(text)}catch(e){toast(`${id} 不是合法 JSON`);throw e}
 }
 function validateMaterialForm(){
-  const required=[['mat_category','分类'],['mat_series','品种'],['mat_name','展示名称']];
+  const required=[['mat_category','材料分类'],['mat_series','品种 / 款式'],['mat_name','展示名称']];
   for(const [id,label] of required){if(!validateRequired(id,label))return false}
   if(!validateMaterialTaxonomySelection())return false;
   if(!validateKnownMaterialOption('grades',formValue('mat_grade'),'品质等级'))return false;
-  return validateNumber('mat_price','单颗价格',0)&&validateNumber('mat_size','珠径',1)&&validateNumber('mat_weight','重量',0)&&validateNumber('mat_stock','库存',0)&&validateNumber('mat_sort','排序',0);
+  if(!(validateNumber('mat_price','单颗价格',0)&&validateNumber('mat_size','外观最大尺寸',0.1)&&validateNumber('mat_weight','重量',0)&&validateNumber('mat_stock','库存',0)&&validateNumber('mat_sort','排序',0)))return false;
+  const enabled=formValue('mat_enabled')==='true'&&num(formValue('mat_stock'))>0;
+  const requiresMeasuredSpecs=materialRequiresMeasuredSpecs();
+  if(requiresMeasuredSpecs&&formValue('mat_spec_mode')==='multi'){
+    toast('异形珠和配饰请逐个 SKU 录入实测规格，不能批量复用同一组尺寸');return false;
+  }
+  if(requiresMeasuredSpecs&&enabled){
+    for(const [id,label] of [['mat_string_axis_width','穿线方向占位'],['mat_body_width','外观宽度'],['mat_body_height','外观高度']]){
+      if(!validateNumber(id,label,0.1))return false;
+    }
+  }
+  return true;
 }
 function materialBasePayload(){
   const stock=num(formValue('mat_stock'));
@@ -1184,7 +1557,8 @@ function materialBasePayload(){
     category:formValue('mat_category'),series:formValue('mat_series'),grade:formValue('mat_grade'),name:formValue('mat_name'),
     price_per_bead:num(formValue('mat_price')),size_mm:num(formValue('mat_size'),8),weight_g:num(formValue('mat_weight'),1),
     stock,sort_order:num(formValue('mat_sort')),enabled:formValue('mat_enabled')==='true'&&stock>0,
-    price:num(formValue('mat_price')),size:num(formValue('mat_size'),8),weight:num(formValue('mat_weight'),1),image_path:'',image_url:'',image_urls:[]
+    physical_specs:skuPhysicalSpecsPayload(),
+    price:num(formValue('mat_price')),size:num(formValue('mat_size'),8),weight:num(formValue('mat_weight'),1)
   };
 }
 function materialSpecPayloads(base){
@@ -1219,9 +1593,527 @@ async function saveMaterial(){
 async function refreshMaterialOptions(){
   const data=await api('/api/v1/admin/material-options');
   state.cache.materialOptions={...DEFAULT_MATERIAL_OPTIONS,...data};
+  state.cache.materialTypes=data.material_types||[];
   state.cache.materialTaxonomy=data.taxonomy||[];
+  populateMaterialDirectoryControls();
   populateMaterialCategoryFilter();
 }
+
+async function loadMaterialTypesPage(){await ensureMaterialAdminMeta();renderMaterialTypesPage()}
+function renderMaterialTypesPage(){
+  const rows=materialTypes(true).map(item=>[
+    `<div class="catalog-name"><b>${esc(item.name)}</b><small>${esc(item.description||'暂无说明')}</small></div>`,
+    `<code>${esc(item.code||item.id)}</code>`,
+    `${num(item.category_count)} 个分类`,
+    `${num(item.variety_count)} 个品种`,
+    `${num(item.sku_count)} 个 SKU`,
+    item.enabled===false?statusPill('closed','已停用'):statusPill('completed','已启用'),
+    `<div class="table-actions"><button class="mini-btn" onclick="editMaterialType('${esc(item.code||item.id)}')">编辑</button>${item.enabled===false?'':`<button class="mini-btn danger" onclick="disableMaterialTypeEntry('${esc(item.code||item.id)}')">停用</button>`}</div>`
+  ]);
+  $('materialTypesTable').innerHTML=table(['材料类型','稳定编码','分类','品种 / 款式','SKU','状态','操作'],rows);
+}
+function renderMaterialTypeForm(item={}){
+  const isEdit=!!(item.code||item.id);
+  openDrawer('MATERIAL TYPE',isEdit?'编辑材料类型':'新增材料类型',`
+    <div class="content-hint">材料类型是目录第一级。编码用于关联分类和 SKU，创建后不可修改。</div>
+    <div class="form-grid">
+      <input id="catalog_type_id" type="hidden" value="${esc(item.code||item.id||'')}">
+      <label>${fieldLabel('类型名称',true)}<input id="catalog_type_name" value="${esc(item.name||'')}" placeholder="如：珠子 / 配饰"></label>
+      <label>类型编码<input id="catalog_type_code" value="${esc(item.code||item.id||'')}" ${isEdit?'readonly class="readonly-input"':''} placeholder="英文编码，留空自动生成"><small class="help-text">仅支持小写字母、数字、下划线和短横线</small></label>
+      <label class="full">说明<textarea id="catalog_type_description" placeholder="说明该类型包含哪些材料">${esc(item.description||'')}</textarea></label>
+      <label>排序<input id="catalog_type_sort" type="number" value="${esc(item.sort_order||0)}"></label>
+      ${selectField('catalog_type_enabled','状态',String(item.enabled!==false),[['true','启用'],['false','停用']])}
+    </div>
+    <div class="form-actions"><button class="btn secondary" onclick="closeDrawer()">取消</button><button class="btn primary" onclick="saveMaterialTypeEntry()">保存类型</button></div>`);
+}
+function newMaterialType(){renderMaterialTypeForm({enabled:true,sort_order:materialTypes(true).length*10+10})}
+function editMaterialType(code){const item=materialTypes(true).find(x=>(x.code||x.id)===code);if(item)renderMaterialTypeForm(item)}
+async function saveMaterialTypeEntry(){
+  const name=formValue('catalog_type_name');if(!name){toast('请填写类型名称');return}
+  try{
+    await api('/api/v1/admin/material-types',{method:'POST',body:JSON.stringify({
+      id:formValue('catalog_type_id'),code:formValue('catalog_type_code'),name,
+      description:formValue('catalog_type_description'),sort_order:num(formValue('catalog_type_sort')),
+      enabled:formValue('catalog_type_enabled')==='true'
+    })});
+    closeDrawer();await refreshMaterialOptions();renderMaterialTypesPage();toast('材料类型已保存');
+  }catch(e){toast(e.message||'保存材料类型失败')}
+}
+async function disableMaterialTypeEntry(code){
+  const item=materialTypes(true).find(x=>(x.code||x.id)===code);if(!item)return;
+  if(!confirm(`停用「${item.name}」后，它下面的分类将不能用于新建 SKU，确认继续？`))return;
+  try{await api(`/api/v1/admin/material-types/${encodeURIComponent(code)}`,{method:'DELETE'});await refreshMaterialOptions();renderMaterialTypesPage();toast('材料类型已停用')}catch(e){toast(e.message||'停用失败')}
+}
+
+async function loadMaterialCategoriesPage(){await ensureMaterialAdminMeta();renderMaterialCategoriesPage()}
+function renderMaterialCategoriesPage(){
+  const top=formValue('catalogCategoryTypeFilter');
+  const categories=taxonomyCategories(true).filter(x=>!top||(x.top||'bead')===top);
+  const rows=categories.map(item=>[
+    `<b>${esc(item.name)}</b>`,esc(topLabel(item.top||'bead')),
+    `${(item.series||[]).length} 个品种 / 款式`,
+    item.enabled===false?statusPill('closed','已停用'):statusPill('completed','已启用'),
+    `<div class="table-actions"><button class="mini-btn" onclick="editMaterialCategory('${esc(item.id)}')">编辑</button><button class="mini-btn primary" onclick="newMaterialVariety('${esc(item.id)}')">新增品种</button>${item.enabled===false?'':`<button class="mini-btn danger" onclick="disableMaterialDirectoryEntry('${esc(item.id)}','分类')">停用</button>`}</div>`
+  ]);
+  $('materialCategoriesTable').innerHTML=table(['材料分类','所属类型','品种 / 款式','状态','操作'],rows);
+}
+function renderMaterialCategoryForm(item={}){
+  const isEdit=!!item.id;
+  const defaultTop=item.top||formValue('catalogCategoryTypeFilter')||materialTypes()[0]?.code||'bead';
+  openDrawer('MATERIAL CATEGORY',isEdit?'编辑材料分类':'新增材料分类',`
+    <div class="content-hint">材料分类只负责目录归属，不在这里填写 SKU 规格、价格或库存。</div>
+    <div class="form-grid">
+      <input id="catalog_category_id" type="hidden" value="${esc(item.id||'')}">
+      ${selectField('catalog_category_top','材料类型',defaultTop,materialTopOptions(true))}
+      <label>${fieldLabel('分类名称',true)}<input id="catalog_category_name" value="${esc(item.name||'')}" placeholder="如：幽灵水晶 / 幽灵随形 / 隔珠"></label>
+      <label>排序<input id="catalog_category_sort" type="number" value="${esc(item.sort_order||0)}"></label>
+      ${selectField('catalog_category_enabled','状态',String(item.enabled!==false),[['true','启用'],['false','停用']])}
+    </div>
+    <div class="form-actions"><button class="btn secondary" onclick="closeDrawer()">取消</button><button class="btn primary" onclick="saveMaterialCategoryEntry()">保存分类</button></div>`);
+}
+function newMaterialCategory(){renderMaterialCategoryForm({enabled:true,sort_order:0})}
+function editMaterialCategory(id){const item=findTaxonomyItem(id);if(item)renderMaterialCategoryForm(item)}
+async function saveMaterialCategoryEntry(){
+  const name=formValue('catalog_category_name');if(!name){toast('请填写分类名称');return}
+  try{
+    await api('/api/v1/admin/material-taxonomy/categories',{method:'POST',body:JSON.stringify({
+      id:formValue('catalog_category_id'),top:formValue('catalog_category_top'),name,
+      sort_order:num(formValue('catalog_category_sort')),enabled:formValue('catalog_category_enabled')==='true'
+    })});
+    closeDrawer();await refreshMaterialOptions();renderMaterialCategoriesPage();toast('材料分类已保存');
+  }catch(e){toast(e.message||'保存材料分类失败')}
+}
+
+function catalogVarietyTypeOptionHtml(selected='',includeDisabled=false){
+  return materialTypes(includeDisabled).map(item=>{
+    const code=item.code||item.id;
+    return `<option value="${esc(code)}" ${code===selected?'selected':''} ${item.enabled===false?'disabled':''}>${esc(item.name||code)}${item.enabled===false?'（已停用）':''}</option>`;
+  }).join('');
+}
+function catalogVarietyCategoryOptionHtml(top='',selected='',includeDisabled=false){
+  return taxonomyCategories(includeDisabled)
+    .filter(item=>!top||(item.top||'bead')===top)
+    .map(item=>`<option value="${esc(item.id)}" ${item.id===selected?'selected':''} ${item.enabled===false?'disabled':''}>${esc(item.name)}${item.enabled===false?'（已停用）':''}</option>`)
+    .join('');
+}
+function updateCatalogVarietyCategoryOptions(selected=''){
+  const select=$('catalog_variety_category');if(!select)return;
+  const top=formValue('catalog_variety_top'),current=selected||select.value;
+  const categories=taxonomyCategories().filter(item=>(item.top||'bead')===top);
+  select.innerHTML=`<option value="">${top?'请选择材料分类':'请先选择材料类型'}</option>${categories.map(item=>`<option value="${esc(item.id)}">${esc(item.name)}</option>`).join('')}`;
+  select.value=categories.some(item=>item.id===current)?current:'';
+}
+function populateVarietyCategoryFilter(){
+  const select=$('catalogVarietyCategoryFilter');if(!select)return;
+  const top=formValue('catalogVarietyTypeFilter'),current=select.value;
+  const categories=taxonomyCategories(true).filter(x=>!top||(x.top||'bead')===top);
+  select.innerHTML=`<option value="">全部分类</option>${categories.map(x=>`<option value="${esc(x.id)}">${top?'':`${esc(topLabel(x.top||'bead'))} / `}${esc(x.name)}</option>`).join('')}`;
+  select.value=categories.some(x=>x.id===current)?current:'';
+}
+function handleVarietyTypeFilterChange(){populateVarietyCategoryFilter();renderMaterialVarietiesPage()}
+async function loadMaterialVarietiesPage(){await ensureMaterialAdminMeta();populateVarietyCategoryFilter();renderMaterialVarietiesPage()}
+function materialVarietyRows(){
+  const top=formValue('catalogVarietyTypeFilter'),categoryId=formValue('catalogVarietyCategoryFilter');
+  const keyword=formValue('catalogVarietyKeyword').trim().toLowerCase(),rows=[];
+  taxonomyCategories(true).filter(cat=>(!top||(cat.top||'bead')===top)&&(!categoryId||cat.id===categoryId)).forEach(cat=>{
+    (cat.series||[]).forEach(item=>{
+      const searchable=[
+        item.name,item.material_code,cat.name,topLabel(cat.top||'bead'),
+        optionLabel('bead_shapes',item.material_params?.bead_shape),
+        ...(item.energy?.effects||item.effects||[])
+      ].filter(Boolean).join(' ').toLowerCase();
+      if(!keyword||searchable.includes(keyword))rows.push({category:cat,item});
+    });
+  });
+  return rows;
+}
+function varietyProfileState(item={}){
+  const params=item.material_params||{},energy=item.energy||{};
+  const complete=!!item.image_url&&!!params.bead_shape&&((item.top||'bead')==='pendant'||!!energy.primary_element);
+  return complete?statusPill('completed','资料较完整'):statusPill('pending_payment','待完善资料');
+}
+function renderMaterialVarietiesPage(){
+  const rows=materialVarietyRows().map(({category,item})=>[
+    `<div class="catalog-name">${item.image_url?`<img src="${esc(item.image_url)}" alt="">`:''}<b>${esc(item.name)}</b><small>${esc(item.material_code||'保存后生成编码')}</small></div>`,
+    esc(topLabel(category.top||'bead')),esc(category.name),
+    esc(optionLabel('bead_shapes',item.material_params?.bead_shape)||'未设置'),
+    varietyProfileState(item),
+    item.enabled===false?statusPill('closed','已停用'):statusPill('completed','已启用'),
+    `<div class="table-actions"><button class="mini-btn" onclick="editMaterialVariety('${esc(item.id)}','${esc(category.id)}')">编辑目录</button><button class="mini-btn primary" onclick="openMaterialVarietyProfile('${esc(item.id)}','${esc(category.id)}')">完善资料</button>${item.enabled===false?'':`<button class="mini-btn danger" onclick="disableMaterialDirectoryEntry('${esc(item.id)}','品种')">停用</button>`}</div>`
+  ]);
+  $('materialVarietiesTable').innerHTML=table(['品种 / 款式','材料类型','材料分类','工作台形制','资料状态','目录状态','操作'],rows);
+}
+function renderMaterialVarietyForm(item={},categoryId=''){
+  const isEdit=!!item.id,selectedCategory=categoryId||item.parent_id||formValue('catalogVarietyCategoryFilter');
+  const category=findTaxonomyItem(selectedCategory);
+  const selectedTop=category?.top||item.top||formValue('catalogVarietyTypeFilter')||materialTypes()[0]?.code||'';
+  openDrawer('MATERIAL VARIETY',isEdit?'编辑品种 / 款式':'新增品种 / 款式',`
+    <div class="content-hint">这里只建立三级目录。图片、工作台形制和推荐资料保存后再按需完善。</div>
+    <div class="form-grid">
+      <input id="catalog_variety_id" type="hidden" value="${esc(item.id||'')}">
+      <label>${fieldLabel('材料类型',true)}<select id="catalog_variety_top" onchange="updateCatalogVarietyCategoryOptions()"><option value="">请选择材料类型</option>${catalogVarietyTypeOptionHtml(selectedTop,isEdit)}</select></label>
+      <label>${fieldLabel('所属材料分类',true)}<select id="catalog_variety_category"><option value="">${selectedTop?'请选择材料分类':'请先选择材料类型'}</option>${catalogVarietyCategoryOptionHtml(selectedTop,selectedCategory,isEdit)}</select></label>
+      <label>${fieldLabel('品种 / 款式名称',true)}<input id="catalog_variety_name" value="${esc(item.name||'')}" placeholder="如：绿幽灵 / 红幽灵随形 / 圆饼隔珠"></label>
+      <label>材料编码<input id="catalog_variety_code" class="readonly-input" value="${esc(item.material_code||'')}" placeholder="保存后自动生成" readonly></label>
+      <label>排序<input id="catalog_variety_sort" type="number" value="${esc(item.sort_order||0)}"></label>
+      ${selectField('catalog_variety_enabled','状态',String(item.enabled!==false),[['true','启用'],['false','停用']])}
+    </div>
+    <div class="form-actions"><button class="btn secondary" onclick="closeDrawer()">取消</button><button class="btn primary" onclick="saveMaterialVarietyEntry()">保存品种 / 款式</button></div>`);
+}
+function newMaterialVariety(categoryId=''){renderMaterialVarietyForm({enabled:true,sort_order:0},categoryId)}
+function editMaterialVariety(id,categoryId=''){const item=findTaxonomyItem(id);if(item)renderMaterialVarietyForm(item,categoryId)}
+async function saveMaterialVarietyEntry(){
+  const top=formValue('catalog_variety_top'),category_id=formValue('catalog_variety_category'),name=formValue('catalog_variety_name');
+  if(!top){toast('请选择材料类型');return}if(!category_id){toast('请选择所属材料分类');return}if(!name){toast('请填写品种 / 款式名称');return}
+  const category=findTaxonomyItem(category_id);
+  if(!category||(category.top||'bead')!==top){toast('所选材料分类不属于当前材料类型，请重新选择');return}
+  try{
+    await api('/api/v1/admin/material-taxonomy/series',{method:'POST',body:JSON.stringify({
+      id:formValue('catalog_variety_id'),category_id,name,sort_order:num(formValue('catalog_variety_sort')),
+      enabled:formValue('catalog_variety_enabled')==='true'
+    })});
+    closeDrawer();await refreshMaterialOptions();populateVarietyCategoryFilter();renderMaterialVarietiesPage();toast('品种 / 款式已保存');
+  }catch(e){toast(e.message||'保存品种 / 款式失败')}
+}
+async function disableMaterialDirectoryEntry(id,label){
+  if(!confirm(`停用这个${label}后，它将不能用于新建 SKU，确认继续？`))return;
+  try{await api(`/api/v1/admin/material-taxonomy/${encodeURIComponent(id)}`,{method:'DELETE'});await refreshMaterialOptions();populateVarietyCategoryFilter();if(state.page==='materialCategories')renderMaterialCategoriesPage();else renderMaterialVarietiesPage();toast(`${label}已停用`)}catch(e){toast(e.message||'停用失败')}
+}
+
+function openMaterialVarietyProfile(id,categoryId=''){
+  const item=findTaxonomyItem(id),category=findTaxonomyItem(categoryId||item?.parent_id);if(!item||!category)return;
+  openDrawer('VARIETY PROFILE',`完善资料 · ${item.name}`,`
+    <div class="content-hint">这些资料用于工作台显示和推荐匹配，不属于 SKU 的价格与库存。可以分次完善，不会阻止目录先建立。</div>
+    <input id="tax_series_id" type="hidden" value="${esc(item.id)}">
+    <input id="tax_series_category" type="hidden" value="${esc(category.id)}">
+    <input id="tax_series_name" type="hidden" value="${esc(item.name)}">
+    <input id="tax_series_material_code" type="hidden" value="${esc(item.material_code||'')}">
+    <input id="tax_series_sort" type="hidden" value="${esc(item.sort_order||0)}">
+    <input id="tax_series_enabled" type="hidden" value="${String(item.enabled!==false)}">
+    <section class="material-form-section"><h3>视觉素材</h3><div class="form-grid">
+      ${colorControl('tax_series_color','主题色','#dfe3e5')}
+      ${colorControl('tax_series_shine','高光色','#ffffff')}
+      ${imageUploadField('tax_series_image','品种主图 / CDN 图片','','material',false)}
+      ${materialMultiImageField('tax_series_images','')}
+      <small class="full help-text">品种图库是该品种全部 SKU 的唯一图片源，保存后所有规格会自动使用这里的图片。</small>
+    </div></section>
+    <section class="material-form-section"><h3>工作台形制</h3><div class="form-grid">
+      <label>形制<select id="tax_series_bead_shape">${selectOptions(optionList('bead_shapes'),'','请选择形制')}</select></label>
+      ${selectField('tax_series_placement_mode','安装方式','threaded',MATERIAL_PLACEMENT_MODES)}
+      <label>原图穿线轴角度<input id="tax_series_image_axis" type="number" min="0" max="179.9" step="0.1" value="90"><small class="help-text">原图竖向穿线填 90，横向穿线填 0</small></label>
+    </div></section>
+    <section class="material-form-section"><h3>推荐资料</h3><div class="form-grid">
+      <label>主五行<select id="tax_series_primary_element">${selectOptions(optionList('elements'),'','可稍后填写')}</select></label>
+      ${checkboxGroup('tax_series_secondary_elements','副五行',optionList('elements'),[],false)}
+      ${checkboxGroup('tax_series_effects','核心功效标签',optionList('effects'),[],false)}
+      ${checkboxGroup('tax_series_chakras','对应脉轮',optionList('chakras'),[],false)}
+      ${checkboxGroup('tax_series_wish_pools','适用愿景池',optionList('wish_pools'),[],false)}
+      <label>色彩倾向<select id="tax_series_color_family">${selectOptions(optionList('color_families'),'','可稍后填写')}</select></label>
+      ${checkboxGroup('tax_series_mood_tags','情绪标签',optionList('mood_tags'),[],false)}
+      ${checkboxGroup('tax_series_visual_tags','视觉标签',optionList('visual_tags'),[],false)}
+      <label class="full">材质故事<textarea id="tax_series_story"></textarea></label>
+    </div></section>
+    <section class="material-form-section"><h3>搭配规则</h3><div class="form-grid">
+      ${checkboxGroup('tax_series_allowed_roles','允许角色',optionList('roles'),['primary','support','accent'],false)}
+      ${checkboxGroup('tax_series_match_rules','搭配规则',optionList('match_rules'),['no_limit'],false)}
+      ${checkboxGroup('tax_series_care_tags','佩戴养护',optionList('care_tags'),[],false)}
+    </div></section>
+    <div class="form-actions"><button class="btn secondary" onclick="closeDrawer()">取消</button><button class="btn primary" onclick="saveMaterialVarietyProfile()">保存资料</button></div>`);
+  fillMaterialSeriesForm(item.id,category.id);
+}
+async function saveMaterialVarietyProfile(){
+  const category_id=formValue('tax_series_category'),name=formValue('tax_series_name');
+  const imageUrls=splitList(formValue('tax_series_images')),image_url=formValue('tax_series_image');
+  const needsEnergy=selectedTaxSeriesNeedsEnergy(),primary_element=needsEnergy?formValue('tax_series_primary_element'):'';
+  try{
+    await api('/api/v1/admin/material-taxonomy/series',{method:'POST',body:JSON.stringify({
+      id:formValue('tax_series_id'),category_id,name,material_code:formValue('tax_series_material_code'),
+      color:normalizeHexColor(formValue('tax_series_color')),shine:normalizeHexColor(formValue('tax_series_shine'),'#ffffff'),
+      image_url,image_urls:imageUrls,sync_sku_images:true,primary_element,
+      secondary_elements:needsEnergy?checkboxValues('tax_series_secondary_elements').filter(x=>x!==primary_element):[],
+      effects:checkboxValues('tax_series_effects'),chakras:checkboxValues('tax_series_chakras'),wish_pools:checkboxValues('tax_series_wish_pools'),
+      color_family:formValue('tax_series_color_family'),mood_tags:checkboxValues('tax_series_mood_tags'),visual_tags:checkboxValues('tax_series_visual_tags'),
+      story:formValue('tax_series_story'),allowed_roles:checkboxValues('tax_series_allowed_roles'),match_rules:checkboxValues('tax_series_match_rules'),
+      care_tags:checkboxValues('tax_series_care_tags'),conflict_codes:[],material_params:seriesMaterialParamsPayload(),
+      sort_order:num(formValue('tax_series_sort')),enabled:formValue('tax_series_enabled')==='true'
+    })});
+    closeDrawer();await refreshMaterialOptions();populateVarietyCategoryFilter();renderMaterialVarietiesPage();toast('品种资料已保存');
+  }catch(e){toast(e.message||'保存品种资料失败')}
+}
+
+const MATERIAL_ASSET_OUTPUT_SIZE=512;
+const MATERIAL_ASSET_TARGET_FILL=.985;
+const MATERIAL_ASSET_MAX_COUNT=24;
+const MATERIAL_ASSET_MAX_SOURCE_BYTES=12*1024*1024;
+const MATERIAL_ASSET_MAX_SOURCE_PIXELS=30_000_000;
+const MATERIAL_ASSET_MAX_OUTPUT_BYTES=800_000;
+
+function materialAssetNaturalCompare(left,right){
+  const leftName=typeof left==='string'?left:left?.name||'';
+  const rightName=typeof right==='string'?right:right?.name||'';
+  return String(leftName).localeCompare(String(rightName),'zh-CN',{numeric:true,sensitivity:'base'});
+}
+function materialAssetAlphaBounds(rgba,width,height,threshold=8){
+  if(!rgba||width<=0||height<=0||rgba.length<width*height*4)return null;
+  let left=width,top=height,right=-1,bottom=-1,subjectPixels=0,transparentPixels=0;
+  for(let index=0,pixel=0;pixel<width*height;pixel+=1,index+=4){
+    const alpha=rgba[index+3];
+    if(alpha<250)transparentPixels+=1;
+    if(alpha<=threshold)continue;
+    const x=pixel%width,y=Math.floor(pixel/width);
+    left=Math.min(left,x);right=Math.max(right,x);top=Math.min(top,y);bottom=Math.max(bottom,y);subjectPixels+=1;
+  }
+  if(right<left||bottom<top)return null;
+  return {left,top,right,bottom,width:right-left+1,height:bottom-top+1,subjectPixels,transparentPixels};
+}
+function materialAssetPlacement(bounds,outputSize=MATERIAL_ASSET_OUTPUT_SIZE,targetFill=MATERIAL_ASSET_TARGET_FILL){
+  if(!bounds||bounds.width<=0||bounds.height<=0)throw new Error('未检测到有效主体');
+  const targetExtent=Math.max(1,Math.floor(outputSize*targetFill));
+  const scale=Math.min(targetExtent/bounds.width,targetExtent/bounds.height);
+  const width=Math.max(1,Math.round(bounds.width*scale));
+  const height=Math.max(1,Math.round(bounds.height*scale));
+  return {x:Math.round((outputSize-width)/2),y:Math.round((outputSize-height)/2),width,height,scale,targetExtent};
+}
+function materialAssetMetrics(bounds,outputSize=MATERIAL_ASSET_OUTPUT_SIZE){
+  if(!bounds)return {fillRatio:0,offsetX:0,offsetY:0};
+  const centerX=(bounds.left+bounds.right+1)/2,centerY=(bounds.top+bounds.bottom+1)/2;
+  return {
+    fillRatio:Math.max(bounds.width,bounds.height)/outputSize,
+    offsetX:centerX-outputSize/2,
+    offsetY:centerY-outputSize/2
+  };
+}
+function materialAssetCanvasBlob(canvas){
+  return new Promise((resolve,reject)=>canvas.toBlob(blob=>{
+    if(!blob){reject(new Error('浏览器无法生成 WebP，请升级 Chrome 后重试'));return}
+    resolve(blob);
+  },'image/webp',.92));
+}
+function materialAssetDecode(file){
+  if(typeof createImageBitmap==='function')return createImageBitmap(file);
+  return new Promise((resolve,reject)=>{
+    const image=new Image(),url=URL.createObjectURL(file);
+    image.onload=()=>{URL.revokeObjectURL(url);resolve(image)};
+    image.onerror=()=>{URL.revokeObjectURL(url);reject(new Error('图片无法读取'))};
+    image.src=url;
+  });
+}
+async function processMaterialAssetFile(file){
+  const filename=String(file?.name||'');
+  const extension=filename.split('.').pop().toLowerCase();
+  if(!['png','webp'].includes(extension)&&!['image/png','image/webp'].includes(file?.type||''))throw new Error('仅支持已抠图的 PNG / WebP');
+  if(!file.size)throw new Error('图片文件为空');
+  if(file.size>MATERIAL_ASSET_MAX_SOURCE_BYTES)throw new Error('原图不能超过 12MB');
+  const bitmap=await materialAssetDecode(file);
+  try{
+    const sourceWidth=bitmap.width||bitmap.naturalWidth,sourceHeight=bitmap.height||bitmap.naturalHeight;
+    if(!sourceWidth||!sourceHeight)throw new Error('无法读取图片尺寸');
+    if(sourceWidth*sourceHeight>MATERIAL_ASSET_MAX_SOURCE_PIXELS)throw new Error('原图像素过大，请先缩小后再上传');
+    const sourceCanvas=document.createElement('canvas');sourceCanvas.width=sourceWidth;sourceCanvas.height=sourceHeight;
+    const sourceContext=sourceCanvas.getContext('2d',{willReadFrequently:true});
+    sourceContext.drawImage(bitmap,0,0,sourceWidth,sourceHeight);
+    const sourcePixels=sourceContext.getImageData(0,0,sourceWidth,sourceHeight).data;
+    const sourceBounds=materialAssetAlphaBounds(sourcePixels,sourceWidth,sourceHeight);
+    if(!sourceBounds)throw new Error('没有检测到可见主体');
+    if(sourceBounds.transparentPixels<Math.max(16,sourceWidth*sourceHeight*.001))throw new Error('未检测到透明背景，请先完成抠图');
+
+    const placement=materialAssetPlacement(sourceBounds);
+    const outputCanvas=document.createElement('canvas');outputCanvas.width=MATERIAL_ASSET_OUTPUT_SIZE;outputCanvas.height=MATERIAL_ASSET_OUTPUT_SIZE;
+    const outputContext=outputCanvas.getContext('2d',{willReadFrequently:true});
+    outputContext.clearRect(0,0,MATERIAL_ASSET_OUTPUT_SIZE,MATERIAL_ASSET_OUTPUT_SIZE);
+    outputContext.imageSmoothingEnabled=true;outputContext.imageSmoothingQuality='high';
+    outputContext.drawImage(
+      bitmap,sourceBounds.left,sourceBounds.top,sourceBounds.width,sourceBounds.height,
+      placement.x,placement.y,placement.width,placement.height
+    );
+    const outputPixels=outputContext.getImageData(0,0,MATERIAL_ASSET_OUTPUT_SIZE,MATERIAL_ASSET_OUTPUT_SIZE).data;
+    const outputBounds=materialAssetAlphaBounds(outputPixels,MATERIAL_ASSET_OUTPUT_SIZE,MATERIAL_ASSET_OUTPUT_SIZE);
+    const metrics=materialAssetMetrics(outputBounds);
+    const blob=await materialAssetCanvasBlob(outputCanvas);
+    if(blob.type!=='image/webp')throw new Error('当前浏览器不支持 WebP 输出');
+    if(blob.size>MATERIAL_ASSET_MAX_OUTPUT_BYTES)throw new Error('处理结果超过 800KB，请压缩原图后重试');
+    return {blob,previewUrl:URL.createObjectURL(blob),sourceWidth,sourceHeight,outputBounds,metrics};
+  }finally{
+    if(typeof bitmap.close==='function')bitmap.close();
+  }
+}
+function materialAssetId(){return `asset_${Date.now()}_${Math.random().toString(36).slice(2,9)}`}
+function materialAssetStatusText(status){
+  return ({processing:'处理中',ready:'待上传',uploading:'上传中',uploaded:'已上传',upload_error:'上传失败',error:'处理失败'})[status]||status;
+}
+function formatMaterialAssetBytes(bytes){
+  if(!Number.isFinite(Number(bytes)))return '-';
+  return bytes>=1024*1024?`${(bytes/1024/1024).toFixed(1)}MB`:`${Math.max(1,Math.round(bytes/1024))}KB`;
+}
+function materialAssetSelectedTarget(){
+  const ui=state.materialAssetUi,category=findTaxonomyItem(ui.targetCategoryId);
+  const series=(category?.series||[]).find(item=>item.id===ui.targetSeriesId);
+  return {category,series};
+}
+function populateMaterialAssetTargets({resetCategory=false,resetSeries=false}={}){
+  const ui=state.materialAssetUi,topSelect=$('materialAssetTop'),categorySelect=$('materialAssetCategory'),seriesSelect=$('materialAssetSeries');
+  if(!topSelect||!categorySelect||!seriesSelect)return;
+  const types=materialTypes();
+  if(!types.some(item=>(item.code||item.id)===ui.targetTop))ui.targetTop=types.find(item=>(item.code||item.id)==='accessory')?.code||types[0]?.code||'';
+  topSelect.innerHTML=types.map(item=>`<option value="${esc(item.code||item.id)}">${esc(item.name||item.code||item.id)}</option>`).join('');
+  topSelect.value=ui.targetTop;
+  const categories=categoriesForTop(ui.targetTop);
+  if(resetCategory||!categories.some(item=>item.id===ui.targetCategoryId))ui.targetCategoryId='';
+  categorySelect.innerHTML=`<option value="">请选择材料分类</option>${categories.map(item=>`<option value="${esc(item.id)}">${esc(item.name)}</option>`).join('')}`;
+  categorySelect.value=ui.targetCategoryId;
+  const category=categories.find(item=>item.id===ui.targetCategoryId),series=(category?.series||[]).filter(item=>item.enabled!==false);
+  if(resetSeries||!series.some(item=>item.id===ui.targetSeriesId))ui.targetSeriesId='';
+  seriesSelect.innerHTML=`<option value="">${category?'请选择品种 / 款式':'请先选择材料分类'}</option>${series.map(item=>`<option value="${esc(item.id)}">${esc(item.name)}</option>`).join('')}`;
+  seriesSelect.value=ui.targetSeriesId;
+  $('materialAssetMode').value=ui.mode;
+  renderMaterialAssetTargetSummary();syncMaterialAssetActions();
+}
+function renderMaterialAssetTargetSummary(){
+  const summary=$('materialAssetTargetSummary');if(!summary)return;
+  const ui=state.materialAssetUi,{category,series}=materialAssetSelectedTarget();
+  if(!series){summary.innerHTML='<b>尚未选择品种</b><span>完成三级选择后才可绑定</span>';return}
+  const count=(series.image_urls||[]).length;
+  summary.innerHTML=`<b>${esc(topLabel(ui.targetTop))} / ${esc(category?.name||'')} / ${esc(series.name)}</b><span>当前图库 ${count} 张 · ${ui.mode==='append'?'追加图片':'替换图库'} · 不影响主图</span>`;
+}
+async function loadMaterialAssetsPage(){
+  await ensureMaterialAdminMeta();populateMaterialAssetTargets();renderMaterialAssetQueue();
+}
+function handleMaterialAssetTopChange(){
+  state.materialAssetUi.targetTop=formValue('materialAssetTop');state.materialAssetUi.targetCategoryId='';state.materialAssetUi.targetSeriesId='';populateMaterialAssetTargets({resetCategory:true,resetSeries:true});
+}
+function handleMaterialAssetCategoryChange(){
+  state.materialAssetUi.targetCategoryId=formValue('materialAssetCategory');state.materialAssetUi.targetSeriesId='';populateMaterialAssetTargets({resetSeries:true});
+}
+function handleMaterialAssetSeriesChange(){state.materialAssetUi.targetSeriesId=formValue('materialAssetSeries');renderMaterialAssetTargetSummary();syncMaterialAssetActions()}
+function handleMaterialAssetModeChange(){state.materialAssetUi.mode=formValue('materialAssetMode')==='append'?'append':'replace';renderMaterialAssetTargetSummary()}
+function syncMaterialAssetActions(){
+  const ui=state.materialAssetUi,items=ui.items||[],uploadable=items.some(item=>['ready','upload_error'].includes(item.status)&&!item.key);
+  const bindable=items.length>0&&items.every(item=>item.status==='uploaded'&&item.key)&&!!ui.targetSeriesId;
+  if($('materialAssetClearButton'))$('materialAssetClearButton').disabled=ui.busy||!items.length;
+  if($('materialAssetUploadButton'))$('materialAssetUploadButton').disabled=ui.busy||!uploadable;
+  if($('materialAssetBindButton'))$('materialAssetBindButton').disabled=ui.busy||!bindable;
+}
+function renderMaterialAssetQueue(){
+  const ui=state.materialAssetUi,items=ui.items||[],queue=$('materialAssetQueue');if(!queue)return;
+  const ready=items.filter(item=>item.status==='ready').length,uploaded=items.filter(item=>item.status==='uploaded').length,errors=items.filter(item=>['error','upload_error'].includes(item.status)).length;
+  $('materialAssetQueueTitle').textContent=items.length?`${items.length} 张素材`:'待处理素材';
+  $('materialAssetStatus').textContent=ui.busy?'任务执行中':items.length?`待上传 ${ready} · 已上传 ${uploaded}${errors?` · 异常 ${errors}`:''}`:'等待选择图片';
+  if(!items.length){
+    queue.innerHTML='<div class="material-asset-empty"><b>暂无素材</b><span>处理完成后会同时检查浅色与深色背景效果</span></div>';syncMaterialAssetActions();return;
+  }
+  queue.innerHTML=items.map((item,index)=>{
+    const metrics=item.metrics||{},statusClass=['error','upload_error'].includes(item.status)?'error':item.status==='uploaded'?'uploaded':item.status;
+    const preview=item.previewUrl?`<img src="${esc(item.previewUrl)}" alt="${esc(item.name)}">`:`<span>${item.status==='processing'?'处理中':'无预览'}</span>`;
+    const details=['error','upload_error'].includes(item.status)?esc(item.error||'处理失败'):[
+      item.sourceWidth?`${item.sourceWidth}×${item.sourceHeight}`:'',
+      item.blob?formatMaterialAssetBytes(item.blob.size):'',
+      metrics.fillRatio?`占比 ${(metrics.fillRatio*100).toFixed(1)}%`:'',
+      metrics.offsetX!==undefined&&item.metrics?`偏移 ${metrics.offsetX.toFixed(1)}, ${metrics.offsetY.toFixed(1)}px`:''
+    ].filter(Boolean).join(' · ');
+    return `<article class="material-asset-card ${statusClass}">
+      <div class="material-asset-order">${index+1}</div>
+      <div class="material-asset-previews">
+        <div class="material-asset-preview light">${preview}<small>浅底</small></div>
+        <div class="material-asset-preview dark">${preview}<small>深底</small></div>
+      </div>
+      <div class="material-asset-card-body">
+        <div class="material-asset-card-head"><b title="${esc(item.name)}">${esc(item.name)}</b><span class="material-asset-state ${statusClass}">${esc(materialAssetStatusText(item.status))}</span></div>
+        <p class="${['error','upload_error'].includes(item.status)?'danger-text':''}">${details||'正在读取透明通道与主体边界'}</p>
+        <div class="material-asset-card-actions">
+          <button title="上移" aria-label="上移" onclick="moveMaterialAssetItem('${esc(item.id)}',-1)" ${ui.busy||index===0?'disabled':''}>↑</button>
+          <button title="下移" aria-label="下移" onclick="moveMaterialAssetItem('${esc(item.id)}',1)" ${ui.busy||index===items.length-1?'disabled':''}>↓</button>
+          <button title="下载处理结果" aria-label="下载处理结果" onclick="downloadMaterialAssetItem('${esc(item.id)}')" ${!item.blob?'disabled':''}>⇩</button>
+          <button class="danger" title="移除" aria-label="移除" onclick="removeMaterialAssetItem('${esc(item.id)}')" ${ui.busy?'disabled':''}>×</button>
+        </div>
+      </div>
+    </article>`;
+  }).join('');
+  syncMaterialAssetActions();
+}
+async function addMaterialAssetFiles(fileList){
+  const ui=state.materialAssetUi;if(ui.busy)return;
+  const files=[...(fileList||[])].sort(materialAssetNaturalCompare);
+  if(!files.length)return;
+  const available=Math.max(0,MATERIAL_ASSET_MAX_COUNT-ui.items.length);
+  if(!available){toast('单次最多处理 24 张图片');return}
+  if(files.length>available)toast(`本次只加入前 ${available} 张图片`);
+  ui.busy=true;
+  try{
+    for(const file of files.slice(0,available)){
+      const item={id:materialAssetId(),name:file.name,status:'processing',file,error:'',key:'',url:''};
+      ui.items.push(item);renderMaterialAssetQueue();
+      try{Object.assign(item,await processMaterialAssetFile(file),{status:'ready'})}
+      catch(error){item.status='error';item.error=error?.message||'图片处理失败'}
+      renderMaterialAssetQueue();
+    }
+  }finally{ui.busy=false;renderMaterialAssetQueue()}
+}
+function handleMaterialAssetFileInput(event){addMaterialAssetFiles(event?.target?.files);if(event?.target)event.target.value=''}
+function handleMaterialAssetDragOver(event){event.preventDefault();event.dataTransfer.dropEffect='copy';$('materialAssetDropzone')?.classList.add('dragging')}
+function handleMaterialAssetDragLeave(event){event.preventDefault();$('materialAssetDropzone')?.classList.remove('dragging')}
+function handleMaterialAssetDrop(event){event.preventDefault();$('materialAssetDropzone')?.classList.remove('dragging');addMaterialAssetFiles(event.dataTransfer?.files)}
+function revokeMaterialAssetPreview(item){if(item?.previewUrl)URL.revokeObjectURL(item.previewUrl)}
+function clearMaterialAssetQueue(){
+  const ui=state.materialAssetUi;if(ui.busy||!ui.items.length)return;
+  if(ui.items.some(item=>item.key)&&!confirm('已上传的 COS 文件不会被删除，仍要清空当前队列吗？'))return;
+  ui.items.forEach(revokeMaterialAssetPreview);ui.items=[];ui.message='';renderMaterialAssetQueue();
+}
+function removeMaterialAssetItem(id){
+  const ui=state.materialAssetUi;if(ui.busy)return;
+  const index=ui.items.findIndex(item=>item.id===id);if(index<0)return;
+  revokeMaterialAssetPreview(ui.items[index]);ui.items.splice(index,1);renderMaterialAssetQueue();
+}
+function moveMaterialAssetItem(id,direction){
+  const ui=state.materialAssetUi;if(ui.busy)return;
+  const index=ui.items.findIndex(item=>item.id===id),target=index+direction;if(index<0||target<0||target>=ui.items.length)return;
+  const [item]=ui.items.splice(index,1);ui.items.splice(target,0,item);renderMaterialAssetQueue();
+}
+function downloadMaterialAssetItem(id){
+  const item=state.materialAssetUi.items.find(entry=>entry.id===id);if(!item?.blob)return;
+  const anchor=document.createElement('a');anchor.href=item.previewUrl;anchor.download=`${item.name.replace(/\.[^.]+$/,'')||'material'}.webp`;anchor.click();
+}
+async function uploadOneMaterialAsset(item,index){
+  const form=new FormData(),filename=`${String(item.name||`material-${index+1}`).replace(/\.[^.]+$/,'')}.webp`;
+  form.append('file',item.blob,filename);
+  const headers={};if(state.token)headers.authorization=`Bearer ${state.token}`;
+  const response=await fetch(`${ADMIN_BASE_PATH}/api/v1/admin/material-assets/upload`,{method:'POST',headers,body:form});
+  const result=await response.json().catch(()=>({}));
+  if(!response.ok||result.code!==0)throw new Error(result.detail||result.message||`上传失败 ${response.status}`);
+  return result.data;
+}
+async function uploadMaterialAssetQueue(){
+  const ui=state.materialAssetUi;if(ui.busy)return;
+  const candidates=ui.items.filter(item=>['ready','upload_error'].includes(item.status)&&!item.key);
+  if(!candidates.length){toast('没有待上传的处理结果');return}
+  ui.busy=true;let failed=0;
+  try{
+    for(const item of candidates){
+      item.status='uploading';item.error='';renderMaterialAssetQueue();
+      try{
+        const data=await uploadOneMaterialAsset(item,ui.items.indexOf(item));
+        Object.assign(item,{status:'uploaded',key:data.key,url:data.url||data.image_url,inspection:data.inspection||{},error:''});
+      }catch(error){item.status='upload_error';item.error=error?.message||'上传失败';failed+=1}
+      renderMaterialAssetQueue();
+    }
+  }finally{ui.busy=false;renderMaterialAssetQueue()}
+  toast(failed?`${failed} 张上传失败，可直接重试`:'素材已上传到 COS');
+}
+async function bindMaterialAssetQueue(){
+  const ui=state.materialAssetUi,{category,series}=materialAssetSelectedTarget();
+  if(ui.busy)return;if(!series||!category){toast('请先选择要绑定的品种');return}
+  if(!ui.items.length||!ui.items.every(item=>item.status==='uploaded'&&item.key)){toast('请先完成全部素材上传，异常素材可移除后再绑定');return}
+  const action=ui.mode==='append'?'追加到':'替换';
+  if(!confirm(`确认将 ${ui.items.length} 张图片${action}「${series.name}」图库？`))return;
+  ui.busy=true;syncMaterialAssetActions();
+  try{
+    const saved=await api('/api/v1/admin/material-assets/bind',{method:'POST',body:JSON.stringify({series_id:series.id,asset_keys:ui.items.map(item=>item.key),mode:ui.mode})});
+    ui.items.forEach(item=>{item.boundSeriesId=series.id});
+    await Promise.all([refreshMaterialOptions(),loadMaterials()]);populateMaterialAssetTargets();renderMaterialAssetQueue();
+    toast(`图库已更新，共 ${saved.bound_count||ui.items.length} 张；主图未改动，材料缓存已刷新`);
+  }catch(error){toast(error?.message||'绑定失败')}
+  finally{ui.busy=false;renderMaterialAssetQueue()}
+}
+
 async function openMaterialTaxonomy(){
   await Promise.all([ensureMaterialAdminMeta(),ensureMaterialRefs()]);
   renderMaterialTaxonomy();
@@ -1269,6 +2161,12 @@ function renderMaterialTaxonomy(options={}){
       ${colorControl('tax_series_shine','高光色','#ffffff')}
       ${imageUploadField('tax_series_image','品种主图 / CDN 图片','','material',false)}
       ${materialMultiImageField('tax_series_images','')}
+      <small class="full help-text">品种图库是该品种全部 SKU 的唯一图片源，保存后所有规格会自动使用这里的图片。</small>
+    </div></section>
+    <section class="material-form-section"><h3>工作台形制</h3><div class="content-hint">形制与安装方式属于品种级规则；每个 SKU 的实物宽、高和穿线占位请在材料编辑中单独填写。</div><div class="form-grid">
+      <label>${fieldLabel('形制',true)}<select id="tax_series_bead_shape">${selectOptions(optionList('bead_shapes'),'','请选择形制')}</select></label>
+      ${selectField('tax_series_placement_mode','安装方式','threaded',MATERIAL_PLACEMENT_MODES)}
+      <label>原图穿线轴角度<input id="tax_series_image_axis" type="number" min="0" max="179.9" step="0.1" value="90"><small class="help-text">原图竖向穿线填 90，横向穿线填 0</small></label>
     </div></section>
     <section class="material-form-section"><h3>品种能量知识</h3><div class="form-grid">
       <label>${fieldLabel('主五行（花托可不填）',false)}<select id="tax_series_primary_element">${selectOptions(optionList('elements'),'','请选择主五行')}</select></label>
@@ -1310,6 +2208,9 @@ function clearMaterialSeriesForm(){
   $('tax_series_category').value='';$('tax_series_sort').value=0;$('tax_series_enabled').value='true';
   if($('tax_series_primary_element'))$('tax_series_primary_element').value='';
   if($('tax_series_color_family'))$('tax_series_color_family').value='';
+  if($('tax_series_bead_shape'))$('tax_series_bead_shape').value='';
+  if($('tax_series_placement_mode'))$('tax_series_placement_mode').value='threaded';
+  if($('tax_series_image_axis'))$('tax_series_image_axis').value='90';
   if($('tax_series_color'))$('tax_series_color').value='#dfe3e5';syncColorPicker('tax_series_color');
   if($('tax_series_shine'))$('tax_series_shine').value='#ffffff';syncColorPicker('tax_series_shine');
   updateImagePreview('tax_series_image');setMaterialImageList('tax_series_images',[]);
@@ -1331,6 +2232,7 @@ function fillMaterialCategoryForm(id){
 function fillMaterialSeriesForm(id,categoryId){
   const item=findTaxonomyItem(id);if(!item)return;
   const energy=item.energy||{},rules=item.rules||{};
+  const params=item.material_params||{};
   const isPendantSeries=(item.top||'bead')==='pendant';
   $('tax_series_id').value=item.id;$('tax_series_category').value=categoryId||item.parent_id||'';$('tax_series_name').value=item.name||'';$('tax_series_material_code').value=item.material_code||'';$('tax_series_sort').value=item.sort_order||0;$('tax_series_enabled').value=String(item.enabled!==false);
   $('tax_series_color').value=normalizeHexColor(item.color||'#dfe3e5');syncColorPicker('tax_series_color');
@@ -1342,6 +2244,9 @@ function fillMaterialSeriesForm(id,categoryId){
   setCheckboxValues('tax_series_chakras',energy.chakras||[]);
   setCheckboxValues('tax_series_wish_pools',energy.wish_pools||[]);
   $('tax_series_color_family').value=energy.color_family||'';
+  $('tax_series_bead_shape').value=params.bead_shape||'';
+  $('tax_series_placement_mode').value=params.placement_mode||'threaded';
+  $('tax_series_image_axis').value=params.image_string_axis_deg==null?'90':params.image_string_axis_deg;
   setCheckboxValues('tax_series_mood_tags',energy.mood_tags||[]);
   setCheckboxValues('tax_series_visual_tags',energy.visual_tags||[]);
   $('tax_series_story').value=energy.story||'';
@@ -1358,22 +2263,23 @@ async function saveMaterialSeries(){
   const category_id=formValue('tax_series_category'),name=formValue('tax_series_name');if(!category_id){toast('请选择所属分类');return}if(!name){toast('请填写品种名称');return}
   const enabled=formValue('tax_series_enabled')==='true';
   const imageUrls=splitList(formValue('tax_series_images'));
-  const image_url=formValue('tax_series_image')||imageUrls[0]||'';
+  const image_url=formValue('tax_series_image');
   const needsEnergy=selectedTaxSeriesNeedsEnergy();
   const rawPrimaryElement=formValue('tax_series_primary_element');
   const primary_element=needsEnergy?rawPrimaryElement:'';
   const effects=checkboxValues('tax_series_effects');
   if(enabled&&!image_url){toast('请给启用品种设置主图');return}
+  if(enabled&&!formValue('tax_series_bead_shape')){toast('请给启用品种设置工作台形制');return}
   if(enabled&&needsEnergy&&!primary_element){toast('请给启用品种设置主五行');return}
   if(enabled&&!effects.length){toast('请给启用品种设置核心功效');return}
   const saved=await api('/api/v1/admin/material-taxonomy/series',{method:'POST',body:JSON.stringify({
     id:formValue('tax_series_id'),category_id,name,material_code:formValue('tax_series_material_code'),
     color:normalizeHexColor(formValue('tax_series_color')),shine:normalizeHexColor(formValue('tax_series_shine'),'#ffffff'),
-    image_url,image_urls:imageUrls,primary_element,secondary_elements:needsEnergy?checkboxValues('tax_series_secondary_elements').filter(x=>x!==primary_element):[],
+    image_url,image_urls:imageUrls,sync_sku_images:true,primary_element,secondary_elements:needsEnergy?checkboxValues('tax_series_secondary_elements').filter(x=>x!==primary_element):[],
     effects,chakras:checkboxValues('tax_series_chakras'),wish_pools:checkboxValues('tax_series_wish_pools'),
     color_family:formValue('tax_series_color_family'),mood_tags:checkboxValues('tax_series_mood_tags'),visual_tags:checkboxValues('tax_series_visual_tags'),
     story:formValue('tax_series_story'),allowed_roles:checkboxValues('tax_series_allowed_roles'),match_rules:checkboxValues('tax_series_match_rules'),
-    care_tags:checkboxValues('tax_series_care_tags'),conflict_codes:[],
+    care_tags:checkboxValues('tax_series_care_tags'),conflict_codes:[],material_params:seriesMaterialParamsPayload(),
     sort_order:num(formValue('tax_series_sort')),enabled
   })});
   await refreshMaterialOptions();renderMaterialTaxonomy({focusSeriesId:saved.id,focusCategoryId:saved.category_id,focusTop:saved.top});toast('品种已保存');
@@ -1534,10 +2440,11 @@ function openAdminImagePicker(id){
   input.click();
 }
 function imageUploadField(id,label,value='',category='content',required=false){
+  const previewClass=category==='material'?' material-primary-preview':'';
   return `<section class="full upload-field">${fieldLabel(label,required)}
     <div class="upload-card" role="button" tabindex="0" onclick="openAdminImagePicker('${id}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openAdminImagePicker('${id}')}" ondragover="event.preventDefault()" ondrop="dropAdminImage(event,'${id}','${category}')">
       <input id="${id}_file" type="file" accept="image/*" hidden onchange="uploadAdminImage('${id}',this.files[0],'${category}')">
-      <div id="${id}_preview" class="upload-preview ${value?'':'empty'}">${value?`<img src="${esc(value)}" alt="">`:'<span>点击或拖拽上传图片</span><small>支持 jpg / png / webp，上传后自动填入 URL</small>'}</div>
+      <div id="${id}_preview" class="upload-preview${previewClass} ${value?'':'empty'}">${value?`<img src="${esc(value)}" alt="">`:'<span>点击或拖拽上传图片</span><small>支持 jpg / png / webp，上传后自动填入 URL</small>'}</div>
     </div>
     <div class="upload-actions"><button type="button" class="mini-btn" onclick="openAdminImagePicker('${id}')">选择/更换</button><button type="button" class="mini-btn danger" onclick="clearImageField('${id}')">删除图片</button></div>
     <div class="url-mode"><span>网络图片 URL</span><input id="${id}" type="url" value="${esc(value)}" placeholder="也可以粘贴外部图片链接" oninput="updateImagePreview('${id}')"></div>
@@ -1992,9 +2899,9 @@ function scoreBar(v){return `<span class="status-pill">${num(v)}/5</span>`}funct
 function field(id,label,value='',type='text',cls=''){return `<label class="${cls}">${label}<input id="${id}" type="${type}" value="${esc(value)}"></label>`}
 function selectField(id,label,value,options){return `<label>${label}<select id="${id}">${options.map(x=>`<option value="${x[0]}" ${String(x[0])===String(value)?'selected':''}>${x[1]}</option>`).join('')}</select></label>`}
 function detailItem(label,value){return `<div class="detail-item"><span>${label}</span><b>${esc(value)}</b></div>`}
-function topLabel(v){return({bead:'珠珠',accessory:'配饰',incense:'合香珠',pendant:'花托'})[v]||v}
+function topLabel(v){const item=materialTypes(true).find(x=>(x.code||x.id)===v);return item?.name||({bead:'珠子',accessory:'配饰',incense:'合香珠',pendant:'花托/吊坠'})[v]||v}
 function fmtTime(v){if(!v)return'-';const d=new Date(v);return Number.isNaN(d.getTime())?esc(v):d.toLocaleString('zh-CN',{hour12:false})}
-function openDrawer(eyebrow,title,html){$('drawerEyebrow').textContent=eyebrow;$('drawerTitle').textContent=title;$('drawerBody').innerHTML=html;$('drawerMask').classList.remove('hide');$('drawer').classList.remove('hide')}
+function openDrawer(eyebrow,title,html){const drawer=$('drawer');$('drawerEyebrow').textContent=eyebrow;$('drawerTitle').textContent=title;$('drawerBody').innerHTML=html;$('drawerMask').classList.remove('hide');drawer.classList.remove('hide');drawer.scrollTop=0}
 function closeDrawer(){$('drawerMask').classList.add('hide');$('drawer').classList.add('hide')}
 async function ensureWarehouseOptions(force=false){
   if(force||!state.cache.warehouse.options)state.cache.warehouse.options=await api('/api/v1/admin/warehouse/options');

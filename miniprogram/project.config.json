@@ -12,84 +12,12 @@
         "value": "assets"
       },
       {
+        "type": "folder",
+        "value": "images/workspace-icons"
+      },
+      {
         "type": "file",
         "value": "pages/test.html"
-      },
-      {
-        "type": "folder",
-        "value": "assets/icons"
-      },
-      {
-        "type": "folder",
-        "value": "assets/sounds"
-      },
-      {
-        "type": "file",
-        "value": "assets/sounds/bead-duang.wav"
-      },
-      {
-        "type": "file",
-        "value": "assets/sounds/bead-duang-bright.wav"
-      },
-      {
-        "type": "file",
-        "value": "assets/sounds/bead-duang-soft.wav"
-      },
-      {
-        "type": "file",
-        "value": "assets/sounds/bead-collision.wav"
-      },
-      {
-        "type": "file",
-        "value": "assets/sounds/bead-collision-bright.wav"
-      },
-      {
-        "type": "file",
-        "value": "assets/sounds/bead-collision-soft.wav"
-      },
-      {
-        "type": "file",
-        "value": "assets/workspace/tray-yustream.jpg"
-      },
-      {
-        "type": "file",
-        "value": "assets/workspace/tray-yustream-black.jpg"
-      },
-      {
-        "type": "file",
-        "value": "assets/workspace/tray-yustream-white.jpg"
-      },
-      {
-        "type": "file",
-        "value": "assets/workspace/tray-yustream-transparent.webp"
-      },
-      {
-        "type": "file",
-        "value": "assets/workspace/tray-yustream-black-transparent.webp"
-      },
-      {
-        "type": "file",
-        "value": "assets/workspace/tray-yustream-white-transparent.webp"
-      },
-      {
-        "type": "file",
-        "value": "assets/workspace/tray-yustream-transparent-user-20260701.webp"
-      },
-      {
-        "type": "file",
-        "value": "assets/workspace/tray-yustream-transparent-user-20260701-v2.webp"
-      },
-      {
-        "type": "file",
-        "value": "assets/workspace/tray-yustream-transparent-user-20260701-v3.webp"
-      },
-      {
-        "type": "file",
-        "value": "assets/workspace/tray-yustream-transparent-user-20260701-v4.webp"
-      },
-      {
-        "type": "file",
-        "value": "assets/workspace/tray-yustream-transparent-user-20260701-v5.webp"
       }
     ],
     "include": []

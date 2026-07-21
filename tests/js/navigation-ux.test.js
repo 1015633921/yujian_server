@@ -24,6 +24,28 @@ test('mini program explicitly launches on the home page', () => {
   assert.equal(appConfig.pages[0], 'pages/home/home');
 });
 
+test('home enables friend and timeline sharing with a stable entry path', () => {
+  let menus = [];
+  global.wx = {
+    showShareMenu(options) {
+      menus = options.menus;
+    }
+  };
+  const page = loadPage('miniprogram/pages/home/home.js');
+
+  page.onLoad();
+
+  assert.deepEqual(menus, ['shareAppMessage', 'shareTimeline']);
+  assert.deepEqual(page.onShareAppMessage(), {
+    title: '宇涧水晶｜测算、搭配与 DIY 定制',
+    path: '/pages/home/home'
+  });
+  assert.deepEqual(page.onShareTimeline(), {
+    title: '宇涧水晶｜测算、搭配与 DIY 定制',
+    query: ''
+  });
+});
+
 test('workspace back always returns to home and relaunches on switch failure', () => {
   const page = loadPage('miniprogram/pages/workspace/workspace.js');
   const calls = [];

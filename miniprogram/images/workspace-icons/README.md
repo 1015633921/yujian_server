@@ -1,7 +1,13 @@
-# Workspace button assets
+# Workspace button source assets
 
 These assets are shared by the live DIY workspace controls and the workspace guide.
-Keep both surfaces on the same file instead of recreating an icon in WXSS.
+They are upload sources only: `project.config.json` excludes this folder from the
+Mini Program package, while runtime URLs are resolved through `utils/assets.js`
+and `config/asset-manifest.*`.
+
+Publish these files to both test and production COS before building the matching
+environment package. Keep both UI surfaces on the same CDN object instead of
+recreating an icon in WXSS.
 
 | Asset | Control |
 | --- | --- |

@@ -125,7 +125,7 @@ class OrderCreateRequest(BaseModel):
     design_id: str | None = Field(default=None, max_length=80)
     receiver: ReceiverInfo
     design: dict = Field(default_factory=dict)
-    sequence: list[dict] = Field(default_factory=list, min_length=1)
+    sequence: list[dict] = Field(default_factory=list, min_length=1, max_length=120)
     bom: list[dict] = Field(default_factory=list)
     remark: str | None = Field(default=None, max_length=500)
 
@@ -134,7 +134,7 @@ class DIYDesignSaveRequest(BaseModel):
     user_id: NonEmptyString
     design_id: str | None = Field(default=None, max_length=80)
     design: dict = Field(default_factory=dict)
-    sequence: list[dict] = Field(default_factory=list)
+    sequence: list[dict] = Field(default_factory=list, max_length=120)
     status: str = Field(default="saved", max_length=30)
 
 
@@ -178,6 +178,44 @@ class UserAddressActionRequest(BaseModel):
 class OrderActionRequest(BaseModel):
     user_id: NonEmptyString
     reason: str | None = Field(default=None, max_length=500)
+
+
+class AfterSaleCreateRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+
+    user_id: NonEmptyString
+    type: str = Field(min_length=1, max_length=40)
+    reason_code: str = Field(min_length=1, max_length=60)
+    reason: str = Field(min_length=5, max_length=500)
+    evidence_urls: list[str] = Field(default_factory=list, max_length=3)
+    idempotency_key: str = Field(min_length=8, max_length=128)
+
+    @field_validator("evidence_urls")
+    @classmethod
+    def validate_evidence_urls(cls, values: list[str]) -> list[str]:
+        cleaned: list[str] = []
+        for value in values:
+            url = str(value or "").strip()
+            if not url.startswith("https://") or len(url) > 2000:
+                raise ValueError("售后凭证必须是有效的 HTTPS 地址")
+            if url not in cleaned:
+                cleaned.append(url)
+        return cleaned
+
+
+class AfterSaleReturnShipmentRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+
+    user_id: NonEmptyString
+    carrier: str = Field(min_length=1, max_length=50)
+    tracking_no: str = Field(min_length=6, max_length=80)
+
+
+class AfterSaleCancelRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+
+    user_id: NonEmptyString
+    reason: str = Field(default="用户取消售后申请", max_length=500)
 
 
 class OrderReceiverUpdateRequest(BaseModel):

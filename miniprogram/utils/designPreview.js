@@ -2,6 +2,16 @@ const PREVIEW_STAGE_SIZE = 560;
 const PREVIEW_CENTER = PREVIEW_STAGE_SIZE / 2;
 const DEFAULT_WORKSPACE_CENTER = 288;
 const MAX_PREVIEW_ITEMS = 40;
+const {
+  resolveMaterialGeometry,
+  stringedMaterialOffset,
+  stringedMaterialRotationDeg
+} = require('./materialGeometry');
+const {
+  beadCapRenderMetrics,
+  beadCapSlotsFromPlacement,
+  isBeadCap
+} = require('./materialAttachments');
 
 function firstImageUrl(item = {}) {
   const urls = (item.image_urls || item.image_pool || [])
@@ -54,12 +64,12 @@ function inferSourceOrigin(placements = [], design = {}) {
 
 function resolveBeadSize(item = {}, placement = {}, count = 0) {
   const placementSize = Number(placement.beadSize || placement.diameter);
-  const sizeMm = Number(item.size || item.diameter || 0);
+  const physical = resolveMaterialGeometry(item);
   const rawSize = Number.isFinite(placementSize) && placementSize > 0
     ? placementSize
-    : (sizeMm ? sizeMm * 5.4 : 52);
-  const maxSize = count >= 28 ? 46 : count >= 22 ? 50 : 58;
-  return Math.max(30, Math.min(maxSize, rawSize));
+    : physical.displaySizeRpx;
+  const maxSize = count >= 28 ? 48 : count >= 22 ? 54 : 68;
+  return Math.max(24, Math.min(maxSize, rawSize));
 }
 
 function resolvePreviewRotation(placement = {}, options = {}) {
@@ -71,7 +81,10 @@ function resolvePreviewRotation(placement = {}, options = {}) {
     const originX = Number(options.originX);
     const originY = Number(options.originY);
     if ([x, y, originX, originY].every(Number.isFinite)) {
-      return Math.atan2(y - originY, x - originX) * 180 / Math.PI;
+      return stringedMaterialRotationDeg(
+        Math.atan2(y - originY, x - originX),
+        options.physical || {}
+      );
     }
   }
   if (Number.isFinite(savedRotation)) return savedRotation;
@@ -96,7 +109,7 @@ function solveTangentRingRadius(beadSizes = []) {
   return (low + high) / 2;
 }
 
-function buildRingGeometry(items = [], design = {}, initialSizes = []) {
+function buildRingGeometry(items = [], design = {}, initialSizes = [], initialSpacingSizes = []) {
   const count = Math.max(items.length, 1);
   const wristSize = Number(
     design.wristSize
@@ -107,26 +120,33 @@ function buildRingGeometry(items = [], design = {}, initialSizes = []) {
   const safeWrist = Number.isFinite(wristSize) ? Math.max(10, Math.min(25, wristSize)) : 16;
   const wristRadius = Math.round(166 + ((safeWrist - 10) / 15) * 28);
   let beadSizes = initialSizes.length ? initialSizes.slice() : items.map(() => 52);
-  let radius = count >= 3 ? Math.max(wristRadius, solveTangentRingRadius(beadSizes)) : wristRadius;
+  let spacingSizes = initialSpacingSizes.length ? initialSpacingSizes.slice() : beadSizes.slice();
+  let radius = count >= 3 ? Math.max(wristRadius, solveTangentRingRadius(spacingSizes)) : wristRadius;
   const maxOuterRadius = PREVIEW_CENTER - 30;
   const largestRadius = Math.max(...beadSizes, 1) / 2;
   if (radius + largestRadius > maxOuterRadius) {
     const scale = maxOuterRadius / (radius + largestRadius);
-    beadSizes = beadSizes.map(size => Math.max(30, size * scale));
+    beadSizes = beadSizes.map(size => Math.max(24, size * scale));
+    spacingSizes = spacingSizes.map(size => Math.max(6, size * scale));
     radius = count >= 3
-      ? Math.min(maxOuterRadius - Math.max(...beadSizes) / 2, solveTangentRingRadius(beadSizes))
+      ? Math.min(maxOuterRadius - Math.max(...beadSizes) / 2, solveTangentRingRadius(spacingSizes))
       : Math.min(wristRadius, maxOuterRadius - Math.max(...beadSizes) / 2);
   }
+  const angles = [-Math.PI / 2];
+  for (let index = 1; index < count; index += 1) {
+    const distance = (spacingSizes[index - 1] + spacingSizes[index]) / 2 + 2;
+    angles.push(angles[index - 1] + 2 * Math.asin(Math.min(1, distance / (2 * radius))));
+  }
   const points = items.map((item, index) => {
-    const angle = -90 + (360 / count) * index;
-    const radian = angle * Math.PI / 180;
+    const radian = angles[index] || -Math.PI / 2;
+    const angle = radian * 180 / Math.PI;
     return {
       x: PREVIEW_CENTER + Math.cos(radian) * radius,
       y: PREVIEW_CENTER + Math.sin(radian) * radius,
       angle
     };
   });
-  return { points, beadSizes };
+  return { points, beadSizes, spacingSizes };
 }
 
 function buildBeadBackground(item = {}) {
@@ -196,7 +216,10 @@ function buildDesignPreviewGuide(beads = [], design = {}) {
   if (design.isLooseMode === true || beads.length < 3) {
     return { visible: false, style: '', centerX: 0, centerY: 0, radius: 0 };
   }
-  const points = beads.map(item => ({ x: item.previewX, y: item.previewY }))
+  const points = beads.filter(item => !item.isAttachment).map(item => ({
+    x: Number.isFinite(item.previewAnchorX) ? item.previewAnchorX : item.previewX,
+    y: Number.isFinite(item.previewAnchorY) ? item.previewAnchorY : item.previewY
+  }))
     .filter(point => Number.isFinite(point.x) && Number.isFinite(point.y));
   const circle = fitPreviewCircle(points);
   if (!circle) return { visible: false, style: '', centerX: 0, centerY: 0, radius: 0 };
@@ -211,7 +234,12 @@ function buildDesignPreviewGuide(beads = [], design = {}) {
 }
 
 function buildDesignPreviewBeads(sequence = [], placements = [], design = {}) {
-  const items = (sequence || []).slice(0, MAX_PREVIEW_ITEMS);
+  const sequenceItems = sequence || [];
+  const items = sequenceItems.filter(item => (
+    !isBeadCap(item)
+    && item.attachment_mode !== 'bead_cap'
+    && !(item.attachment && item.attachment.mode === 'bead_cap')
+  )).slice(0, MAX_PREVIEW_ITEMS);
   if (!items.length) return [];
   const count = items.length;
   const savedPlacements = Array.isArray(placements) ? placements : [];
@@ -225,10 +253,15 @@ function buildDesignPreviewBeads(sequence = [], placements = [], design = {}) {
   const initialSizes = items.map((item, index) => (
     resolveBeadSize(item, resolvedPlacements[index], count)
   ));
-  const ring = buildRingGeometry(items, design, initialSizes);
+  const physicalSpecs = items.map(item => resolveMaterialGeometry(item));
+  const initialSpacingSizes = physicalSpecs.map((physical, index) => (
+    physical.spacingSizeRpx * initialSizes[index] / Math.max(1, physical.displaySizeRpx)
+  ));
+  const ring = buildRingGeometry(items, design, initialSizes, initialSpacingSizes);
 
-  return items.map((item, index) => {
+  const beads = items.map((item, index) => {
     const placement = resolvedPlacements[index];
+    const physical = physicalSpecs[index];
     const savedX = placementCoordinate(placement, 'x', preferStringed) + Number(placement.dx || 0);
     const savedY = placementCoordinate(placement, 'y', preferStringed) + Number(placement.dy || 0);
     const hasSavedPosition = useSavedPlacements && Number.isFinite(savedX) && Number.isFinite(savedY);
@@ -236,12 +269,17 @@ function buildDesignPreviewBeads(sequence = [], placements = [], design = {}) {
       ? Math.max(30, Math.min(62, (initialSizes[index] || 52) * placementScale))
       : (ring.beadSizes[index] || initialSizes[index] || 52);
     const ringPoint = ring.points[index] || { x: PREVIEW_CENTER, y: PREVIEW_CENTER, angle: 0 };
-    const x = hasSavedPosition
+    const anchorX = hasSavedPosition
       ? PREVIEW_CENTER + (savedX - sourceOrigin.x) * placementScale
       : ringPoint.x;
-    const y = hasSavedPosition
+    const anchorY = hasSavedPosition
       ? PREVIEW_CENTER + (savedY - sourceOrigin.y) * placementScale
       : ringPoint.y;
+    const offset = preferStringed
+      ? stringedMaterialOffset(physical, beadSize / Math.max(1, physical.displaySizeRpx))
+      : { x: 0, y: 0 };
+    const x = anchorX + offset.x;
+    const y = anchorY + offset.y;
     const rotation = hasSavedPosition
       ? resolvePreviewRotation(placement, {
         preferStringed,
@@ -249,20 +287,73 @@ function buildDesignPreviewBeads(sequence = [], placements = [], design = {}) {
         y: savedY,
         originX: sourceOrigin.x,
         originY: sourceOrigin.y,
+        physical,
         fallback: ringPoint.angle
       })
-      : ringPoint.angle;
+      : (preferStringed
+        ? stringedMaterialRotationDeg(ringPoint.angle * Math.PI / 180, physical)
+        : ringPoint.angle);
     const imageUrl = placement.image_url || firstImageUrl(item);
     return {
       key: `${item.id || item.sku || item.skuId || item.name || 'bead'}-${index}`,
       image_url: imageUrl,
       previewX: x,
       previewY: y,
+      previewAnchorX: anchorX,
+      previewAnchorY: anchorY,
       previewSize: beadSize,
+      attachmentAxisRotation: preferStringed ? ringPoint.angle + 90 : rotation,
       fallbackStyle: `background:${buildBeadBackground(item)};`,
       style: `width:${beadSize}rpx;height:${beadSize}rpx;background:transparent;transform:translate3d(${(x - beadSize / 2).toFixed(1)}rpx,${(y - beadSize / 2).toFixed(1)}rpx,0) rotate(${rotation.toFixed(1)}deg);`
     };
   });
+  const capSlots = resolvedPlacements.map(placement => beadCapSlotsFromPlacement(placement));
+  sequenceItems.filter(item => (
+    isBeadCap(item)
+    || item.attachment_mode === 'bead_cap'
+    || item.attachment && item.attachment.mode === 'bead_cap'
+  )).forEach(cap => {
+    const attachment = cap.attachment || cap.placement || {};
+    const hostIndex = Number(attachment.host_index || attachment.hostIndex) - 1;
+    const side = attachment.side;
+    if (!Number.isInteger(hostIndex) || hostIndex < 0 || hostIndex >= capSlots.length) return;
+    if (side !== 'left' && side !== 'right') return;
+    capSlots[hostIndex] = { ...(capSlots[hostIndex] || {}), [side]: cap };
+  });
+  const capBeads = [];
+  beads.forEach((host, hostIndex) => {
+    const slots = capSlots[hostIndex] || {};
+    ['left', 'right'].forEach(side => {
+      const cap = slots[side];
+      if (!cap) return;
+      const direction = side === 'left' ? -1 : 1;
+      const axisRotation = Number(host.attachmentAxisRotation) || 0;
+      const radians = axisRotation * Math.PI / 180;
+      const metrics = beadCapRenderMetrics({
+        item: items[hostIndex] || {},
+        size: host.previewSize
+      }, cap);
+      const capWidth = metrics.width;
+      const capHeight = metrics.height;
+      const capSize = metrics.size;
+      const offset = metrics.offset * direction;
+      const x = host.previewX + Math.cos(radians) * offset;
+      const y = host.previewY + Math.sin(radians) * offset;
+      capBeads.push({
+        key: `${host.key}-cap-${side}-${cap.id || cap.sku || cap.skuId || 'item'}`,
+        image_url: cap.image_url || firstImageUrl(cap),
+        previewX: x,
+        previewY: y,
+        previewAnchorX: host.previewAnchorX,
+        previewAnchorY: host.previewAnchorY,
+        previewSize: capSize,
+        isAttachment: true,
+        fallbackStyle: `background:${buildBeadBackground(cap)};`,
+        style: `width:${capWidth.toFixed(1)}rpx;height:${capHeight.toFixed(1)}rpx;background:transparent;transform:translate3d(${(x - capWidth / 2).toFixed(1)}rpx,${(y - capHeight / 2).toFixed(1)}rpx,0) rotate(${axisRotation.toFixed(1)}deg) scaleX(${side === 'right' ? -1 : 1});`
+      });
+    });
+  });
+  return [...beads, ...capBeads];
 }
 
 module.exports = {

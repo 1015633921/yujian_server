@@ -249,7 +249,12 @@ Page({
     labTabbarClass: ''
   },
 
+  onLoad() {
+    this.enableShareMenu();
+  },
+
   onShow() {
+    this.enableShareMenu();
     this.hideNativeTabBar();
     this.lastHomeScrollTop = 0;
     if (this.data.labTabbarClass) {
@@ -296,6 +301,27 @@ Page({
     this.tabbarSetDataTimer = setTimeout(() => {
       this.setData({ labTabbarClass: nextClass });
     }, 16);
+  },
+
+  enableShareMenu() {
+    if (!wx.showShareMenu) return;
+    wx.showShareMenu({
+      menus: ['shareAppMessage', 'shareTimeline']
+    });
+  },
+
+  onShareAppMessage() {
+    return {
+      title: '宇涧水晶｜测算、搭配与 DIY 定制',
+      path: '/pages/home/home'
+    };
+  },
+
+  onShareTimeline() {
+    return {
+      title: '宇涧水晶｜测算、搭配与 DIY 定制',
+      query: ''
+    };
   },
 
   hideNativeTabBar() {

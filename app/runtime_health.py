@@ -154,6 +154,7 @@ def readiness(sqlite_path: Path | None = None) -> dict[str, Any]:
     ready = not config_errors and bool(database.get("ok"))
     return {
         "ready": ready,
+        "release_version": os.getenv("RELEASE_VERSION", "unversioned"),
         "checks": {
             "database": "ok" if database.get("ok") else "failed",
             "configuration": "ok" if not config_errors else "failed",

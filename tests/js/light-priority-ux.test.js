@@ -82,7 +82,7 @@ test('workspace never exposes demo materials as sellable inventory', () => {
   );
 
   assert.match(workspaceSource, /const DEFAULT_MATERIALS = \[\];/);
-  assert.match(workspaceSource, /workspaceMaterialCatalogV7/);
+  assert.match(workspaceSource, /workspaceMaterialCatalogV9/);
   assert.doesNotMatch(workspaceSource, /喜马拉雅白水晶/);
 });
 
@@ -401,9 +401,9 @@ test('backend recommendation recalculates only after selected beads reach page d
   assert.equal(countSeenByRecalculate, instance.data.selected.length);
 });
 
-test('workspace falls back to DOM beads when canvas rendering fails', () => {
+test('workspace retries the canvas renderer when drawing fails', () => {
   const page = loadPage('miniprogram/pages/workspace/workspace.js');
-  let fallbackReason = '';
+  let failureReason = '';
   let restoreCount = 0;
   const instance = Object.assign({}, page, {
     data: { ...page.data, selected: ['clearQuartz8'] },
@@ -424,15 +424,170 @@ test('workspace falls back to DOM beads when canvas rendering fails', () => {
     drawCanvasBeadSprites() {
       throw new Error('offscreen canvas draw failed');
     },
-    switchToDomRendererFallback(reason) {
-      fallbackReason = reason;
+    handleCanvasRendererFailure(reason) {
+      failureReason = reason;
     }
   });
 
   instance.renderBraceletCanvas();
 
   assert.equal(restoreCount, 1);
-  assert.equal(fallbackReason, 'bracelet canvas render failed');
+  assert.equal(failureReason, 'bracelet canvas render failed');
+});
+
+test('workspace uses canvas only and exposes an explicit retry state', () => {
+  const workspaceJs = fs.readFileSync(
+    path.resolve(__dirname, '../../miniprogram/pages/workspace/workspace.js'),
+    'utf8'
+  );
+  const workspaceWxml = fs.readFileSync(
+    path.resolve(__dirname, '../../miniprogram/pages/workspace/workspace.wxml'),
+    'utf8'
+  );
+
+  assert.doesNotMatch(workspaceJs, /switchToDomRendererFallback/);
+  assert.doesNotMatch(workspaceJs, /useCanvasRenderer/);
+  assert.doesNotMatch(workspaceWxml, /class="circle-bead/);
+  assert.doesNotMatch(workspaceWxml, /class="flight-bead/);
+  assert.match(workspaceWxml, /class="canvas-error-state"/);
+  assert.match(workspaceWxml, /bindtap="retryCanvasRenderer"/);
+});
+
+test('workspace canvas keeps the ground shadow outside bead rotation', () => {
+  const page = loadPage('miniprogram/pages/workspace/workspace.js');
+  const events = [];
+  const instance = Object.assign({}, page, {
+    drawCanvasBeadShadow() {
+      events.push('shadow');
+    },
+    drawCanvasNonRoundShadow() {
+      events.push('non-round-shadow');
+    },
+    getCanvasBeadTexture() {
+      return { texture: true };
+    },
+    getCanvasImage() {
+      return null;
+    }
+  });
+  const ctx = {
+    globalAlpha: 1,
+    save() {},
+    restore() {},
+    translate() {},
+    rotate() {
+      events.push('rotate');
+    },
+    drawImage() {
+      events.push('bead');
+    }
+  };
+
+  instance.drawCanvasBead(ctx, {
+    item: { id: 'round-bead', name: 'Round bead', image_url: 'https://cdn.example.com/bead.webp', size: 8 },
+    x: 120,
+    y: 120,
+    size: 48,
+    rotation: 180,
+    opacity: 1
+  });
+
+  assert.deepEqual(events, ['shadow', 'rotate', 'bead']);
+});
+
+test('workspace applies a top studio light to silver metal without recoloring gold accessories', () => {
+  const page = loadPage('miniprogram/pages/workspace/workspace.js');
+  const instance = Object.assign({}, page);
+
+  assert.equal(instance.isSilverToneMetalMaterial({
+    top: 'accessory',
+    category: '合金配件',
+    name: '镜面隔珠'
+  }), true);
+  assert.equal(instance.isSilverToneMetalMaterial({
+    top: 'accessory',
+    category: '合金配件',
+    name: '镜面金色隔珠'
+  }), false);
+  assert.equal(instance.isSilverToneMetalMaterial({
+    top: 'accessory',
+    material_code: 'silver_spacer',
+    name: '925 银隔片'
+  }), true);
+  assert.equal(instance.isSilverToneMetalMaterial({
+    top: 'accessory',
+    material_code: 'accessory_metal_20260720_01',
+    category: '隔珠',
+    name: '四叶花纹橄榄隔珠'
+  }), true);
+  assert.equal(instance.isSilverToneMetalMaterial({
+    top: 'accessory',
+    material_code: 'accessory_metal_20260720_17',
+    category: '隔珠',
+    name: '古金素面圆珠'
+  }), false);
+
+  instance.braceletCanvasState = { width: 600, height: 600 };
+  const topLight = instance.getStudioMetalLightIntensity({ x: 300, y: 80 });
+  const bottomLight = instance.getStudioMetalLightIntensity({ x: 300, y: 520 });
+  const edgeLight = instance.getStudioMetalLightIntensity({ x: 30, y: 80 });
+  assert.ok(topLight > bottomLight);
+  assert.ok(topLight > edgeLight);
+  assert.ok(bottomLight >= 0.68);
+
+  const events = [];
+  const gradient = { addColorStop() {} };
+  const ctx = {
+    createLinearGradient(startX, startY, endX, endY) {
+      events.push(['linear', startX, startY, endX, endY]);
+      return gradient;
+    },
+    createRadialGradient(centerX, centerY) {
+      events.push(['radial', centerX, centerY]);
+      return gradient;
+    },
+    fillRect() { events.push(['fill']); }
+  };
+  instance.drawStudioMetalLightMask(ctx, 48, 48, 90, false);
+
+  assert.equal(events.filter(event => event[0] === 'fill').length, 2);
+  assert.notEqual(events[0][1], events[0][3]);
+});
+
+test('workspace accessory random image pool excludes the primary image and uses gallery images only', () => {
+  const page = loadPage('miniprogram/pages/workspace/workspace.js');
+  const instance = Object.assign({}, page);
+  const material = {
+    id: 'metal-spacer',
+    top: 'accessory',
+    category: '隔珠',
+    image_url: 'https://cdn.example.com/primary.webp?v=1',
+    image_urls: [
+      'https://cdn.example.com/gallery-1.webp',
+      'https://cdn.example.com/primary.webp?v=2',
+      'https://cdn.example.com/gallery-2.webp'
+    ]
+  };
+  const urls = instance.materialOwnImageUrls(material);
+
+  assert.deepEqual(urls, [
+    'https://cdn.example.com/gallery-1.webp',
+    'https://cdn.example.com/gallery-2.webp'
+  ]);
+
+  const originalRandom = Math.random;
+  Math.random = () => 0;
+  try {
+    instance.lastPickedMaterialImages = {};
+    assert.equal(instance.pickMaterialImageUrl(material), material.image_urls[0]);
+  } finally {
+    Math.random = originalRandom;
+  }
+
+  assert.deepEqual(instance.materialOwnImageUrls({
+    ...material,
+    image_urls: ['https://cdn.example.com/primary.webp?v=2']
+  }), []);
 });
 
 test('assessment prefetches the last confirmed size and report reads the cached plan', () => {

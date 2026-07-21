@@ -890,7 +890,7 @@ Page({
   statusKey(order) {
     if (order.status === 'pending_ship') return 'ship';
     if (order.status === 'shipped') return 'receive';
-    if (order.status === 'after_sale' || order.status === 'refund_requested' || order.status === 'refunded') return 'after';
+    if (order.status === 'refund_requested' || order.status === 'refunded') return 'after';
     if (order.payment_status === 'unpaid' || order.status === 'pending_payment') return 'pay';
     return 'done';
   },
@@ -901,7 +901,6 @@ Page({
       pending_ship: '待发货',
       shipped: '待收货',
       completed: '已完成',
-      after_sale: '售后中',
       refund_requested: '退款中',
       refunded: '已退款'
     }[order.status] || (order.payment_status === 'paid' ? '已支付' : '待付款');

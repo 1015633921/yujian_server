@@ -9,7 +9,6 @@ const {
   confirmReceipt,
   cancelOrder,
   updateOrderReceiver,
-  requestAfterSale,
   refundOrder,
   getOrderLogistics
 } = require('../../utils/api');
@@ -23,7 +22,7 @@ const STATUS_META = {
   },
   ship: {
     title: '待发货',
-    hint: '订单已支付',
+    hint: '工作室正在制作与打包',
     tone: 'green',
     eta: '预计 3-7 个工作日内完成制作并发出'
   },
@@ -206,19 +205,23 @@ Page({
   },
 
   buildFooterActions({ statusKey, paymentStatus, logisticsCard, afterSaleStatus, refundStatus }) {
-    const activeAfterSaleValues = ['requested', 'processing', 'approved', 'after_sale', 'refund_requested', 'refunding'];
+    const activeAfterSaleValues = [
+      'requested', 'approved', 'awaiting_return', 'returning', 'service_processing',
+      'refund_pending', 'refund_submitting', 'refunding', 'processing'
+    ];
     const hasActiveAfterSale = statusKey === 'after'
       || activeAfterSaleValues.includes(afterSaleStatus)
       || activeAfterSaleValues.includes(refundStatus);
     const paymentInProgress = paymentStatus === 'processing';
     const canCancel = statusKey === 'pay' && !paymentInProgress;
-    const canRefund = ['ship', 'receive'].includes(statusKey) && !hasActiveAfterSale;
+    const canRefund = statusKey === 'ship' && !hasActiveAfterSale;
     const canAfterSale = ['receive', 'done'].includes(statusKey) && !hasActiveAfterSale;
+    const canViewAfterSale = hasActiveAfterSale;
     const canViewLogistics = Boolean(logisticsCard && logisticsCard.show);
     const canPay = statusKey === 'pay' && !paymentInProgress;
     const canMockShip = statusKey === 'ship' && this.data.isLocalApi;
     const canReceive = statusKey === 'receive' && !hasActiveAfterSale;
-    const hasSecondaryAction = canCancel || canRefund || canAfterSale;
+    const hasSecondaryAction = canCancel || canRefund || canAfterSale || canViewAfterSale;
     const hasPrimaryAction = canPay || canMockShip || canReceive || canViewLogistics;
     const actionCount = ['closed', 'refunded'].includes(statusKey)
       ? 0
@@ -229,6 +232,7 @@ Page({
       canCancel,
       canRefund,
       canAfterSale,
+      canViewAfterSale,
       canViewLogistics,
       canPay,
       canMockShip,
@@ -243,7 +247,7 @@ Page({
     if (rawStatus === 'refunded' || paymentStatus === 'refunded') return 'refunded';
     if (rawStatus === 'pending_ship') return 'ship';
     if (rawStatus === 'shipped') return 'receive';
-    if (['after_sale', 'refund_requested'].includes(rawStatus)) return 'after';
+    if (rawStatus === 'refund_requested') return 'after';
     if (paymentStatus === 'unpaid' || rawStatus === 'pending_payment') return 'pay';
     if (cachedKey && ['pay', 'ship', 'receive', 'done', 'after', 'closed', 'refunded'].includes(cachedKey)) {
       return cachedKey;
@@ -310,9 +314,8 @@ Page({
       || String(logistics.status_text || logistics.statusText || '').includes('签收');
     const autoCompleteAt = logistics.auto_complete_at || logistics.autoCompleteAt || '';
     const autoCompleteAtText = this.formatDateTime(autoCompleteAt);
-    const localTracePattern = /商家已打包|商家已填写发货信息|等待物流公司更新轨迹/;
+    const localTracePattern = /商家已打包|商家已填写发货信息|等待物流公司更新轨迹|商家已发货，等待快递揽收/;
     const carrierTraces = rawTraces.filter(trace => !localTracePattern.test(trace.desc));
-    const packingAt = this.findHistoryTime(statusHistory, 'pending_ship');
     const shippedAt = this.findHistoryTime(statusHistory, 'shipped') || logistics.shipped_at || '';
     const merchantTraces = [];
     if (shippedAt || hasTracking) {
@@ -324,33 +327,25 @@ Page({
         active: carrierTraces.length === 0
       });
     }
-    if (packingAt) {
-      merchantTraces.push({
-        id: 'merchant-packing',
-        desc: '商家打包中',
-        location: '宇涧水晶工作室',
-        time: this.formatDateTime(packingAt),
-        active: !hasTracking && carrierTraces.length === 0
-      });
-    }
     const traces = [...carrierTraces, ...merchantTraces];
     const hasCarrierUpdates = logistics.source === 'kuaidi100' && carrierTraces.length > 0;
     const hasTraces = traces.length > 0;
-    const isPacking = statusKey === 'ship' && !hasTracking;
+    const isAwaitingShipment = statusKey === 'ship' && !hasTracking;
     const latestTrace = carrierTraces[0] || merchantTraces[0] || {
-      id: 'waiting-pickup',
-      desc: hasTracking ? '商家已打包，等待快递揽收或物流更新。' : '商家尚未填写快递单号。',
+      id: 'awaiting-shipment',
+      desc: hasTracking ? '商家已发货，等待快递揽收。' : '工作室正在制作与打包，完成后将填写快递单号。',
       location: '',
       time: '',
       active: true
     };
-    const statusText = isPacking
-      ? '商家打包中'
+    const statusText = isAwaitingShipment
+      ? '待发货'
       : (hasTracking && !hasCarrierUpdates
-        ? '已发货，等待揽收'
+        ? '已发货待揽收'
         : (logistics.status_text || logistics.statusText || (hasTraces ? '物流运输中' : '暂无物流轨迹')));
     return {
-      show: ['ship', 'receive', 'done', 'after'].includes(statusKey) || hasTracking || hasTraces,
+      show: ['ship', 'receive'].includes(statusKey) || hasTracking || hasTraces,
+      isFulfillmentProgress: isAwaitingShipment,
       hasTracking,
       hasTraces,
       hasCarrierUpdates,
@@ -392,8 +387,9 @@ Page({
     return {
       statusStepsClass: `steps-${count}`,
       statusStepsScrollable: scrollable,
+      statusStepsScrollLeft: scrollable ? 99999 : 0,
       statusStepsStyle: scrollable
-        ? `min-width:${count * 112}rpx;grid-template-columns:repeat(${count},minmax(112rpx,1fr));`
+        ? `min-width:${count * 132}rpx;grid-template-columns:repeat(${count},minmax(132rpx,1fr));`
         : ''
     };
   },
@@ -425,14 +421,14 @@ Page({
     const steps = [
       { key: 'paid', label: paid ? '已支付' : '待支付', time: this.formatDateTime(paidAt), active: paid },
       {
-        key: 'packing',
-        label: !paid ? '待打包' : (shipped ? '打包完成' : '商家打包中'),
+        key: 'fulfillment',
+        label: '待发货',
         time: this.formatDateTime(paidAt),
         active: paid
       },
       {
         key: 'pickup',
-        label: !shipped ? '待发货' : ((carrierUpdated || signed) ? '已揽收' : '已发货待揽收'),
+        label: (carrierUpdated || signed) ? '已揽收' : '已发货待揽收',
         time: this.formatDateTime(shippedAt),
         active: shipped
       },
@@ -470,7 +466,6 @@ Page({
       ship: 'pending_ship',
       receive: 'shipped',
       done: 'completed',
-      after: 'after_sale',
       refund: 'refund_requested'
     };
     const labels = {
@@ -478,7 +473,6 @@ Page({
       pending_ship: '已支付',
       shipped: '已发货',
       completed: '已完成',
-      after_sale: '售后申请',
       refund_requested: '退款申请',
       refunded: '已退款'
     };
@@ -508,24 +502,22 @@ Page({
     };
     const logistics = context.logistics || {};
     const rawStatus = aliases[context.rawStatus] || context.rawStatus || '';
-    const refundStatus = context.refundStatus || '';
 
     insertStatus('pending_payment', context.createdAt || '', supportedStatuses.slice(1));
     if (context.paidAt || hasStatus('pending_ship')) {
       insertStatus('pending_ship', context.paidAt || '', [
-        'shipped', 'completed', 'after_sale', 'refund_requested', 'refunded'
+        'shipped', 'completed', 'refund_requested', 'refunded'
       ]);
     }
     if (logistics.tracking_no || logistics.trackingNo) {
       insertStatus('shipped', logistics.shipped_at || context.updatedAt || '', [
-        'completed', 'after_sale', 'refund_requested', 'refunded'
+        'completed', 'refund_requested', 'refunded'
       ]);
     }
     const lastStatus = timeline.length ? timeline[timeline.length - 1].status : '';
     if (rawStatus && rawStatus !== lastStatus) appendStatus(rawStatus, context.updatedAt || '');
-    if (statusKey === 'after' && !hasStatus('after_sale') && !hasStatus('refund_requested')) {
-      const refundActive = ['requested', 'processing', 'approved', 'refunding'].includes(refundStatus);
-      appendStatus(refundActive ? 'refund_requested' : 'after_sale', context.updatedAt || '');
+    if (statusKey === 'after' && !hasStatus('refund_requested')) {
+      appendStatus('refund_requested', context.updatedAt || '');
     }
     if (statusKey === 'refunded') {
       if (!hasStatus('refund_requested')) {
@@ -572,8 +564,8 @@ Page({
       wx.showToast({ title: '暂无物流轨迹', icon: 'none' });
       return;
     }
-    if (action === 'afterSale' && !order.canAfterSale) {
-      wx.showToast({ title: '订单已在售后处理中', icon: 'none' });
+    if (action === 'afterSale' && !order.canAfterSale && !order.canViewAfterSale) {
+      wx.showToast({ title: '当前订单暂不能申请售后', icon: 'none' });
       return;
     }
     if (action === 'refund' && !order.canRefund) {
@@ -667,9 +659,7 @@ Page({
         statusHistory,
         statusSteps,
         ...statusStepsLayout,
-        canViewLogistics: actionState.canViewLogistics,
-        hasFooterAction: actionState.hasFooterAction,
-        actionBarClass: actionState.actionBarClass
+        ...actionState
       };
       this.updateOrderCache(nextOrder);
       this.setData({
@@ -702,22 +692,15 @@ Page({
   noop() {},
 
   confirmAfterSale(orderId, userId) {
-    wx.showModal({
-      title: '申请售后',
-      content: '提交后订单会进入售后处理中，客服会尽快与你联系。',
-      confirmText: '提交',
-      success: async res => {
-        if (res.confirm) {
-          await this.runOrderAction(() => requestAfterSale(orderId, userId, '用户在小程序订单详情中发起售后'), '售后已提交');
-        }
-      }
+    wx.navigateTo({
+      url: `/pages/after-sale-apply/after-sale-apply?id=${encodeURIComponent(orderId)}`
     });
   },
 
   confirmRefund(orderId, userId) {
     wx.showModal({
       title: '申请退款',
-      content: '提交后订单会进入退款审核，已制作或已发货订单需客服确认后处理。',
+      content: '待发货订单可申请退款；如商品已经发出，请改为申请退货退款。',
       confirmText: '提交',
       success: async res => {
         if (res.confirm) {

@@ -1,0 +1,330 @@
+Window: "抖音", App: 抖音.
+0 标准窗口 抖音, Secondary Actions: Raise
+	1 container (settable, string)
+		2 HTML 内容 about:blank
+		3 HTML 内容 发现更多精彩视频 - 抖音搜索, URL: douyin.com/jingxuan/search/%E5%B9%BD%E7%81%B5%E9%9A%8F%E5%BD%A2%E6%B0%B4%E6%99%B6%E6%89%8B%E4%B8%B2%20%E8%AE%BE%E8%AE%A1
+			4 container
+				5 按钮 开启读屏标签
+				6 文本 读屏标签已关闭
+				7 container
+					8 container
+						9 container
+							10 文本栏 (settable, string) Value: 幽灵随形水晶手串 设计, Placeholder: 搜索你感兴趣的内容
+							11 按钮 搜索
+								12 图像
+								13 文本 搜索
+						14 container
+							15 container
+								16 图像
+								17 文本 壁纸
+							18 内容列表
+								19 container
+									20 图像
+									21 文本 通知
+							22 内容列表
+								23 container
+									24 文本 消息
+							25 container
+								26 图像
+								27 文本 投稿
+							28 link douyin.com/user/self
+							29 图像
+						30 图像
+						31 图像
+					32 container
+						33 container
+							34 text 综合 视频 用户 直播
+							35 图像
+							36 文本 多列
+							37 图像
+							38 文本 单列
+							39 container
+								40 文本 筛选
+								41 图像
+						42 container
+							43 文本 为你找到以下结果，问问AI智能总结内容
+							44 图像
+							45 文本 问问AI
+						46 container
+							47 container
+								48 container
+									49 未加标签的图片 /ool3EiEpEwAIbB9zAExqfAxAdmDDXFeqceayrA~tplv-dy-cropcenter:323:430.jpeg?biz_tag=pcweb_cover&from=327834062&lk3s=138a59ce&s=PackSourceEnum_SEARCH&sc=cover&se=true&sh=323_430&x-expires=2099448000&x-signature=Er5wuYaNqzR5lD4EzfHM65hsG9A%3D
+									50 container
+										51 文本 01:24
+										52 图像
+										53 文本 9
+								54 container
+									55 文本 改造四季幽灵素串，今天的改造加的是古银配件，风格也很独特！ 好喜欢~#改造手串 #水晶手链 #天然水晶 #四季幽灵
+									56 container
+										57 text @ 小梨家
+									58 文本 · 1月7日
+							59 container
+								60 container
+									61 未加标签的图片 /oUEwIAEAeSzmANB0ZiAafSxQNT2AhiAwnICcCE~noop.jpeg?biz_tag=pcweb_cover&card_type=303&column_n=0&from=327834062&lk3s=138a59ce&s=PackSourceEnum_SEARCH&se=false&x-expires=1785297600&x-signature=BD0kYLlJJdyQJ9McymUh7u%2FTrZE%3D
+									62 container
+										63 图像
+										64 文本 图文
+										65 图像
+										66 文本 36
+								67 container
+									68 文本 水晶手串 绿幽灵随形 水晶手串diy.#天然水晶 #与众不同 #手链控
+									69 container
+										70 text @ 小晶灵
+									71 文本 · 2025年12月3日
+							72 container
+								73 container
+									74 未加标签的图片 /oofiQzrGAnP2AhmRjeAeEeWsDATM4W8tFwFIMq~tplv-dy-cropcenter:323:430.jpeg?biz_tag=pcweb_cover&from=327834062&lk3s=138a59ce&s=PackSourceEnum_SEARCH&sc=cover&se=true&sh=323_430&x-expires=2099448000&x-signature=LsTv0WMK9hyQux5HaA3pxByJm3E%3D
+									75 container
+										76 文本 00:19
+										77 图像
+										78 文本 5
+								79 container
+									80 文本 🌈彩光白幽灵随形手串 超冰又闪#天然水晶
+									81 container
+										82 text @ 岁月👍
+									83 文本 · 2025年9月14日
+							84 container
+								85 container
+									86 未加标签的图片 /oUwozbAAPB1HA0PAAsiZiH3Aiwy0AiIgIsCEI~tplv-dy-cropcenter:323:430.jpeg?biz_tag=pcweb_cover&from=327834062&lk3s=138a59ce&s=PackSourceEnum_SEARCH&sc=cover&se=true&sh=323_430&x-expires=2099448000&x-signature=WDZpGodBdIEvScjvSpqk3b8aQbQ%3D
+									87 container
+										88 文本 01:07
+										89 图像
+										90 文本 51
+								91 container
+									92 文本 一物一景一世界 | 专属意境四季幽灵招米串#天然水晶 #四季幽灵 #白兔毛 #招财
+									93 container
+										94 text @ 木子手作
+									95 文本 · 2024年11月7日
+							96 container
+								97 container
+									98 未加标签的图片 /ooVCZGefaclRFJArECOE7q6DgEAB8yCeiNOiI3~tplv-dy-cropcenter:323:430.jpeg?biz_tag=pcweb_cover&from=327834062&lk3s=138a59ce&s=PackSourceEnum_SEARCH&sc=cover&se=true&sh=323_430&x-expires=2099448000&x-signature=s989CHMA4CvCBqPZN%2FWEfh2OnTs%3D
+									99 container
+										100 文本 00:10
+										101 图像
+										102 文本 7
+								103 container
+									104 文本 它他她又来咯，上新幽灵随形#天然水晶 #总有一款适合你 #高级珠宝 #Dⅰy 配件#水晶手链
+									105 container
+										106 text @ 小楷珠宝
+									107 文本 · 2025年8月13日
+							108 container
+								109 container
+									110 未加标签的图片 /oI82mnwdfAEaSUB6AD9pTSCf1EEnFAAXdtAIN4~noop.jpeg?biz_tag=pcweb_cover&card_type=303&column_n=0&from=327834062&lk3s=138a59ce&s=PackSourceEnum_SEARCH&se=false&x-expires=1785297600&x-signature=adoO4OtayywR3o%2BPiMxHipiytQY%3D
+									111 container
+										112 图像
+										113 文本 图文
+										114 图像
+										115 文本 18
+								116 container
+									117 文本 设计款随型紫水晶手串 这也太美了吧🥳越看越喜欢 #紫水晶 #创作者扶持计划 #抖音小助手dou上热门 #手作diy #水晶
+									118 container
+										119 text @ 澜微原创水晶
+									120 文本 · 1月26日
+							121 container
+								122 container
+									123 未加标签的图片 /o8Ixe0ATuBNiAsayEAIAR4hfBHPwDiEBA7oCGN~noop.jpeg?biz_tag=pcweb_cover&card_type=303&column_n=0&from=327834062&lk3s=138a59ce&s=PackSourceEnum_SEARCH&se=false&x-expires=1785297600&x-signature=AUAvVYRFSJREsDKdtULTFowWAGk%3D
+									124 container
+										125 图像
+										126 文本 图文
+										127 图像
+										128 文本 26
+								129 container
+									130 文本 半盆红幽灵 适合秋冬季节佩戴 无事牌的景也超级美～ #创作者计划 #原创设计 #水晶手串 #手作diy #原相机无美颜滤镜
+									131 container
+										132 text @ 澜微原创水晶
+									133 文本 · 1月22日
+							134 文本 相关搜索
+							135 container
+								136 图像
+								137 文本 幽灵随形手串
+							138 container
+								139 图像
+								140 文本 水晶手串diy小程序
+							141 container
+								142 图像
+								143 文本 幽灵水晶随形盘
+							144 container
+								145 图像
+								146 文本 幽灵水晶手链的作用
+							147 container
+								148 图像
+								149 文本 幽灵随形diy款手串
+							150 container
+								151 图像
+								152 文本 幽灵水晶戴左手还是右手
+							153 container
+								154 图像
+								155 文本 水晶手串图片
+							156 container
+								157 图像
+								158 文本 驻马店绿幽灵水晶手串
+							159 container
+								160 container
+									161 未加标签的图片 /ocT55nPDiMCJAGkAPhCMiAKqncNxAI0EhaBA4~noop.jpeg?biz_tag=pcweb_cover&card_type=303&column_n=0&from=327834062&lk3s=138a59ce&s=PackSourceEnum_SEARCH&se=false&x-expires=1785297600&x-signature=wCwxt%2FGTihBKsNwfKfxyWiDTMHU%3D
+									162 container
+										163 图像
+										164 文本 图文
+										165 图像
+										166 文本 27
+								167 container
+									168 文本 幽灵随 型DIY 上新#天然水晶 #水晶配饰 #幽灵随型
+									169 container
+									170 文本 · 2025年8月13日
+							171 container
+								172 container
+									173 未加标签的图片 /ocAlCA12onPPaKhiWHGQgZMtBAIahi70rAgAE~tplv-dy-cropcenter:323:430.jpeg?biz_tag=pcweb_cover&from=327834062&lk3s=138a59ce&s=PackSourceEnum_SEARCH&sc=cover&se=true&sh=323_430&x-expires=2099448000&x-signature=7FyQIqf0njpePUpUWL6b3UuddOc%3D
+									174 container
+										175 文本 00:14
+										176 图像
+										177 文本 15
+								178 container
+									179 文本 随型四季幽灵，不爱吗#水晶 #水晶手串 #水晶手串搭配 #天然水晶 #水晶手串diy
+									180 container
+										181 text @ 涵岚·水晶手作
+									182 文本 · 2025年8月20日
+							183 container
+								184 container
+									185 未加标签的图片 /oIFqNImQDCJP2CxSgEf8AyAArFkyAmAAfta9UW~tplv-dy-cropcenter:323:430.jpeg?biz_tag=pcweb_cover&from=327834062&lk3s=138a59ce&s=PackSourceEnum_SEARCH&sc=cover&se=true&sh=323_430&x-expires=2099448000&x-signature=qcgwDSdaQiaDCjO2meWCaAk%2BPaY%3D
+									186 container
+										187 文本 00:37
+										188 图像
+										189 文本 3162
+								190 container
+									191 文本 按着设计图做的手串果然不一样#天然水晶 #原创珠宝设计 #水晶手串diy
+									192 container
+										193 text @ 万物有灵-小影的水晶
+									194 文本 · 2024年8月1日
+							195 container
+								196 container
+									197 未加标签的图片 /osASBA8vdjvPz1ciK0MqLgIoBAIZQiyg2A7AE~tplv-dy-cropcenter:323:430.jpeg?biz_tag=pcweb_cover&from=327834062&lk3s=138a59ce&s=PackSourceEnum_SEARCH&sc=cover&se=true&sh=323_430&x-expires=2099448000&x-signature=anrpmFHDnns%2Fwr%2Be%2By2H4BL4mYM%3D
+									198 container
+										199 文本 00:38
+										200 图像
+										201 文本 200
+								202 container
+									203 文本 无须多言！！水晶里蔷薇花园 最独特的就是那颗四色花幽灵少见的粉紫色调，漂浮的幽灵景 正好呼应了这一整串幽灵的四种颜色，融合的恰到好处！！！#水晶手串diy #天然水晶 #手工diy
+									204 container
+										205 text @ 饰也手作DIY定制
+									206 文本 · 2024年12月6日
+							207 container
+								208 container
+									209 未加标签的图片 /ocDeBig7E50AdVAJICbAYNiApbKguAfdxCA1xO~noop.jpeg?biz_tag=pcweb_cover&card_type=303&column_n=0&from=327834062&lk3s=138a59ce&s=PackSourceEnum_SEARCH&se=false&x-expires=1785297600&x-signature=k%2BsEe6BPD2BpepQejuG4brklOfY%3D
+									210 container
+										211 图像
+										212 文本 图文
+										213 图像
+										214 文本 15
+								215 container
+									216 文本 原创设计彩幽灵手链合集🌱。#能量水晶 #原创水晶手链 #配饰分享 #配饰不重样#晒晒手上戴什么
+									217 container
+										218 text @ Kocomint Crystal
+									219 文本 · 2025年9月30日
+							220 container
+								221 container
+									222 未加标签的图片 /oYJ9DEwcE8nAfqANICpJ7eF0qayhFEfRldAgSI~tplv-dy-cropcenter:323:430.jpeg?biz_tag=pcweb_cover&from=327834062&lk3s=138a59ce&s=PackSourceEnum_SEARCH&sc=cover&se=true&sh=323_430&x-expires=2099448000&x-signature=w8mKwo0pyKfYjU6ZKrSZlp%2BLSWQ%3D
+									223 container
+										224 文本 00:38
+										225 图像
+										226 文本 2
+								227 container
+									228 文本 随形真的好美。#设计款水晶手串 #肇庆水晶手串定制 #矿物晶体 #幽灵水晶 #紫超七随形
+									229 container
+										230 text @ 伴我钱行
+									231 文本 · 2024年12月23日
+							232 container
+								233 container
+									234 未加标签的图片 /38ed1695dd874d04a6ddb1834506d881~tplv-dy-cropcenter:323:430.jpeg?biz_tag=pcweb_cover&from=327834062&lk3s=138a59ce&s=PackSourceEnum_SEARCH&sc=cover&se=true&sh=323_430&x-expires=2099448000&x-signature=e8ngEd2OqH7Zy7l%2Bb15XSTDyilE%3D
+									235 container
+										236 文本 03:09
+										237 图像
+										238 文本 21
+								239 container
+									240 文本 夏日绵绵冰🍨白幽灵水晶蛋面手串diy教程 ❄️ 这串白幽灵水晶手串也太适合夏天了吧！ 像一碗牛奶绵绵冰，清透又温柔✨ 自带透心凉的治愈感～ 💎 蛋面圆润又Q弹，像是夏日刚盛满的冰沙🧊！ 搭配s925银饰高级感拿捏🤏~ ❄️ 今年夏天就靠它“物理+玄学”降温了！ 你们喜欢这款白幽灵蛋面水晶手串吗？ ﻿#水晶手串diy #水晶 #水晶手链 #串珠 #白幽灵
+									241 container
+										242 text @ 加一珠宝
+									243 文本 · 2025年7月7日
+							244 container
+								245 container
+									246 未加标签的图片 /oAMgbDfTAgfBvhQT7Y6FJgvB9EQqIAFaAFAWfD~noop.jpeg?biz_tag=pcweb_cover&card_type=303&column_n=0&from=327834062&lk3s=138a59ce&s=PackSourceEnum_SEARCH&se=false&x-expires=1785297600&x-signature=5uLd0I8Sp6mcDNGaslPDNeXVx4A%3D
+									247 container
+										248 图像
+										249 文本 图文
+										250 图像
+										251 文本 29
+								252 container
+									253 文本 绿幽灵『森韵』🍃。#原创水晶手链 #天然水晶 #配饰分享 #穿搭分享 #宝藏饰品大公开
+									254 container
+										255 text @ Kocomint Crystal
+									256 文本 · 3月8日
+							257 container
+								258 container
+									259 未加标签的图片 /o8MAAwIaAYPhWEishS0bDPPBOAiixB4Azmn78~noop.jpeg?biz_tag=pcweb_cover&card_type=303&column_n=0&from=327834062&lk3s=138a59ce&s=PackSourceEnum_SEARCH&se=false&x-expires=1785297600&x-signature=sfnv%2BYK3wbtyvo5hDFxpr8jVgps%3D
+									260 container
+										261 图像
+										262 文本 图文
+										263 图像
+										264 文本 28
+								265 container
+									266 文本 关于幽灵水晶叠戴。#原创水晶手串 #创作者中心 #创作灵感 #幽灵水晶 #水晶手串
+									267 container
+										268 text @ 微澜原创珠宝
+									269 文本 · 1月18日
+							270 container
+								271 container
+									272 未加标签的图片 /o4iBeelVfgA7GGAIAUVIABFOLJqLE6wCSwxqAB~tplv-dy-cropcenter:323:430.jpeg?biz_tag=pcweb_cover&from=327834062&lk3s=138a59ce&s=PackSourceEnum_SEARCH&sc=cover&se=true&sh=323_430&x-expires=2099448000&x-signature=49WnEDvFW2TnAQ9oQiTJd5aKglI%3D
+									273 container
+										274 文本 01:04
+										275 图像
+										276 文本 106
+								277 container
+									278 文本 沉浸式串珠|绿幽灵📿#天然水晶 #能量水晶 #绿幽灵
+									279 container
+										280 text @ 晶鲤
+									281 文本 · 2025年12月31日
+							282 container
+								283 container
+									284 未加标签的图片 /o8A0b9unhiIkaCzx3aBoMXv3ZP5LBGvBAiDED~tplv-dy-cropcenter:323:430.jpeg?biz_tag=pcweb_cover&from=327834062&lk3s=138a59ce&s=PackSourceEnum_SEARCH&sc=cover&se=true&sh=323_430&x-expires=2099448000&x-signature=4%2FEqQyC%2BnPgBK2EoYc5zOrXaiL4%3D
+									285 container
+										286 文本 00:29
+										287 图像
+										288 文本 4
+								289 container
+									290 文本 天然绿幽灵随形 非常漂亮 体透 可以搭配做手串 有没有喜欢的宝子🥰🥰 #天然水晶 #绿幽灵 #水晶 #矿物晶体 #实拍
+									291 container
+										292 text @ 卡尔洛水晶
+									293 文本 · 2025年8月29日
+							294 文本 相关搜索
+							295 container
+								296 图像
+								297 文本 幽灵随形手串
+							298 container
+								299 图像
+								300 文本 水晶手串diy小程序
+							301 container
+								302 图像
+								303 文本 幽灵水晶随形盘
+							304 container
+								305 图像
+								306 文本 幽灵水晶手链的作用
+							307 container
+								308 图像
+								309 文本 幽灵随形diy款手串
+							310 container
+								311 图像
+								312 文本 幽灵水晶戴左手还是右手
+							313 container
+								314 图像
+								315 文本 水晶手串图片
+							316 container
+								317 图像
+								318 文本 驻马店绿幽灵水晶手串
+	319 关闭按钮
+	320 全屏幕按钮 Help: 此按钮也可以执行缩放窗口的操作, Secondary Actions: 缩放窗口
+	321 最小化按钮
+322 menu bar
+	323 抖音
+	324 文件
+	325 编辑
+	326 窗口
+
+The focused UI element is 3 HTML 内容 发现更多精彩视频 - 抖音搜索, URL: douyin.com/jingxuan/search/%E5%B9%BD%E7%81%B5%E9%9A%8F%E5%BD%A2%E6%B0%B4%E6%99%B6%E6%89%8B%E4%B8%B2%20%E8%AE%BE%E8%AE%A1

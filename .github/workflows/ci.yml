@@ -78,6 +78,10 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Validate Docker deployment profiles
+        run: |
+          python3 scripts/deploy.py test plan
+          python3 scripts/deploy.py prod plan
       - name: Validate Compose and build image
         env:
           APP_IMAGE: example.invalid/yujian-api@sha256:0000000000000000000000000000000000000000000000000000000000000000

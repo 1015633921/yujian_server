@@ -88,11 +88,35 @@ test('workspace checkout snapshot keeps the visual fields used by the preview', 
 
   assert.match(
     workspaceSource,
-    /rotation:\s*stringedBeadRotationFromPoint\(visualX, visualY, center\)/
+    /rotation:\s*stringedMaterialRotationDeg\(angle, physical\)/
   );
   ['dx', 'dy', 'looseX', 'looseY', 'rotation', 'beadSize'].forEach(field => {
     assert.match(workspaceSource, new RegExp(`${field}: placement\\.${field}`));
   });
+});
+
+test('preview uses measured irregular dimensions and string occupancy metadata', () => {
+  const sequence = Array.from({ length: 8 }, (_, index) => ({
+    id: `irregular-${index}`,
+    top: 'accessory',
+    size: 12,
+    material_params: {
+      bead_shape: 'nugget',
+      string_axis_width_mm: 5,
+      body_width_mm: 12,
+      body_height_mm: 8,
+      image_string_axis_deg: 0
+    },
+    image_url: `https://cdn.example.com/irregular-${index}.webp`
+  }));
+  const beads = buildDesignPreviewBeads(sequence, [], {
+    isLooseMode: false,
+    wristSize: 16
+  });
+
+  assert.equal(beads.length, 8);
+  assert.ok(beads.every(bead => bead.previewSize > 52));
+  assert.match(beads[0].style, /rotate\(0\.0deg\)/);
 });
 
 test('preview keeps transparent irregular materials in their original silhouette', () => {
@@ -116,4 +140,41 @@ test('preview keeps transparent irregular materials in their original silhouette
   assert.match(wxml, /wx:else class="design-preview-bead-fallback"/);
   assert.ok(imageRule);
   assert.doesNotMatch(imageRule[1], /border-radius:\s*50%/);
+});
+
+test('preview overlays single-sided and back-to-back bead caps without adding ring hosts', () => {
+  const sequence = sequenceWithPlacements([
+    {
+      x: 240,
+      y: 180,
+      bead_caps: {
+        right: {
+          id: 'cap-a',
+          image_url: 'https://cdn.example.com/cap-a.webp',
+          material_params: { bead_shape: 'bead_cap', placement_mode: 'attached_side' }
+        }
+      }
+    },
+    {
+      x: 320,
+      y: 180,
+      bead_caps: {
+        left: {
+          id: 'cap-b',
+          image_url: 'https://cdn.example.com/cap-b.webp',
+          material_params: { bead_shape: 'bead_cap', placement_mode: 'attached_side' }
+        }
+      }
+    }
+  ]);
+  const preview = buildDesignPreviewBeads(sequence, [], {
+    isLooseMode: false,
+    workspaceStageCenter: 300
+  });
+  const hosts = preview.filter(item => !item.isAttachment);
+  const caps = preview.filter(item => item.isAttachment);
+
+  assert.equal(hosts.length, 2);
+  assert.equal(caps.length, 2);
+  assert.ok(caps.every(item => item.previewSize < hosts[0].previewSize));
 });

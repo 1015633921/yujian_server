@@ -343,6 +343,23 @@ def test_out_of_order_and_closed_order_events_never_downgrade_paid_state(tmp_pat
     )
     assert compensation["processing_status"] == "compensation_required"
     assert service.get_order(cancelled["order_id"])["status"] == "closed"
+    pending = service.list_payment_compensations()
+    assert [item["provider_event_id"] for item in pending] == ["closed-order-paid"]
+    resolved = service.resolve_payment_compensation(
+        pending[0]["id"],
+        action="refund_verified",
+        operator="finance-admin",
+        note="微信商户平台退款凭证已核验",
+    )
+    replay = service.resolve_payment_compensation(
+        pending[0]["id"],
+        action="refund_verified",
+        operator="finance-admin",
+        note="重复确认不会产生第二次处理",
+    )
+    assert resolved["processing_status"] == "compensation_resolved"
+    assert replay["processing_status"] == "compensation_resolved"
+    assert service.list_payment_compensations() == []
 
 
 def test_terminal_payment_failure_releases_reservation_once(tmp_path, monkeypatch):
@@ -449,6 +466,7 @@ def test_refund_webhook_is_deduplicated_and_old_event_cannot_downgrade(tmp_path,
     [
         ({"mchid": "wrong-mch"}, "mchid_mismatch"),
         ({"transaction_id": "wrong-transaction"}, "transaction_id_mismatch"),
+        ({"out_refund_no": "RF-WRONG-ORDER"}, "out_refund_no_mismatch"),
         ({"amount": {"total": 1234.5, "refund": 1234}}, "refund_amount_invalid"),
         ({"amount": {"total": 1234, "refund": True}}, "refund_amount_invalid"),
         ({"amount": {"total": 1, "refund": 1234}}, "amount_mismatch"),

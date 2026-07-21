@@ -28,6 +28,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--edge-padding", type=int, default=2)
     parser.add_argument("--max-bytes", type=int, default=200_000)
     parser.add_argument("--quality", type=int, default=92)
+    parser.add_argument(
+        "--require-source-alpha",
+        action="store_true",
+        help="Reject opaque source images instead of attempting background removal.",
+    )
     parser.add_argument("--clean", action="store_true")
     return parser.parse_args()
 
@@ -85,8 +90,37 @@ def alpha_mask(image: Image.Image, threshold: int) -> Image.Image:
     red, green, blue = difference.split()
     contrast = ImageChops.lighter(ImageChops.lighter(red, green), blue)
     mask = contrast.point(lambda value: 255 if value > threshold else 0)
-    # Close tiny textured-paper gaps without expanding the object materially.
-    return mask.filter(ImageFilter.MaxFilter(5)).filter(ImageFilter.MinFilter(5))
+    # Remove isolated paper texture, then close small gaps in reflective metal.
+    return (
+        mask.filter(ImageFilter.MedianFilter(5))
+        .filter(ImageFilter.MaxFilter(7))
+        .filter(ImageFilter.MinFilter(7))
+    )
+
+
+def subject_search_box(image: Image.Image) -> tuple[int, int, int, int]:
+    """Locate the photographed object before estimating its local background."""
+    rgb = image.convert("RGB")
+    width, height = rgb.size
+    blur_radius = max(10, min(width, height) // 28)
+    difference = ImageChops.difference(rgb, rgb.filter(ImageFilter.GaussianBlur(blur_radius)))
+    red, green, blue = difference.split()
+    detail = ImageChops.lighter(ImageChops.lighter(red, green), blue)
+    saliency = detail.filter(ImageFilter.GaussianBlur(max(4, min(width, height) // 110)))
+
+    margin_x = max(1, width // 20)
+    margin_y = max(1, height // 20)
+    inner = saliency.crop((margin_x, margin_y, width - margin_x, height - margin_y))
+    pixels = inner.tobytes()
+    peak_index = max(range(len(pixels)), key=pixels.__getitem__)
+    peak_x = margin_x + peak_index % inner.width
+    peak_y = margin_y + peak_index // inner.width
+
+    search_width = min(width, max(280, round(width * 0.52)))
+    search_height = min(height, max(280, round(height * 0.6)))
+    left = max(0, min(width - search_width, round(peak_x - search_width / 2)))
+    top = max(0, min(height - search_height, round(peak_y - search_height / 2)))
+    return left, top, left + search_width, top + search_height
 
 
 def normalize_one(
@@ -95,32 +129,68 @@ def normalize_one(
     args: argparse.Namespace,
     background_threshold: int | None = None,
 ) -> dict[str, object]:
-    image = ImageOps.exif_transpose(Image.open(source)).convert("RGBA")
+    opened = ImageOps.exif_transpose(Image.open(source))
+    image = opened.convert("RGBA")
     # The app output is 512px. Reducing source photos first keeps the masking
     # pass light enough for a full batch while preserving more than enough detail.
     image.thumbnail((1200, 1200), Image.Resampling.LANCZOS)
-    mask = alpha_mask(image, background_threshold or args.background_threshold)
+    source_alpha = image.getchannel("A")
+    has_source_alpha = source_alpha.getextrema()[0] < 255
+    if args.require_source_alpha and not has_source_alpha:
+        raise ValueError(f"opaque_source: {source}")
+
+    if has_source_alpha:
+        search_box = (0, 0, image.width, image.height)
+        localized = image
+        mask = source_alpha.point(lambda value: 255 if value > args.alpha_threshold else 0)
+        mask_mode = "source_alpha"
+    else:
+        search_box = subject_search_box(image)
+        localized = image.crop(search_box)
+        mask = alpha_mask(localized, background_threshold or args.background_threshold)
+        mask_mode = f"localized_border_color:{border_color(localized)}"
     bbox = mask.getbbox()
     if not bbox:
         raise ValueError(f"empty_subject: {source}")
-    padding = max(8, int(max(bbox[2] - bbox[0], bbox[3] - bbox[1]) * 0.04))
+    padding = max(args.edge_padding, int(max(bbox[2] - bbox[0], bbox[3] - bbox[1]) * 0.04))
     crop_box = (
         max(0, bbox[0] - padding),
         max(0, bbox[1] - padding),
-        min(image.width, bbox[2] + padding),
-        min(image.height, bbox[3] + padding),
+        min(localized.width, bbox[2] + padding),
+        min(localized.height, bbox[3] + padding),
     )
-    cropped = image.crop(crop_box)
-    cropped_mask = mask.crop(crop_box).filter(ImageFilter.GaussianBlur(0.8))
-    cropped.putalpha(cropped_mask)
+    cropped = localized.crop(crop_box)
+    if has_source_alpha:
+        # Preserve the supplied cutout, including translucent antialiased edges
+        # and holes. Re-segmenting shiny metal would erase real reflections.
+        cropped.putalpha(source_alpha.crop(crop_box))
+    else:
+        cropped_mask = mask.crop(crop_box).filter(ImageFilter.GaussianBlur(0.8))
+        cropped.putalpha(cropped_mask)
     target_edge = max(1, round(args.size * args.target_fill))
-    scale = target_edge / max(cropped.width, cropped.height)
+    subject_width = bbox[2] - bbox[0]
+    subject_height = bbox[3] - bbox[1]
+    scale = target_edge / max(subject_width, subject_height)
     resized = cropped.resize(
         (max(1, round(cropped.width * scale)), max(1, round(cropped.height * scale))),
         Image.Resampling.LANCZOS,
     )
+    subject_center_x = ((bbox[0] + bbox[2]) / 2 - crop_box[0]) * scale
+    subject_center_y = ((bbox[1] + bbox[3]) / 2 - crop_box[1]) * scale
+    paste_x = round(args.size / 2 - subject_center_x)
+    paste_y = round(args.size / 2 - subject_center_y)
     canvas = Image.new("RGBA", (args.size, args.size), (0, 0, 0, 0))
-    canvas.alpha_composite(resized, ((args.size - resized.width) // 2, (args.size - resized.height) // 2))
+    canvas.alpha_composite(resized, (paste_x, paste_y))
+    canvas_bbox = canvas.getchannel("A").point(
+        lambda value: 255 if value > args.alpha_threshold else 0
+    ).getbbox()
+    if canvas_bbox:
+        offset_x = round(args.size / 2 - (canvas_bbox[0] + canvas_bbox[2]) / 2)
+        offset_y = round(args.size / 2 - (canvas_bbox[1] + canvas_bbox[3]) / 2)
+        if offset_x or offset_y:
+            centered = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
+            centered.alpha_composite(canvas, (offset_x, offset_y))
+            canvas = centered
     output.parent.mkdir(parents=True, exist_ok=True)
     quality = args.quality
     for candidate in (args.quality, 88, 84, 80, 76, 72):
@@ -136,8 +206,14 @@ def normalize_one(
     return {
         "source_width": image.width,
         "source_height": image.height,
-        "source_bbox": list(bbox),
-        "mask_mode": f"border_color:{border_color(image)}",
+        "source_search_box": list(search_box),
+        "source_bbox": [
+            search_box[0] + bbox[0],
+            search_box[1] + bbox[1],
+            search_box[0] + bbox[2],
+            search_box[1] + bbox[3],
+        ],
+        "mask_mode": mask_mode,
         "output_width": args.size,
         "output_height": args.size,
         "output_bbox": list(final_bbox),
@@ -226,6 +302,9 @@ def main() -> None:
         if item["output_width"] != args.size
         or item["output_height"] != args.size
         or int(item["file_size"]) > args.max_bytes
+        or not 0.975 <= float(item["fill_ratio"]) <= 0.995
+        or abs(float(item["center_offset_x"])) > 2
+        or abs(float(item["center_offset_y"])) > 2
         or not Image.open(str(item["app_webp"])).convert("RGBA").getchannel("A").getbbox()
     ]
     if invalid:
