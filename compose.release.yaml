@@ -18,6 +18,7 @@ services:
       ALLOW_RUNTIME_SCHEMA_MUTATION: "false"
       WECHAT_PAY_TEST_MODE: "false"
     networks:
+      - edge
       - backend
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=3)"]
@@ -70,6 +71,8 @@ services:
       - backend
 
 networks:
+  edge:
+    driver: bridge
   backend:
     external: true
     name: "${BACKEND_NETWORK:?BACKEND_NETWORK is required}"
