@@ -27,7 +27,8 @@
 
 ## 日常发布
 
-GitHub Actions 中运行 `deploy-docker-blue-green`，只选择目标环境。工作流会：
+代码推送到 `master` 后会自动运行 `deploy-docker-blue-green` 发布测试环境；正式环境仍由
+GitHub Actions 手动选择 `prod`。工作流会：
 
 1. 构建并推送唯一的 `repository@sha256:<digest>` 镜像。
 2. 上传最小部署控制包，不上传源码或环境配置。

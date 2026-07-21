@@ -163,7 +163,8 @@ def test_deploy_dry_run_requires_only_environment_from_operator(tmp_path: Path) 
 def test_deployment_workflow_has_one_environment_choice_and_no_kubernetes() -> None:
     workflow = (ROOT / ".github" / "workflows" / "deploy-docker.yml").read_text(encoding="utf-8")
     assert "deploy-docker-blue-green" in workflow
-    assert "TARGET_ENVIRONMENT: ${{ inputs.environment }}" in workflow
+    assert "branches: [master]" in workflow
+    assert "github.event_name == 'push' && 'test' || inputs.environment" in workflow
     assert "python3 scripts/deploy.py '${TARGET_ENVIRONMENT}'" in workflow
     assert "compose.release.yaml" in workflow
     assert "kubectl" not in workflow

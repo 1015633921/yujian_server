@@ -1,6 +1,8 @@
 name: deploy-docker-blue-green
 
 on:
+  push:
+    branches: [master]
   workflow_dispatch:
     inputs:
       environment:
@@ -17,14 +19,14 @@ permissions:
   packages: write
 
 concurrency:
-  group: deploy-docker-${{ inputs.environment }}
+  group: deploy-docker-${{ github.event_name == 'push' && 'test' || inputs.environment }}
   cancel-in-progress: false
 
 jobs:
   deploy:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
-    environment: ${{ inputs.environment }}
+    environment: ${{ github.event_name == 'push' && 'test' || inputs.environment }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
@@ -34,7 +36,7 @@ jobs:
       - name: Create an immutable release identifier
         id: release
         env:
-          TARGET_ENVIRONMENT: ${{ inputs.environment }}
+          TARGET_ENVIRONMENT: ${{ github.event_name == 'push' && 'test' || inputs.environment }}
         run: |
           release="v$(date -u +%Y%m%d)-001-${GITHUB_RUN_ID}-${TARGET_ENVIRONMENT}"
           echo "release=${release}" >> "${GITHUB_OUTPUT}"
@@ -79,7 +81,7 @@ jobs:
 
       - name: Upload and run the same deployment command
         env:
-          TARGET_ENVIRONMENT: ${{ inputs.environment }}
+          TARGET_ENVIRONMENT: ${{ github.event_name == 'push' && 'test' || inputs.environment }}
           RELEASE_VERSION: ${{ steps.release.outputs.release }}
           APP_IMAGE: ${{ steps.image.outputs.ref }}
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
