@@ -30,8 +30,8 @@ docker buildx build "${ROOT}" \
   --tag "${IMAGE_TAG}" \
   --build-arg "RELEASE_VERSION=${RELEASE_VERSION}" \
   --build-arg "VCS_REF=${VCS_REF}" \
-  --provenance=mode=max \
-  --sbom=true \
+  --provenance=false \
+  --sbom=false \
   --metadata-file "${METADATA_FILE}" \
   "${MODE}"
 
