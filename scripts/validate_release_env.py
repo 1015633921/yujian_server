@@ -120,10 +120,20 @@ def validate(values: dict[str, str], environment: str, allow_placeholders: bool 
             errors.append("WECHAT_PAY_TEST_MODE_FORBIDDEN")
     if values.get("ALLOW_RUNTIME_SCHEMA_MUTATION", "false").lower() not in FALSE_VALUES:
         errors.append("RUNTIME_SCHEMA_MUTATION_FORBIDDEN")
-    if values.get("ALLOW_DEV_WECHAT_LOGIN", "false").lower() not in FALSE_VALUES:
+    dev_login_value = values.get("ALLOW_DEV_WECHAT_LOGIN", "false").lower()
+    if dev_login_value not in FALSE_VALUES | TRUE_VALUES:
+        errors.append("ALLOW_DEV_WECHAT_LOGIN_INVALID_BOOLEAN")
+    elif environment != "test" and dev_login_value not in FALSE_VALUES:
         errors.append("DEV_WECHAT_LOGIN_FORBIDDEN")
     if values.get("TRUST_CLOUDBASE_IDENTITY_HEADERS", "false").lower() not in FALSE_VALUES:
         errors.append("CLOUDBASE_IDENTITY_HEADERS_FORBIDDEN")
+    web_pairing_value = values.get("WEB_LOGIN_PAIRING_ENABLED", "false").strip().lower()
+    if web_pairing_value not in FALSE_VALUES | TRUE_VALUES:
+        errors.append("WEB_LOGIN_PAIRING_ENABLED_INVALID_BOOLEAN")
+    if web_pairing_value in TRUE_VALUES:
+        pairing_secret = require("WEB_LOGIN_PAIRING_BFF_SECRET")
+        if pairing_secret and not allow_placeholders and len(pairing_secret.encode("utf-8")) < 32:
+            errors.append("WEB_LOGIN_PAIRING_BFF_SECRET_TOO_SHORT")
 
     for group in (
         ("WECHAT_APP_ID", "WECHAT_APP_SECRET"),

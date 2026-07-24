@@ -8,7 +8,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from .database import DEFAULT_SQLITE_PATH, MySQLConnection, use_mysql
-from .feature_flags import checkout_enabled, kuaidi100_subscribe_enabled, payment_enabled, report_versioning_v2_enabled
+from .feature_flags import checkout_enabled, kuaidi100_subscribe_enabled, payment_enabled, report_versioning_v2_enabled, web_login_pairing_enabled
 from .observability import metrics
 
 
@@ -32,6 +32,12 @@ def required_config_errors() -> list[str]:
             errors.append("RELEASE_VERSION_INVALID")
         if os.getenv("ALLOW_RUNTIME_SCHEMA_MUTATION", "false").lower() in {"1", "true", "yes", "on"}:
             errors.append("RUNTIME_SCHEMA_MUTATION_FORBIDDEN")
+    if web_login_pairing_enabled():
+        pairing_secret = os.getenv("WEB_LOGIN_PAIRING_BFF_SECRET", "")
+        if not pairing_secret:
+            errors.append("WEB_LOGIN_PAIRING_BFF_SECRET_MISSING")
+        elif len(pairing_secret.encode("utf-8")) < 32:
+            errors.append("WEB_LOGIN_PAIRING_BFF_SECRET_TOO_SHORT")
     if app_env == "production":
         if os.getenv("WECHAT_PAY_TEST_MODE", "false").lower() in {"1", "true", "yes", "on"}:
             errors.append("WECHAT_PAY_TEST_MODE_FORBIDDEN")
@@ -103,6 +109,8 @@ def _required_tables() -> tuple[str, ...]:
         required.append("payment_webhook_events")
     if report_versioning_v2_enabled():
         required.extend(("report_snapshots", "report_generation_requests"))
+    if web_login_pairing_enabled():
+        required.append("web_login_pairings")
     return tuple(required)
 
 

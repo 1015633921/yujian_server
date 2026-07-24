@@ -43,3 +43,7 @@ def metrics_endpoint_enabled() -> bool:
 
 def kuaidi100_subscribe_enabled() -> bool:
     return enabled("KUAIDI100_SUBSCRIBE_ENABLED", False)
+
+
+def web_login_pairing_enabled() -> bool:
+    return enabled("WEB_LOGIN_PAIRING_ENABLED", False)
