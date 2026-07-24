@@ -18,6 +18,7 @@ from app.migrations.versions import v20260713_08_after_sale_cases
 from app.migrations.versions import v20260714_09_after_sale_return_flow
 from app.migrations.versions import v20260714_10_material_physical_specs
 from app.migrations.versions import v20260715_11_material_types
+from app.migrations.versions import v20260724_13_web_login_pairing
 
 MIGRATIONS = [
     v20260712_01_p0a_security,
@@ -31,6 +32,7 @@ MIGRATIONS = [
     v20260714_09_after_sale_return_flow,
     v20260714_10_material_physical_specs,
     v20260715_11_material_types,
+    v20260724_13_web_login_pairing,
 ]
 
 

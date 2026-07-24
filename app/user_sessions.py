@@ -43,31 +43,34 @@ class UserSessionService:
         configured = int(os.getenv("USER_SESSION_TTL_SECONDS", str(7 * 24 * 60 * 60)))
         return max(300, min(configured, 30 * 24 * 60 * 60))
 
-    def create(self, user_id: str) -> dict[str, Any]:
+    def create_in_connection(self, connection, user_id: str) -> dict[str, Any]:
         token = secrets.token_urlsafe(48)
         session_id = f"us_{secrets.token_hex(16)}"
         created_at = now_iso()
         expires_at = (
             datetime.now(timezone.utc) + timedelta(seconds=self.ttl_seconds())
         ).replace(microsecond=0).isoformat()
-        try:
-            with self.connect() as connection:
-                connection.execute(
-                    """
-                    INSERT INTO user_sessions
-                    (id, user_id, token_hash, created_at, expires_at, revoked_at, last_seen_at)
-                    VALUES (?, ?, ?, ?, ?, NULL, ?)
-                    """,
-                    (session_id, user_id, token_hash(token), created_at, expires_at, created_at),
-                )
-        except (sqlite3.OperationalError, KeyError) as exc:
-            raise RuntimeError("P0-A security migration has not been applied") from exc
+        connection.execute(
+            """
+            INSERT INTO user_sessions
+            (id, user_id, token_hash, created_at, expires_at, revoked_at, last_seen_at)
+            VALUES (?, ?, ?, ?, ?, NULL, ?)
+            """,
+            (session_id, user_id, token_hash(token), created_at, expires_at, created_at),
+        )
         return {
             "access_token": token,
             "token_type": "Bearer",
             "expires_at": expires_at,
             "session_id": session_id,
         }
+
+    def create(self, user_id: str) -> dict[str, Any]:
+        try:
+            with self.connect() as connection:
+                return self.create_in_connection(connection, user_id)
+        except (sqlite3.OperationalError, KeyError) as exc:
+            raise RuntimeError("P0-A security migration has not been applied") from exc
 
     def authenticate(self, token: str) -> UserPrincipal | None:
         if not token or len(token) < 32 or len(token) > 512:

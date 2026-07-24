@@ -20,6 +20,7 @@ assert_startup_configuration()
 from .admin_api import admin_router  # noqa: E402
 from .admin_page import admin_page  # noqa: E402
 from .api import legacy_router, router  # noqa: E402
+from .web_login_pairing import web_login_pairing_router  # noqa: E402
 from .observability import (
     REQUEST_ID_HEADER,
     Timer,
@@ -67,6 +68,7 @@ app.add_middleware(
 app.include_router(router)
 app.include_router(legacy_router)
 app.include_router(admin_router)
+app.include_router(web_login_pairing_router)
 
 
 @app.middleware("http")
@@ -132,7 +134,7 @@ async def admin_static_cache_control(request: Request, call_next):
     if content_type.startswith("application/json") and "charset=" not in content_type.lower():
         response.headers["Content-Type"] = "application/json; charset=utf-8"
     path = request.url.path
-    if request.headers.get("authorization"):
+    if request.headers.get("authorization") or request.url.path.startswith("/api/v1/auth/web-pairings"):
         response.headers["Cache-Control"] = "no-store"
         response.headers["Pragma"] = "no-cache"
     elif path == "/admin":

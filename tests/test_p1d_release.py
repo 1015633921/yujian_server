@@ -84,6 +84,12 @@ def test_environment_validator_fails_closed_and_keeps_databases_isolated():
         }
     )
     assert validate(enabled_payment, "prod") == []
+    test_mock_login = valid_environment("test")
+    test_mock_login["ALLOW_DEV_WECHAT_LOGIN"] = "true"
+    assert validate(test_mock_login, "test") == []
+    prod_mock_login = valid_environment("prod")
+    prod_mock_login["ALLOW_DEV_WECHAT_LOGIN"] = "true"
+    assert "DEV_WECHAT_LOGIN_FORBIDDEN" in validate(prod_mock_login, "prod")
     invalid_payment = valid_environment("prod")
     invalid_payment["WECHAT_PAYMENT_ENABLED"] = "sometimes"
     assert "WECHAT_PAYMENT_ENABLED_INVALID_BOOLEAN" in validate(invalid_payment, "prod")
