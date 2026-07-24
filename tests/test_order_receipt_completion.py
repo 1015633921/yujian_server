@@ -14,6 +14,8 @@ AFTER_SALE_MIGRATION_VERSION = "20260713_08_after_sale_cases"
 AFTER_SALE_RETURN_MIGRATION_VERSION = "20260714_09_after_sale_return_flow"
 MATERIAL_PHYSICAL_SPECS_MIGRATION_VERSION = "20260714_10_material_physical_specs"
 MATERIAL_TYPES_MIGRATION_VERSION = "20260715_11_material_types"
+AI_MATERIAL_MIGRATION_VERSION = "20260723_12_ai_material_annotations"
+WEB_LOGIN_MIGRATION_VERSION = "20260724_13_web_login_pairing"
 
 
 def columns(path, table: str) -> set[str]:
@@ -32,7 +34,9 @@ def test_receipt_completion_migration_backfills_signed_order_and_round_trips(tmp
     OrderService(db_path)
     AssessmentRepository(db_path)
     upgrade("sqlite", db_path)
-    assert downgrade("sqlite", db_path, steps=5) == [
+    assert downgrade("sqlite", db_path, steps=7) == [
+        WEB_LOGIN_MIGRATION_VERSION,
+        AI_MATERIAL_MIGRATION_VERSION,
         MATERIAL_TYPES_MIGRATION_VERSION,
         MATERIAL_PHYSICAL_SPECS_MIGRATION_VERSION,
         AFTER_SALE_RETURN_MIGRATION_VERSION,
@@ -71,6 +75,8 @@ def test_receipt_completion_migration_backfills_signed_order_and_round_trips(tmp
         AFTER_SALE_RETURN_MIGRATION_VERSION,
         MATERIAL_PHYSICAL_SPECS_MIGRATION_VERSION,
         MATERIAL_TYPES_MIGRATION_VERSION,
+        AI_MATERIAL_MIGRATION_VERSION,
+        WEB_LOGIN_MIGRATION_VERSION,
     ]
     assert {"logistics_signed_at", "auto_complete_at"} <= columns(db_path, "orders")
     assert "idx_orders_auto_complete" in indexes(db_path, "orders")
@@ -89,7 +95,9 @@ def test_receipt_completion_migration_backfills_signed_order_and_round_trips(tmp
     assert migrated["auto_complete_at"] == row["auto_complete_at"]
     assert upgrade("sqlite", db_path) == []
 
-    assert downgrade("sqlite", db_path, steps=5) == [
+    assert downgrade("sqlite", db_path, steps=7) == [
+        WEB_LOGIN_MIGRATION_VERSION,
+        AI_MATERIAL_MIGRATION_VERSION,
         MATERIAL_TYPES_MIGRATION_VERSION,
         MATERIAL_PHYSICAL_SPECS_MIGRATION_VERSION,
         AFTER_SALE_RETURN_MIGRATION_VERSION,

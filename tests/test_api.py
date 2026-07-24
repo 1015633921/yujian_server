@@ -81,6 +81,24 @@ def ensure_material_taxonomy(service, category: str, series: str, top: str = "be
     service.save_material_series({"category_id": saved_category["id"], "name": series})
 
 
+def test_public_material_payload_honors_category_sort_order(monkeypatch):
+    from app import materials as materials_module
+
+    monkeypatch.setattr(
+        materials_module,
+        "list_db_material_facets",
+        lambda: [
+            {"top": "accessory", "category": "后置分类", "series": "A", "name": "A", "category_sort_order": 30},
+            {"top": "accessory", "category": "前置分类", "series": "B", "name": "B", "category_sort_order": 10},
+            {"top": "accessory", "category": "中间分类", "series": "C", "name": "C", "category_sort_order": 20},
+        ],
+    )
+
+    payload = materials_module.build_material_payload([], {"version": "test", "updated_at": ""})
+
+    assert payload["categories_by_top"]["accessory"] == ["全部", "前置分类", "中间分类", "后置分类"]
+
+
 def test_options_support_form_rendering():
     response = client.get("/api/v1/assessment/options")
     assert response.status_code == 200
@@ -2125,7 +2143,15 @@ def test_two_step_energy_to_diy_workbench_flow():
     assert recommendation_data["next_step"]["action"] == "navigate_to_diy_workbench"
     assert recommendation_data["workbench_payload"]["wrist_size_cm"] == 16.5
     plan = recommendation_data["workbench_payload"]["bracelet_plan"]
+    plans = recommendation_data["workbench_payload"]["bracelet_plans"]
     assert plan["layout"]
+    assert len(plans) == 3
+    assert {item["style"] for item in plans} == {
+        "daily_minimal",
+        "balanced_layers",
+        "signature_accent",
+    }
+    assert plan["plan_id"] == next(item["plan_id"] for item in plans if item["is_recommended"])
     assert plan["validation"]["is_valid"] is True
     assert all(check["passed"] for check in plan["validation"]["checks"])
 

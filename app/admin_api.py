@@ -130,6 +130,14 @@ class MaterialCategoryPayload(BaseModel):
     enabled: bool = True
 
 
+class MaterialCategoryBatchDeletePayload(BaseModel):
+    ids: list[str] = Field(min_length=1, max_length=100)
+
+
+class MaterialDirectoryBatchDeletePayload(BaseModel):
+    ids: list[str] = Field(min_length=1, max_length=100)
+
+
 class MaterialSeriesPayload(BaseModel):
     id: str | None = None
     category_id: str
@@ -1286,11 +1294,56 @@ def save_material_category(payload: MaterialCategoryPayload, authorization: str 
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@admin_router.post("/material-taxonomy/categories/batch-delete", summary="批量删除空材料分类")
+def delete_empty_material_categories(
+    payload: MaterialCategoryBatchDeletePayload,
+    authorization: str | None = Header(default=None),
+):
+    actor = require_admin(authorization)
+    try:
+        return success(
+            admin_service.delete_empty_material_categories(payload.ids, actor=actor),
+            "空材料分类已删除",
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@admin_router.post("/material-types/batch-delete", summary="批量删除空材料类型")
+def delete_empty_material_types(
+    payload: MaterialDirectoryBatchDeletePayload,
+    authorization: str | None = Header(default=None),
+):
+    actor = require_admin(authorization)
+    try:
+        return success(admin_service.delete_empty_material_types(payload.ids, actor=actor), "空材料类型已删除")
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @admin_router.post("/material-taxonomy/series", summary="新增或更新材料品种")
 def save_material_series(payload: MaterialSeriesPayload, authorization: str | None = Header(default=None)):
     actor = require_admin(authorization)
     try:
         return success(admin_service.save_material_series(payload.model_dump(exclude_unset=True), actor=actor), "品种已保存")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@admin_router.post("/material-taxonomy/series/batch-delete", summary="批量删除空材料品种")
+def delete_empty_material_series(
+    payload: MaterialDirectoryBatchDeletePayload,
+    authorization: str | None = Header(default=None),
+):
+    actor = require_admin(authorization)
+    try:
+        return success(admin_service.delete_empty_material_series(payload.ids, actor=actor), "空材料品种已删除")
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

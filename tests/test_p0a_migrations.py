@@ -39,6 +39,8 @@ def test_p0a_migration_is_explicit_idempotent_and_reversible(tmp_path):
         "20260714_09_after_sale_return_flow",
         "20260714_10_material_physical_specs",
         "20260715_11_material_types",
+        "20260723_12_ai_material_annotations",
+        "20260724_13_web_login_pairing",
     ]
     assert upgrade("sqlite", db_path) == []
     assert "user_sessions" in sqlite_tables(db_path)
@@ -50,6 +52,8 @@ def test_p0a_migration_is_explicit_idempotent_and_reversible(tmp_path):
     }.issubset(sqlite_columns(db_path, "diy_designs"))
 
     assert downgrade("sqlite", db_path) == [
+        "20260724_13_web_login_pairing",
+        "20260723_12_ai_material_annotations",
         "20260715_11_material_types",
         "20260714_10_material_physical_specs",
         "20260714_09_after_sale_return_flow",
@@ -77,4 +81,6 @@ def test_p0a_migration_is_explicit_idempotent_and_reversible(tmp_path):
         "20260714_09_after_sale_return_flow",
         "20260714_10_material_physical_specs",
         "20260715_11_material_types",
+        "20260723_12_ai_material_annotations",
+        "20260724_13_web_login_pairing",
     ]

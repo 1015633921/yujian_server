@@ -22,7 +22,7 @@ from .observability import log_event, safe_exception_frames
 from .schemas import AssessmentRequest, DIYRecommendationRequest
 
 CHINA_TZ = ZoneInfo("Asia/Shanghai")
-DIY_RECOMMENDATION_CACHE_VERSION = "2026-07-12-mbti-v2"
+DIY_RECOMMENDATION_CACHE_VERSION = "2026-07-24-composer-v2"
 LOGGER = logging.getLogger(__name__)
 
 ELEMENT_ZEN_WORDS = {
@@ -126,6 +126,7 @@ class AssessmentService:
             "primary_crystal": recommendation["primary"],
             "supporting_crystals": recommendation["supporting"],
             "bracelet_plan": recommendation["bracelet_plan"],
+            "bracelet_plans": recommendation["bracelet_plans"],
             "recommendation_copy": recommendation["copy"],
             "care_tips": [
                 "首次佩戴前用柔软干布轻拭，保持珠体洁净。",
@@ -315,6 +316,7 @@ class AssessmentService:
             "primary_crystal": recommendation["primary"],
             "supporting_crystals": recommendation["supporting"],
             "bracelet_plan": recommendation["bracelet_plan"],
+            "bracelet_plans": recommendation["bracelet_plans"],
             "recommendation_copy": recommendation["copy"],
             "editable": True,
             "save_api": "/api/diy-plans/save/",
@@ -328,6 +330,7 @@ class AssessmentService:
             "primary_crystal": recommendation["primary"],
             "supporting_crystals": recommendation["supporting"],
             "bracelet_plan": recommendation["bracelet_plan"],
+            "bracelet_plans": recommendation["bracelet_plans"],
             "recommendation_copy": recommendation["copy"],
             "workbench_payload": workbench_payload,
         }
@@ -443,6 +446,7 @@ class AssessmentService:
             "primary_crystal": recommendation["primary"],
             "supporting_crystals": recommendation["supporting"],
             "bracelet_plan": recommendation["bracelet_plan"],
+            "bracelet_plans": recommendation["bracelet_plans"],
             "recommendation_copy": recommendation["copy"],
             "editable": True,
             "save_api": "/api/diy-plans/save/",
@@ -453,6 +457,7 @@ class AssessmentService:
                 "primary_crystal": recommendation["primary"],
                 "supporting_crystals": recommendation["supporting"],
                 "bracelet_plan": recommendation["bracelet_plan"],
+                "bracelet_plans": recommendation["bracelet_plans"],
                 "recommendation_copy": recommendation["copy"],
                 "workbench_payload": workbench_payload,
                 "next_step": {

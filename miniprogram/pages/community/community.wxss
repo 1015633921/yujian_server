@@ -39,33 +39,6 @@ page {
   letter-spacing: 1rpx;
 }
 
-.nav-tools {
-  justify-self: end;
-  display: flex;
-  align-items: center;
-  gap: 16rpx;
-  height: 58rpx;
-  padding: 0 18rpx;
-  border: var(--yu-line-hair);
-  border-radius: var(--yu-radius-pill);
-  background: rgba(255, 255, 255, .74);
-  box-shadow: var(--yu-shadow-press);
-}
-
-.nav-dot {
-  color: var(--yu-color-anchor-dark);
-  font-size: 24rpx;
-  font-weight: 900;
-  letter-spacing: 2rpx;
-}
-
-.nav-circle {
-  width: 24rpx;
-  height: 24rpx;
-  border: 5rpx solid var(--yu-color-anchor-dark);
-  border-radius: 50%;
-}
-
 .search-card {
   display: grid;
   grid-template-columns: 44rpx 1fr auto auto;

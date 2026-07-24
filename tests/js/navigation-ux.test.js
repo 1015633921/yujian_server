@@ -67,6 +67,46 @@ test('workspace back always returns to home and relaunches on switch failure', (
   ]);
 });
 
+test('custom navigation does not render controls underneath the native capsule', () => {
+  const root = path.resolve(__dirname, '../..');
+  const workspaceWxml = fs.readFileSync(
+    path.join(root, 'miniprogram/pages/workspace/workspace.wxml'),
+    'utf8'
+  );
+  const workspaceWxss = fs.readFileSync(
+    path.join(root, 'miniprogram/pages/workspace/workspace.wxss'),
+    'utf8'
+  );
+  const decorativeCapsulePages = [
+    'miniprogram/pages/community/community.wxml',
+    'miniprogram/pages/community-detail/community-detail.wxml',
+    'miniprogram/pages/custom-mode/custom-mode.wxml',
+    'miniprogram/pages/assessment-guide/assessment-guide.wxml'
+  ];
+  const arSource = fs.readFileSync(
+    path.join(root, 'miniprogram/package-ar/pages/ar-tryon/ar-tryon.js'),
+    'utf8'
+  );
+  const arTemplate = fs.readFileSync(
+    path.join(root, 'miniprogram/package-ar/pages/ar-tryon/ar-tryon.wxml'),
+    'utf8'
+  );
+  const arStyles = fs.readFileSync(
+    path.join(root, 'miniprogram/package-ar/pages/ar-tryon/ar-tryon.wxss'),
+    'utf8'
+  );
+
+  assert.doesNotMatch(workspaceWxml, /aria-label="更多操作"|class="more-btn"/);
+  assert.doesNotMatch(workspaceWxss, /\.more-btn|\.more-dot/);
+  decorativeCapsulePages.forEach(relativePath => {
+    const template = fs.readFileSync(path.join(root, relativePath), 'utf8');
+    assert.doesNotMatch(template, /class="(?:nav-tools|nav-capsule|guide-nav-mark)"/);
+  });
+  assert.match(arSource, /getMenuButtonBoundingClientRect/);
+  assert.match(arTemplate, /--capsule-safe-right: \{\{capsuleSafeRight\}\}px/);
+  assert.match(arStyles, /padding:\s*var\(--safe-top\)\s+var\(--capsule-safe-right\)/);
+});
+
 test('existing assessment report shows a transition before navigation', () => {
   const page = loadPage('miniprogram/pages/assessment/assessment.js');
   const storage = {

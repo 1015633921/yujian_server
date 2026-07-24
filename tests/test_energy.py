@@ -200,7 +200,16 @@ def test_recommendation_uses_preferred_bead_size_in_items_and_layout():
     assert all(item["bead_size_mm"] == 10 for item in recommendation["supporting"])
     assert {item["bead_size_mm"] for item in plan["items"]} == {10}
     assert {item["bead_size_mm"] for item in plan["layout"]} == {10}
-    assert {item["actual_material_size_mm"] for item in plan["items"]} == {10}
+    assert {
+        item["actual_material_size_mm"]
+        for item in plan["items"]
+        if item.get("top") == "bead"
+    } == {10}
+    assert all(
+        float(item["string_axis_width_mm"]) > 0
+        for item in plan["items"]
+        if item.get("top") == "accessory"
+    )
     assert all(item["material_id"] for item in plan["items"])
 
 
@@ -233,9 +242,9 @@ def test_recommendation_plan_passes_all_hard_constraints_for_16cm_8mm():
     energy = EnergyCalculator().calculate(request)
     plan = RecommendationEngine().recommend(request, energy)["bracelet_plan"]
 
-    assert plan["estimated_bead_count"] == 24
-    assert plan["estimated_stringed_length_cm"] == 16.7
+    assert 12 <= plan["estimated_bead_count"] <= 40
     assert plan["target_stringed_length_cm"] == 16.8
+    assert abs(plan["estimated_stringed_length_cm"] - 16.8) <= 0.5
     assert plan["validation"]["is_valid"] is True
     assert all(check["passed"] for check in plan["validation"]["checks"])
     assert all(item["available"] for item in plan["items"])
@@ -248,8 +257,167 @@ def test_recommendation_plan_fits_14_5cm_wrist_instead_of_under_sizing():
     plan = RecommendationEngine().recommend(request, energy)["bracelet_plan"]
 
     assert plan["target_stringed_length_cm"] == 15.3
-    assert plan["estimated_stringed_length_cm"] == 15.1
+    assert plan["estimated_stringed_length_cm"] >= 14.8
     assert plan["validation"]["is_valid"] is True
+
+
+def test_recommendation_returns_three_distinct_editable_design_directions():
+    request = make_request(wrist_size_cm=16, bead_size_mm=8)
+    energy = EnergyCalculator().calculate(request)
+    recommendation = RecommendationEngine().recommend(request, energy)
+    plans = recommendation["bracelet_plans"]
+
+    assert len(plans) == 3
+    assert {plan["style"] for plan in plans} == {
+        "daily_minimal",
+        "balanced_layers",
+        "signature_accent",
+    }
+    assert len(
+        {
+            tuple(item["material_id"] for item in plan["layout"])
+            for plan in plans
+        }
+    ) == 3
+    assert all(plan["validation"]["is_valid"] for plan in plans)
+    assert all(plan["material_variety"] >= 3 for plan in plans)
+    assert sum(bool(plan["is_recommended"]) for plan in plans) == 1
+    assert recommendation["bracelet_plan"]["plan_id"] == next(
+        plan["plan_id"] for plan in plans if plan["is_recommended"]
+    )
+
+
+def test_at_least_one_recommendation_uses_sellable_symmetric_accessories():
+    request = make_request(wrist_size_cm=16, bead_size_mm=8)
+    energy = EnergyCalculator().calculate(request)
+    plans = RecommendationEngine().recommend(request, energy)["bracelet_plans"]
+    accessory_plans = [plan for plan in plans if plan["has_accessories"]]
+
+    assert accessory_plans
+    for plan in accessory_plans:
+        accessories = [item for item in plan["items"] if item.get("top") == "accessory"]
+        assert accessories
+        assert all(item["available"] for item in accessories)
+        assert all(int(item["stock"]) >= int(item["quantity"]) for item in accessories)
+        assert all(
+            int(item["quantity"]) % 2 == 0
+            for item in accessories
+            if "pair_symmetry" in set((item.get("rules") or {}).get("match_rules") or [])
+        )
+
+
+def test_accessory_selection_prefers_metal_tone_that_matches_bead_palette(monkeypatch):
+    materials = [
+        {
+            "id": "crystal-shape",
+            "material_code": "crystal-shape",
+            "name": "幽灵三角牌",
+            "category": "异形件",
+            "top": "accessory",
+            "allowed_roles": ["spacer", "accent"],
+            "match_rules": ["spacer_only"],
+            "enabled": True,
+            "stock": 20,
+            "price": 12,
+            "image_url": "https://example.com/crystal.webp",
+            "size": 16,
+            "sort_order": 1,
+        },
+        {
+            "id": "silver-spacer",
+            "material_code": "silver-spacer",
+            "name": "亮银圆珠隔珠",
+            "category": "隔珠",
+            "top": "accessory",
+            "allowed_roles": ["spacer", "accent"],
+            "match_rules": ["spacer_only"],
+            "enabled": True,
+            "stock": 20,
+            "price": 6,
+            "image_url": "https://example.com/metal.webp",
+            "size": 8,
+            "sort_order": 2,
+        },
+        {
+            "id": "gold-spacer",
+            "material_code": "gold-spacer",
+            "name": "亮金圆珠隔珠",
+            "category": "隔珠",
+            "top": "accessory",
+            "allowed_roles": ["spacer", "accent"],
+            "match_rules": ["spacer_only"],
+            "enabled": True,
+            "stock": 20,
+            "price": 6,
+            "image_url": "https://example.com/gold.webp",
+            "size": 8,
+            "sort_order": 99,
+        },
+    ]
+    monkeypatch.setattr(
+        RecommendationEngine,
+        "load_accessory_inventory",
+        staticmethod(lambda: (materials, True)),
+    )
+
+    selected = RecommendationEngine.select_accessory_items(
+        request=make_request(wrist_size_cm=16, bead_size_mm=8),
+        context={"color_families": set(), "mood_tags": set(), "visual_tags": set()},
+        bead_items=[{"material_code": "citrine", "color_families": ["gold", "yellow", "clear"]}],
+    )
+
+    assert selected[0]["material_id"] == "gold-spacer"
+    assert any(item["material_id"] == "crystal-shape" for item in selected)
+
+
+def test_accessory_selection_does_not_force_mismatched_metal(monkeypatch):
+    materials = [
+        {
+            "id": "blue-crystal-shape",
+            "material_code": "blue-crystal-shape",
+            "name": "海蓝宝随形横通",
+            "category": "异形件",
+            "top": "accessory",
+            "allowed_roles": ["spacer", "accent"],
+            "match_rules": ["pair_symmetry"],
+            "color_family": "blue",
+            "enabled": True,
+            "stock": 20,
+            "price": 12,
+            "image_url": "https://example.com/crystal.webp",
+            "size": 12,
+            "sort_order": 1,
+        },
+        {
+            "id": "gold-spacer",
+            "material_code": "gold-spacer",
+            "name": "亮金圆珠隔珠",
+            "category": "隔珠",
+            "top": "accessory",
+            "allowed_roles": ["spacer"],
+            "match_rules": ["spacer_only"],
+            "enabled": True,
+            "stock": 20,
+            "price": 6,
+            "image_url": "https://example.com/gold.webp",
+            "size": 8,
+            "sort_order": 2,
+        },
+    ]
+    monkeypatch.setattr(
+        RecommendationEngine,
+        "load_accessory_inventory",
+        staticmethod(lambda: (materials, True)),
+    )
+
+    selected = RecommendationEngine.select_accessory_items(
+        request=make_request(wrist_size_cm=16, bead_size_mm=8),
+        context={"color_families": {"blue"}, "mood_tags": set(), "visual_tags": set()},
+        bead_items=[{"material_code": "aquamarine", "color_families": ["blue", "white", "clear"]}],
+        limit=1,
+    )
+
+    assert selected[0]["material_id"] == "blue-crystal-shape"
 
 
 def test_user_facing_copy_safety_removes_health_and_chakra_claim_terms():

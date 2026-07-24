@@ -628,6 +628,8 @@ Page({
     beadSize: 8,
     beadSizeOptions: [6, 8, 10, 12],
     generating: false,
+    showPlanModal: false,
+    recommendationPlans: [],
     posterGenerating: false,
     posterPath: '',
     posterSaving: false,
@@ -1258,6 +1260,7 @@ Page({
     const display = this.formatWristValue(wristSize);
     this.setData({
       showWristModal: true,
+      showPlanModal: false,
       wristInput: display,
       wristRulerValue: display
     });
@@ -1407,20 +1410,105 @@ Page({
           wrist_size_cm: wristSize,
           bead_size_mm: this.data.beadSize
         });
-      if (!currentReport.report_id) wx.setStorageSync('energyReport', result);
-      wx.setStorageSync('recommendedWristSize', wristSize);
-      wx.setStorageSync('workspaceWristConfirmed', true);
-      wx.setStorageSync('diyWorkbenchPayload', result.workbench_payload);
-      wx.setStorageSync('workspacePreset', 'backend-recommended');
-      this.setData({ showWristModal: false });
-      this.skipSuppressAssessmentAutoReport = true;
-      wx.switchTab({ url: '/pages/workspace/workspace' });
+      const plans = Array.isArray(result.bracelet_plans) && result.bracelet_plans.length
+        ? result.bracelet_plans
+        : ((result.workbench_payload && Array.isArray(result.workbench_payload.bracelet_plans))
+          ? result.workbench_payload.bracelet_plans
+          : []);
+      this.pendingRecommendationResult = result;
+      this.pendingRecommendationPlans = plans;
+      if (plans.length > 1) {
+        this.setData({
+          showWristModal: false,
+          showPlanModal: true,
+          recommendationPlans: this.decorateRecommendationPlans(plans)
+        });
+      } else {
+        this.enterWorkspaceWithRecommendation(result, plans[0] || result.bracelet_plan);
+      }
     } catch (error) {
       wx.showToast({ title: error.message || '生成失败，请稍后重试', icon: 'none' });
     } finally {
       wx.hideLoading();
       this.setData({ generating: false });
     }
+  },
+
+  decorateRecommendationPlans(plans = []) {
+    return plans.map((plan, index) => {
+      const items = Array.isArray(plan.items) ? plan.items : [];
+      const previewImages = items
+        .map(item => item && item.image_url)
+        .filter(Boolean)
+        .slice(0, 5);
+      const names = uniqueTextValues(items.map(item => item && item.name)).slice(0, 4);
+      const price = Number(plan.estimated_price);
+      return {
+        index,
+        title: safeText(plan.title, `方案 ${index + 1}`),
+        subtitle: safeText(plan.subtitle, plan.pattern || '按你的手围生成'),
+        pattern: safeText(plan.pattern),
+        materialText: names.join(' · '),
+        beadCount: Number(plan.estimated_bead_count) || 0,
+        priceText: Number.isFinite(price) && price > 0 ? `¥${price.toFixed(2)}` : '价格以工作台为准',
+        accessoryText: Array.isArray(plan.accessory_names) && plan.accessory_names.length
+          ? `含${plan.accessory_names.join('、')}`
+          : '纯珠材搭配',
+        previewImages,
+        isRecommended: Boolean(plan.is_recommended)
+      };
+    });
+  },
+
+  chooseRecommendationPlan(e) {
+    const index = Number(e.currentTarget.dataset.index);
+    const plan = (this.pendingRecommendationPlans || [])[index];
+    if (!plan || !this.pendingRecommendationResult) {
+      wx.showToast({ title: '方案已失效，请重新生成', icon: 'none' });
+      return;
+    }
+    this.enterWorkspaceWithRecommendation(this.pendingRecommendationResult, plan);
+  },
+
+  closePlanModal() {
+    this.pendingRecommendationResult = null;
+    this.pendingRecommendationPlans = [];
+    this.setData({ showPlanModal: false, recommendationPlans: [] });
+  },
+
+  reviseWristSelection() {
+    this.setData({ showPlanModal: false, recommendationPlans: [] });
+    this.openWristModal();
+  },
+
+  enterWorkspaceWithRecommendation(result = {}, plan = {}) {
+    const currentReport = this.data.report || {};
+    const selectedPlan = plan && Array.isArray(plan.layout) ? plan : result.bracelet_plan;
+    const workbenchPayload = {
+      ...(result.workbench_payload || {}),
+      bracelet_plan: selectedPlan,
+      selected_plan_id: selectedPlan && selectedPlan.plan_id ? selectedPlan.plan_id : ''
+    };
+    const selectedResult = {
+      ...result,
+      bracelet_plan: selectedPlan,
+      workbench_payload: workbenchPayload
+    };
+    if (!currentReport.report_id) wx.setStorageSync('energyReport', selectedResult);
+    wx.setStorageSync('recommendedWristSize', Number(selectedPlan.wrist_size_cm) || Number(workbenchPayload.wrist_size_cm) || 16);
+    wx.setStorageSync('workspaceWristConfirmed', true);
+    wx.setStorageSync('diyWorkbenchPayload', workbenchPayload);
+    wx.removeStorageSync('workspaceOpenDesign');
+    wx.setStorageSync('workspacePreset', 'backend-recommended');
+    this.pendingRecommendationResult = null;
+    this.pendingRecommendationPlans = [];
+    this.setData({
+      showWristModal: false,
+      showPlanModal: false,
+      recommendationPlans: []
+    });
+    this.skipSuppressAssessmentAutoReport = true;
+    wx.switchTab({ url: '/pages/workspace/workspace' });
   },
 
   noop() {},

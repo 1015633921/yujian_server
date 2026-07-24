@@ -25,7 +25,9 @@ def test_p1b_migration_backfills_stable_legacy_snapshot_and_round_trips(tmp_path
     OrderService(db_path)
     AssessmentRepository(db_path)
     upgrade("sqlite", db_path)
-    assert downgrade("sqlite", db_path, steps=8) == [
+    assert downgrade("sqlite", db_path, steps=10) == [
+        "20260724_13_web_login_pairing",
+        "20260723_12_ai_material_annotations",
         "20260715_11_material_types",
         "20260714_10_material_physical_specs",
         "20260714_09_after_sale_return_flow",
@@ -72,6 +74,8 @@ def test_p1b_migration_backfills_stable_legacy_snapshot_and_round_trips(tmp_path
         "20260714_09_after_sale_return_flow",
         "20260714_10_material_physical_specs",
         "20260715_11_material_types",
+        "20260723_12_ai_material_annotations",
+        "20260724_13_web_login_pairing",
     ]
     with sqlite3.connect(db_path) as connection:
         first = connection.execute(
@@ -82,7 +86,9 @@ def test_p1b_migration_backfills_stable_legacy_snapshot_and_round_trips(tmp_path
     first_report_id = first[0]
     assert upgrade("sqlite", db_path) == []
 
-    assert downgrade("sqlite", db_path, steps=8) == [
+    assert downgrade("sqlite", db_path, steps=10) == [
+        "20260724_13_web_login_pairing",
+        "20260723_12_ai_material_annotations",
         "20260715_11_material_types",
         "20260714_10_material_physical_specs",
         "20260714_09_after_sale_return_flow",
@@ -103,6 +109,8 @@ def test_p1b_migration_backfills_stable_legacy_snapshot_and_round_trips(tmp_path
         "20260714_09_after_sale_return_flow",
         "20260714_10_material_physical_specs",
         "20260715_11_material_types",
+        "20260723_12_ai_material_annotations",
+        "20260724_13_web_login_pairing",
     ]
     with sqlite3.connect(db_path) as connection:
         second_report_id = connection.execute(

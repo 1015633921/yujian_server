@@ -1,0 +1,77 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const path = require('node:path');
+
+const root = path.resolve(__dirname, '../..');
+
+function loadWorkspacePage() {
+  const workspacePath = path.join(root, 'miniprogram/pages/workspace/workspace.js');
+  delete require.cache[require.resolve(workspacePath)];
+  let pageConfig = null;
+  global.Page = config => {
+    pageConfig = config;
+  };
+  require(workspacePath);
+  return pageConfig;
+}
+
+test('ring reorder reflows every material instead of preserving stale per-item slots', () => {
+  const page = loadWorkspacePage();
+  const geometry = {
+    center: 100,
+    radius: 60,
+    angles: [-Math.PI / 2, 0, Math.PI / 2],
+    beadSizes: [40, 40, 40]
+  };
+  const source = [
+    { id: 'accessory', dx: -28, dy: 17 },
+    { id: 'bead-a', dx: 19, dy: -24 },
+    { id: 'bead-b', dx: 8, dy: 31 }
+  ];
+  const instance = Object.assign({}, page, {
+    normalizePlacements(selected, placements) {
+      return placements.map((placement, index) => ({ ...placement, id: selected[index] }));
+    },
+    getCachedSelectedMaterials(selected) {
+      return selected.map(id => ({ id, size: 8 }));
+    },
+    getCachedBraceletGeometry() {
+      return geometry;
+    },
+    getMaterialDisplaySize() {
+      return 40;
+    }
+  });
+
+  const placements = instance.rebuildRingPlacementsForVisualSlots(
+    ['bead-a', 'accessory', 'bead-b'],
+    source,
+    0
+  );
+
+  assert.deepEqual(
+    placements.map(item => [item.dx, item.dy]),
+    [[0, 0], [0, 0], [0, 0]]
+  );
+});
+
+test('ring reorder retains a coherent whole-ring rotation without carrying item offsets', () => {
+  const page = loadWorkspacePage();
+  const oldGeometry = {
+    center: 100,
+    radius: 60,
+    angles: [-Math.PI / 2, 0, Math.PI / 2]
+  };
+  const rotation = 0.3;
+  const placements = oldGeometry.angles.map(angle => {
+    const baseX = oldGeometry.center + Math.cos(angle) * oldGeometry.radius;
+    const baseY = oldGeometry.center + Math.sin(angle) * oldGeometry.radius;
+    return {
+      dx: oldGeometry.center + Math.cos(angle + rotation) * oldGeometry.radius - baseX,
+      dy: oldGeometry.center + Math.sin(angle + rotation) * oldGeometry.radius - baseY
+    };
+  });
+  const instance = Object.assign({}, page, { normalizeAngleDelta: page.normalizeAngleDelta });
+
+  assert.ok(Math.abs(instance.getRingRotationDelta(placements, oldGeometry) - rotation) < 0.0001);
+});

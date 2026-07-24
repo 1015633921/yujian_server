@@ -219,3 +219,61 @@
     <button class="yu-button yu-button-primary modal-button" loading="{{generating}}" disabled="{{generating}}" bindtap="confirmWristAndRecommend">生成推荐 DIY 手串</button>
   </view>
 </view>
+
+<view wx:if="{{showPlanModal}}" class="modal-mask plan-selector-mask" bindtap="closePlanModal">
+  <view class="plan-selector-modal" catchtap="noop">
+    <view class="modal-head plan-selector-head">
+      <view>
+        <view class="section-kicker">为你生成 3 种方向</view>
+        <view class="modal-title">选择一套继续 DIY</view>
+        <view class="modal-sub">材料、配饰和结构都可以进入工作台后继续修改</view>
+      </view>
+      <view class="modal-close" bindtap="closePlanModal">×</view>
+    </view>
+
+    <scroll-view class="plan-selector-scroll" scroll-y enhanced show-scrollbar="{{false}}">
+      <view
+        wx:for="{{recommendationPlans}}"
+        wx:for-item="plan"
+        wx:key="index"
+        class="plan-option yu-pressable {{plan.isRecommended ? 'recommended' : ''}}"
+        data-index="{{plan.index}}"
+        bindtap="chooseRecommendationPlan"
+        aria-role="button"
+        aria-label="选择{{plan.title}}方案"
+      >
+        <view class="plan-option-top">
+          <view>
+            <view class="plan-option-title">
+              <text>{{plan.title}}</text>
+              <text wx:if="{{plan.isRecommended}}" class="plan-recommended-tag">推荐</text>
+            </view>
+            <view class="plan-option-subtitle">{{plan.subtitle}}</view>
+          </view>
+          <view class="plan-option-arrow">→</view>
+        </view>
+
+        <view class="plan-preview-images" wx:if="{{plan.previewImages.length}}">
+          <image
+            wx:for="{{plan.previewImages}}"
+            wx:for-item="imageUrl"
+            wx:key="*this"
+            class="plan-preview-image"
+            src="{{imageUrl}}"
+            mode="aspectFill"
+            lazy-load
+          ></image>
+        </view>
+
+        <view class="plan-option-materials">{{plan.materialText}}</view>
+        <view class="plan-option-meta">
+          <text>{{plan.beadCount}} 颗</text>
+          <text>{{plan.accessoryText}}</text>
+          <text class="plan-option-price">{{plan.priceText}}</text>
+        </view>
+      </view>
+    </scroll-view>
+
+    <button class="plan-revise-button" bindtap="reviseWristSelection">返回修改手围和珠径</button>
+  </view>
+</view>

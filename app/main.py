@@ -18,6 +18,7 @@ from .runtime_health import assert_startup_configuration, readiness
 assert_startup_configuration()
 
 from .admin_api import admin_router  # noqa: E402
+from .ai_material_api import ai_material_router  # noqa: E402
 from .admin_page import admin_page  # noqa: E402
 from .api import legacy_router, router  # noqa: E402
 from .web_login_pairing import web_login_pairing_router  # noqa: E402
@@ -68,6 +69,7 @@ app.add_middleware(
 app.include_router(router)
 app.include_router(legacy_router)
 app.include_router(admin_router)
+app.include_router(ai_material_router)
 app.include_router(web_login_pairing_router)
 
 

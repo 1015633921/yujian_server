@@ -322,6 +322,27 @@ MYSQL_SCHEMA = [
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     """,
     """
+    CREATE TABLE IF NOT EXISTS ai_material_annotations (
+      annotation_id VARCHAR(80) PRIMARY KEY,
+      target_id VARCHAR(80) NOT NULL, material_code VARCHAR(160) NOT NULL,
+      top VARCHAR(40) NOT NULL DEFAULT '', category VARCHAR(100) NOT NULL DEFAULT '',
+      series VARCHAR(160) NOT NULL DEFAULT '', model_id VARCHAR(100) NOT NULL,
+      prompt_version VARCHAR(100) NOT NULL, schema_version VARCHAR(100) NOT NULL,
+      input_fingerprint CHAR(64) NOT NULL, image_urls_json LONGTEXT NOT NULL,
+      known_facts_json LONGTEXT NOT NULL, raw_response_json LONGTEXT NOT NULL,
+      parsed_response_json LONGTEXT NOT NULL, reviewer_final_json LONGTEXT NOT NULL,
+      status VARCHAR(30) NOT NULL, request_id VARCHAR(160) NOT NULL DEFAULT '',
+      usage_json LONGTEXT NOT NULL, error_code VARCHAR(80) NOT NULL DEFAULT '',
+      error_message VARCHAR(500) NOT NULL DEFAULT '', review_notes VARCHAR(1000) NOT NULL DEFAULT '',
+      reviewer_id VARCHAR(80) NOT NULL DEFAULT '', reviewer_name VARCHAR(120) NOT NULL DEFAULT '',
+      reviewed_at VARCHAR(40), source_updated_at VARCHAR(40) NOT NULL DEFAULT '',
+      created_at VARCHAR(40) NOT NULL, updated_at VARCHAR(40) NOT NULL,
+      INDEX idx_ai_material_status_created (status, created_at),
+      INDEX idx_ai_material_target_created (target_id, created_at),
+      INDEX idx_ai_material_fingerprint (input_fingerprint)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """,
+    """
     CREATE TABLE IF NOT EXISTS content_blocks (
       block_id VARCHAR(100) PRIMARY KEY, section VARCHAR(80) NOT NULL, title VARCHAR(255) NOT NULL,
       subtitle TEXT, body LONGTEXT, image_url VARCHAR(2000), action_text VARCHAR(255),

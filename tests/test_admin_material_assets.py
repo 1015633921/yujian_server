@@ -174,7 +174,7 @@ def test_binding_material_assets_preserves_profile_and_supports_append(tmp_path)
         )
 
 
-def test_primary_image_can_be_removed_from_gallery_without_being_deleted(tmp_path):
+def test_primary_and_gallery_images_are_stored_independently(tmp_path):
     service = AdminService(tmp_path / "material-gallery-primary.db")
     category = service.save_material_category({"top": "accessory", "name": "隔珠"})
     series = service.save_material_series(
@@ -191,7 +191,10 @@ def test_primary_image_can_be_removed_from_gallery_without_being_deleted(tmp_pat
 
     initially_saved = service.list_material_taxonomy(top="accessory", include_disabled=True)[0]["series"][0]
     assert initially_saved["image_url"] == "https://cdn.example.com/main.webp"
-    assert initially_saved["image_urls"] == ["https://cdn.example.com/side.webp"]
+    assert initially_saved["image_urls"] == [
+        "https://cdn.example.com/main.webp",
+        "https://cdn.example.com/side.webp",
+    ]
 
     saved = service.save_material_series(
         {
@@ -199,22 +202,143 @@ def test_primary_image_can_be_removed_from_gallery_without_being_deleted(tmp_pat
             "category_id": category["id"],
             "name": "测试隔珠",
             "image_url": "https://cdn.example.com/main.webp",
-            "image_urls": ["https://cdn.example.com/side.webp"],
+            "image_urls": [
+                "https://cdn.example.com/main.webp",
+                "https://cdn.example.com/side.webp",
+            ],
         }
     )
 
     assert saved["image_url"] == "https://cdn.example.com/main.webp"
-    assert saved["image_urls"] == ["https://cdn.example.com/side.webp"]
+    assert saved["image_urls"] == [
+        "https://cdn.example.com/main.webp",
+        "https://cdn.example.com/side.webp",
+    ]
     stored = service.list_material_taxonomy(top="accessory", include_disabled=True)[0]["series"][0]
     assert stored["image_url"] == "https://cdn.example.com/main.webp"
-    assert stored["image_urls"] == ["https://cdn.example.com/side.webp"]
+    assert stored["image_urls"] == [
+        "https://cdn.example.com/main.webp",
+        "https://cdn.example.com/side.webp",
+    ]
     with service.connect() as connection:
         row = connection.execute(
             "SELECT image_url,image_urls_json FROM material_taxonomy WHERE item_id=?",
             (series["id"],),
         ).fetchone()
     assert row["image_url"] == "https://cdn.example.com/main.webp"
-    assert json.loads(row["image_urls_json"]) == ["https://cdn.example.com/side.webp"]
+    assert json.loads(row["image_urls_json"]) == [
+        "https://cdn.example.com/main.webp",
+        "https://cdn.example.com/side.webp",
+    ]
+
+
+def test_material_spu_search_normalizes_invisible_characters_in_chinese_keywords(tmp_path):
+    service = AdminService(tmp_path / "material-search-keyword.db")
+    category = service.save_material_category({"top": "accessory", "name": "隔珠"})
+    service.save_material_series({"category_id": category["id"], "name": "八吉祥圆珠隔珠"})
+    service.save_material(
+        {
+            "id": "eight-auspicious-spacer",
+            "top": "accessory",
+            "category": "隔珠",
+            "series": "八吉祥圆珠隔珠",
+            "name": "八吉祥圆珠隔珠",
+            "price": 10,
+            "size": 8,
+            "weight": 1,
+            "stock": 1,
+            "enabled": True,
+        }
+    )
+
+    result = service.list_material_spus_paginated(keyword="八吉\u200b祥", page=1, page_size=20)
+
+    assert result["pagination"]["total"] == 1
+    assert result["items"][0]["sku"]["series"] == "八吉祥圆珠隔珠"
+
+
+def test_editing_sku_keeps_its_material_code_and_rejects_a_missing_target(tmp_path):
+    service = AdminService(tmp_path / "material-edit-identity.db")
+    category = service.save_material_category({"top": "bead", "name": "发晶"})
+    service.save_material_series(
+        {
+            "category_id": category["id"],
+            "name": "蓝发晶",
+            "material_code": "blue_rutilated_quartz",
+        }
+    )
+    legacy_code = "mat_legacy_blue_rutilated"
+    base = {
+        "id": "blue-rutilated-10",
+        "material_code": legacy_code,
+        "top": "bead",
+        "category": "发晶",
+        "series": "蓝发晶",
+        "name": "蓝发晶",
+        "effects": ["calm"],
+        "price": 10,
+        "size": 10,
+        "weight": 1,
+        "stock": 3,
+        "enabled": True,
+    }
+    service.save_material(base)
+    new_size = service.save_material(
+        {**base, "id": "blue-rutilated-12", "material_code": "", "size": 12}
+    )
+    assert new_size["sku"]["material_code"] == "blue_rutilated_quartz"
+    with service.connect() as connection:
+        service._ensure_material_columns(connection)
+        connection.execute(
+            "UPDATE managed_materials SET material_code=? WHERE id=?",
+            (legacy_code, base["id"]),
+        )
+
+    updated = service.save_material({**base, "price": 12}, material_id=base["id"])
+
+    assert updated["sku"]["material_code"] == legacy_code
+    with pytest.raises(ValueError, match="待更新的 SKU 不存在"):
+        service.save_material({**base, "id": "missing-blue-rutilated"}, material_id="missing-blue-rutilated")
+
+
+def test_batch_enable_requires_stock_for_every_selected_sku(tmp_path):
+    service = AdminService(tmp_path / "batch-enable-stock.db")
+    category = service.save_material_category({"top": "bead", "name": "测试分类"})
+    service.save_material_series({"category_id": category["id"], "name": "测试品种"})
+    empty = service.save_material(
+        {
+            "id": "batch-empty",
+            "top": "bead",
+            "category": "测试分类",
+            "series": "测试品种",
+            "name": "缺货 SKU",
+            "price": 10,
+            "size": 8,
+            "weight": 1,
+            "stock": 0,
+            "enabled": False,
+        }
+    )
+    ready = service.save_material(
+        {
+            "id": "batch-ready",
+            "top": "bead",
+            "category": "测试分类",
+            "series": "测试品种",
+            "name": "有货 SKU",
+            "price": 10,
+            "size": 10,
+            "weight": 1,
+            "stock": 3,
+            "enabled": False,
+        }
+    )
+
+    with pytest.raises(ValueError, match="库存为 0，请先补充库存后再批量启用：缺货 SKU"):
+        service.batch_update_materials([empty["sku"]["id"], ready["sku"]["id"]], "enable")
+
+    assert service.get_material(empty["sku"]["id"])["sku"]["enabled"] is False
+    assert service.get_material(ready["sku"]["id"])["sku"]["enabled"] is False
 
 
 def test_material_asset_upload_endpoint_validates_before_cos(monkeypatch):

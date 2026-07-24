@@ -27,6 +27,88 @@ def test_material_directory_is_managed_separately_from_skus(tmp_path):
     assert taxonomy[0]["series"][0]["id"] == variety["id"]
 
 
+def test_only_empty_material_categories_can_be_deleted_in_a_batch(tmp_path):
+    service = AdminService(tmp_path / "empty-category-delete.db")
+    empty = service.save_material_category({"top": "bead", "name": "待删除空分类"})
+    in_use = service.save_material_category({"top": "bead", "name": "仍在使用分类"})
+    service.save_material_series({"category_id": in_use["id"], "name": "仍在使用品种"})
+
+    with pytest.raises(ValueError, match="仍在使用分类（含1 个品种）"):
+        service.delete_empty_material_categories([empty["id"], in_use["id"]])
+
+    taxonomy_ids = {item["id"] for item in service.list_material_taxonomy(top="bead", include_disabled=True)}
+    assert empty["id"] in taxonomy_ids
+    assert in_use["id"] in taxonomy_ids
+
+    deleted = service.delete_empty_material_categories([empty["id"]])
+
+    assert deleted["count"] == 1
+    taxonomy_ids = {item["id"] for item in service.list_material_taxonomy(top="bead", include_disabled=True)}
+    assert empty["id"] not in taxonomy_ids
+
+
+def test_empty_material_types_and_series_can_be_deleted(tmp_path):
+    service = AdminService(tmp_path / "empty-directory-delete.db")
+    empty_type = service.save_material_type({"code": "empty_type", "name": "空类型"})
+    used_type = service.save_material_type({"code": "used_type", "name": "使用中类型"})
+    category = service.save_material_category({"top": used_type["code"], "name": "使用中分类"})
+    empty_series = service.save_material_series({"category_id": category["id"], "name": "空品种"})
+
+    with pytest.raises(ValueError, match="使用中类型（含2 个目录项）"):
+        service.delete_empty_material_types([empty_type["code"], used_type["code"]])
+    assert service.delete_empty_material_series([empty_series["id"]])["count"] == 1
+    assert service.delete_empty_material_types([empty_type["code"]])["count"] == 1
+
+
+def test_deleted_empty_default_material_type_is_not_seeded_again(tmp_path):
+    service = AdminService(tmp_path / "deleted-default-material-type.db")
+
+    assert "incense" in {item["code"] for item in service.list_material_types(include_disabled=True)}
+    assert service.delete_empty_material_types(["incense"])["count"] == 1
+    assert "incense" not in {item["code"] for item in service.list_material_types(include_disabled=True)}
+
+    service.save_material_type({"code": "incense", "name": "合香珠", "enabled": True})
+    assert "incense" in {item["code"] for item in service.list_material_types(include_disabled=True)}
+
+
+def test_only_disabled_skus_can_be_deleted(tmp_path):
+    service = AdminService(tmp_path / "disabled-sku-delete.db")
+    category = service.save_material_category({"top": "bead", "name": "删除 SKU 分类"})
+    service.save_material_series({"category_id": category["id"], "name": "删除 SKU 品种"})
+    active = service.save_material(
+        {
+            "id": "active-delete-guard",
+            "top": "bead",
+            "category": "删除 SKU 分类",
+            "series": "删除 SKU 品种",
+            "name": "启用 SKU",
+            "price": 10,
+            "size": 8,
+            "weight": 1,
+            "stock": 1,
+            "enabled": True,
+        }
+    )
+    disabled = service.save_material(
+        {
+            "id": "disabled-delete-allowed",
+            "top": "bead",
+            "category": "删除 SKU 分类",
+            "series": "删除 SKU 品种",
+            "name": "停用 SKU",
+            "price": 10,
+            "size": 10,
+            "weight": 1,
+            "stock": 1,
+            "enabled": False,
+        }
+    )
+
+    service.delete_material(disabled["sku"]["id"])
+    with pytest.raises(ValueError, match="材料不存在"):
+        service.get_material(disabled["sku"]["id"])
+
+
 def test_disabled_material_type_fails_closed_for_category_and_sku_creation(tmp_path):
     service = AdminService(tmp_path / "disabled-material-type.db")
     category = service.save_material_category({"top": "bead", "name": "幽灵水晶"})
@@ -90,6 +172,74 @@ def test_basic_variety_edit_preserves_optional_profile(tmp_path):
     assert saved["energy"]["primary_element"] == "fire"
     assert saved["energy"]["effects"] == ["vitality"]
     assert saved["material_params"]["bead_shape"] == "nugget"
+
+
+def test_series_move_and_rename_does_not_duplicate_during_sku_sync(tmp_path):
+    service = AdminService(tmp_path / "series-move-rename.db")
+    old_category = service.save_material_category({"top": "accessory", "name": "隔珠"})
+    series = service.save_material_series(
+        {
+            "category_id": old_category["id"],
+            "name": "繁花圆片隔珠",
+            "material_code": "accessory_metal_test_03",
+            "image_url": "https://cdn-test.yustream.cn/materials/accessories/flower.webp",
+            "image_urls": ["https://cdn-test.yustream.cn/materials/accessories/flower-gallery.webp"],
+        }
+    )
+    service.save_material(
+        {
+            "id": "flower-spacer-default",
+            "skuId": "flower-spacer-default",
+            "top": "accessory",
+            "category": "隔珠",
+            "series": "繁花圆片隔珠",
+            "material_code": "accessory_metal_test_03",
+            "name": "繁花圆片隔珠",
+            "price_per_bead": 10,
+            "size_mm": 8,
+            "weight_g": 1,
+            "stock": 10,
+        }
+    )
+    new_category = service.save_material_category({"top": "accessory", "name": "隔片"})
+
+    service.save_material_series(
+        {
+            "id": series["id"],
+            "category_id": new_category["id"],
+            "name": "繁花圆片隔片",
+            "sort_order": 20,
+            "enabled": True,
+        }
+    )
+    payload = service.material_options_payload()
+
+    matches = [
+        item
+        for category in payload["taxonomy"]
+        for item in category.get("series", [])
+        if item["name"] == "繁花圆片隔片"
+    ]
+    assert len(matches) == 1
+    assert matches[0]["id"] == series["id"]
+    assert matches[0]["material_code"] == "accessory_metal_test_03"
+    assert matches[0]["image_url"] == "https://cdn-test.yustream.cn/materials/accessories/flower.webp"
+    with service.connect() as connection:
+        duplicate_count = connection.execute(
+            """
+            SELECT COUNT(*) AS total
+            FROM material_taxonomy
+            WHERE kind='series' AND parent_id=? AND name=?
+            """,
+            (new_category["id"], "繁花圆片隔片"),
+        ).fetchone()["total"]
+        sku = connection.execute(
+            "SELECT category, series FROM managed_materials WHERE id=?",
+            ("flower-spacer-default",),
+        ).fetchone()
+    assert duplicate_count == 1
+    assert sku["category"] == "隔片"
+    assert sku["series"] == "繁花圆片隔片"
 
 
 def test_material_type_code_is_immutable(tmp_path):

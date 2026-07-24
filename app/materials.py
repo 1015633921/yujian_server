@@ -285,14 +285,11 @@ def material_image_identity(url: str | None) -> str:
 
 
 def clean_gallery_image_urls(value, primary_url: str = "", *, top: str = "") -> list[str]:
-    """Keep accessory cover images separate from their random-placement gallery."""
-    image_urls = clean_image_urls(value)
-    if str(top or "").strip() != "accessory":
-        return image_urls
-    primary_identity = material_image_identity(primary_url)
-    if not primary_identity:
-        return image_urls
-    return [url for url in image_urls if material_image_identity(url) != primary_identity]
+    """Normalize only gallery entries; the primary image is a separate field."""
+    # Keep the arguments for backwards-compatible callers.  In particular, do
+    # not compare against primary_url here: a gallery may intentionally contain
+    # the same asset as the manually selected primary image.
+    return clean_image_urls(value)
 
 
 def with_cdn_url(item: dict) -> dict:
@@ -551,7 +548,18 @@ def build_material_payload(materials: list[dict], version: dict | None = None) -
     for tab in TOP_TABS:
         pool = db_facets if db_facets is not None else MATERIAL_CATALOG
         pool = [item for item in pool if item.get("top") == tab["key"]]
-        categories_by_top[tab["key"]] = [ALL_OPTION_LABEL, *sorted({item["category"] for item in pool if item.get("category")})]
+        category_sort_orders: dict[str, int] = {}
+        for item in pool:
+            category = str(item.get("category") or "").strip()
+            if not category:
+                continue
+            try:
+                sort_order = int(item.get("category_sort_order") or 0)
+            except (TypeError, ValueError):
+                sort_order = 0
+            category_sort_orders[category] = min(category_sort_orders.get(category, sort_order), sort_order)
+        ordered_categories = sorted(category_sort_orders, key=lambda name: (category_sort_orders[name], name))
+        categories_by_top[tab["key"]] = [ALL_OPTION_LABEL, *ordered_categories]
         for item in pool:
             category_key = f"{tab['key']}::{item.get('category', '')}"
             series = item.get("series") or item.get("name") or ""
@@ -623,13 +631,27 @@ def list_db_material_facets() -> list[dict] | None:
         return None
     try:
         with connect_database() as connection:
-            rows = connection.execute(
-                """
-                SELECT top, category, series, name
-                FROM managed_materials
-                WHERE enabled = 1
-                """
-            ).fetchall()
+            try:
+                rows = connection.execute(
+                    """
+                    SELECT m.top, m.category, m.series, m.name,
+                           COALESCE(c.sort_order, 0) AS category_sort_order
+                    FROM managed_materials m
+                    LEFT JOIN material_taxonomy c
+                      ON c.kind='category' AND c.top=m.top AND c.name=m.category
+                    WHERE m.enabled = 1
+                    """
+                ).fetchall()
+            except Exception:
+                # Keep older deployments usable until their taxonomy table is
+                # initialized; their legacy category order remains unchanged.
+                rows = connection.execute(
+                    """
+                    SELECT top, category, series, name, 0 AS category_sort_order
+                    FROM managed_materials
+                    WHERE enabled = 1
+                    """
+                ).fetchall()
     except Exception:
         return None
     return [dict(row) for row in rows]

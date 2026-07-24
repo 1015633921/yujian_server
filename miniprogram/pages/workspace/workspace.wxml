@@ -2,11 +2,6 @@
   <view class="studio-top">
     <view class="title-row">
       <view class="back-btn" catchtap="goBack" hover-class="back-btn-press" aria-role="button" aria-label="返回"></view>
-      <view class="more-btn" catchtap="openToolbox" hover-class="more-btn-press" aria-role="button" aria-label="更多操作">
-        <view class="more-dot"></view>
-        <view class="more-dot"></view>
-        <view class="more-dot"></view>
-      </view>
     </view>
   </view>
 
@@ -34,7 +29,7 @@
     </view>
 
     <view class="bracelet-stage">
-      <view class="bracelet-circle tray-theme-{{trayTheme}} {{trayImageFailed ? 'tray-image-failed' : ''}} {{isShuffling ? 'shuffling' : ''}}">
+      <view class="bracelet-circle workspace-guide-anchor-tray tray-theme-{{trayTheme}} {{trayImageFailed ? 'tray-image-failed' : ''}} {{isShuffling ? 'shuffling' : ''}}">
         <image
           class="bracelet-tray-image"
           src="{{trayImageUrl}}"
@@ -45,7 +40,7 @@
         <canvas
           wx:if="{{workspaceCanvasVisible}}"
           id="braceletCanvas"
-          class="bracelet-canvas"
+          class="bracelet-canvas {{workspaceCanvasSuppressed ? 'workspace-canvas-suppressed' : ''}}"
           type="2d"
           canvas-id="braceletCanvas"
           catchtouchstart="onBraceletCanvasTouchStart"
@@ -55,7 +50,7 @@
         ></canvas>
         <view
           wx:if="{{workspaceCanvasVisible && !canvasRenderError}}"
-          class="bracelet-touch-layer"
+          class="bracelet-touch-layer {{workspaceCanvasSuppressed ? 'workspace-canvas-suppressed' : ''}}"
           catchtouchstart="onBraceletCanvasTouchStart"
           catchtouchmove="onBraceletCanvasTouchMove"
           catchtouchend="onBraceletCanvasTouchEnd"
@@ -66,17 +61,19 @@
           <view class="canvas-error-subtitle">请重新加载后继续设计</view>
           <button class="canvas-error-retry" bindtap="retryCanvasRenderer">重新加载</button>
         </view>
-        <view class="completion-watermark {{completionWatermarkClass}}">
+        <view wx:if="{{isLooseMode}}" class="completion-watermark {{completionWatermarkClass}}">
           <view class="studio-compass">✦</view>
           <view class="completion-sub"></view>
         </view>
       </view>
     </view>
 
+    <view wx:if="{{dragDeleteArmed}}" class="drag-delete-hint">松手移除这颗珠子</view>
+
     <view class="plate-tool plate-tool-left-one {{canUndo ? '' : 'disabled'}}" catchtap="undo" hover-class="plate-tool-press" aria-role="button" aria-label="撤回">
       <image class="plate-tool-icon-image plate-tool-icon-image-undo" src="{{workspaceIcons.undo}}" mode="aspectFit"></image>
     </view>
-    <view class="plate-tool plate-tool-left-two" catchtap="openWristSetting" hover-class="plate-tool-press" aria-role="button" aria-label="调整腕围">
+    <view class="plate-tool plate-tool-left-two workspace-guide-anchor-wrist" catchtap="openWristSetting" hover-class="plate-tool-press" aria-role="button" aria-label="调整腕围">
       <image class="plate-tool-icon-image plate-tool-icon-image-wrist" src="{{workspaceIcons.wrist}}" mode="aspectFit"></image>
       <view class="plate-tool-label">腕围{{wristSize}}cm</view>
     </view>
@@ -94,7 +91,7 @@
       <image class="plate-tool-icon plate-tool-icon-image plate-tool-icon-image-clear" src="{{workspaceIcons.clear}}" mode="aspectFit"></image>
     </view>
 
-    <view class="plate-random-btn {{shuffleButtonClass}}" catchtap="toggleStringMode" hover-class="plate-random-press" aria-role="button" aria-label="随机成串">
+    <view class="plate-random-btn workspace-guide-anchor-string {{shuffleButtonClass}}" catchtap="toggleStringMode" hover-class="plate-random-press" aria-role="button" aria-label="随机成串">
       <image class="plate-random-icon-image" src="{{workspaceIcons.string}}" mode="aspectFit"></image>
       <view class="plate-random-text">{{randomTitle}}</view>
     </view>
@@ -131,7 +128,7 @@
   <canvas
     wx:if="{{workspaceCanvasVisible}}"
     id="workspaceFlightCanvas"
-    class="workspace-flight-canvas {{canvasFlightActive ? 'active' : ''}}"
+    class="workspace-flight-canvas {{canvasFlightActive ? 'active' : ''}} {{workspaceCanvasSuppressed ? 'workspace-canvas-suppressed' : ''}}"
     type="2d"
     canvas-id="workspaceFlightCanvas"
   ></canvas>
@@ -183,7 +180,7 @@
             <view wx:if="{{materialSearchKeyword}}" class="material-search-clear" catchtap="clearMaterialSearch">×</view>
           </view>
           <view
-            class="material-search-cart {{isAddingToCart ? 'is-loading' : ''}}"
+            class="material-search-cart workspace-guide-anchor-checkout {{isAddingToCart ? 'is-loading' : ''}}"
             catchtap="checkoutCurrentDesign"
             aria-role="button"
             aria-disabled="{{isAddingToCart}}"
@@ -191,28 +188,6 @@
           >
             <view wx:if="{{isAddingToCart}}" class="material-search-cart-spinner"></view>
             <text>{{cartActionText}}</text>
-          </view>
-        </view>
-        <view wx:if="{{showWorkspaceGuide}}" class="workspace-guide-card">
-          <view class="workspace-guide-head">
-            <view>
-              <view class="workspace-guide-kicker">FIRST DIY</view>
-              <view class="workspace-guide-title">三步开始排一串</view>
-            </view>
-            <view class="workspace-guide-close" catchtap="dismissWorkspaceGuide" data-forever="true">×</view>
-          </view>
-          <view class="workspace-guide-list">
-            <view wx:for="{{workspaceGuideItems}}" wx:key="index" class="workspace-guide-item">
-              <view class="workspace-guide-index">{{item.index}}</view>
-              <view>
-                <view class="workspace-guide-item-title">{{item.title}}</view>
-                <view class="workspace-guide-desc">{{item.desc}}</view>
-              </view>
-            </view>
-          </view>
-          <view class="workspace-guide-actions">
-            <button class="workspace-guide-primary" catchtap="dismissWorkspaceGuide" data-forever="true">开始试试</button>
-            <view class="workspace-guide-secondary" catchtap="dismissWorkspaceGuide" data-forever="true">不再提示</view>
           </view>
         </view>
         <scroll-view wx:if="{{seriesOptions.length > 1}}" class="series-scroll" scroll-x enhanced="{{true}}" bounces="{{true}}" show-scrollbar="{{false}}" scroll-into-view="{{activeSeriesAnchor}}" scroll-with-animation="{{true}}">
@@ -229,15 +204,14 @@
               wx:for="{{visibleMaterials}}"
               wx:for-index="index"
               wx:key="id"
-              class="material-card {{item.cardClass}} {{item.physical_spec_complete ? '' : 'material-card-spec-incomplete'}}"
+              class="material-card {{index === 0 ? 'workspace-guide-anchor-materials' : ''}} {{item.cardClass}} {{item.physical_spec_complete ? '' : 'material-card-spec-incomplete'}}"
               data-id="{{item.id}}"
               data-index="{{index}}"
               bindtap="addMaterial"
             >
-              <image wx:if="{{item.image_url}}" class="material-sphere material-image {{item.material_shape_class}} {{item.materialToneClass}}" src="{{item.image_url}}" mode="aspectFit" lazy-load="{{true}}" webp="{{true}}" fade-in="{{false}}" data-id="{{item.id}}" binderror="onMaterialImageError"></image>
+              <image wx:if="{{item.image_url}}" class="material-sphere material-image {{item.material_shape_class}}" src="{{item.image_url}}" mode="aspectFit" lazy-load="{{true}}" webp="{{true}}" fade-in="{{false}}" data-id="{{item.id}}" binderror="onMaterialImageError"></image>
               <view wx:else class="material-sphere" style="background: radial-gradient(circle at 32% 26%, {{item.shine}} 0 10%, {{item.color}} 12% 58%, rgba(0,0,0,.22) 100%);"></view>
               <view class="material-name">{{item.name}}</view>
-              <view class="material-effect">{{item.effectText}}</view>
               <view class="material-meta">
                 <view class="material-price">¥{{item.price}}</view>
                 <view class="size-pill {{item.physical_spec_complete ? '' : 'size-pill-warning'}}">{{item.card_spec_text}}</view>
@@ -323,7 +297,10 @@
           <view class="wrist-guide-title">手围与工作台指南</view>
           <view class="wrist-guide-subtitle">先熟悉工作台按钮，再按需要查看手围测量。</view>
         </view>
-        <view class="wrist-guide-close" bindtap="closeWristGuideModal">×</view>
+        <view class="wrist-guide-head-actions">
+          <view wx:if="{{activeWristGuideTab === 'workspace'}}" class="wrist-guide-replay" catchtap="restartWorkspaceGuide">播放引导</view>
+          <view class="wrist-guide-close" bindtap="closeWristGuideModal">×</view>
+        </view>
       </view>
       <view class="wrist-guide-tabs">
         <view
@@ -407,6 +384,24 @@
         <text>分享给好友</text>
       </button>
       <button class="share-sheet-secondary" bindtap="closeShareSheet">继续编辑</button>
+    </view>
+  </view>
+
+  <view wx:if="{{showWorkspaceGuide}}" class="workspace-onboarding-mask">
+    <view class="workspace-onboarding-focus" style="{{workspaceGuideFocusStyle}}"></view>
+    <view class="workspace-onboarding-card guide-card-{{activeWorkspaceGuide.target}}" catchtap="stopPropagation">
+      <view class="workspace-onboarding-progress">
+        <view wx:for="{{workspaceGuideSteps}}" wx:key="target" class="workspace-onboarding-dot {{index === workspaceGuideStep ? 'active' : ''}}"></view>
+        <text>{{workspaceGuideStep + 1}} / {{workspaceGuideSteps.length}}</text>
+      </view>
+      <view class="workspace-onboarding-eyebrow">{{activeWorkspaceGuide.eyebrow}}</view>
+      <view class="workspace-onboarding-title">{{activeWorkspaceGuide.title}}</view>
+      <view class="workspace-onboarding-desc">{{activeWorkspaceGuide.desc}}</view>
+      <view class="workspace-onboarding-actions">
+        <view class="workspace-onboarding-skip" catchtap="dismissWorkspaceGuide" data-forever="true">跳过教程</view>
+        <button wx:if="{{activeWorkspaceGuide.target === 'wrist'}}" class="workspace-onboarding-next" catchtap="openWristSetting">设置腕围</button>
+        <button wx:else class="workspace-onboarding-next" catchtap="advanceWorkspaceGuide">{{workspaceGuideStep === workspaceGuideSteps.length - 1 ? '开始设计' : '下一步'}}</button>
+      </view>
     </view>
   </view>
 </view>

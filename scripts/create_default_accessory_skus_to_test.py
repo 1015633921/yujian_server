@@ -78,7 +78,7 @@ def load_targets(path: Path) -> list[dict[str, object]]:
         raise SystemExit(
             f"Expected {EXPECTED_TARGET_COUNT} accessory varieties, received {len(rows)}"
         )
-    expected_codes = {f"{TARGET_PREFIX}{index:02d}" for index in range(1, 29)}
+    expected_codes = {f"{TARGET_PREFIX}{index:02d}" for index in range(1, EXPECTED_TARGET_COUNT + 1)}
     actual_codes = {str(row["material_code"]) for row in rows}
     if actual_codes != expected_codes:
         missing = sorted(expected_codes - actual_codes)
@@ -174,12 +174,8 @@ def preflight_targets(targets: list[dict[str, object]]) -> list[dict[str, object
             image_urls = json.loads(item.get("image_urls_json") or "[]")
         except json.JSONDecodeError as exc:
             raise SystemExit(f"Invalid variety image JSON: {item['name']}") from exc
-        if (
-            not isinstance(image_urls, list)
-            or len(image_urls) != 2
-            or str(item.get("image_url") or "") != str(image_urls[0])
-        ):
-            raise SystemExit(f"Variety must have exactly two consistent images: {item['name']}")
+        if not isinstance(image_urls, list) or len(image_urls) != 1 or not str(item.get("image_url") or ""):
+            raise SystemExit(f"Variety must have one gallery image and a primary image: {item['name']}")
         manifest_row = target_by_code[str(item["material_code"])]
         if str(item["name"]) != str(manifest_row["name"]):
             raise SystemExit(f"Variety name mismatch: {item['material_code']}")
@@ -302,7 +298,7 @@ def verify_database(targets: list[dict[str, object]], skus: list[dict[str, objec
         raise RuntimeError("Variety image verification count mismatch")
     for row in series:
         urls = json.loads(row["image_urls_json"] or "[]")
-        if len(urls) != 2 or row["image_url"] != urls[0]:
+        if len(urls) != 1 or not str(row["image_url"] or ""):
             raise RuntimeError(f"Variety images changed unexpectedly: {row['material_code']}")
 
 

@@ -273,7 +273,10 @@ class SolarTimeInfo(BaseModel):
 class CrystalItem(BaseModel):
     code: str
     name: str
+    top: str = "bead"
+    kind: str = "bead"
     role: str
+    role_key: str = ""
     element: str
     secondary_elements: list[str] = Field(default_factory=list)
     color: str
@@ -282,6 +285,12 @@ class CrystalItem(BaseModel):
     quantity: int
     bead_size_mm: int
     image_url: str = ""
+    material_id: str = ""
+    material_code: str = ""
+    actual_material_size_mm: float | None = None
+    string_axis_width_mm: float | None = None
+    unit_price: float | None = None
+    stock: int | None = None
 
 
 class BraceletLayoutItem(BaseModel):
@@ -289,16 +298,35 @@ class BraceletLayoutItem(BaseModel):
     crystal_code: str
     crystal_name: str
     role: str
+    role_key: str = ""
+    top: str = "bead"
+    kind: str = "bead"
     color: str
+    material_id: str = ""
+    material_code: str = ""
+    bead_size_mm: int | None = None
+    actual_material_size_mm: float | None = None
+    string_axis_width_mm: float | None = None
 
 
 class BraceletPlan(BaseModel):
+    plan_id: str = ""
+    style: str = ""
+    title: str = ""
+    subtitle: str = ""
     wrist_size_cm: float
     bead_size_mm: int
     estimated_bead_count: int
     pattern: str
     items: list[CrystalItem]
     layout: list[BraceletLayoutItem]
+    estimated_price: float = 0
+    material_variety: int = 0
+    has_accessories: bool = False
+    accessory_names: list[str] = Field(default_factory=list)
+    match_reasons: list[str] = Field(default_factory=list)
+    validation: dict = Field(default_factory=dict)
+    is_recommended: bool = False
 
 
 class AssessmentResult(BaseModel):
@@ -315,6 +343,7 @@ class AssessmentResult(BaseModel):
     primary_crystal: CrystalItem
     supporting_crystals: list[CrystalItem]
     bracelet_plan: BraceletPlan
+    bracelet_plans: list[BraceletPlan] = Field(default_factory=list)
     recommendation_copy: str
     care_tips: list[str]
     disclaimer: str

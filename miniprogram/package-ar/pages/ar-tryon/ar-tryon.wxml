@@ -1,0 +1,114 @@
+<view class="tryon-page" style="--safe-top: {{safeTop}}px; --safe-bottom: {{safeBottom}}px; --capsule-safe-right: {{capsuleSafeRight}}px;">
+  <camera
+    wx:if="{{cameraRequested && !cameraError}}"
+    id="tryonCamera"
+    class="tryon-camera"
+    device-position="back"
+    flash="off"
+    resolution="high"
+    frame-size="medium"
+    bindinitdone="onCameraInitDone"
+    binderror="onCameraError"
+  ></camera>
+
+  <view wx:else class="camera-fallback">
+    <view class="fallback-grain"></view>
+    <view class="fallback-copy">
+      <view class="fallback-kicker">AR TRY-ON</view>
+      <view class="fallback-title">{{privacyAuthorizationNeeded ? '需要隐私授权' : (cameraError ? '相机暂不可用' : '需要相机权限')}}</view>
+      <view class="fallback-desc">{{cameraError || (privacyAuthorizationNeeded ? '同意隐私保护指引后，才会申请摄像头权限。' : '相机画面只在本机处理，不会上传。')}}</view>
+      <button
+        wx:if="{{privacyAuthorizationNeeded}}"
+        class="fallback-button"
+        open-type="agreePrivacyAuthorization"
+        bindagreeprivacyauthorization="onAgreePrivacyAuthorization"
+      >同意并开启相机</button>
+      <button wx:else class="fallback-button" bindtap="requestCameraPermission">{{cameraAuthorized ? '重新尝试' : '开启相机'}}</button>
+    </view>
+  </view>
+
+  <canvas
+    id="arOverlayCanvas"
+    canvas-id="arOverlayCanvas"
+    type="2d"
+    class="tryon-overlay {{cameraAuthorized && !cameraError ? '' : 'tryon-overlay-disabled'}}"
+    catchtouchstart="onOverlayTouchStart"
+    catchtouchmove="onOverlayTouchMove"
+    catchtouchend="onOverlayTouchEnd"
+    catchtouchcancel="onOverlayTouchEnd"
+  ></canvas>
+
+  <canvas
+    id="arExportCanvas"
+    canvas-id="arExportCanvas"
+    type="2d"
+    class="export-canvas"
+  ></canvas>
+
+  <view class="tryon-nav">
+    <view class="nav-button nav-back" bindtap="goBack" aria-role="button" aria-label="返回"></view>
+    <view class="nav-title">AR 试戴</view>
+    <view class="nav-button nav-help" bindtap="showHelp" aria-role="button" aria-label="使用说明">?</view>
+  </view>
+
+  <view wx:if="{{hasDesign}}" class="alignment-copy {{gestureActive ? 'active' : ''}}">
+    <view class="alignment-eyebrow">LIVE FIT · {{itemCount}} 颗</view>
+    <view class="alignment-title">{{guideText}}</view>
+  </view>
+
+  <view wx:if="{{hasDesign}}" class="wrist-guide {{gestureActive ? 'active' : ''}}">
+    <view class="guide-notch notch-left"></view>
+    <view class="guide-notch notch-right"></view>
+  </view>
+
+  <view class="tryon-panel">
+    <view class="panel-handle"></view>
+    <view class="size-row">
+      <view>
+        <view class="size-label">佩戴比例</view>
+        <view class="size-value">{{wristSizeText}} <text>cm</text></view>
+      </view>
+      <view class="calibrate-action" bindtap="resetCalibration">重新校准</view>
+    </view>
+
+    <slider
+      class="scale-slider"
+      min="58"
+      max="148"
+      step="1"
+      value="{{scaleValue}}"
+      activeColor="#20201F"
+      backgroundColor="#DDDAD3"
+      block-color="#20201F"
+      block-size="18"
+      bindchanging="onScaleChanging"
+      bindchange="onScaleChanging"
+    ></slider>
+
+    <view class="gesture-row">
+      <view class="gesture-item">
+        <view class="gesture-icon move-icon"></view>
+        <view>单指移动</view>
+      </view>
+      <view class="gesture-item">
+        <view class="gesture-icon scale-icon"></view>
+        <view>双指缩放</view>
+      </view>
+      <view class="gesture-item">
+        <view class="gesture-icon rotate-icon"></view>
+        <view>双指旋转</view>
+      </view>
+    </view>
+
+    <button class="capture-button" loading="{{savingPhoto}}" disabled="{{savingPhoto || !cameraAuthorized || !!cameraError || !hasDesign}}" bindtap="captureTryOn">
+      {{savingPhoto ? '正在合成…' : '拍照保存'}}
+    </button>
+    <view class="privacy-note">试戴画面仅在本机合成</view>
+  </view>
+
+  <view wx:if="{{!hasDesign}}" class="empty-design">
+    <view class="empty-title">暂无可试戴手串</view>
+    <view class="empty-desc">返回工作台完成成串后再试。</view>
+    <button class="empty-button" bindtap="goBack">返回工作台</button>
+  </view>
+</view>

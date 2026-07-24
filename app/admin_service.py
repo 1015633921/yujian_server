@@ -5,6 +5,7 @@ import json
 import os
 import re
 import secrets
+import unicodedata
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -20,7 +21,6 @@ from .materials import (
     MATERIAL_CATALOG,
     clean_image_urls,
     invalidate_material_cache,
-    material_image_identity,
     material_url_from_path,
     normalize_material_image_url,
 )
@@ -68,6 +68,13 @@ def json_value(value: Any, default: Any = None) -> Any:
         return json.loads(value)
     except (TypeError, json.JSONDecodeError):
         return [] if default is None else default
+
+
+def normalize_material_search_keyword(value: Any) -> str:
+    """Make pasted/IME Chinese material keywords safe for SQL matching."""
+    normalized = unicodedata.normalize("NFKC", str(value or ""))
+    normalized = re.sub(r"[\u200b\u200c\u200d\ufeff]", "", normalized)
+    return re.sub(r"\s+", " ", normalized).strip()
 
 
 ADMIN_USERNAME_RE = re.compile(r"^[A-Za-z0-9_.@-]{3,40}$")
@@ -560,6 +567,8 @@ class AdminService:
                 connection.execute("ALTER TABLE managed_materials ADD COLUMN supplier_name VARCHAR(255) NOT NULL DEFAULT ''")
             if "purchase_note" not in columns:
                 connection.execute("ALTER TABLE managed_materials ADD COLUMN purchase_note TEXT")
+            if "reserved_stock" not in columns:
+                connection.execute("ALTER TABLE managed_materials ADD COLUMN reserved_stock INT NOT NULL DEFAULT 0")
             connection.execute("UPDATE managed_materials SET series = name WHERE COALESCE(series, '') = ''")
             return
         columns = {row["name"] for row in connection.execute("PRAGMA table_info(managed_materials)").fetchall()}
@@ -581,6 +590,8 @@ class AdminService:
             connection.execute("ALTER TABLE managed_materials ADD COLUMN supplier_name TEXT NOT NULL DEFAULT ''")
         if "purchase_note" not in columns:
             connection.execute("ALTER TABLE managed_materials ADD COLUMN purchase_note TEXT")
+        if "reserved_stock" not in columns:
+            connection.execute("ALTER TABLE managed_materials ADD COLUMN reserved_stock INTEGER NOT NULL DEFAULT 0")
         connection.execute("UPDATE managed_materials SET series = name WHERE COALESCE(series, '') = ''")
 
     def _ensure_material_knowledge_columns(self, connection) -> None:
@@ -651,8 +662,29 @@ class AdminService:
             """
         )
 
+    def _ensure_material_type_deletion_schema(self, connection) -> None:
+        if use_mysql() and not self._force_sqlite:
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS material_type_deletions (
+                    type_code VARCHAR(40) PRIMARY KEY,
+                    deleted_at VARCHAR(40) NOT NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """
+            )
+            return
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS material_type_deletions (
+                type_code TEXT PRIMARY KEY,
+                deleted_at TEXT NOT NULL
+            )
+            """
+        )
+
     def _seed_material_types(self, connection) -> None:
         self._ensure_material_type_schema(connection)
+        self._ensure_material_type_deletion_schema(connection)
         defaults = {
             code: {"name": name, "description": description, "sort_order": sort_order}
             for code, name, description, sort_order in DEFAULT_MATERIAL_TYPES
@@ -667,6 +699,12 @@ class AdminService:
             codes.update(str(row["top"] or "").strip() for row in rows)
         timestamp = now_iso()
         for index, code in enumerate(sorted(code for code in codes if code)):
+            deleted = connection.execute(
+                "SELECT 1 FROM material_type_deletions WHERE type_code = ?",
+                (code,),
+            ).fetchone()
+            if deleted:
+                continue
             existing = connection.execute(
                 "SELECT type_code FROM material_types WHERE type_code = ?",
                 (code,),
@@ -750,6 +788,7 @@ class AdminService:
         timestamp = now_iso()
         with self.connect() as connection:
             self._ensure_material_type_schema(connection)
+            self._ensure_material_type_deletion_schema(connection)
             existing = connection.execute(
                 "SELECT * FROM material_types WHERE type_code = ?",
                 (requested_code,),
@@ -779,6 +818,7 @@ class AdminService:
                     """,
                     (requested_code, name, description, sort_order, enabled, timestamp, timestamp),
                 )
+            connection.execute("DELETE FROM material_type_deletions WHERE type_code = ?", (requested_code,))
             after = {
                 "type_code": requested_code,
                 "name": name,
@@ -919,6 +959,21 @@ class AdminService:
         clean_name = str(name or "").strip()
         if not clean_name:
             return ""
+        existing = connection.execute(
+            """
+            SELECT item_id
+            FROM material_taxonomy
+            WHERE kind=? AND top=? AND name=? AND COALESCE(parent_id, '')=?
+            ORDER BY
+                CASE WHEN COALESCE(material_code, '') <> '' THEN 0 ELSE 1 END,
+                created_at ASC,
+                item_id ASC
+            LIMIT 1
+            """,
+            (kind, top or "bead", clean_name, parent_id),
+        ).fetchone()
+        if existing:
+            return str(existing["item_id"])
         item_id = self.material_taxonomy_id(kind, top, clean_name, parent_id)
         existing = connection.execute("SELECT item_id FROM material_taxonomy WHERE item_id = ?", (item_id,)).fetchone()
         if not existing:
@@ -1660,12 +1715,6 @@ class AdminService:
                 image_path = str((before or {}).get("image_path") or "").strip()
                 primary_image_url = normalize_material_image_url((before or {}).get("image_url") or "")
                 image_urls = clean_image_urls((before or {}).get("image_urls_json"))
-            if top == "accessory" and primary_image_url:
-                primary_identity = material_image_identity(primary_image_url)
-                image_urls = [
-                    url for url in image_urls
-                    if material_image_identity(url) != primary_identity
-                ]
             material_code = str(payload.get("material_code") or (before or {}).get("material_code") or "").strip()
             if not material_code:
                 material_code = material_code_from_payload(
@@ -1871,12 +1920,6 @@ class AdminService:
             item = dict(row)
             current = clean_image_urls(item.get("image_urls_json"))
             final_urls = list(dict.fromkeys([*current, *incoming])) if mode == "append" else incoming
-            if item.get("top") == "accessory":
-                primary_identity = material_image_identity(item.get("image_url") or "")
-                final_urls = [
-                    url for url in final_urls
-                    if material_image_identity(url) != primary_identity
-                ]
             if len(final_urls) > 24:
                 raise ValueError("品种图库最多保留 24 张图片")
             timestamp = now_iso()
@@ -1937,6 +1980,227 @@ class AdminService:
                 summary=f"停用材料{'分类' if before.get('kind') == 'category' else '品种'}：{before.get('name') or clean_id}",
             )
         return {"disabled": clean_id}
+
+    def delete_empty_material_categories(
+        self,
+        ids: list[str],
+        actor: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        if (actor or {}).get("role") == "viewer":
+            raise PermissionError("只读账号不能删除材料分类")
+        clean_ids = list(dict.fromkeys(str(item or "").strip() for item in ids if str(item or "").strip()))
+        if not clean_ids:
+            raise ValueError("请选择要删除的材料分类")
+        placeholders = ", ".join(["?"] * len(clean_ids))
+        with self.connect() as connection:
+            self._ensure_material_taxonomy_schema(connection)
+            rows = [
+                dict(row)
+                for row in connection.execute(
+                    f"SELECT * FROM material_taxonomy WHERE item_id IN ({placeholders})",
+                    clean_ids,
+                ).fetchall()
+            ]
+            rows_by_id = {row["item_id"]: row for row in rows}
+            missing = [item_id for item_id in clean_ids if item_id not in rows_by_id]
+            if missing:
+                raise ValueError("材料分类不存在或已被删除")
+
+            blocked: list[str] = []
+            for row in rows:
+                if row.get("kind") != "category":
+                    blocked.append(f"{row.get('name') or row['item_id']}（不是一级分类）")
+                    continue
+                series_count = int(
+                    connection.execute(
+                        "SELECT COUNT(*) AS total FROM material_taxonomy WHERE parent_id=?",
+                        (row["item_id"],),
+                    ).fetchone()["total"]
+                    or 0
+                )
+                sku_count = int(
+                    connection.execute(
+                        "SELECT COUNT(*) AS total FROM managed_materials WHERE top=? AND category=?",
+                        (row.get("top") or "", row.get("name") or ""),
+                    ).fetchone()["total"]
+                    or 0
+                )
+                if series_count or sku_count:
+                    details = []
+                    if series_count:
+                        details.append(f"{series_count} 个品种")
+                    if sku_count:
+                        details.append(f"{sku_count} 个 SKU")
+                    blocked.append(f"{row.get('name') or row['item_id']}（含{'、'.join(details)}）")
+            if blocked:
+                raise ValueError("以下分类不是空分类，不能删除：" + "；".join(blocked))
+
+            cursor = connection.execute(
+                f"DELETE FROM material_taxonomy WHERE item_id IN ({placeholders}) AND kind='category'",
+                clean_ids,
+            )
+            if cursor.rowcount != len(rows):
+                raise ValueError("分类状态已变化，请刷新后重试")
+            for row in rows:
+                self.record_material_audit(
+                    connection,
+                    action="taxonomy_delete_empty_category",
+                    target_type="material_taxonomy",
+                    target_id=row["item_id"],
+                    before=row,
+                    actor=actor,
+                    summary=f"删除空材料分类：{row.get('name') or row['item_id']}",
+                )
+        invalidate_material_cache()
+        return {"deleted": clean_ids, "count": len(clean_ids)}
+
+    def delete_empty_material_series(
+        self,
+        ids: list[str],
+        actor: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        if (actor or {}).get("role") == "viewer":
+            raise PermissionError("只读账号不能删除材料品种")
+        clean_ids = list(dict.fromkeys(str(item or "").strip() for item in ids if str(item or "").strip()))
+        if not clean_ids:
+            raise ValueError("请选择要删除的材料品种")
+        placeholders = ", ".join(["?"] * len(clean_ids))
+        with self.connect() as connection:
+            self._ensure_material_taxonomy_schema(connection)
+            rows = [
+                dict(row)
+                for row in connection.execute(
+                    f"""
+                    SELECT s.*, c.name AS category_name
+                    FROM material_taxonomy s
+                    LEFT JOIN material_taxonomy c ON c.item_id=s.parent_id AND c.kind='category'
+                    WHERE s.item_id IN ({placeholders})
+                    """,
+                    clean_ids,
+                ).fetchall()
+            ]
+            rows_by_id = {row["item_id"]: row for row in rows}
+            if any(item_id not in rows_by_id for item_id in clean_ids):
+                raise ValueError("材料品种不存在或已被删除")
+            blocked: list[str] = []
+            for row in rows:
+                if row.get("kind") != "series":
+                    blocked.append(f"{row.get('name') or row['item_id']}（不是品种 / 款式）")
+                    continue
+                sku_count = int(
+                    connection.execute(
+                        """
+                        SELECT COUNT(*) AS total FROM managed_materials
+                        WHERE top=? AND category=? AND COALESCE(NULLIF(series, ''), name)=?
+                        """,
+                        (row.get("top") or "", row.get("category_name") or "", row.get("name") or ""),
+                    ).fetchone()["total"]
+                    or 0
+                )
+                if sku_count:
+                    blocked.append(f"{row.get('name') or row['item_id']}（含 {sku_count} 个 SKU）")
+            if blocked:
+                raise ValueError("以下品种 / 款式仍有 SKU，不能删除：" + "；".join(blocked))
+            cursor = connection.execute(
+                f"DELETE FROM material_taxonomy WHERE item_id IN ({placeholders}) AND kind='series'",
+                clean_ids,
+            )
+            if cursor.rowcount != len(rows):
+                raise ValueError("品种状态已变化，请刷新后重试")
+            if self.table_exists(connection, "material_knowledge"):
+                for row in rows:
+                    material_code = str(row.get("material_code") or "").strip()
+                    if material_code:
+                        connection.execute("DELETE FROM material_knowledge WHERE code=?", (material_code,))
+            for row in rows:
+                self.record_material_audit(
+                    connection,
+                    action="taxonomy_delete_empty_series",
+                    target_type="material_taxonomy",
+                    target_id=row["item_id"],
+                    before=row,
+                    actor=actor,
+                    summary=f"删除空材料品种：{row.get('name') or row['item_id']}",
+                )
+        invalidate_material_cache()
+        return {"deleted": clean_ids, "count": len(clean_ids)}
+
+    def delete_empty_material_types(
+        self,
+        codes: list[str],
+        actor: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        if (actor or {}).get("role") == "viewer":
+            raise PermissionError("只读账号不能删除材料类型")
+        clean_codes = list(dict.fromkeys(str(code or "").strip().lower() for code in codes if str(code or "").strip()))
+        if not clean_codes:
+            raise ValueError("请选择要删除的材料类型")
+        placeholders = ", ".join(["?"] * len(clean_codes))
+        with self.connect() as connection:
+            self._ensure_material_type_schema(connection)
+            self._ensure_material_type_deletion_schema(connection)
+            rows = [
+                dict(row)
+                for row in connection.execute(
+                    f"SELECT * FROM material_types WHERE type_code IN ({placeholders})",
+                    clean_codes,
+                ).fetchall()
+            ]
+            rows_by_code = {row["type_code"]: row for row in rows}
+            if any(code not in rows_by_code for code in clean_codes):
+                raise ValueError("材料类型不存在或已被删除")
+            blocked: list[str] = []
+            for row in rows:
+                code = row["type_code"]
+                taxonomy_count = int(
+                    connection.execute("SELECT COUNT(*) AS total FROM material_taxonomy WHERE top=?", (code,)).fetchone()["total"]
+                    or 0
+                )
+                sku_count = int(
+                    connection.execute("SELECT COUNT(*) AS total FROM managed_materials WHERE top=?", (code,)).fetchone()["total"]
+                    or 0
+                )
+                if taxonomy_count or sku_count:
+                    details = []
+                    if taxonomy_count:
+                        details.append(f"{taxonomy_count} 个目录项")
+                    if sku_count:
+                        details.append(f"{sku_count} 个 SKU")
+                    blocked.append(f"{row.get('name') or code}（含{'、'.join(details)}）")
+            if blocked:
+                raise ValueError("以下材料类型不是空类型，不能删除：" + "；".join(blocked))
+            cursor = connection.execute(
+                f"DELETE FROM material_types WHERE type_code IN ({placeholders})",
+                clean_codes,
+            )
+            if cursor.rowcount != len(rows):
+                raise ValueError("材料类型状态已变化，请刷新后重试")
+            for code in clean_codes:
+                if use_mysql() and not self._force_sqlite:
+                    connection.execute(
+                        """
+                        INSERT INTO material_type_deletions (type_code, deleted_at) VALUES (?, ?)
+                        ON DUPLICATE KEY UPDATE deleted_at=VALUES(deleted_at)
+                        """,
+                        (code, now_iso()),
+                    )
+                else:
+                    connection.execute(
+                        "INSERT OR REPLACE INTO material_type_deletions (type_code, deleted_at) VALUES (?, ?)",
+                        (code, now_iso()),
+                    )
+            for row in rows:
+                self.record_material_audit(
+                    connection,
+                    action="material_type_delete_empty",
+                    target_type="material_type",
+                    target_id=row["type_code"],
+                    before=row,
+                    actor=actor,
+                    summary=f"删除空材料类型：{row.get('name') or row['type_code']}",
+                )
+        invalidate_material_cache()
+        return {"deleted": clean_codes, "count": len(clean_codes)}
 
     def _ensure_material_option_schema(self, connection) -> None:
         if use_mysql() and not self._force_sqlite:
@@ -4005,7 +4269,8 @@ class AdminService:
         clauses = []
         params: list[Any] = []
         if keyword.strip():
-            value = f"%{keyword.strip()}%"
+            keyword = keyword.strip()
+            value = f"%{keyword}%"
             clauses.append("(u.user_id LIKE ? OR COALESCE(u.nickname, '') LIKE ? OR COALESCE(u.phone_number, '') LIKE ?)")
             params.extend([value, value, value])
         if profile_status == "complete":
@@ -4674,7 +4939,7 @@ class AdminService:
             clauses.append(
                 "(order_id LIKE ? OR user_id LIKE ? OR receiver_json LIKE ? OR logistics_json LIKE ?)"
             )
-            value = f"%{keyword.strip()}%"
+            value = f"%{keyword}%"
             params.extend([value, value, value, value])
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         params.append(limit)
@@ -5012,11 +5277,12 @@ class AdminService:
             clauses.append("enabled = 1")
         elif status == "disabled":
             clauses.append("enabled = 0")
-        if keyword.strip():
+        keyword = normalize_material_search_keyword(keyword)
+        if keyword:
             clauses.append(
                 "(name LIKE ? OR category LIKE ? OR series LIKE ? OR grade LIKE ? OR effect LIKE ? OR element LIKE ? OR material_code LIKE ?)"
             )
-            value = f"%{keyword.strip()}%"
+            value = f"%{keyword}%"
             params.extend([value, value, value, value, value, value, value])
         return clauses, params
 
@@ -5384,13 +5650,24 @@ class AdminService:
         timestamp = now_iso()
         item_id = material_id or payload.get("id") or self.generate_material_id(payload)
         with self.connect() as connection:
+            self._ensure_material_columns(connection)
             self._ensure_material_taxonomy_schema(connection)
             existing = connection.execute("SELECT * FROM managed_materials WHERE id = ?", (item_id,)).fetchone()
+            if material_id and not existing:
+                raise ValueError("待更新的 SKU 不存在，请刷新列表后重试")
             before = dict(existing) if existing else None
-            payload = self.canonicalize_material_payload_taxonomy({**payload, "id": item_id}, connection)
+            taxonomy_changed = bool(before) and any(
+                str(payload.get(field) or "").strip() != str(before.get(field) or "").strip()
+                for field in ("top", "category", "series")
+            )
+            canonical_payload = {**payload, "id": item_id}
+            # 编辑 SKU 改选品种时，表单带回的旧编码不能继续覆盖新选品种的编码。
+            if taxonomy_changed:
+                canonical_payload["material_code"] = ""
+            payload = self.canonicalize_material_payload_taxonomy(canonical_payload, connection)
             same_taxonomy = bool(before) and all(
                 str(payload.get(field) or "").strip() == str(before.get(field) or "").strip()
-                for field in ("top", "category", "series", "material_code")
+                for field in ("top", "category", "series")
             )
             if same_taxonomy:
                 existing_element = str(before.get("element") or "").strip()
@@ -5406,6 +5683,12 @@ class AdminService:
                 require_primary_element=False,
             )
             item = self.normalize_material(payload)
+            # 新增规格必须继承品种编码；名称推断只能用于目录尚未建立的历史数据。
+            # 同目录编辑则保留旧编码，避免历史 SKU 被拆到另一个 SPU。
+            if before and same_taxonomy:
+                item["material_code"] = str(before.get("material_code") or item["material_code"]).strip()
+            else:
+                item["material_code"] = str(payload.get("material_code") or item["material_code"]).strip()
             item["skuId"] = self.unique_material_sku(connection, item["skuId"], item_id)
             if existing:
                 reserved_stock = int(dict(existing).get("reserved_stock") or 0)
@@ -5613,14 +5896,23 @@ class AdminService:
 
     def delete_material(self, material_id: str, actor: dict[str, Any] | None = None) -> None:
         with self.connect() as connection:
+            self._ensure_material_columns(connection)
+            if use_mysql() and not self._force_sqlite:
+                material_columns = {row["Field"] for row in connection.execute("SHOW COLUMNS FROM managed_materials").fetchall()}
+            else:
+                material_columns = {row["name"] for row in connection.execute("PRAGMA table_info(managed_materials)").fetchall()}
+            has_reserved_stock = "reserved_stock" in material_columns
             row = connection.execute("SELECT * FROM managed_materials WHERE id = ?", (material_id,)).fetchone()
             before = dict(row) if row else None
             if before and int(before.get("reserved_stock") or 0) > 0:
                 raise ValueError("SKU 存在未完成库存预占，不能删除")
-            cursor = connection.execute(
-                "DELETE FROM managed_materials WHERE id = ? AND reserved_stock = 0",
-                (material_id,),
-            )
+            if has_reserved_stock:
+                cursor = connection.execute(
+                    "DELETE FROM managed_materials WHERE id = ? AND reserved_stock = 0",
+                    (material_id,),
+                )
+            else:
+                cursor = connection.execute("DELETE FROM managed_materials WHERE id = ?", (material_id,))
             if before and cursor.rowcount != 1:
                 raise ValueError("SKU 存在未完成库存预占，不能删除")
             if before:
@@ -5640,6 +5932,12 @@ class AdminService:
         placeholders = ", ".join(["?"] * len(clean_ids))
         timestamp = now_iso()
         with self.connect() as connection:
+            self._ensure_material_columns(connection)
+            if use_mysql() and not self._force_sqlite:
+                material_columns = {row["Field"] for row in connection.execute("SHOW COLUMNS FROM managed_materials").fetchall()}
+            else:
+                material_columns = {row["name"] for row in connection.execute("PRAGMA table_info(managed_materials)").fetchall()}
+            has_reserved_stock = "reserved_stock" in material_columns
             before_rows = [
                 dict(row)
                 for row in connection.execute(
@@ -5648,8 +5946,19 @@ class AdminService:
                 ).fetchall()
             ]
             if action == "enable":
+                out_of_stock = [row for row in before_rows if int(row.get("stock") or 0) <= 0]
+                if out_of_stock:
+                    labels = [
+                        str(row.get("name") or row.get("skuId") or row.get("id") or "")
+                        for row in out_of_stock
+                    ]
+                    preview = "、".join(labels[:5])
+                    suffix = f" 等 {len(labels)} 个 SKU" if len(labels) > 5 else ""
+                    raise ValueError(
+                        f"以下材料库存为 0，请先补充库存后再批量启用：{preview}{suffix}"
+                    )
                 cursor = connection.execute(
-                    f"UPDATE managed_materials SET enabled=CASE WHEN stock > 0 THEN 1 ELSE 0 END, updated_at=? WHERE id IN ({placeholders})",
+                    f"UPDATE managed_materials SET enabled=1, updated_at=? WHERE id IN ({placeholders})",
                     [timestamp, *clean_ids],
                 )
             elif action == "disable":
@@ -5696,10 +6005,11 @@ class AdminService:
                     [safety_stock, timestamp, *clean_ids],
                 )
             elif action == "delete":
-                if any(int(row.get("reserved_stock") or 0) > 0 for row in before_rows):
+                if has_reserved_stock and any(int(row.get("reserved_stock") or 0) > 0 for row in before_rows):
                     raise ValueError("SKU 存在未完成库存预占，不能删除")
+                delete_condition = " AND reserved_stock = 0" if has_reserved_stock else ""
                 cursor = connection.execute(
-                    f"DELETE FROM managed_materials WHERE id IN ({placeholders}) AND reserved_stock = 0",
+                    f"DELETE FROM managed_materials WHERE id IN ({placeholders}){delete_condition}",
                     clean_ids,
                 )
                 if cursor.rowcount != len(before_rows):
