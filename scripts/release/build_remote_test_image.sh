@@ -20,7 +20,7 @@ fi
 
 IMAGE="yujian-test-local:ctx-${CONTEXT_HASH:0:24}"
 if docker image inspect "${IMAGE}" >/dev/null 2>&1; then
-  echo "reusing cached test image ${IMAGE}"
+  echo "reusing cached test image ${IMAGE}" >&2
 else
   DOCKER_BUILDKIT=1 docker build \
     --file "${CONTEXT_DIR}/Dockerfile" \
@@ -28,7 +28,7 @@ else
     --build-arg "PIP_INDEX_URL=${PIP_INDEX_URL}" \
     --tag "${IMAGE}" \
     "${CONTEXT_DIR}"
-  echo "built test image ${IMAGE}"
+  echo "built test image ${IMAGE}" >&2
 fi
 
 actual_hash="$(docker image inspect "${IMAGE}" --format '{{ index .Config.Labels "org.opencontainers.image.source-hash" }}')"
