@@ -35,7 +35,8 @@ GitHub Actions 手动选择 `prod`。工作流会：
 
 1. 计算最小后端构建上下文的 SHA-256；小程序、素材原图和无关文档不进入服务镜像。
 2. 测试发布上传约数 MB 的构建上下文；服务器已有相同哈希镜像时直接复用，没有时使用
-   本地 BuildKit 缓存构建，不经过 GHCR。
+   本地 BuildKit 缓存构建，不经过 GHCR。首次缺失依赖层时使用腾讯云 PyPI 镜像，
+   `requirements.lock` 的强制哈希校验保持不变。
 3. 正式发布构建并推送唯一的 `repository@sha256:<digest>` 镜像，服务器使用临时
    Docker 登录目录拉取，任务结束立即删除登录文件。
 4. 上传最小部署控制包并执行 `python3 scripts/deploy.py <env>`，以候选服务 readiness

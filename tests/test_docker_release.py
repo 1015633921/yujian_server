@@ -222,6 +222,8 @@ def test_dockerfile_keeps_dynamic_labels_after_dependency_layer() -> None:
     assert "docker image inspect" in remote_build_script
     assert 'IMAGE="yujian-test-local:ctx-' in remote_build_script
     assert "org.opencontainers.image.source-hash" in remote_build_script
+    assert "https://mirrors.cloud.tencent.com/pypi/simple" in remote_build_script
+    assert '--build-arg "PIP_INDEX_URL=${PIP_INDEX_URL}"' in remote_build_script
 
 
 def test_local_cached_image_requires_test_environment_opt_in_and_matching_hash(

@@ -3,6 +3,7 @@ set -euo pipefail
 
 CONTEXT_DIR="${1:?usage: build_remote_test_image.sh CONTEXT_DIR CONTEXT_HASH}"
 CONTEXT_HASH="${2:?usage: build_remote_test_image.sh CONTEXT_DIR CONTEXT_HASH}"
+PIP_INDEX_URL="${PIP_INDEX_URL:-https://mirrors.cloud.tencent.com/pypi/simple}"
 
 if [[ ! "${CONTEXT_HASH}" =~ ^[a-f0-9]{64}$ ]]; then
   echo "invalid backend context hash" >&2
@@ -10,6 +11,10 @@ if [[ ! "${CONTEXT_HASH}" =~ ^[a-f0-9]{64}$ ]]; then
 fi
 if [[ ! -d "${CONTEXT_DIR}" || ! -f "${CONTEXT_DIR}/Dockerfile" ]]; then
   echo "invalid remote build context" >&2
+  exit 1
+fi
+if [[ ! "${PIP_INDEX_URL}" =~ ^https:// ]]; then
+  echo "PIP_INDEX_URL must use https" >&2
   exit 1
 fi
 
@@ -20,6 +25,7 @@ else
   DOCKER_BUILDKIT=1 docker build \
     --file "${CONTEXT_DIR}/Dockerfile" \
     --build-arg "BUILD_CONTEXT_HASH=${CONTEXT_HASH}" \
+    --build-arg "PIP_INDEX_URL=${PIP_INDEX_URL}" \
     --tag "${IMAGE}" \
     "${CONTEXT_DIR}"
   echo "built test image ${IMAGE}"
