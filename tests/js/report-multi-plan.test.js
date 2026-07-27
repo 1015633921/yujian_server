@@ -55,10 +55,33 @@ test('report formats three backend design directions for selection', () => {
   assert.equal(decorated[1].isRecommended, true);
   assert.equal(decorated[1].accessoryText, '含银隔片');
   assert.equal(decorated[1].priceText, '¥268.00');
+  assert.match(decorated[1].designNote, /配饰负责建立停顿/);
   assert.deepEqual(decorated[1].previewImages, [
     'https://cdn.example.com/white.webp',
     'https://cdn.example.com/silver.webp'
   ]);
+});
+
+test('report refinement keeps real material ids and exposes adjustment controls', () => {
+  const page = loadReportPage();
+  const materials = page.buildRefinementMaterials({
+    items: [
+      { material_id: 'bead-1', name: '白水晶', image_url: 'white.webp' },
+      { material_id: 'bead-1', name: '白水晶', image_url: 'white.webp' },
+      { source_material_id: 'acc-1', name: '银隔片', image_url: 'silver.webp' },
+      { name: '无 ID 材料' }
+    ]
+  });
+  const wxml = fs.readFileSync(
+    path.join(root, 'miniprogram/pages/report/report.wxml'),
+    'utf8'
+  );
+
+  assert.deepEqual(materials.map(item => item.materialId), ['bead-1', 'acc-1']);
+  assert.match(wxml, /不喜欢这套，调整方案/);
+  assert.match(wxml, /想保留的材料/);
+  assert.match(wxml, /重新生成 3 套/);
+  assert.match(wxml, /bindtap="selectRefinementAccessory"/);
 });
 
 test('selected design direction is written to the workbench payload without changing its layout', () => {
@@ -102,6 +125,9 @@ test('selected design direction is written to the workbench payload without chan
 
   assert.equal(storage.diyWorkbenchPayload.selected_plan_id, 'balanced-layers');
   assert.deepEqual(storage.diyWorkbenchPayload.bracelet_plan.layout, selectedPlan.layout);
+  assert.match(storage.diyWorkbenchPayload.workspace_import_id, /^backend-recommended:balanced-layers:/);
+  assert.equal(storage.diyWorkbenchPayload.source_context.title, '专属推荐');
+  assert.equal(storage.workspaceImportIntent.id, storage.diyWorkbenchPayload.workspace_import_id);
   assert.equal(storage.workspacePreset, 'backend-recommended');
   assert.equal(storage.workspaceOpenDesign, undefined);
   assert.equal(switchedTo, '/pages/workspace/workspace');
@@ -117,7 +143,7 @@ test('report UI exposes the three-plan selector and workspace trusts a validated
     'utf8'
   );
 
-  assert.match(wxml, /wx:if="\{\{showPlanModal\}\}"/);
+  assert.match(wxml, /wx:if="\{\{showAutomaticRecommendation && showPlanModal\}\}"/);
   assert.match(wxml, /bindtap="chooseRecommendationPlan"/);
   assert.match(wxml, /返回修改手围和珠径/);
   assert.match(workspace, /backendValidation\.is_valid === true/);

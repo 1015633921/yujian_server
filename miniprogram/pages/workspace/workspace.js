@@ -48,6 +48,7 @@ const MAX_RECOMMENDED_RECIPE_BEADS = 40;
 const MIN_STRING_BEAD_COUNT = 8;
 const MAX_MATERIAL_FLIGHT_QUEUE = 6;
 const MATERIAL_TAP_GUARD_MS = 80;
+const MATERIAL_LONG_PRESS_TAP_SUPPRESS_MS = 520;
 const MATERIAL_QUEUE_TOAST_GUARD_MS = 1200;
 const MATERIAL_SEARCH_DEBOUNCE_MS = 260;
 const MATERIAL_PRELOAD_BATCH_SIZE = 3;
@@ -567,6 +568,8 @@ Page({
     workspaceLoadingSubtext: '同步盘面与珠材...',
     materialSkeletons: [1, 2, 3, 4],
     materialSearchKeyword: '',
+    showMaterialDetail: false,
+    materialDetail: null,
     categories: [],
     seriesOptions: ['全部'],
     filterSummary: '全部 · 全部 · 0 款',
@@ -610,6 +613,7 @@ Page({
     randomIconText: '串',
     randomTitle: '随机成串',
     randomSubtitle: '随机排列珠面',
+    workspacePlanLabel: '当前方案',
     cartActionText: '去结算',
     isAddingToCart: false,
     flightBead: null,
@@ -689,6 +693,7 @@ Page({
     this.flightQueue = [];
     this.flightActive = false;
     this.lastMaterialTapAt = 0;
+    this.lastMaterialLongPress = { id: '', at: 0 };
     this.lastQueueToastAt = 0;
     this.physicsBodies = [];
     this.canvasRecoveryAttempts = 0;
@@ -701,10 +706,14 @@ Page({
     this.lastSoundAt = {};
     this.sourceContext = null;
     this.pendingBackendRecommendation = false;
+    this.pendingBackendRecommendationRevision = 0;
     this.pendingRecommendedRecipe = false;
+    this.pendingRecommendedRecipeRevision = 0;
     this.pendingSharedDesign = null;
     this.pendingShareToken = '';
     this.materialPayloadReady = false;
+    this.workspaceDesignRevision = 0;
+    this.activeWorkspaceImportId = '';
     this.materialPayloadVersion = '';
     this.lastMaterialRefreshAt = 0;
     this.workspaceHasShown = false;
@@ -726,11 +735,15 @@ Page({
       this.pendingShareToken = shareToken;
       this.loadSharedDesign(shareToken);
     } else if (query.preset === 'backend-recommended') {
+      const importRevision = this.beginWorkspaceImportSession('query:backend-recommended');
       this.pendingBackendRecommendation = true;
-      this.applyBackendRecommendation();
+      this.pendingBackendRecommendationRevision = importRevision;
+      this.applyBackendRecommendation({ importRevision });
     } else if (query.preset === 'recommended') {
+      const importRevision = this.beginWorkspaceImportSession('query:recommended');
       this.pendingRecommendedRecipe = true;
-      this.applyRecommendedRecipe();
+      this.pendingRecommendedRecipeRevision = importRevision;
+      this.applyRecommendedRecipe({ importRevision });
     } else {
       this.loadDraft();
     }
@@ -2072,14 +2085,27 @@ Page({
   },
 
   async ensurePendingMaterialDetails(options = {}) {
+    const importRevision = Number(
+      options.importRevision
+      || (this.pendingBackendRecommendation ? this.pendingBackendRecommendationRevision : 0)
+      || (this.pendingRecommendedRecipe ? this.pendingRecommendedRecipeRevision : 0)
+      || 0
+    );
+    if (importRevision && !this.isWorkspaceDesignRevisionCurrent(importRevision)) {
+      return false;
+    }
     const missing = this.pendingMaterialIds().filter(id => !this.hasResolvableMaterialIdentifier(id));
     if (missing.length) {
       await this.fetchMaterialsByIds(missing);
     }
+    if (importRevision && !this.isWorkspaceDesignRevisionCurrent(importRevision)) {
+      return false;
+    }
     let applied = false;
     const applyOptions = {
       silent: options.silent !== false,
-      keepPendingOnEmpty: options.keepPendingOnEmpty !== false
+      keepPendingOnEmpty: options.keepPendingOnEmpty !== false,
+      importRevision
     };
     if (this.pendingSharedDesign) {
       applied = (await this.applySharedDesign(this.pendingSharedDesign, applyOptions)) || applied;
@@ -2807,6 +2833,7 @@ Page({
 
   buildBackendRecommendationSelected(payload = {}) {
     const plan = payload.bracelet_plan || {};
+    const layout = Array.isArray(plan.layout) ? plan.layout : [];
     const sizeByCode = {};
     const materialByCode = {};
     (plan.items || []).forEach(item => {
@@ -2815,11 +2842,22 @@ Page({
         materialByCode[item.code] = item.material_id || item.source_material_id || item.id;
       }
     });
-    return (plan.layout || [])
+    return layout
       .map(item => {
-        const explicitId = item.material_id || item.source_material_id || materialByCode[item.crystal_code] || '';
-        const resolvedExplicitId = explicitId ? this.resolveMaterialId(explicitId) : '';
-        if (resolvedExplicitId && this.hasMaterial(resolvedExplicitId)) return resolvedExplicitId;
+        const explicitIds = [
+          item.material_id,
+          item.source_material_id,
+          item.sku_id,
+          item.skuId,
+          item.material_code,
+          materialByCode[item.crystal_code]
+        ].map(value => String(value || '').trim()).filter(Boolean);
+        const resolvedExplicitId = explicitIds
+          .map(id => this.resolveMaterialId(id))
+          .find(id => id && this.hasMaterial(id));
+        if (resolvedExplicitId) return resolvedExplicitId;
+        const itemTop = String(item.top || item.kind || '').trim().toLowerCase();
+        if (itemTop === 'accessory') return '';
         return this.resolveBackendCrystalMaterialId(
           item.crystal_code,
           sizeByCode[item.crystal_code] || Number(item.bead_size_mm) || Number(plan.bead_size_mm) || Number(payload.bead_size_mm) || 8
@@ -2834,6 +2872,36 @@ Page({
 
   onShow() {
     wx.hideTabBar({ animation: false });
+    const workspacePreset = wx.getStorageSync('workspacePreset');
+    if (workspacePreset === 'backend-recommended') {
+      const intent = wx.getStorageSync('workspaceImportIntent') || {};
+      wx.removeStorageSync('workspacePreset');
+      wx.removeStorageSync('workspaceImportIntent');
+      wx.removeStorageSync('workspaceOpenDesign');
+      const importRevision = this.beginWorkspaceImportSession(
+        intent.id || `backend-recommended:${Date.now()}`
+      );
+      this.pendingBackendRecommendation = true;
+      this.pendingBackendRecommendationRevision = importRevision;
+      if (this.materialPayloadReady) {
+        this.ensurePendingMaterialDetails({
+          silent: false,
+          keepPendingOnEmpty: false,
+          importRevision
+        });
+      }
+      return;
+    }
+    if (workspacePreset === 'recommended') {
+      wx.removeStorageSync('workspacePreset');
+      const importRevision = this.beginWorkspaceImportSession(`recommended:${Date.now()}`);
+      this.pendingRecommendedRecipe = true;
+      this.pendingRecommendedRecipeRevision = importRevision;
+      if (this.materialPayloadReady) {
+        this.applyRecommendedRecipe({ importRevision });
+      }
+      return;
+    }
     if (this.workspaceHasShown) {
       this.refreshMaterialCatalogInBackground();
     } else {
@@ -2851,19 +2919,6 @@ Page({
     }
     this.scheduleCanvasRender();
     if (this.data.isLooseMode && !this.data.sharedDesignFrozen && this.physicsEngine) this.runPhysics();
-    if (wx.getStorageSync('workspacePreset') === 'backend-recommended') {
-      wx.removeStorageSync('workspacePreset');
-      wx.removeStorageSync('workspaceOpenDesign');
-      this.pendingBackendRecommendation = true;
-      this.applyBackendRecommendation();
-      return;
-    }
-    if (wx.getStorageSync('workspacePreset') === 'recommended') {
-      wx.removeStorageSync('workspacePreset');
-      this.pendingRecommendedRecipe = true;
-      this.applyRecommendedRecipe();
-      return;
-    }
     if (wx.getStorageSync('workspaceOpenDesign')) {
       wx.removeStorageSync('workspaceOpenDesign');
       this.pendingBackendRecommendation = false;
@@ -2972,6 +3027,8 @@ Page({
     const draft = wx.getStorageSync('currentDesign');
     this.resetWorkspaceRuntime();
     if (draft && draft.selected && draft.selected.length) {
+      const sourceContext = draft.sourceContext || draft.source_context || null;
+      this.sourceContext = sourceContext;
       this.setData({
         selected: draft.selected.map(id => LEGACY_ID_MAP[id] || id),
         placements: this.normalizePlacements(draft.selected, draft.placements, draft.sequence),
@@ -2987,10 +3044,13 @@ Page({
         isReleasingString: false,
         selectedBeadIndex: -1,
         draggingBeadIndex: -1,
-        dragDeleteArmed: false
+        dragDeleteArmed: false,
+        sourceContext,
+        workspacePlanLabel: this.workspaceSourceLabel(sourceContext || {})
       });
       this.recalculate();
     } else {
+      this.sourceContext = null;
       this.resetInteractionData({
         selected: [],
         placements: [],
@@ -2998,7 +3058,9 @@ Page({
         selectedItems: [],
         attachedPendantItems: [],
         selectedBeadIndex: -1,
-        isLooseMode: true
+        isLooseMode: true,
+        sourceContext: null,
+        workspacePlanLabel: '当前方案'
       }, () => this.recalculate());
     }
   },
@@ -3012,7 +3074,34 @@ Page({
     wx.setStorageSync('currentDesign', draft);
   },
 
+  beginWorkspaceImportSession(importId = '') {
+    this.workspaceDesignRevision = Number(this.workspaceDesignRevision || 0) + 1;
+    this.activeWorkspaceImportId = String(importId || `workspace-import:${Date.now()}`);
+    clearTimeout(this.persistDraftTimer);
+    this.persistDraftTimer = null;
+    this.resetWorkspaceRuntime();
+    this.historyStack = [];
+    this.redoStack = [];
+    if (wx.setStorageSync) wx.setStorageSync('workspaceHistory', []);
+    this.setData({ canUndo: false, canRedo: false });
+    return this.workspaceDesignRevision;
+  },
+
+  isWorkspaceDesignRevisionCurrent(revision) {
+    return Number(revision || 0) === Number(this.workspaceDesignRevision || 0);
+  },
+
+  workspaceSourceLabel(sourceContext = {}) {
+    const sourceLabel = String(sourceContext.source_label || '').trim();
+    const title = String(sourceContext.title || '').trim();
+    if (sourceLabel && title) return `${sourceLabel} · ${title}`;
+    return sourceLabel || title || '当前方案';
+  },
+
   applyRecommendedRecipe(options = {}) {
+    if (options.importRevision && !this.isWorkspaceDesignRevisionCurrent(options.importRevision)) {
+      return false;
+    }
     if (!this.materialPayloadReady) return false;
     const rawRecipe = wx.getStorageSync('recommendedRecipe') || ['aquamarine', 'amethyst', 'clearQuartz', 'moonstone'];
     const recipe = this.normalizedRecommendedRecipe(rawRecipe);
@@ -3062,17 +3151,27 @@ Page({
     const selected = expandSequenceToCount(recipeMaterialIds, targetCount);
     if (!selected.length) {
       if (!options.silent) wx.showToast({ title: '暂未匹配到可用珠材', icon: 'none' });
-      if (!options.keepPendingOnEmpty) this.pendingRecommendedRecipe = false;
+      if (!options.keepPendingOnEmpty) {
+        this.pendingRecommendedRecipe = false;
+        this.pendingRecommendedRecipeRevision = 0;
+      }
+      return false;
+    }
+    if (options.importRevision && !this.isWorkspaceDesignRevisionCurrent(options.importRevision)) {
       return false;
     }
     this.pendingRecommendedRecipe = false;
+    this.pendingRecommendedRecipeRevision = 0;
     this.resetWorkspaceRuntime();
-    this.pushHistory();
+    this.historyStack = [];
+    this.redoStack = [];
+    if (wx.setStorageSync) wx.setStorageSync('workspaceHistory', []);
     wx.removeStorageSync('recommendedRecipeContext');
     wx.setStorageSync('recommendedWristSize', wristSize);
     wx.setStorageSync('workspaceWristConfirmed', true);
     this.sourceContext = sourceContext;
-    const placements = this.normalizePlacements(selected);
+    const loosePlacements = this.normalizePlacements(selected);
+    const placements = this.rebuildRingPlacementsForVisualSlots(selected, loosePlacements, 0);
     this.replaceCurrentDesignWithImportedDraft({
       name: sourceContext.title,
       selected,
@@ -3095,26 +3194,42 @@ Page({
       isReleasingString: false,
       draggingBeadIndex: -1,
       dragDeleteArmed: false,
-      sourceContext
-    }, () => this.recalculate());
+      sourceContext,
+      workspacePlanLabel: this.workspaceSourceLabel(sourceContext),
+      canUndo: false,
+      canRedo: false
+    }, () => {
+      if (options.importRevision && !this.isWorkspaceDesignRevisionCurrent(options.importRevision)) return;
+      this.recalculate({ persist: false });
+    });
     return true;
   },
 
   applyBackendRecommendation(options = {}) {
+    if (options.importRevision && !this.isWorkspaceDesignRevisionCurrent(options.importRevision)) {
+      return false;
+    }
     const payload = wx.getStorageSync('diyWorkbenchPayload');
     if (!payload || !payload.bracelet_plan || !payload.bracelet_plan.layout) {
       if (!options.silent) wx.showToast({ title: '未找到推荐方案', icon: 'none' });
       if (!options.keepPendingOnEmpty) {
         this.pendingBackendRecommendation = false;
+        this.pendingBackendRecommendationRevision = 0;
         this.loadDraft();
       }
       return false;
     }
     if (!this.materialPayloadReady) return false;
     const baseSelected = this.buildBackendRecommendationSelected(payload);
-    if (!baseSelected.length) {
+    const backendLayout = Array.isArray(payload.bracelet_plan.layout)
+      ? payload.bracelet_plan.layout
+      : [];
+    if (!baseSelected.length || baseSelected.length !== backendLayout.length) {
       if (!options.silent) wx.showToast({ title: '推荐方案暂未匹配到可用珠材', icon: 'none' });
-      if (!options.keepPendingOnEmpty) this.pendingBackendRecommendation = false;
+      if (!options.keepPendingOnEmpty) {
+        this.pendingBackendRecommendation = false;
+        this.pendingBackendRecommendationRevision = 0;
+      }
       return false;
     }
     const sourceContext = payload.source_context || {
@@ -3131,31 +3246,60 @@ Page({
     if (recommendationItems.length !== baseSelected.length
       || recommendationItems.some(item => !materialIsWorkspaceSupported(item))) {
       if (!options.silent) wx.showToast({ title: '推荐材料已更新，请重新生成方案', icon: 'none' });
-      if (!options.keepPendingOnEmpty) this.pendingBackendRecommendation = false;
+      if (!options.keepPendingOnEmpty) {
+        this.pendingBackendRecommendation = false;
+        this.pendingBackendRecommendationRevision = 0;
+      }
       return false;
     }
     const recommendedCount = recommendedStringedBeadCount(recommendationItems, wristSize);
     const backendValidation = payload.bracelet_plan.validation || {};
+    const isDesignerLayout = payload.source === 'custom_design'
+      || (payload.source_context || {}).source === 'custom_design';
     const backendLayoutIsTrusted = backendValidation.is_valid === true
-      && baseSelected.length === (payload.bracelet_plan.layout || []).length
-      && baseSelected.length >= MIN_STRING_BEAD_COUNT
+      && baseSelected.length === backendLayout.length
+      && (isDesignerLayout || baseSelected.length >= MIN_STRING_BEAD_COUNT)
+      && baseSelected.length > 0
       && baseSelected.length <= MAX_RECOMMENDED_RECIPE_BEADS;
     const selected = backendLayoutIsTrusted
       ? baseSelected
       : expandSequenceToCount(baseSelected, recommendedCount);
+    if (options.importRevision && !this.isWorkspaceDesignRevisionCurrent(options.importRevision)) {
+      return false;
+    }
     this.pendingBackendRecommendation = false;
+    this.pendingBackendRecommendationRevision = 0;
     this.resetWorkspaceRuntime();
-    this.pushHistory();
+    this.historyStack = [];
+    this.redoStack = [];
+    if (wx.setStorageSync) wx.setStorageSync('workspaceHistory', []);
     wx.setStorageSync('recommendedWristSize', wristSize);
     wx.setStorageSync('workspaceWristConfirmed', true);
-    this.sourceContext = sourceContext;
-    const placements = this.normalizePlacements(selected);
+    const resolvedSourceContext = {
+      ...sourceContext,
+      recommendation_validation: backendValidation,
+      target_bead_count: selected.length
+    };
+    this.sourceContext = resolvedSourceContext;
+    const exactPlacements = backendLayoutIsTrusted
+      ? backendLayout.map((item, index) => ({
+          ...item,
+          id: selected[index],
+          image_url: item.selected_image_url || item.image_url || ''
+        }))
+      : [];
+    const loosePlacements = this.normalizePlacements(
+      selected,
+      exactPlacements,
+      backendLayoutIsTrusted ? backendLayout : []
+    );
+    const placements = this.rebuildRingPlacementsForVisualSlots(selected, loosePlacements, 0);
     this.replaceCurrentDesignWithImportedDraft({
       name: sourceContext.title || payload.name || payload.bracelet_plan.title,
       selected,
       placements,
       wristSize,
-      sourceContext
+      sourceContext: resolvedSourceContext
     });
     this.setData({
       wristSize,
@@ -3163,6 +3307,7 @@ Page({
       placements,
       isLooseMode: false,
       selectedBeadIndex: -1,
+      selectedBeadInfo: null,
       showTip: false,
       canvasFlightActive: false,
       flightBead: null,
@@ -3172,8 +3317,28 @@ Page({
       isReleasingString: false,
       draggingBeadIndex: -1,
       dragDeleteArmed: false,
-      sourceContext
-    }, () => this.recalculate());
+      sourceContext: resolvedSourceContext,
+      workspacePlanLabel: this.workspaceSourceLabel(resolvedSourceContext),
+      canUndo: false,
+      canRedo: false
+    }, () => {
+      if (options.importRevision && !this.isWorkspaceDesignRevisionCurrent(options.importRevision)) return;
+      this.recalculate({ persist: false });
+      // switchTab reuses the existing workspace page. In some WeChat runtimes
+      // the 2D canvas backing surface remains stale after the recommendation
+      // replaces the complete design, even though draw calls succeed. Resetting
+      // the canvas dimensions through initWorkspaceCanvases makes the imported
+      // bracelet visible immediately.
+      wx.nextTick(() => {
+        if (options.importRevision && !this.isWorkspaceDesignRevisionCurrent(options.importRevision)) return;
+        // recalculate() may already have queued a frame. Cancel it before
+        // setupCanvasNode resets the backing bitmap, otherwise the init render
+        // can be skipped because canvasFramePending is still true.
+        this.stopCanvasRenderLoop();
+        this.braceletCanvasDirty = true;
+        this.initWorkspaceCanvases();
+      });
+    });
     if (!options.silent) wx.showToast({ title: '已载入专属推荐', icon: 'success' });
     return true;
   },
@@ -6446,6 +6611,7 @@ Page({
     }, () => {
       this.recalculate();
       this.stopPhysics();
+      this.refreshWorkspaceCanvasAfterDesignTransition();
     });
   },
 
@@ -6486,6 +6652,7 @@ Page({
     this.pendingFrozenImpactAt = 0;
     this.physicsFramePending = false;
     this.suppressStringingSounds = false;
+    this.stringingStartQueued = false;
     this.clearLivePlacements();
   },
 
@@ -6511,6 +6678,7 @@ Page({
     this.clearFlightRuntime();
     this.clearLivePlacements();
     this.stopPhysics();
+    this.invalidateCanvasInteractionSnapshot();
     this.dragState = null;
     this.ringDragState = null;
     this.ringSlideState = null;
@@ -6521,6 +6689,24 @@ Page({
     this.workspaceSummaryCache = null;
     this.suppressBeadTapUntil = 0;
     this.lastPersistedDraftSignature = '';
+  },
+
+  invalidateCanvasInteractionSnapshot() {
+    // 推荐方案会一次替换整条手串。触摸命中必须等待新方案完成绘制，
+    // 不能继续复用上一条手串的画布精灵快照。
+    this.lastBraceletCanvasRenderSignature = '';
+    this.lastBraceletCanvasRenderSnapshot = null;
+    this.latestCanvasDrawSnapshot = null;
+    this.canvasHitTestSpritesCache = null;
+    this.braceletCanvasDirty = true;
+  },
+
+  refreshWorkspaceCanvasAfterDesignTransition() {
+    wx.nextTick(() => {
+      this.stopCanvasRenderLoop();
+      this.braceletCanvasDirty = true;
+      this.initWorkspaceCanvases();
+    });
   },
 
   resetInteractionData(extra = {}, callback) {
@@ -7378,17 +7564,91 @@ Page({
       dragDeleteArmed: false
     }, () => {
       this.recalculate({ persistDelay: 260 });
-      wx.nextTick(() => this.startPhysicsFromCurrentDesign());
+      wx.nextTick(() => {
+        this.startPhysicsFromCurrentDesign();
+        this.refreshWorkspaceCanvasAfterDesignTransition();
+      });
     });
   },
 
   toggleStringMode() {
+    if (this.hasActiveStringModeTransition()) {
+      wx.showToast({ title: this.data.isReleasingString ? '正在散开，请稍候' : '正在成串，请稍候', icon: 'none' });
+      return;
+    }
+    if (this.hasStaleStringModeTransition()) {
+      const keepLooseMode = !!this.data.isLooseMode;
+      this.stopPhysics();
+      this.resetInteractionData({ isLooseMode: keepLooseMode }, () => {
+        this.recalculate({ persist: false });
+        this.toggleStringMode();
+      });
+      return;
+    }
     if (this.data.sharedDesignFrozen) this.setData({ sharedDesignFrozen: false });
     if (this.data.isLooseMode) {
+      if (this.isRecommendationWorkspaceSource()) {
+        this.stringCurrentDesign();
+        return;
+      }
       this.shuffleDesign();
       return;
     }
     this.releaseString();
+  },
+
+  hasActiveStringModeTransition() {
+    if (this.data.isReleasingString) return !!this.releaseStringTimer;
+    if (!this.data.isShuffling && !this.data.isStringingFinishing) return false;
+    return !!(
+      this.stringingStartQueued
+      || this.stringingFinishTimer
+      || this.stringingCompleteTimer
+      || this.physicsTargets
+      || this.physicsTimer
+    );
+  },
+
+  hasStaleStringModeTransition() {
+    return !!(
+      (this.data.isShuffling || this.data.isStringingFinishing || this.data.isReleasingString)
+      && !this.hasActiveStringModeTransition()
+    );
+  },
+
+  isRecommendationWorkspaceSource() {
+    const context = this.data.sourceContext || this.sourceContext || {};
+    const source = String(context.source || '').trim().toLowerCase();
+    const sourceLabel = String(context.source_label || '').trim();
+    return source === 'backend_recommendation'
+      || source === 'recommended_recipe'
+      || sourceLabel === '推荐方案';
+  },
+
+  stringCurrentDesign() {
+    if (this.data.selected.length < MIN_STRING_BEAD_COUNT) {
+      wx.showToast({ title: `至少选择${MIN_STRING_BEAD_COUNT}颗珠子成串`, icon: 'none' });
+      return;
+    }
+    this.pushHistory();
+    this.stopPhysics();
+    this.setData({
+      isLooseMode: true,
+      isShuffling: true,
+      isStringingFinishing: false,
+      isReleasingString: false,
+      selectedBeadIndex: -1,
+      selectedBeadInfo: null,
+      draggingBeadIndex: -1,
+      dragDeleteArmed: false
+    }, () => {
+      this.recalculate({ persist: false });
+      this.stringingStartQueued = true;
+      wx.nextTick(() => {
+        this.stringingStartQueued = false;
+        this.startStringingPhysics();
+      });
+    });
   },
 
   buildCurrentPersistedPlacements() {
@@ -7716,6 +7976,72 @@ Page({
     wx.showToast({ title, icon: 'none' });
   },
 
+  buildMaterialDetail(material = {}) {
+    const physical = resolveMaterialGeometry(material);
+    const top = materialTop(material);
+    const category = safeMaterialDisplayText(material.category || '未分类');
+    const series = safeMaterialDisplayText(material.series || '');
+    const price = Number(material.price || 0);
+    const unit = top === 'accessory' ? '个' : '颗';
+    const galleryImages = this.materialOwnImageUrls(material);
+    const primaryImage = String(material.image_url || '').trim();
+    // 图库优先；图库尚未配置时，详情仍应展示材料卡已在使用的主图。
+    const images = galleryImages.length ? galleryImages : (primaryImage ? [primaryImage] : []);
+    const fields = [
+      { label: '分类', value: category },
+      ...(series && series !== category ? [{ label: '品种', value: series }] : []),
+      { label: '规格', value: physical.specText || material.card_spec_text || '--' },
+      { label: '计价单位', value: `每${unit}` }
+    ];
+    const fallbackColor = String(material.color || '#d6d0c5');
+    const fallbackShine = String(material.shine || 'rgba(255,255,255,.85)');
+    return {
+      id: String(material.id || ''),
+      cardIndex: Number((this.data.visibleMaterials || []).findIndex(item => String(item.id || '') === String(material.id || ''))),
+      name: this.displayMaterialName(material),
+      typeLabel: top === 'accessory' ? 'DIY 配饰' : 'DIY 珠材',
+      priceText: Number.isFinite(price) ? `¥${price.toFixed(2)} / ${unit}` : '--',
+      images,
+      fields,
+      fallbackStyle: `background:radial-gradient(circle at 32% 26%,${fallbackShine} 0 10%,${fallbackColor} 12% 58%,rgba(0,0,0,.22) 100%);`
+    };
+  },
+
+  openMaterialDetail(e) {
+    const id = String((e.currentTarget && e.currentTarget.dataset && e.currentTarget.dataset.id) || '').trim();
+    if (!id) return;
+    const material = this.findMaterialById(id);
+    if (!material) {
+      this.showMaterialQueueToast(this.data.materialsLoading ? '珠材加载中，请稍候' : '材料暂不可用');
+      return;
+    }
+    this.lastMaterialLongPress = { id, at: Date.now() };
+    this.setData({
+      showMaterialDetail: true,
+      materialDetail: this.buildMaterialDetail(material)
+    });
+  },
+
+  closeMaterialDetail() {
+    this.setData({ showMaterialDetail: false, materialDetail: null });
+  },
+
+  addMaterialFromDetail() {
+    const detail = this.data.materialDetail || {};
+    const id = String(detail.id || '').trim();
+    if (!id) return;
+    this.closeMaterialDetail();
+    this.addMaterial({
+      currentTarget: {
+        dataset: {
+          id,
+          index: Number.isInteger(detail.cardIndex) && detail.cardIndex >= 0 ? detail.cardIndex : 0
+        }
+      },
+      ignoreLongPressGuard: true
+    });
+  },
+
   getTapPoint(e = {}) {
     const detail = e.detail || {};
     if (Number.isFinite(Number(detail.x)) && Number.isFinite(Number(detail.y))) {
@@ -7760,6 +8086,13 @@ Page({
 
   resolveMaterialFlightTarget(task = {}, material = {}, layout = this.getStageLayout()) {
     const beadSize = resolveMaterialGeometry(material).displaySizeRpx;
+    if (task.keepStringed && !this.data.isLooseMode) {
+      const insertion = this.buildStringedInsertion(task.id, task.placement);
+      const slot = insertion.visualSlots[insertion.selected.length - 1] || {};
+      if (Number.isFinite(Number(slot.x)) && Number.isFinite(Number(slot.y))) {
+        return { x: Number(slot.x), y: Number(slot.y), beadSize };
+      }
+    }
     const center = layout.center || 300;
     const rawX = Number(task.placement && task.placement.looseX);
     const rawY = Number(task.placement && task.placement.looseY);
@@ -7896,6 +8229,10 @@ Page({
     const cardIndex = Number(e.currentTarget.dataset.index);
     if (!id) return;
     const now = Date.now();
+    const lastLongPress = this.lastMaterialLongPress || {};
+    if (!e.ignoreLongPressGuard
+      && String(lastLongPress.id || '') === String(id)
+      && now - Number(lastLongPress.at || 0) < MATERIAL_LONG_PRESS_TAP_SUPPRESS_MS) return;
     if (now - (this.lastMaterialTapAt || 0) < MATERIAL_TAP_GUARD_MS) return;
     this.lastMaterialTapAt = now;
     const material = this.findMaterialById(id);
@@ -7953,7 +8290,9 @@ Page({
       cardIndex,
       placement,
       image_url: placement.image_url,
-      tapPoint: this.getTapPoint(e)
+      tapPoint: this.getTapPoint(e),
+      // 成串状态下，新珠直接飞入圆环，而不是落进托盘后把整串打散。
+      keepStringed: !this.data.isLooseMode
     });
     this.processFlightQueue();
   },
@@ -8145,9 +8484,55 @@ Page({
     });
   },
 
+  buildStringedInsertion(id, placement = {}) {
+    const context = this.getStringedRingContext();
+    const selected = [...context.selected, id];
+    const sourcePlacements = [...context.placements, placement];
+    const ringRotation = this.getRingRotationDelta(context.placements, context.geometry);
+    const placements = this.rebuildRingPlacementsForVisualSlots(selected, sourcePlacements, ringRotation);
+    const materials = this.getCachedSelectedMaterials(selected);
+    const items = selected.map((materialId, index) => {
+      const material = materials[index] || {};
+      const currentPlacement = placements[index] || {};
+      const size = Number(material.size || currentPlacement.size || currentPlacement.diameter || 8);
+      return {
+        ...currentPlacement,
+        ...material,
+        id: materialId,
+        size: Number.isFinite(size) && size > 0 ? size : 8
+      };
+    });
+    const geometry = this.getCachedBraceletGeometry(items);
+    return {
+      selected,
+      placements,
+      visualSlots: this.getRingVisualSlots(items, placements, geometry)
+    };
+  },
+
   commitMaterial(id, placement, physicsOptions = {}, onReady) {
     const wasLooseMode = this.data.isLooseMode;
     const previousCount = this.data.selected.length;
+    this.playMaterialLandingSound(physicsOptions);
+    if (!wasLooseMode) {
+      const insertion = this.buildStringedInsertion(id, placement || {});
+      this.pushHistory();
+      this.stopPhysics();
+      this.setData({
+        selected: insertion.selected,
+        placements: insertion.placements,
+        isLooseMode: false,
+        selectedBeadIndex: -1,
+        selectedBeadInfo: null,
+        draggingBeadIndex: -1,
+        dragDeleteArmed: false
+      }, () => {
+        this.recalculate({ persistDelay: 520 });
+        this.scheduleCanvasRender(true);
+        if (onReady) onReady();
+      });
+      return;
+    }
     const existingPlacements = wasLooseMode
       ? this.normalizePlacements(this.data.selected, this.data.placements)
       : this.buildLoosePlacementsFromStringedRing();
@@ -8179,7 +8564,6 @@ Page({
       dragDeleteArmed: false
     });
     this.recalculate({ persistDelay: 520 });
-    this.playMaterialLandingSound(physicsOptions);
     this.scheduleCanvasRender();
     this.cancelCanvasFrame(this.pendingPhysicsLaunchFrame);
     this.pendingPhysicsLaunchFrame = this.requestCanvasFrame(() => {
@@ -8300,11 +8684,16 @@ Page({
       dragDeleteArmed: false
     });
     this.recalculate();
-    wx.nextTick(() => this.startStringingPhysics());
+    this.stringingStartQueued = true;
+    wx.nextTick(() => {
+      this.stringingStartQueued = false;
+      this.startStringingPhysics();
+    });
   },
 
   startStringingPhysics() {
     try {
+      this.stringingStartQueued = false;
       this.stopPhysics();
       this.dragState = null;
       this.ringDragState = null;
@@ -8378,6 +8767,7 @@ Page({
         }, () => {
           this.suppressStringingSounds = false;
           this.recalculate();
+          this.refreshWorkspaceCanvasAfterDesignTransition();
         });
       };
       clearTimeout(this.stringingGuardTimer);
@@ -9177,6 +9567,7 @@ Page({
       selectedBeadIndex: safeSelectedBeadIndex,
       selectedBeadInfo: this.buildSelectedBeadInfo(safeSelectedBeadIndex, this.data.selected, placements),
       wristOptionItems: this.getCachedWristOptionItems(),
+      workspacePlanLabel: this.workspaceSourceLabel(this.data.sourceContext || this.sourceContext || {}),
       ...actionState,
       energyChartSvgUrl
     };
@@ -9418,6 +9809,8 @@ Page({
 
   workspaceSummaryCacheKey(items = [], attachments = []) {
     const wristSize = Number(this.data.wristSize || 16);
+    const sourceContext = this.data.sourceContext || this.sourceContext || {};
+    const recommendationValidation = sourceContext.recommendation_validation || {};
     const itemKey = (items || []).map(item => [
       item.id,
       item.skuId,
@@ -9447,6 +9840,9 @@ Page({
     return [
       this.materialCatalogDesignVersion || 0,
       wristSize,
+      sourceContext.source || '',
+      sourceContext.target_bead_count || '',
+      recommendationValidation.estimated_stringed_length_cm || '',
       itemKey,
       attachmentKey
     ].join('::');
@@ -9460,16 +9856,22 @@ Page({
     const price = [...items, ...attachments].reduce((sum, item) => sum + Number(item.price || 0), 0);
     const effectiveLengthMm = estimateStringedLengthMm(items);
     const length = effectiveLengthMm / 10;
+    const roundedLength = Number(length.toFixed(1));
     const weight = [...items, ...attachments].reduce((sum, item) => sum + Number(item.weight || 0), 0);
     const wristSize = Number(this.data.wristSize || 16);
     const targetLength = wristSize + 0.8;
-    const recommendedCount = recommendedStringedBeadCount(items, wristSize);
+    const sourceContext = this.data.sourceContext || this.sourceContext || {};
+    const recommendationValidation = sourceContext.recommendation_validation || {};
+    const recommendationTargetCount = Number(sourceContext.target_bead_count || 0);
+    const recommendedCount = this.isRecommendationWorkspaceSource() && recommendationTargetCount > 0
+      ? recommendationTargetCount
+      : recommendedStringedBeadCount(items, wristSize);
     const maxBeadCount = Math.min(MAX_WORKSPACE_BEADS, recommendedCount + 1);
     const warning = items.length === 0
       ? ''
-      : length > targetLength + 0.5
+      : roundedLength > targetLength + 0.5 + 1e-6
         ? '\u504f\u957f'
-        : length < targetLength - 0.5
+        : roundedLength < targetLength - 0.5 - 1e-6
           ? '\u504f\u77ed'
           : '\u5408\u9002';
     const counts = {};
@@ -9484,8 +9886,14 @@ Page({
       ...element,
       value: energyItemCount ? Math.round(((counts[element.key] || 0) / energyItemCount) * 100) : 0
     }));
+    const validatedLength = this.isRecommendationWorkspaceSource()
+      && recommendationValidation.is_valid === true
+      && items.length === recommendationTargetCount
+      ? Number(recommendationValidation.estimated_stringed_length_cm)
+      : NaN;
+    const displayedLength = Number.isFinite(validatedLength) ? validatedLength : roundedLength;
     const currentWrist = items.length
-      ? Math.max(0, length - 0.8)
+      ? Math.max(0, displayedLength - 0.8)
       : 0;
     const sizes = items.map(item => Number(item.size || 0)).filter(Boolean);
     const minSize = sizes.length ? Math.min(...sizes) : 0;
@@ -9548,6 +9956,7 @@ Page({
 
   buildActionState() {
     const isWorking = this.data.isShuffling || this.data.isStringingFinishing || this.data.isReleasingString;
+    const isRecommendationSource = this.isRecommendationWorkspaceSource();
     return {
       shuffleButtonClass: isWorking ? 'working' : '',
       randomIconText: isWorking ? '...' : '串',
@@ -9555,10 +9964,14 @@ Page({
         ? '正在散开'
         : this.data.isShuffling
           ? '正在成串'
-          : (this.data.isLooseMode ? '随机成串' : '解除成串'),
+          : (this.data.isLooseMode
+            ? (isRecommendationSource ? '成串预览' : '随机成串')
+            : (isRecommendationSource ? '散开编辑' : '解除成串')),
       randomSubtitle: this.data.isReleasingString
         ? '恢复自由编辑'
-        : (this.data.isLooseMode ? '随机排列珠面' : '恢复自由编辑')
+        : (this.data.isLooseMode
+          ? (isRecommendationSource ? '保留当前推荐顺序' : '随机排列珠面')
+          : '恢复自由编辑')
     };
   },
 

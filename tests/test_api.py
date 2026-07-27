@@ -155,6 +155,22 @@ def test_workspace_material_catalog_supports_paged_slim_payload():
                 assert item["id"] in [material["id"] for material in alias_data["materials"]]
 
 
+def test_workspace_material_sort_groups_same_style_and_orders_by_size():
+    from app.materials import sort_materials_for_customer
+
+    materials = [
+        {"id": "rose-12", "top": "accessory", "category": "隔珠", "series": "玫瑰花纹", "material_code": "rose", "size": 12},
+        {"id": "cross-8", "top": "accessory", "category": "隔珠", "series": "十字花纹", "material_code": "cross", "size": 8},
+        {"id": "rose-8", "top": "accessory", "category": "隔珠", "series": "玫瑰花纹", "material_code": "rose", "size": 8},
+        {"id": "rose-plated-9", "top": "accessory", "category": "隔珠", "series": "玫瑰花纹", "material_code": "rose-plated", "size": 9},
+        {"id": "rose-10", "top": "accessory", "category": "隔珠", "series": "玫瑰花纹", "material_code": "rose", "size": 10},
+    ]
+
+    sorted_ids = [item["id"] for item in sort_materials_for_customer(materials)]
+
+    assert sorted_ids == ["cross-8", "rose-8", "rose-plated-9", "rose-10", "rose-12"]
+
+
 def test_production_material_catalog_does_not_fall_back_to_demo_inventory(monkeypatch):
     from app import materials as materials_module
 

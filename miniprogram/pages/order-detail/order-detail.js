@@ -728,6 +728,18 @@ Page({
   },
 
   async continuePay(orderId, userId) {
+    const receiver = (this.data.order || {}).receiver || {};
+    if (!receiver.name || !receiver.phone || !receiver.address) {
+      wx.showModal({
+        title: '请先填写收货信息',
+        content: '设计师方案订单已经生成，补齐地址后即可继续支付。',
+        confirmText: '填写地址',
+        success: result => {
+          if (result.confirm) this.editAddress();
+        }
+      });
+      return;
+    }
     if (this._paymentActionRunning) return;
     this._paymentActionRunning = true;
     this.setData({ paymentConfirming: false });

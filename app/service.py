@@ -235,28 +235,30 @@ class AssessmentService:
         assessment_id: str,
         payload: DIYRecommendationRequest,
     ) -> dict | None:
-        cached = self.repository.get_cached_recommendation(
-            assessment_id,
-            payload.wrist_size_cm,
-            payload.bead_size_mm,
-            DIY_RECOMMENDATION_CACHE_VERSION,
-        )
-        if cached:
-            self.repository.update(cached)
-            return {**self.with_energy_extras(cached), "recommendation_cache_hit": True}
+        if not payload.has_refinement:
+            cached = self.repository.get_cached_recommendation(
+                assessment_id,
+                payload.wrist_size_cm,
+                payload.bead_size_mm,
+                DIY_RECOMMENDATION_CACHE_VERSION,
+            )
+            if cached:
+                self.repository.update(cached)
+                return {**self.with_energy_extras(cached), "recommendation_cache_hit": True}
 
         result = self._build_diy_recommendation(assessment_id, payload)
         if not result:
             return None
         timestamp = datetime.now(CHINA_TZ).isoformat()
-        self.repository.save_cached_recommendation(
-            assessment_id,
-            payload.wrist_size_cm,
-            payload.bead_size_mm,
-            DIY_RECOMMENDATION_CACHE_VERSION,
-            result,
-            timestamp,
-        )
+        if not payload.has_refinement:
+            self.repository.save_cached_recommendation(
+                assessment_id,
+                payload.wrist_size_cm,
+                payload.bead_size_mm,
+                DIY_RECOMMENDATION_CACHE_VERSION,
+                result,
+                timestamp,
+            )
         self.repository.update(result)
         return {**self.with_energy_extras(result), "recommendation_cache_hit": False}
 
@@ -269,16 +271,17 @@ class AssessmentService:
         snapshot = self.report_repository.owned(report_id, user_id, payload.expected_report_version)
         if not snapshot:
             return None
-        cached = self.repository.get_cached_recommendation(
-            snapshot["assessment_id"],
-            payload.wrist_size_cm,
-            payload.bead_size_mm,
-            DIY_RECOMMENDATION_CACHE_VERSION,
-            report_id=report_id,
-            report_version=int(snapshot["report_version"]),
-        )
-        if cached:
-            return {**cached, "recommendation_cache_hit": True}
+        if not payload.has_refinement:
+            cached = self.repository.get_cached_recommendation(
+                snapshot["assessment_id"],
+                payload.wrist_size_cm,
+                payload.bead_size_mm,
+                DIY_RECOMMENDATION_CACHE_VERSION,
+                report_id=report_id,
+                report_version=int(snapshot["report_version"]),
+            )
+            if cached:
+                return {**cached, "recommendation_cache_hit": True}
 
         input_snapshot = snapshot["input_snapshot"]
         output_snapshot = snapshot["output_snapshot"]
@@ -302,7 +305,7 @@ class AssessmentService:
             "strongest": output_snapshot["strongest_element"],
             "weakest": output_snapshot["weakest_element"],
         }
-        recommendation = self.recommendation_engine.recommend(request, energy)
+        recommendation = self.recommendation_engine.recommend(request, energy, payload.refinement)
         workbench_payload = {
             "source": "report_snapshot",
             "assessment_id": snapshot["assessment_id"],
@@ -335,16 +338,17 @@ class AssessmentService:
             "workbench_payload": workbench_payload,
         }
         timestamp = datetime.now(CHINA_TZ).isoformat()
-        self.repository.save_cached_recommendation(
-            snapshot["assessment_id"],
-            payload.wrist_size_cm,
-            payload.bead_size_mm,
-            DIY_RECOMMENDATION_CACHE_VERSION,
-            result,
-            timestamp,
-            report_id=report_id,
-            report_version=int(snapshot["report_version"]),
-        )
+        if not payload.has_refinement:
+            self.repository.save_cached_recommendation(
+                snapshot["assessment_id"],
+                payload.wrist_size_cm,
+                payload.bead_size_mm,
+                DIY_RECOMMENDATION_CACHE_VERSION,
+                result,
+                timestamp,
+                report_id=report_id,
+                report_version=int(snapshot["report_version"]),
+            )
         return {**result, "recommendation_cache_hit": False}
 
     def pre_generate_diy_recommendation(
@@ -434,7 +438,7 @@ class AssessmentService:
             "strongest": assessment["strongest_element"],
             "weakest": assessment["weakest_element"],
         }
-        recommendation = self.recommendation_engine.recommend(request, energy)
+        recommendation = self.recommendation_engine.recommend(request, energy, payload.refinement)
         workbench_payload = {
             "source": "energy_assessment",
             "assessment_id": assessment_id,

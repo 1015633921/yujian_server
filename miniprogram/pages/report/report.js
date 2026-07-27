@@ -617,6 +617,8 @@ Page({
     viewReport: null,
     steps: STEPS,
     avatarChar: '',
+    // Legacy generation is retained for an internal rollback path, but is never rendered to users.
+    showAutomaticRecommendation: false,
     showWristModal: false,
     wristInput: '',
     wristRulerValue: '16.0',
@@ -630,6 +632,21 @@ Page({
     generating: false,
     showPlanModal: false,
     recommendationPlans: [],
+    showPlanRefinement: false,
+    refinementPlanTitle: '',
+    refinementStyle: 'balanced',
+    refinementAccessory: 'balanced',
+    refinementMaterials: [],
+    refinementStyleOptions: [
+      { value: 'minimal', label: '更简约', desc: '颜色和材料更集中' },
+      { value: 'balanced', label: '保持均衡', desc: '主次关系更清楚' },
+      { value: 'layered', label: '更有层次', desc: '增加节奏和质感变化' }
+    ],
+    refinementAccessoryOptions: [
+      { value: 'less', label: '少一点' },
+      { value: 'balanced', label: '适量' },
+      { value: 'more', label: '多一点' }
+    ],
     posterGenerating: false,
     posterPath: '',
     posterSaving: false,
@@ -1254,6 +1271,21 @@ Page({
     return `conic-gradient(${segments.join(', ')})`;
   },
 
+  openCustomDesignService() {
+    const report = this.data.report || {};
+    const assessmentId = safeText(report.assessment_id);
+    const persistedReportId = safeText(report.report_id);
+    const reportId = persistedReportId || (assessmentId ? `assessment:${assessmentId}` : '');
+    const reportVersion = Number(report.report_version) || 1;
+    if (!reportId || !Number.isInteger(reportVersion) || reportVersion < 1 || !assessmentId) {
+      wx.showToast({ title: '报告资料未就绪，请稍后重试', icon: 'none' });
+      return;
+    }
+    wx.navigateTo({
+      url: `/pages/design-service/design-service?report_id=${encodeURIComponent(reportId)}&report_version=${reportVersion}&assessment_id=${encodeURIComponent(assessmentId)}`
+    });
+  },
+
   openWristModal() {
     const savedWrist = Number(wx.getStorageSync('recommendedWristSize')) || 16;
     const wristSize = this.normalizeWristValue(savedWrist);
@@ -1399,39 +1431,49 @@ Page({
     wx.showLoading({ title: '正在读取方案' });
     try {
       wx.setStorageSync('recommendedBeadSize', this.data.beadSize);
-      const currentReport = this.data.report || {};
-      const result = currentReport.report_id && currentReport.report_version
-        ? await createReportDIYRecommendation(
-          currentReport.report_id,
-          currentReport.report_version,
-          { wrist_size_cm: wristSize, bead_size_mm: this.data.beadSize }
-        )
-        : await createDIYRecommendation(currentReport.assessment_id, {
-          wrist_size_cm: wristSize,
-          bead_size_mm: this.data.beadSize
-        });
-      const plans = Array.isArray(result.bracelet_plans) && result.bracelet_plans.length
-        ? result.bracelet_plans
-        : ((result.workbench_payload && Array.isArray(result.workbench_payload.bracelet_plans))
-          ? result.workbench_payload.bracelet_plans
-          : []);
-      this.pendingRecommendationResult = result;
-      this.pendingRecommendationPlans = plans;
-      if (plans.length > 1) {
-        this.setData({
-          showWristModal: false,
-          showPlanModal: true,
-          recommendationPlans: this.decorateRecommendationPlans(plans)
-        });
-      } else {
-        this.enterWorkspaceWithRecommendation(result, plans[0] || result.bracelet_plan);
-      }
+      const { result, plans } = await this.requestRecommendation({
+        wrist_size_cm: wristSize,
+        bead_size_mm: this.data.beadSize
+      });
+      this.presentRecommendation(result, plans);
     } catch (error) {
       wx.showToast({ title: error.message || '生成失败，请稍后重试', icon: 'none' });
     } finally {
       wx.hideLoading();
       this.setData({ generating: false });
     }
+  },
+
+  async requestRecommendation(payload) {
+    const currentReport = this.data.report || {};
+    const result = currentReport.report_id && currentReport.report_version
+      ? await createReportDIYRecommendation(
+        currentReport.report_id,
+        currentReport.report_version,
+        payload
+      )
+      : await createDIYRecommendation(currentReport.assessment_id, payload);
+    const plans = Array.isArray(result.bracelet_plans) && result.bracelet_plans.length
+      ? result.bracelet_plans
+      : ((result.workbench_payload && Array.isArray(result.workbench_payload.bracelet_plans))
+        ? result.workbench_payload.bracelet_plans
+        : []);
+    return { result, plans };
+  },
+
+  presentRecommendation(result, plans = []) {
+    this.pendingRecommendationResult = result;
+    this.pendingRecommendationPlans = plans;
+    if (plans.length > 1) {
+      this.setData({
+        showWristModal: false,
+        showPlanModal: true,
+        showPlanRefinement: false,
+        recommendationPlans: this.decorateRecommendationPlans(plans)
+      });
+      return;
+    }
+    this.enterWorkspaceWithRecommendation(result, plans[0] || result.bracelet_plan);
   },
 
   decorateRecommendationPlans(plans = []) {
@@ -1443,6 +1485,13 @@ Page({
         .slice(0, 5);
       const names = uniqueTextValues(items.map(item => item && item.name)).slice(0, 4);
       const price = Number(plan.estimated_price);
+      const materialVariety = Number(plan.material_variety) || names.length;
+      const hasAccessories = Array.isArray(plan.accessory_names) && plan.accessory_names.length > 0;
+      const designNote = hasAccessories
+        ? `配饰负责建立停顿，${materialVariety} 种材料保持主次关系`
+        : (materialVariety <= 2
+          ? '材料更集中，日常佩戴会更耐看'
+          : `${materialVariety} 种珠材形成层次，整体仍以珠材为主`);
       return {
         index,
         title: safeText(plan.title, `方案 ${index + 1}`),
@@ -1455,9 +1504,105 @@ Page({
           ? `含${plan.accessory_names.join('、')}`
           : '纯珠材搭配',
         previewImages,
-        isRecommended: Boolean(plan.is_recommended)
+        isRecommended: Boolean(plan.is_recommended),
+        designNote
       };
     });
+  },
+
+  buildRefinementMaterials(plan = {}) {
+    const items = Array.isArray(plan.items) ? plan.items : [];
+    const seen = new Set();
+    return items.reduce((result, item) => {
+      const materialId = safeText(item && (item.material_id || item.source_material_id));
+      if (!materialId || seen.has(materialId)) return result;
+      seen.add(materialId);
+      result.push({
+        materialId,
+        name: safeText(item.name, '未命名材料'),
+        imageUrl: safeText(item.image_url),
+        role: safeText(item.role),
+        selected: false
+      });
+      return result;
+    }, []);
+  },
+
+  openPlanRefinement(e) {
+    const index = Number(e.currentTarget.dataset.index);
+    const plan = (this.pendingRecommendationPlans || [])[index];
+    if (!plan) {
+      wx.showToast({ title: '方案已失效，请重新生成', icon: 'none' });
+      return;
+    }
+    this.refinementPlanIndex = index;
+    this.setData({
+      showPlanRefinement: true,
+      refinementPlanTitle: safeText(plan.title, `方案 ${index + 1}`),
+      refinementStyle: 'balanced',
+      refinementAccessory: plan.has_accessories ? 'balanced' : 'less',
+      refinementMaterials: this.buildRefinementMaterials(plan)
+    });
+  },
+
+  closePlanRefinement() {
+    if (!this.data.generating) this.setData({ showPlanRefinement: false });
+  },
+
+  selectRefinementStyle(e) {
+    this.setData({ refinementStyle: safeText(e.currentTarget.dataset.value, 'balanced') });
+  },
+
+  selectRefinementAccessory(e) {
+    this.setData({ refinementAccessory: safeText(e.currentTarget.dataset.value, 'balanced') });
+  },
+
+  toggleRefinementMaterial(e) {
+    const materialId = safeText(e.currentTarget.dataset.id);
+    const materials = (this.data.refinementMaterials || []).map(item => ({ ...item }));
+    const target = materials.find(item => item.materialId === materialId);
+    if (!target) return;
+    const selectedCount = materials.filter(item => item.selected).length;
+    if (!target.selected && selectedCount >= 3) {
+      wx.showToast({ title: '最多保留 3 种材料', icon: 'none' });
+      return;
+    }
+    target.selected = !target.selected;
+    this.setData({ refinementMaterials: materials });
+  },
+
+  async submitPlanRefinement() {
+    const sourcePlan = (this.pendingRecommendationPlans || [])[this.refinementPlanIndex];
+    if (!sourcePlan || this.data.generating) return;
+    const lockedMaterialIds = (this.data.refinementMaterials || [])
+      .filter(item => item.selected)
+      .map(item => item.materialId);
+    const wristSize = this.normalizeWristValue(
+      Number(sourcePlan.wrist_size_cm)
+      || Number(this.data.wristRulerValue)
+      || Number(wx.getStorageSync('recommendedWristSize'))
+      || 16
+    );
+    const beadSize = Number(sourcePlan.bead_size_mm) || Number(this.data.beadSize) || 8;
+    this.setData({ generating: true });
+    wx.showLoading({ title: '正在调整方案' });
+    try {
+      const { result, plans } = await this.requestRecommendation({
+        wrist_size_cm: wristSize,
+        bead_size_mm: beadSize,
+        style_preference: this.data.refinementStyle,
+        accessory_preference: this.data.refinementAccessory,
+        locked_material_ids: lockedMaterialIds,
+        rejected_plan_id: safeText(sourcePlan.plan_id)
+      });
+      this.presentRecommendation(result, plans);
+      wx.showToast({ title: '已按你的偏好重新搭配', icon: 'none' });
+    } catch (error) {
+      wx.showToast({ title: error.message || '调整失败，请稍后重试', icon: 'none' });
+    } finally {
+      wx.hideLoading();
+      this.setData({ generating: false });
+    }
   },
 
   chooseRecommendationPlan(e) {
@@ -1473,21 +1618,34 @@ Page({
   closePlanModal() {
     this.pendingRecommendationResult = null;
     this.pendingRecommendationPlans = [];
-    this.setData({ showPlanModal: false, recommendationPlans: [] });
+    this.setData({ showPlanModal: false, showPlanRefinement: false, recommendationPlans: [] });
   },
 
   reviseWristSelection() {
-    this.setData({ showPlanModal: false, recommendationPlans: [] });
+    this.setData({ showPlanModal: false, showPlanRefinement: false, recommendationPlans: [] });
     this.openWristModal();
   },
 
   enterWorkspaceWithRecommendation(result = {}, plan = {}) {
     const currentReport = this.data.report || {};
     const selectedPlan = plan && Array.isArray(plan.layout) ? plan : result.bracelet_plan;
+    const importId = [
+      'backend-recommended',
+      safeText(selectedPlan && selectedPlan.plan_id, 'plan'),
+      Date.now()
+    ].join(':');
+    const sourceContext = {
+      ...((result.workbench_payload && result.workbench_payload.source_context) || {}),
+      source: 'backend_recommendation',
+      source_label: '推荐方案',
+      title: safeText(selectedPlan && selectedPlan.title, '专属推荐')
+    };
     const workbenchPayload = {
       ...(result.workbench_payload || {}),
       bracelet_plan: selectedPlan,
-      selected_plan_id: selectedPlan && selectedPlan.plan_id ? selectedPlan.plan_id : ''
+      selected_plan_id: selectedPlan && selectedPlan.plan_id ? selectedPlan.plan_id : '',
+      workspace_import_id: importId,
+      source_context: sourceContext
     };
     const selectedResult = {
       ...result,
@@ -1498,6 +1656,11 @@ Page({
     wx.setStorageSync('recommendedWristSize', Number(selectedPlan.wrist_size_cm) || Number(workbenchPayload.wrist_size_cm) || 16);
     wx.setStorageSync('workspaceWristConfirmed', true);
     wx.setStorageSync('diyWorkbenchPayload', workbenchPayload);
+    wx.setStorageSync('workspaceImportIntent', {
+      id: importId,
+      type: 'backend-recommended',
+      createdAt: Date.now()
+    });
     wx.removeStorageSync('workspaceOpenDesign');
     wx.setStorageSync('workspacePreset', 'backend-recommended');
     this.pendingRecommendationResult = null;
@@ -1505,6 +1668,7 @@ Page({
     this.setData({
       showWristModal: false,
       showPlanModal: false,
+      showPlanRefinement: false,
       recommendationPlans: []
     });
     this.skipSuppressAssessmentAutoReport = true;

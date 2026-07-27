@@ -38,6 +38,7 @@
       <nav>
         <button class="nav-item active" data-page="overview" onclick="switchPage('overview')"><i>⌂</i>经营概览</button>
         <button class="nav-item" data-page="orders" onclick="switchPage('orders')"><i>▤</i>订单履约<span id="orderBadge" class="nav-badge hide">0</span></button>
+        <button class="nav-item" data-page="designRequests" onclick="switchPage('designRequests')"><i>✦</i>人工搭配</button>
         <button class="nav-item" data-page="afterSales" onclick="switchPage('afterSales')"><i>↺</i>售后审核<span id="afterSaleBadge" class="nav-badge hide">0</span></button>
         <button class="nav-item" data-page="materials" onclick="switchPage('materials')"><i>◇</i>SKU 管理</button>
         <button class="nav-item" data-page="materialTypes" onclick="switchPage('materialTypes')"><i>Ⅰ</i>材料类型</button>
@@ -105,6 +106,15 @@
           <div class="table-actions"><button class="btn secondary" onclick="syncAllLogistics()">同步全部物流</button><button class="btn secondary" onclick="loadOrders()">刷新订单</button></div>
         </div>
         <article class="panel table-panel"><div id="ordersTable"></div></article>
+      </section>
+
+      <section id="designRequests" class="page-view hide">
+        <div class="page-toolbar">
+          <div class="filter-group"><select id="designRequestStatus" onchange="loadCustomDesignRequests()"><option value="">全部状态</option><option value="submitted">待设计</option><option value="designing">设计中</option><option value="proposed">待用户确认</option><option value="revision_requested">待调整</option><option value="confirmed">已确认</option></select></div>
+          <div class="table-actions"><button class="btn secondary" onclick="openCustomDesignStandard()">设计规范</button><button class="btn secondary" onclick="openCustomDesignSettings()">服务设置</button><button class="btn secondary" onclick="loadCustomDesignRequests()">刷新工单</button></div>
+        </div>
+        <div class="content-hint">设计师需在工作台逐颗完成真实搭配；发布方案时固化材料、价格和图库图，用户确认后系统才会生成待支付订单并预占库存。</div>
+        <article class="panel table-panel"><div id="designRequestsTable"></div></article>
       </section>
 
       <section id="afterSales" class="page-view hide">
@@ -230,6 +240,7 @@
             <div class="search-control catalog-variety-search">⌕<input id="catalogVarietyKeyword" aria-label="搜索品种或款式" placeholder="搜索品种、分类或形制" oninput="renderMaterialVarietiesPage()"></div>
             <select id="catalogVarietyTypeFilter" onchange="handleVarietyTypeFilterChange()"></select>
             <select id="catalogVarietyCategoryFilter" onchange="renderMaterialVarietiesPage()"></select>
+            <select id="catalogVarietyStatusFilter" aria-label="筛选品种状态" onchange="renderMaterialVarietiesPage()"><option value="">全部状态</option><option value="enabled">已启用</option><option value="disabled">已停用</option></select>
           </div>
         </div>
         <article class="panel table-panel"><div id="materialVarietiesTable"></div></article>

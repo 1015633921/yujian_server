@@ -789,6 +789,8 @@ class AdminService:
         with self.connect() as connection:
             self._ensure_material_type_schema(connection)
             self._ensure_material_type_deletion_schema(connection)
+            self._ensure_material_taxonomy_schema(connection)
+            self._ensure_material_columns(connection)
             existing = connection.execute(
                 "SELECT * FROM material_types WHERE type_code = ?",
                 (requested_code,),
@@ -818,6 +820,11 @@ class AdminService:
                     """,
                     (requested_code, name, description, sort_order, enabled, timestamp, timestamp),
                 )
+            cascaded = {"disabled_taxonomy_count": 0, "disabled_sku_count": 0}
+            if not enabled:
+                cascaded = self._disable_material_hierarchy(
+                    connection, top=requested_code, timestamp=timestamp
+                )
             connection.execute("DELETE FROM material_type_deletions WHERE type_code = ?", (requested_code,))
             after = {
                 "type_code": requested_code,
@@ -836,6 +843,8 @@ class AdminService:
                 actor=actor,
                 summary=("更新材料类型：" if before else "新增材料类型：") + name,
             )
+        if not enabled:
+            invalidate_material_cache()
         return {
             "id": requested_code,
             "code": requested_code,
@@ -843,6 +852,7 @@ class AdminService:
             "description": description,
             "sort_order": sort_order,
             "enabled": bool(enabled),
+            **cascaded,
         }
 
     def disable_material_type(self, type_code: str, actor: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -851,6 +861,8 @@ class AdminService:
             raise ValueError("请选择要停用的材料类型")
         with self.connect() as connection:
             self._ensure_material_type_schema(connection)
+            self._ensure_material_taxonomy_schema(connection)
+            self._ensure_material_columns(connection)
             row = connection.execute(
                 "SELECT * FROM material_types WHERE type_code = ?",
                 (code,),
@@ -863,6 +875,7 @@ class AdminService:
                 "UPDATE material_types SET enabled=0, updated_at=? WHERE type_code=?",
                 (timestamp, code),
             )
+            cascaded = self._disable_material_hierarchy(connection, top=code, timestamp=timestamp)
             self.record_material_audit(
                 connection,
                 action="type_disable",
@@ -873,7 +886,132 @@ class AdminService:
                 actor=actor,
                 summary=f"停用材料类型：{before.get('name') or code}",
             )
-        return {"disabled": code}
+        invalidate_material_cache()
+        return {"disabled": code, **cascaded}
+
+    def _disable_material_hierarchy(
+        self,
+        connection,
+        *,
+        timestamp: str,
+        top: str = "",
+        category: str = "",
+        series: str = "",
+        taxonomy_item_id: str = "",
+    ) -> dict[str, int]:
+        """Disable every descendant of a material directory node in one transaction.
+
+        Directory state and SKU state are intentionally kept in sync: a disabled
+        type/category/series must never leave a sellable child SKU behind.
+        """
+        taxonomy_where: list[str] = []
+        taxonomy_params: list[Any] = []
+        material_where: list[str] = []
+        material_params: list[Any] = []
+        if top:
+            taxonomy_where.append("top=?")
+            taxonomy_params.append(top)
+            material_where.append("top=?")
+            material_params.append(top)
+        if category:
+            material_where.append("category=?")
+            material_params.append(category)
+        if series:
+            material_where.append("COALESCE(NULLIF(series, ''), name, '')=?")
+            material_params.append(series)
+        if taxonomy_item_id:
+            taxonomy_where.append("(item_id=? OR parent_id=?)")
+            taxonomy_params.extend([taxonomy_item_id, taxonomy_item_id])
+
+        taxonomy_count = 0
+        if taxonomy_where:
+            cursor = connection.execute(
+                f"UPDATE material_taxonomy SET enabled=0, updated_at=? "
+                f"WHERE enabled<>0 AND {' AND '.join(taxonomy_where)}",
+                [timestamp, *taxonomy_params],
+            )
+            taxonomy_count = int(cursor.rowcount or 0)
+        sku_count = 0
+        if material_where:
+            cursor = connection.execute(
+                f"UPDATE managed_materials SET enabled=0, updated_at=? "
+                f"WHERE enabled<>0 AND {' AND '.join(material_where)}",
+                [timestamp, *material_params],
+            )
+            sku_count = int(cursor.rowcount or 0)
+        return {"disabled_taxonomy_count": taxonomy_count, "disabled_sku_count": sku_count}
+
+    def repair_material_hierarchy_enabled_state(
+        self,
+        actor: dict[str, Any] | None = None,
+    ) -> dict[str, int]:
+        """Repair historical rows whose parent is disabled but child remains enabled."""
+        timestamp = now_iso()
+        taxonomy_total = 0
+        sku_total = 0
+        with self.connect() as connection:
+            self._ensure_material_type_schema(connection)
+            self._ensure_material_taxonomy_schema(connection)
+            self._ensure_material_columns(connection)
+            disabled_types = connection.execute(
+                "SELECT type_code FROM material_types WHERE enabled=0"
+            ).fetchall()
+            for row in disabled_types:
+                result = self._disable_material_hierarchy(
+                    connection, top=str(row["type_code"] or ""), timestamp=timestamp
+                )
+                taxonomy_total += result["disabled_taxonomy_count"]
+                sku_total += result["disabled_sku_count"]
+            disabled_categories = connection.execute(
+                "SELECT item_id, top, name FROM material_taxonomy WHERE kind='category' AND enabled=0"
+            ).fetchall()
+            for row in disabled_categories:
+                result = self._disable_material_hierarchy(
+                    connection,
+                    top=str(row["top"] or ""),
+                    category=str(row["name"] or ""),
+                    taxonomy_item_id=str(row["item_id"] or ""),
+                    timestamp=timestamp,
+                )
+                taxonomy_total += result["disabled_taxonomy_count"]
+                sku_total += result["disabled_sku_count"]
+            parent_join = (
+                "BINARY c.item_id=BINARY s.parent_id"
+                if use_mysql() and not self._force_sqlite
+                else "c.item_id=s.parent_id"
+            )
+            disabled_series = connection.execute(
+                f"""
+                SELECT s.item_id, s.top, s.name, c.name AS category_name
+                FROM material_taxonomy s
+                LEFT JOIN material_taxonomy c ON {parent_join} AND c.kind='category'
+                WHERE s.kind='series' AND s.enabled=0
+                """
+            ).fetchall()
+            for row in disabled_series:
+                result = self._disable_material_hierarchy(
+                    connection,
+                    top=str(row["top"] or ""),
+                    category=str(row["category_name"] or ""),
+                    series=str(row["name"] or ""),
+                    taxonomy_item_id=str(row["item_id"] or ""),
+                    timestamp=timestamp,
+                )
+                taxonomy_total += result["disabled_taxonomy_count"]
+                sku_total += result["disabled_sku_count"]
+            if taxonomy_total or sku_total:
+                self.record_material_audit(
+                    connection,
+                    action="taxonomy_hierarchy_repair",
+                    target_type="material_taxonomy",
+                    target_id="hierarchy-enabled-state",
+                    after={"disabled_taxonomy_count": taxonomy_total, "disabled_sku_count": sku_total},
+                    actor=actor,
+                    summary="修复材料层级停用状态",
+                )
+        if taxonomy_total or sku_total:
+            invalidate_material_cache()
+        return {"disabled_taxonomy_count": taxonomy_total, "disabled_sku_count": sku_total}
 
     def _ensure_material_taxonomy_schema(self, connection) -> None:
         if use_mysql() and not self._force_sqlite:
@@ -1516,6 +1654,11 @@ class AdminService:
                 parent_id = row.get("parent_id") or ""
                 visual = self.public_taxonomy_visual(row)
                 knowledge = knowledge_map.get(visual.get("material_code") or "") or {}
+                material_params = dict(knowledge.get("material_params") or {})
+                # 工作台的“珠子”材料统一按圆珠处理。配饰、吊坠等非珠子类型仍使用
+                # 各自保存的形制，避免把隔珠或挂件误改为圆珠。
+                if row["top"] == "bead":
+                    material_params["bead_shape"] = "round"
                 series_item = {
                     "id": row["item_id"],
                     "parent_id": parent_id,
@@ -1543,7 +1686,7 @@ class AdminService:
                         "match_rules": knowledge.get("match_rules") or [],
                         "care_tags": knowledge.get("care_tags") or [],
                     },
-                    "material_params": knowledge.get("material_params") or {},
+                    "material_params": material_params,
                     "asset": knowledge.get("asset") or {},
                 }
                 if parent_id in categories:
@@ -1629,6 +1772,15 @@ class AdminService:
                         """,
                         (top, name, timestamp, before_top, before_name),
                     )
+            cascaded = {"disabled_taxonomy_count": 0, "disabled_sku_count": 0}
+            if not enabled:
+                cascaded = self._disable_material_hierarchy(
+                    connection,
+                    top=top,
+                    category=name,
+                    taxonomy_item_id=item_id,
+                    timestamp=timestamp,
+                )
             after = {
                 "item_id": item_id,
                 "parent_id": "",
@@ -1648,7 +1800,16 @@ class AdminService:
                 actor=actor,
                 summary=("更新材料分类：" if before else "新增材料分类：") + name,
             )
-        return {"id": item_id, "top": top, "name": name, "sort_order": sort_order, "enabled": bool(enabled)}
+        if not enabled:
+            invalidate_material_cache()
+        return {
+            "id": item_id,
+            "top": top,
+            "name": name,
+            "sort_order": sort_order,
+            "enabled": bool(enabled),
+            **cascaded,
+        }
 
     def save_material_series(self, payload: dict[str, Any], actor: dict[str, Any] | None = None) -> dict[str, Any]:
         category_id = str(payload.get("category_id") or "").strip()
@@ -1836,6 +1997,16 @@ class AdminService:
             )
             if remaining_sku_images:
                 raise ValueError("SKU 图片清理失败，品种图片未能保持唯一数据源")
+            cascaded = {"disabled_taxonomy_count": 0, "disabled_sku_count": 0}
+            if not enabled:
+                cascaded = self._disable_material_hierarchy(
+                    connection,
+                    top=top,
+                    category=str(category["name"] or ""),
+                    series=name,
+                    taxonomy_item_id=item_id,
+                    timestamp=timestamp,
+                )
             after = {
                 "item_id": item_id,
                 "parent_id": category_id,
@@ -1877,6 +2048,7 @@ class AdminService:
             "image_source": "series",
             "sort_order": sort_order,
             "enabled": bool(enabled),
+            **cascaded,
         }
 
     def bind_material_series_images(
@@ -1960,13 +2132,18 @@ class AdminService:
         timestamp = now_iso()
         with self.connect() as connection:
             self._ensure_material_taxonomy_schema(connection)
+            self._ensure_material_columns(connection)
             row = connection.execute("SELECT * FROM material_taxonomy WHERE item_id = ?", (clean_id,)).fetchone()
             if not row:
                 raise ValueError("分类或品种不存在")
             before = dict(row)
-            connection.execute(
-                "UPDATE material_taxonomy SET enabled=0, updated_at=? WHERE item_id=? OR parent_id=?",
-                (timestamp, clean_id, clean_id),
+            cascaded = self._disable_material_hierarchy(
+                connection,
+                top=str(before.get("top") or ""),
+                category=str(before.get("name") or "") if before.get("kind") == "category" else "",
+                series=str(before.get("name") or "") if before.get("kind") == "series" else "",
+                taxonomy_item_id=clean_id,
+                timestamp=timestamp,
             )
             after = {**before, "enabled": 0, "updated_at": timestamp}
             self.record_material_audit(
@@ -1979,7 +2156,8 @@ class AdminService:
                 actor=actor,
                 summary=f"停用材料{'分类' if before.get('kind') == 'category' else '品种'}：{before.get('name') or clean_id}",
             )
-        return {"disabled": clean_id}
+        invalidate_material_cache()
+        return {"disabled": clean_id, **cascaded}
 
     def delete_empty_material_categories(
         self,

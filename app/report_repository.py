@@ -81,6 +81,38 @@ class ReportRepository:
         )
         return version
 
+    @staticmethod
+    def _report_code_day(created_at: str) -> str:
+        digits = "".join(char for char in str(created_at or "") if char.isdigit())
+        return digits[:8] if len(digits) >= 8 else "00000000"
+
+    def _next_report_code(self, connection, created_at: str) -> str:
+        day = self._report_code_day(created_at)
+        if self.mysql:
+            connection.execute(
+                "INSERT INTO report_code_counters(day_key, last_sequence) VALUES (?, 0) "
+                "ON DUPLICATE KEY UPDATE day_key=VALUES(day_key)",
+                (day,),
+            )
+            suffix = " FOR UPDATE"
+        else:
+            connection.execute(
+                "INSERT INTO report_code_counters(day_key, last_sequence) VALUES (?, 0) "
+                "ON CONFLICT(day_key) DO NOTHING",
+                (day,),
+            )
+            suffix = ""
+        row = connection.execute(
+            f"SELECT last_sequence FROM report_code_counters WHERE day_key = ?{suffix}",
+            (day,),
+        ).fetchone()
+        sequence = int(row["last_sequence"] or 0) + 1
+        connection.execute(
+            "UPDATE report_code_counters SET last_sequence = ? WHERE day_key = ?",
+            (sequence, day),
+        )
+        return f"RPT-{day}-{sequence:04d}"
+
     def create_snapshot(
         self,
         *,
@@ -115,6 +147,7 @@ class ReportRepository:
                     (request_id, user_id, key, source_input_hash, created_at, created_at),
                 )
                 report_version = self._next_version(connection, user_id, created_at)
+                report_code = self._next_report_code(connection, created_at)
                 connection.execute(
                     """
                     INSERT INTO energy_assessments
@@ -134,14 +167,15 @@ class ReportRepository:
                 connection.execute(
                     """
                     INSERT INTO report_snapshots
-                    (report_id, assessment_id, user_id, report_version, source_input_hash,
+                    (report_id, report_code, assessment_id, user_id, report_version, source_input_hash,
                      algorithm_version, schema_version, calibration_version, calibration_status,
                      calibration_source, calibration_reason_code, input_snapshot_json,
                      output_snapshot_json, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         report_id,
+                        report_code,
                         assessment_id,
                         user_id,
                         report_version,
@@ -222,6 +256,7 @@ class ReportRepository:
         output.pop("solar_time", None)
         metadata = {
             "report_id": snapshot["report_id"],
+            "report_code": snapshot.get("report_code") or snapshot["report_id"],
             "assessment_id": snapshot["assessment_id"],
             "report_version": int(snapshot["report_version"]),
             "created_at": snapshot["created_at"],
@@ -239,6 +274,7 @@ class ReportRepository:
         output = snapshot["output_snapshot"]
         return {
             "report_id": snapshot["report_id"],
+            "report_code": snapshot.get("report_code") or snapshot["report_id"],
             "report_version": int(snapshot["report_version"]),
             "created_at": snapshot["created_at"],
             "algorithm_version": snapshot["algorithm_version"],
@@ -263,6 +299,7 @@ class ReportRepository:
         projection = dict((snapshot["output_snapshot"] or {}).get("report_projection") or {})
         payload = {
             "report_id": snapshot["report_id"],
+            "report_code": snapshot.get("report_code") or snapshot["report_id"],
             "report_version": int(snapshot["report_version"]),
             "created_at": snapshot["created_at"],
             "core_conclusion": projection.get("core_conclusion") or {},

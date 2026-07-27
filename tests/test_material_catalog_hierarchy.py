@@ -142,6 +142,118 @@ def test_disabled_material_type_fails_closed_for_category_and_sku_creation(tmp_p
         )
 
 
+def test_disabling_parent_recursively_disables_descendant_taxonomy_and_skus(tmp_path):
+    service = AdminService(tmp_path / "recursive-disable.db")
+    type_entry = service.save_material_type({"code": "findings", "name": "配件测试类型"})
+    category = service.save_material_category({"top": type_entry["code"], "name": "隔珠"})
+    series = service.save_material_series({"category_id": category["id"], "name": "银色隔珠"})
+    saved = service.save_material(
+        {
+            "id": "recursive-disable-sku",
+            "top": type_entry["code"],
+            "category": "隔珠",
+            "series": "银色隔珠",
+            "name": "银色隔珠 8mm",
+            "price": 10,
+            "size": 8,
+            "weight": 1,
+            "stock": 5,
+            "enabled": True,
+        }
+    )
+
+    category_result = service.disable_material_taxonomy_item(category["id"])
+    assert category_result["disabled_sku_count"] == 1
+    taxonomy = service.list_material_taxonomy(top="findings", include_disabled=True)
+    assert taxonomy[0]["enabled"] is False
+    assert taxonomy[0]["series"][0]["enabled"] is False
+    assert service.get_material(saved["sku"]["id"])["sku"]["enabled"] is False
+
+    # Saving a disabled top-level type must apply the same cascade even if a
+    # legacy child was re-enabled directly in the database.
+    with service.connect() as connection:
+        connection.execute("UPDATE managed_materials SET enabled=1 WHERE id=?", (saved["sku"]["id"],))
+        connection.execute("UPDATE material_taxonomy SET enabled=1 WHERE item_id=?", (series["id"],))
+    result = service.save_material_type({"code": "findings", "name": "配件测试类型", "enabled": False})
+    assert result["disabled_sku_count"] == 1
+    assert service.get_material(saved["sku"]["id"])["sku"]["enabled"] is False
+
+
+def test_repair_material_hierarchy_enabled_state_disables_legacy_children(tmp_path):
+    service = AdminService(tmp_path / "hierarchy-repair.db")
+    category = service.save_material_category({"top": "bead", "name": "脏数据分类"})
+    series = service.save_material_series({"category_id": category["id"], "name": "脏数据品种"})
+    saved = service.save_material(
+        {
+            "id": "hierarchy-repair-sku",
+            "top": "bead",
+            "category": "脏数据分类",
+            "series": "脏数据品种",
+            "name": "脏数据珠 8mm",
+            "price": 10,
+            "size": 8,
+            "weight": 1,
+            "stock": 5,
+            "enabled": True,
+        }
+    )
+    with service.connect() as connection:
+        connection.execute("UPDATE material_taxonomy SET enabled=0 WHERE item_id=?", (category["id"],))
+    repaired = service.repair_material_hierarchy_enabled_state()
+    assert repaired["disabled_taxonomy_count"] >= 1
+    assert repaired["disabled_sku_count"] == 1
+    assert service.get_material(saved["sku"]["id"])["sku"]["enabled"] is False
+
+
+def test_saving_renamed_parent_as_disabled_disables_existing_sku(tmp_path):
+    service = AdminService(tmp_path / "rename-disable.db")
+    category = service.save_material_category({"top": "bead", "name": "旧分类"})
+    series = service.save_material_series({"category_id": category["id"], "name": "旧品种"})
+    saved = service.save_material(
+        {
+            "id": "rename-disable-sku",
+            "top": "bead",
+            "category": "旧分类",
+            "series": "旧品种",
+            "name": "旧品种 8mm",
+            "price": 10,
+            "size": 8,
+            "weight": 1,
+            "stock": 5,
+            "enabled": True,
+        }
+    )
+    category_result = service.save_material_category(
+        {"id": category["id"], "top": "bead", "name": "新分类", "enabled": False}
+    )
+    assert category_result["disabled_sku_count"] == 1
+    assert service.get_material(saved["sku"]["id"])["sku"]["enabled"] is False
+
+    # This covers the series-edit path as well: SKU taxonomy is renamed first,
+    # then the disabled parent state is cascaded.
+    category = service.save_material_category({"top": "accessory", "name": "配饰分类"})
+    series = service.save_material_series({"category_id": category["id"], "name": "旧款式"})
+    saved = service.save_material(
+        {
+            "id": "rename-disable-series-sku",
+            "top": "accessory",
+            "category": "配饰分类",
+            "series": "旧款式",
+            "name": "旧款式",
+            "price": 10,
+            "size": 8,
+            "weight": 1,
+            "stock": 5,
+            "enabled": True,
+        }
+    )
+    series_result = service.save_material_series(
+        {"id": series["id"], "category_id": category["id"], "name": "新款式", "enabled": False}
+    )
+    assert series_result["disabled_sku_count"] == 1
+    assert service.get_material(saved["sku"]["id"])["sku"]["enabled"] is False
+
+
 def test_basic_variety_edit_preserves_optional_profile(tmp_path):
     service = AdminService(tmp_path / "variety-profile.db")
     category = service.save_material_category({"top": "accessory", "name": "幽灵随形"})

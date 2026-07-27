@@ -1008,6 +1008,29 @@ class OrderService:
         ]
 
     def create_order(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._create_order(
+            payload,
+            initiate_payment=True,
+            require_receiver=True,
+        )
+
+    def create_pending_order(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Create an inventory-reserved order without opening a payment session."""
+        return self._create_order(
+            payload,
+            initiate_payment=False,
+            require_receiver=False,
+            reservation_ttl_seconds=self.custom_design_order_reservation_ttl_seconds(),
+        )
+
+    def _create_order(
+        self,
+        payload: dict[str, Any],
+        *,
+        initiate_payment: bool,
+        require_receiver: bool,
+        reservation_ttl_seconds: int | None = None,
+    ) -> dict[str, Any]:
         user_id = str(payload.get("user_id") or "").strip()
         if not user_id:
             raise ValueError("user_id 不能为空")
@@ -1016,7 +1039,12 @@ class OrderService:
         replay = self.resolve_idempotent_order(user_id, idempotency_key, request_hash, wait=False)
         if replay:
             return replay
-        receiver = self.normalize_order_receiver(payload.get("receiver") or {})
+        receiver_payload = payload.get("receiver") or {}
+        receiver = (
+            self.normalize_order_receiver(receiver_payload)
+            if require_receiver or receiver_payload
+            else {}
+        )
         design = payload.get("design") or {}
         design_id = str(payload.get("design_id") or design.get("design_id") or "").strip()
         sequence = payload.get("sequence") or []
@@ -1024,7 +1052,10 @@ class OrderService:
             raise ValueError("订单材料不能为空")
         user = self.get_user(user_id) or {}
         timestamp = now_iso()
-        expires_at = self.reservation_expiry(timestamp)
+        expires_at = self.reservation_expiry(
+            timestamp,
+            ttl_seconds=reservation_ttl_seconds,
+        )
         history = [{"status": "pending_payment", "label": "订单已创建，等待支付", "time": timestamp}]
         order_id = generate_numeric_order_no()
 
@@ -1121,6 +1152,13 @@ class OrderService:
             raise OrderConflictError("订单请求冲突，请勿重复提交") from exc
 
         order = self.get_order(order_id)
+        if not initiate_payment:
+            self.complete_order_request(user_id, idempotency_key)
+            return {
+                "order": order,
+                "payment": {},
+                "idempotent_replay": False,
+            }
         try:
             payment = self.create_wechat_payment(order)
         except Exception:
@@ -1160,9 +1198,25 @@ class OrderService:
         return max(60, min(configured, 24 * 60 * 60))
 
     @classmethod
-    def reservation_expiry(cls, created_at: str) -> str:
+    def reservation_expiry(
+        cls,
+        created_at: str,
+        *,
+        ttl_seconds: int | None = None,
+    ) -> str:
         created = datetime.fromisoformat(created_at)
-        return (created + timedelta(seconds=cls.reservation_ttl_seconds())).isoformat()
+        seconds = cls.reservation_ttl_seconds() if ttl_seconds is None else int(ttl_seconds)
+        return (created + timedelta(seconds=seconds)).isoformat()
+
+    @staticmethod
+    def custom_design_order_reservation_ttl_seconds() -> int:
+        try:
+            configured = int(
+                os.getenv("CUSTOM_DESIGN_ORDER_RESERVATION_TTL_SECONDS", "86400")
+            )
+        except ValueError:
+            configured = 86400
+        return max(15 * 60, min(configured, 24 * 60 * 60))
 
     @staticmethod
     def cents_text(cents: int) -> str:
@@ -1261,6 +1315,8 @@ class OrderService:
         self,
         connection,
         sequence: list[dict[str, Any]],
+        *,
+        include_validation_metadata: bool = False,
     ) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]]:
         self.validate_attachment_sequence(sequence)
         requested: list[tuple[dict[str, Any], str, int]] = []
@@ -1315,6 +1371,16 @@ class OrderService:
             client_cents = self.client_price_cents(item)
             if client_cents is not None and client_cents != unit_cents:
                 changed.append(str(material.get("name") or reference))
+            selected_image_url = str(
+                item.get("selected_image_url")
+                or ((item.get("placement") or {}).get("image_url") if isinstance(item.get("placement"), dict) else "")
+                or ""
+            ).strip()
+            gallery_image_urls = clean_image_urls(material.get("image_urls_json"))
+            if selected_image_url and selected_image_url not in gallery_image_urls:
+                raise OrderPricingError(
+                    f"材料图库已更新，请重新确认：{material.get('name') or reference}"
+                )
             material_id = str(material.get("id") or "").strip()
             sku_code = str(material.get("skuId") or material_id).strip()
             if not material_id:
@@ -1350,6 +1416,11 @@ class OrderService:
                 "subtotal": self.cents_text(subtotal_cents),
                 "price_version": str(material.get("updated_at") or ""),
             }
+            if selected_image_url:
+                snapshot["selected_image_url"] = selected_image_url
+            if include_validation_metadata:
+                snapshot["gallery_image_urls"] = gallery_image_urls
+                snapshot["top"] = material.get("top") or "bead"
             snapshots.append(snapshot)
             reservation = reservations.setdefault(
                 material_id,
@@ -1743,6 +1814,7 @@ class OrderService:
             raise ValueError("订单已超时，请重新确认价格与库存")
         if order["status"] != "pending_payment" or order["payment_status"] != "unpaid":
             raise ValueError("当前订单状态不能继续支付")
+        self.normalize_order_receiver(order.get("receiver") or {})
         return {"order": order, "payment": self.create_wechat_payment(order)}
 
     def mark_paid_for_dev(self, order_id: str, user_id: str) -> dict[str, Any]:
@@ -5379,7 +5451,11 @@ class OrderService:
     def validate_and_refresh_material_prices(self, sequence: list[dict[str, Any]]) -> list[dict[str, Any]]:
         with self.connect() as connection:
             self.begin_order_transaction(connection)
-            snapshots, _ = self.lock_validate_and_snapshot_items(connection, sequence)
+            snapshots, _ = self.lock_validate_and_snapshot_items(
+                connection,
+                sequence,
+                include_validation_metadata=True,
+            )
             return snapshots
 
     @staticmethod

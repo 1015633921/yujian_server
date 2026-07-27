@@ -746,6 +746,26 @@ function getOrderLogistics(orderId, userId, options = {}) {
   });
 }
 
+function createCustomDesignRequest(payload, options = {}) {
+  return request('/api/v1/custom-design-requests', { ...options, method: 'POST', data: payload });
+}
+
+function getCustomDesignRequests(options = {}) {
+  return request('/api/v1/custom-design-requests', options);
+}
+
+function confirmCustomDesignRequest(requestId, payload, options = {}) {
+  return request(`/api/v1/custom-design-requests/${encodeURIComponent(requestId)}/confirm`, {
+    ...options, method: 'POST', data: payload
+  });
+}
+
+function reviseCustomDesignRequest(requestId, payload, options = {}) {
+  return request(`/api/v1/custom-design-requests/${encodeURIComponent(requestId)}/revision`, {
+    ...options, method: 'POST', data: payload
+  });
+}
+
 module.exports = {
   getBaseUrl,
   request,
@@ -802,5 +822,9 @@ module.exports = {
   submitAfterSaleReturnShipment,
   cancelAfterSaleCase,
   refundOrder,
-  getOrderLogistics
+  getOrderLogistics,
+  createCustomDesignRequest,
+  getCustomDesignRequests,
+  confirmCustomDesignRequest,
+  reviseCustomDesignRequest
 };

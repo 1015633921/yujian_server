@@ -19,6 +19,7 @@
     "pages/assessment-guide/assessment-guide",
     "pages/report/report",
     "pages/report-basis/report-basis",
+    "pages/design-service/design-service",
     "pages/checkout/checkout",
     "pages/order-success/order-success",
     "pages/order-list/order-list",

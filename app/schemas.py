@@ -83,6 +83,56 @@ class DIYRecommendationRequest(BaseModel):
     bead_size_mm: int = Field(default=8, ge=4, le=20, description="偏好珠径，单位毫米")
     report_id: str | None = Field(default=None, max_length=100)
     expected_report_version: int | None = Field(default=None, ge=1)
+    style_preference: str | None = Field(
+        default=None,
+        pattern="^(minimal|balanced|layered)$",
+        description="方案调整方向",
+    )
+    accessory_preference: str | None = Field(
+        default=None,
+        pattern="^(less|balanced|more)$",
+        description="配饰用量偏好",
+    )
+    locked_material_ids: list[str] = Field(
+        default_factory=list,
+        max_length=3,
+        description="重新生成时需要保留的材料 ID",
+    )
+    rejected_plan_id: str | None = Field(
+        default=None,
+        max_length=100,
+        description="用户明确不喜欢的方案 ID",
+    )
+
+    @field_validator("locked_material_ids")
+    @classmethod
+    def validate_locked_material_ids(cls, values: list[str]) -> list[str]:
+        normalized: list[str] = []
+        for value in values:
+            material_id = str(value or "").strip()
+            if not material_id or len(material_id) > 100:
+                raise ValueError("保留材料 ID 不合法")
+            if material_id not in normalized:
+                normalized.append(material_id)
+        return normalized
+
+    @property
+    def has_refinement(self) -> bool:
+        return bool(
+            self.style_preference
+            or self.accessory_preference
+            or self.locked_material_ids
+            or self.rejected_plan_id
+        )
+
+    @property
+    def refinement(self) -> dict:
+        return {
+            "style_preference": self.style_preference,
+            "accessory_preference": self.accessory_preference,
+            "locked_material_ids": self.locked_material_ids,
+            "rejected_plan_id": self.rejected_plan_id,
+        }
 
 
 class DailyCheckInRequest(BaseModel):
@@ -136,6 +186,32 @@ class DIYDesignSaveRequest(BaseModel):
     design: dict = Field(default_factory=dict)
     sequence: list[dict] = Field(default_factory=list, max_length=120)
     status: str = Field(default="saved", max_length=30)
+
+
+class CustomDesignRequestCreate(BaseModel):
+    """A service request, intentionally separate from merchandise orders."""
+
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+
+    user_id: NonEmptyString
+    report_id: str = Field(min_length=1, max_length=80)
+    report_version: int = Field(ge=1, le=10000)
+    assessment_id: str | None = Field(default=None, max_length=80)
+    wrist_size_cm: float = Field(ge=12, le=26)
+    bead_size_mm: int = Field(ge=4, le=20)
+    budget: str = Field(default="", max_length=80)
+    style_preference: str = Field(default="", max_length=80)
+    color_preference: str = Field(default="", max_length=120)
+    accessory_preference: str = Field(default="", max_length=80)
+    wear_scene: str = Field(default="", max_length=80)
+    note: str = Field(default="", max_length=500)
+
+
+class CustomDesignResponseRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+
+    user_id: NonEmptyString
+    note: str = Field(default="", max_length=500)
 
 
 class CartItemCreateRequest(BaseModel):

@@ -34,7 +34,9 @@ def material_cdn_base_url() -> str:
 CDN_BASE_URL = material_cdn_base_url()
 MATERIAL_CACHE_TTL_SECONDS = 60
 _MATERIAL_PAYLOAD_CACHE: dict[tuple, dict] = {}
-MATERIAL_SORT_POLICY_VERSION = "featured-v1"
+# The material grid is paginated on the server.  Keep the version in the
+# catalog cache key so a change to its ordering reaches clients immediately.
+MATERIAL_SORT_POLICY_VERSION = "style-size-v1"
 
 INTERNAL_MATERIAL_FIELDS = {
     "cost_price",
@@ -105,12 +107,24 @@ def featured_material_rank(item: dict) -> int:
 
 
 def material_customer_sort_key(item: dict) -> tuple:
-    rank = featured_material_rank(item)
+    """Keep SKU variants next to one another, ordered by their diameter.
+
+    ``series`` is the operator-maintained variety/style.  Some legacy rows do
+    not have one, in which case the display name is the best available group
+    key.  When a style has multiple material codes, diameter still takes
+    priority: every 8 mm option is shown before every 10 mm option.
+    """
+    top = str(item.get("top") or (item.get("sku") or {}).get("top") or "")
+    category = str(item.get("category") or (item.get("sku") or {}).get("category") or "")
+    series = str(item.get("series") or (item.get("sku") or {}).get("series") or item.get("name") or "")
+    material_code = str(item.get("material_code") or item.get("materialCode") or item.get("skuId") or "")
     sort_order = int(float(item.get("sort_order") or item.get("sortOrder") or 0))
-    size = float(item.get("size") or 0)
-    name = str(item.get("series") or item.get("name") or item.get("category") or "")
+    try:
+        size = float(item.get("size") or (item.get("sku") or {}).get("size_mm") or 0)
+    except (TypeError, ValueError):
+        size = 0
     item_id = str(item.get("id") or item.get("skuId") or "")
-    return (rank, sort_order, name, size, item_id)
+    return (top, category, series, size, material_code, sort_order, item_id)
 
 
 def sort_materials_for_customer(materials: list[dict]) -> list[dict]:
@@ -717,7 +731,14 @@ def list_db_materials_page(
                 SELECT *
                 FROM managed_materials
                 WHERE {where}
-                ORDER BY sort_order ASC, updated_at DESC, id ASC
+                ORDER BY
+                    COALESCE(top, '') ASC,
+                    COALESCE(category, '') ASC,
+                    COALESCE(NULLIF(series, ''), name, '') ASC,
+                    size ASC,
+                    COALESCE(material_code, '') ASC,
+                    sort_order ASC,
+                    id ASC
                 LIMIT ? OFFSET ?
                 """,
                 [*params, size, offset],

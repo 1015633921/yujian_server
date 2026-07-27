@@ -127,7 +127,7 @@
   <view class="result-bottom">
     <view class="result-actions">
       <button class="result-secondary" bindtap="restartAssessment">重新分析</button>
-      <button class="yu-button yu-button-primary result-submit" bindtap="openWristModal">查看专属手串方案</button>
+      <button class="yu-button yu-button-primary result-submit" bindtap="openCustomDesignService">申请人工搭配</button>
     </view>
   </view>
 </view>
@@ -166,7 +166,7 @@
   </view>
 </view>
 
-<view wx:if="{{showWristModal}}" class="modal-mask" bindtap="closeWristModal">
+<view wx:if="{{showAutomaticRecommendation && showWristModal}}" class="modal-mask" bindtap="closeWristModal">
   <view class="wrist-modal" catchtap="noop">
     <view class="modal-head">
       <view>
@@ -220,7 +220,7 @@
   </view>
 </view>
 
-<view wx:if="{{showPlanModal}}" class="modal-mask plan-selector-mask" bindtap="closePlanModal">
+<view wx:if="{{showAutomaticRecommendation && showPlanModal}}" class="modal-mask plan-selector-mask" bindtap="closePlanModal">
   <view class="plan-selector-modal" catchtap="noop">
     <view class="modal-head plan-selector-head">
       <view>
@@ -266,14 +266,96 @@
         </view>
 
         <view class="plan-option-materials">{{plan.materialText}}</view>
+        <view class="plan-design-note">
+          <text class="plan-design-note-label">设计观察</text>
+          <text>{{plan.designNote}}</text>
+        </view>
         <view class="plan-option-meta">
           <text>{{plan.beadCount}} 颗</text>
           <text>{{plan.accessoryText}}</text>
           <text class="plan-option-price">{{plan.priceText}}</text>
         </view>
+        <button
+          class="plan-refine-entry"
+          data-index="{{plan.index}}"
+          catchtap="openPlanRefinement"
+          aria-label="不喜欢{{plan.title}}，调整方案"
+        >不喜欢这套，调整方案</button>
       </view>
     </scroll-view>
 
     <button class="plan-revise-button" bindtap="reviseWristSelection">返回修改手围和珠径</button>
+  </view>
+</view>
+
+<view wx:if="{{showAutomaticRecommendation && showPlanRefinement}}" class="modal-mask plan-refinement-mask" bindtap="closePlanRefinement">
+  <view class="plan-refinement-modal" catchtap="noop">
+    <view class="modal-head">
+      <view>
+        <view class="section-kicker">调整 {{refinementPlanTitle}}</view>
+        <view class="modal-title">告诉我哪里需要变化</view>
+        <view class="modal-sub">保留喜欢的材料，其余部分会重新搭配</view>
+      </view>
+      <view class="modal-close" bindtap="closePlanRefinement">×</view>
+    </view>
+
+    <scroll-view class="plan-refinement-scroll" scroll-y enhanced show-scrollbar="{{false}}">
+      <view class="refinement-section">
+        <view class="refinement-label">整体方向</view>
+        <view class="refinement-style-list">
+          <view
+            wx:for="{{refinementStyleOptions}}"
+            wx:key="value"
+            class="refinement-style-option yu-pressable {{refinementStyle === item.value ? 'active' : ''}}"
+            data-value="{{item.value}}"
+            bindtap="selectRefinementStyle"
+          >
+            <view class="refinement-option-title">{{item.label}}</view>
+            <view class="refinement-option-desc">{{item.desc}}</view>
+          </view>
+        </view>
+      </view>
+
+      <view class="refinement-section">
+        <view class="refinement-label">配饰用量</view>
+        <view class="refinement-segment">
+          <view
+            wx:for="{{refinementAccessoryOptions}}"
+            wx:key="value"
+            class="refinement-segment-option {{refinementAccessory === item.value ? 'active' : ''}}"
+            data-value="{{item.value}}"
+            bindtap="selectRefinementAccessory"
+          >{{item.label}}</view>
+        </view>
+      </view>
+
+      <view class="refinement-section" wx:if="{{refinementMaterials.length}}">
+        <view class="refinement-label-row">
+          <view class="refinement-label">想保留的材料</view>
+          <view class="refinement-hint">可选，最多 3 种</view>
+        </view>
+        <view class="refinement-material-list">
+          <view
+            wx:for="{{refinementMaterials}}"
+            wx:key="materialId"
+            class="refinement-material yu-pressable {{item.selected ? 'active' : ''}}"
+            data-id="{{item.materialId}}"
+            bindtap="toggleRefinementMaterial"
+          >
+            <image wx:if="{{item.imageUrl}}" class="refinement-material-image" src="{{item.imageUrl}}" mode="aspectFill" lazy-load></image>
+            <view wx:else class="refinement-material-placeholder"></view>
+            <view class="refinement-material-name">{{item.name}}</view>
+            <view class="refinement-material-check">{{item.selected ? '✓' : '+'}}</view>
+          </view>
+        </view>
+      </view>
+    </scroll-view>
+
+    <button
+      class="yu-button yu-button-primary refinement-submit"
+      loading="{{generating}}"
+      disabled="{{generating}}"
+      bindtap="submitPlanRefinement"
+    >重新生成 3 套</button>
   </view>
 </view>

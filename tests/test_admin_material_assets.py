@@ -174,6 +174,46 @@ def test_binding_material_assets_preserves_profile_and_supports_append(tmp_path)
         )
 
 
+def test_bead_series_are_always_exposed_as_round_while_accessory_shape_is_preserved(tmp_path):
+    service = AdminService(tmp_path / "bead-series-round.db")
+    bead_category = service.save_material_category({"top": "bead", "name": "水晶"})
+    service.save_material_series(
+        {
+            "category_id": bead_category["id"],
+            "name": "测试珠子",
+            "material_params": {"bead_shape": "cube"},
+        }
+    )
+    service.save_material(
+        {
+            "id": "test-round-bead-01",
+            "top": "bead",
+            "category": "水晶",
+            "series": "测试珠子",
+            "name": "测试珠子 8mm",
+            "price": 10,
+            "size": 8,
+            "stock": 1,
+            "enabled": True,
+        }
+    )
+    accessory_category = service.save_material_category({"top": "accessory", "name": "隔珠"})
+    service.save_material_series(
+        {
+            "category_id": accessory_category["id"],
+            "name": "测试隔珠",
+            "material_params": {"bead_shape": "nugget"},
+        }
+    )
+
+    bead = service.list_material_taxonomy(top="bead", include_disabled=True)[0]["series"][0]
+    accessory = service.list_material_taxonomy(top="accessory", include_disabled=True)[0]["series"][0]
+
+    assert bead["material_params"]["bead_shape"] == "round"
+    assert accessory["material_params"]["bead_shape"] == "nugget"
+    assert service.get_material("test-round-bead-01")["material_params"]["bead_shape"] == "round"
+
+
 def test_primary_and_gallery_images_are_stored_independently(tmp_path):
     service = AdminService(tmp_path / "material-gallery-primary.db")
     category = service.save_material_category({"top": "accessory", "name": "隔珠"})
@@ -229,6 +269,35 @@ def test_primary_and_gallery_images_are_stored_independently(tmp_path):
     assert json.loads(row["image_urls_json"]) == [
         "https://cdn.example.com/main.webp",
         "https://cdn.example.com/side.webp",
+    ]
+
+
+def test_series_primary_image_can_be_cleared_without_changing_gallery(tmp_path):
+    service = AdminService(tmp_path / "clear-material-primary.db")
+    category = service.save_material_category({"top": "accessory", "name": "隔珠"})
+    series = service.save_material_series(
+        {
+            "category_id": category["id"],
+            "name": "可清空主图隔珠",
+            "image_url": "https://cdn.example.com/main.webp",
+            "image_urls": ["https://cdn.example.com/gallery-a.webp", "https://cdn.example.com/gallery-b.webp"],
+        }
+    )
+
+    saved = service.save_material_series(
+        {
+            "id": series["id"],
+            "category_id": category["id"],
+            "name": "可清空主图隔珠",
+            "image_url": "",
+            "image_urls": ["https://cdn.example.com/gallery-a.webp", "https://cdn.example.com/gallery-b.webp"],
+        }
+    )
+
+    assert saved["image_url"] == ""
+    assert saved["image_urls"] == [
+        "https://cdn.example.com/gallery-a.webp",
+        "https://cdn.example.com/gallery-b.webp",
     ]
 
 

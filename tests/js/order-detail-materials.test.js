@@ -89,6 +89,34 @@ test('order detail hides internal material classification and recommendation fie
   assert.doesNotMatch(template, /item\.tags|item\.effect|material-tags|material-effect/);
 });
 
+test('designer order asks for an address before starting payment', async () => {
+  let modal = null;
+  let editAddressCalls = 0;
+  const page = loadOrderDetailPage({
+    payOrder: async () => {
+      throw new Error('payment must not start without an address');
+    }
+  });
+  global.wx.showModal = options => {
+    modal = options;
+    options.success({ confirm: true });
+  };
+  page.data.order = {
+    id: 'designer-order-1',
+    receiver: {},
+    canEditAddress: true
+  };
+  page.editAddress = () => {
+    editAddressCalls += 1;
+  };
+
+  await page.continuePay('designer-order-1', 'user-1');
+
+  assert.equal(modal.title, '请先填写收货信息');
+  assert.equal(modal.confirmText, '填写地址');
+  assert.equal(editAddressCalls, 1);
+});
+
 test('order detail keeps one pending-shipment stage before waiting for pickup', () => {
   const page = loadOrderDetailPage();
   const history = [

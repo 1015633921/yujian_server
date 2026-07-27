@@ -22,6 +22,7 @@ from .feature_flags import (
     report_versioning_v2_enabled,
 )
 from .admin_service import AdminService
+from .custom_design_service import CustomDesignService
 from .materials import MaterialCatalogUnavailable, list_materials
 from .order_service import (
     KUAIDI100_CALLBACK_MAX_BYTES,
@@ -42,6 +43,8 @@ from .schemas import (
     CartItemCreateRequest,
     CartItemUpdateRequest,
     CommunityFavoriteSaveRequest,
+    CustomDesignRequestCreate,
+    CustomDesignResponseRequest,
     DailyCheckInRequest,
     DIYDesignSaveRequest,
     DIYRecommendationRequest,
@@ -73,6 +76,7 @@ auth_service = WechatAuthService()
 avatar_storage = AvatarStorage()
 admin_content_service = AdminService()
 order_service = OrderService()
+custom_design_service = CustomDesignService(order_service=order_service)
 BEIJING_TZ = ZoneInfo("Asia/Shanghai")
 LOGGER = logging.getLogger("yujian.business")
 
@@ -413,6 +417,66 @@ def save_diy_design(payload: DIYDesignSaveRequest, principal: UserPrincipal = De
     try:
         safe_payload = owned_payload(payload, principal)
         return success(order_service.save_design(safe_payload.model_dump(mode="json")), "DIY 方案已保存")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/custom-design-requests", summary="申请人工水晶搭配服务")
+def create_custom_design_request(
+    payload: CustomDesignRequestCreate,
+    principal: UserPrincipal = Depends(require_current_user),
+):
+    safe_payload = owned_payload(payload, principal)
+    # Only a source reference is retained; assessment inputs are never copied into this service.
+    if safe_payload.assessment_id:
+        require_assessment_owner(safe_payload.assessment_id, principal)
+    else:
+        require_report_owner(safe_payload.report_id, principal, safe_payload.report_version)
+    try:
+        return success(custom_design_service.create(principal.user_id, safe_payload.model_dump(mode="json")), "申请已提交")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/custom-design-requests", summary="获取我的人工搭配申请")
+def list_custom_design_requests(principal: UserPrincipal = Depends(require_current_user)):
+    return success(custom_design_service.list_for_user(principal.user_id))
+
+
+@router.get("/custom-design-requests/{request_id}", summary="获取人工搭配申请详情")
+def get_custom_design_request(request_id: str, principal: UserPrincipal = Depends(require_current_user)):
+    try:
+        return success(custom_design_service.get_for_user(request_id, principal.user_id))
+    except ValueError as exc:
+        raise private_not_found() from exc
+
+
+@router.post("/custom-design-requests/{request_id}/confirm", summary="确认人工搭配方案")
+def confirm_custom_design_request(
+    request_id: str,
+    payload: CustomDesignResponseRequest,
+    principal: UserPrincipal = Depends(require_current_user),
+):
+    safe_payload = owned_payload(payload, principal)
+    try:
+        return success(custom_design_service.user_response(request_id, principal.user_id, "confirm", safe_payload.note), "已确认方案")
+    except (OrderPriceChangedError, OrderConflictError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except OrderPricingError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/custom-design-requests/{request_id}/revision", summary="申请调整人工搭配方案")
+def revise_custom_design_request(
+    request_id: str,
+    payload: CustomDesignResponseRequest,
+    principal: UserPrincipal = Depends(require_current_user),
+):
+    safe_payload = owned_payload(payload, principal)
+    try:
+        return success(custom_design_service.user_response(request_id, principal.user_id, "revision", safe_payload.note), "已提交调整说明")
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

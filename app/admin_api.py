@@ -3,10 +3,11 @@ from __future__ import annotations
 from typing import Any, Literal
 
 from fastapi import APIRouter, File, Form, Header, HTTPException, Query, Request, UploadFile
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from .admin_service import AdminService
 from .avatar_storage import AvatarStorage
+from .custom_design_service import CustomDesignService
 from .material_asset_upload import (
     MATERIAL_ASSET_PREFIX,
     MAX_MATERIAL_ASSET_BYTES,
@@ -19,6 +20,7 @@ from .order_service import OrderConflictError, OrderService
 admin_router = APIRouter(prefix="/api/v1/admin", tags=["后台管理"])
 admin_service = AdminService()
 order_service = OrderService()
+custom_design_service = CustomDesignService()
 media_storage = AvatarStorage()
 
 
@@ -33,6 +35,120 @@ class AdminAccountPayload(BaseModel):
     display_name: str | None = Field(default="", max_length=120)
     role: str = Field(default="operator", max_length=40)
     status: str = Field(default="active", max_length=20)
+
+
+class CustomDesignWorkbenchPayload(BaseModel):
+    wrist_size_cm: float = Field(ge=12, le=26)
+    bead_size_mm: float = Field(ge=6, le=16)
+    layout: list[dict[str, Any]] = Field(min_length=1, max_length=40)
+    notes: str = Field(default="", max_length=1000)
+
+    @field_validator("layout")
+    @classmethod
+    def validate_layout(cls, values: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        cleaned: list[dict[str, Any]] = []
+        for index, value in enumerate(values):
+            if not isinstance(value, dict):
+                raise ValueError(f"第 {index + 1} 个材料格式无效")
+            material_id = str(
+                value.get("material_id")
+                or value.get("sku_id")
+                or value.get("id")
+                or ""
+            ).strip()
+            if not material_id or len(material_id) > 120:
+                raise ValueError(f"第 {index + 1} 个材料缺少有效 ID")
+            image_url = str(
+                value.get("selected_image_url")
+                or value.get("image_url")
+                or ""
+            ).strip()
+            if image_url and (
+                not image_url.startswith(("https://", "http://"))
+                or len(image_url) > 2000
+            ):
+                raise ValueError(f"第 {index + 1} 个材料图片地址无效")
+            cleaned.append(
+                {
+                    **value,
+                    "id": material_id,
+                    "material_id": material_id,
+                    "quantity": 1,
+                    "selected_image_url": image_url,
+                }
+            )
+        return cleaned
+
+
+class CustomDesignDraftPayload(CustomDesignWorkbenchPayload):
+    pass
+
+
+class CustomDesignProposalPayload(BaseModel):
+    title: str = Field(min_length=1, max_length=160)
+    description: str = Field(default="", max_length=2000)
+    image_urls: list[str] = Field(default_factory=list, max_length=6)
+    workbench: CustomDesignWorkbenchPayload
+
+    @field_validator("image_urls")
+    @classmethod
+    def validate_image_urls(cls, values: list[str]) -> list[str]:
+        cleaned: list[str] = []
+        for value in values:
+            url = str(value or "").strip()
+            if not url.startswith(("https://", "http://")) or len(url) > 2000:
+                raise ValueError("方案图片必须是有效的图片地址")
+            if url not in cleaned:
+                cleaned.append(url)
+        return cleaned
+
+
+def validated_custom_design_workbench(
+    payload: CustomDesignWorkbenchPayload,
+) -> dict[str, Any]:
+    raw = payload.model_dump(mode="json")
+    requested_layout = raw["layout"]
+    snapshots = order_service.validate_and_refresh_material_prices(requested_layout)
+    layout: list[dict[str, Any]] = []
+    for requested, snapshot in zip(requested_layout, snapshots, strict=True):
+        selected_image_url = str(requested.get("selected_image_url") or "").strip()
+        allowed_images = {
+            str(url).strip()
+            for url in snapshot.get("gallery_image_urls") or []
+            if str(url).strip()
+        }
+        if selected_image_url and selected_image_url not in allowed_images:
+            raise ValueError(f"{snapshot.get('name') or '材料'}的图库图片已更新，请重新选择")
+        exact_image_url = selected_image_url or str(snapshot.get("image_url") or "")
+        layout.append(
+            {
+                **snapshot,
+                "id": snapshot["id"],
+                "material_id": snapshot["id"],
+                "quantity": 1,
+                "selected_image_url": exact_image_url,
+                "image_url": exact_image_url,
+            }
+        )
+    total_fee = sum(int(item.get("subtotal_cents") or 0) for item in layout)
+    return {
+        "schema_version": 1,
+        "wrist_size_cm": raw["wrist_size_cm"],
+        "bead_size_mm": raw["bead_size_mm"],
+        "layout": layout,
+        "selected": [item["id"] for item in layout],
+        "notes": raw.get("notes") or "",
+        "summary": {
+            "count": len(layout),
+            "total_fee": total_fee,
+            "price": order_service.cents_text(total_fee),
+        },
+    }
+
+
+class CustomDesignSettingsPayload(BaseModel):
+    daily_capacity: int = Field(ge=0, le=200)
+    sla_hours: int = Field(ge=1, le=168)
 
 
 class AdminAccountUpdatePayload(BaseModel):
@@ -390,6 +506,13 @@ def require_admin(authorization: str | None) -> dict:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
 
 
+def require_design_operator(authorization: str | None) -> dict:
+    actor = require_admin(authorization)
+    if actor.get("role") == "viewer":
+        raise HTTPException(status_code=403, detail="只读账号不能处理人工搭配工单")
+    return actor
+
+
 def request_context(request: Request) -> dict[str, str]:
     return {
         "ip": request.client.host if request.client else "",
@@ -671,6 +794,83 @@ def checkins(
 ):
     require_admin(authorization)
     return success(admin_service.list_checkins(keyword=keyword, limit=limit))
+
+
+@admin_router.get("/custom-design-requests", summary="人工搭配工单列表")
+def custom_design_requests(
+    status: str = Query(default="", max_length=40),
+    limit: int = Query(default=100, ge=1, le=300),
+    authorization: str | None = Header(default=None),
+):
+    require_admin(authorization)
+    return success(custom_design_service.list_for_admin(status=status, limit=limit))
+
+
+@admin_router.get("/custom-design-requests/settings", summary="人工搭配服务设置")
+def custom_design_settings(authorization: str | None = Header(default=None)):
+    require_admin(authorization)
+    return success(custom_design_service.get_settings())
+
+
+@admin_router.put("/custom-design-requests/settings", summary="更新人工搭配服务设置")
+def update_custom_design_settings(
+    payload: CustomDesignSettingsPayload,
+    authorization: str | None = Header(default=None),
+):
+    require_design_operator(authorization)
+    return success(custom_design_service.save_settings(payload.model_dump()), "人工搭配服务设置已保存")
+
+
+@admin_router.get("/custom-design-requests/{request_id}", summary="人工搭配工单详情")
+def custom_design_request_detail(request_id: str, authorization: str | None = Header(default=None)):
+    require_admin(authorization)
+    try:
+        return success(custom_design_service.get_for_admin(request_id))
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@admin_router.put("/custom-design-requests/{request_id}/draft", summary="保存设计师结构化草稿")
+def save_custom_design_draft(
+    request_id: str,
+    payload: CustomDesignDraftPayload,
+    authorization: str | None = Header(default=None),
+):
+    actor = require_design_operator(authorization)
+    try:
+        workbench = validated_custom_design_workbench(payload)
+        return success(
+            custom_design_service.save_draft(
+                request_id,
+                str(actor.get("admin_id") or actor.get("username") or "operator"),
+                workbench,
+            ),
+            "设计草稿已保存",
+        )
+    except (OrderConflictError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@admin_router.post("/custom-design-requests/{request_id}/proposal", summary="发布结构化人工搭配方案")
+def publish_custom_design_proposal(
+    request_id: str,
+    payload: CustomDesignProposalPayload,
+    authorization: str | None = Header(default=None),
+):
+    actor = require_design_operator(authorization)
+    try:
+        proposal_payload = payload.model_dump(mode="json")
+        proposal_payload["workbench"] = validated_custom_design_workbench(payload.workbench)
+        return success(
+            custom_design_service.publish_proposal(
+                request_id,
+                str(actor.get("admin_id") or actor.get("username") or "operator"),
+                proposal_payload,
+            ),
+            "方案已提交给用户",
+        )
+    except (OrderConflictError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @admin_router.get("/orders", summary="后台订单列表")
@@ -1355,6 +1555,12 @@ def disable_material_taxonomy(item_id: str, authorization: str | None = Header(d
         return success(admin_service.disable_material_taxonomy_item(item_id, actor=actor), "分类或品种已停用")
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@admin_router.post("/material-taxonomy/repair-enabled-state", summary="修复材料层级停用脏数据")
+def repair_material_taxonomy_enabled_state(authorization: str | None = Header(default=None)):
+    actor = require_admin(authorization)
+    return success(admin_service.repair_material_hierarchy_enabled_state(actor=actor), "材料层级停用状态已修复")
 
 
 @admin_router.get("/material-option-items", summary="后台材料字段字典")

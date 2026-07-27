@@ -152,6 +152,133 @@ test('backend recommendation replaces stale placement prices with current sellab
   assert.equal(summary.priceText, '160.00');
 });
 
+test('backend recommendation waits for a missing metal accessory instead of replacing it with a bead', () => {
+  const page = loadPage('miniprogram/pages/workspace/workspace.js');
+  const bead = {
+    id: 'bead-8',
+    skuId: 'bead-sku-8',
+    material_code: 'clear_quartz',
+    top: 'bead',
+    category: '白水晶',
+    series: '白水晶',
+    name: '白水晶',
+    size: 8,
+    price: 10,
+    stock: 99,
+    enabled: true,
+    image_url: 'https://cdn.example.com/bead.webp'
+  };
+  const payload = {
+    bracelet_plan: {
+      validation: { is_valid: true },
+      items: [
+        { code: 'clear_quartz', material_id: 'bead-8' },
+        { code: 'silver_spacer', material_id: 'metal-spacer-8', top: 'accessory' }
+      ],
+      layout: [
+        { crystal_code: 'clear_quartz', material_id: 'bead-8', top: 'bead' },
+        {
+          crystal_code: 'silver_spacer',
+          material_id: 'metal-spacer-8',
+          material_code: 'silver_spacer',
+          top: 'accessory'
+        }
+      ]
+    }
+  };
+  const instance = Object.assign({}, page, {
+    data: { ...page.data, selected: [], placements: [] },
+    materialCatalog: [bead],
+    materialPayloadReady: true,
+    pendingBackendRecommendation: true
+  });
+  instance.rebuildMaterialLookup(instance.materialCatalog);
+  global.wx = {
+    getStorageSync(key) {
+      return key === 'diyWorkbenchPayload' ? payload : '';
+    },
+    showToast() {}
+  };
+
+  const selected = instance.buildBackendRecommendationSelected(payload);
+  const applied = instance.applyBackendRecommendation({ silent: true, keepPendingOnEmpty: true });
+
+  assert.deepEqual(selected, ['bead-8']);
+  assert.equal(applied, false);
+  assert.equal(instance.pendingBackendRecommendation, true);
+  assert.deepEqual(instance.pendingMaterialIds().sort(), ['bead-8', 'metal-spacer-8'].sort());
+});
+
+test('backend recommendation fetches its missing metal accessory before applying the complete layout', async () => {
+  const page = loadPage('miniprogram/pages/workspace/workspace.js');
+  const bead = {
+    id: 'bead-8',
+    skuId: 'bead-sku-8',
+    material_code: 'clear_quartz',
+    top: 'bead',
+    size: 8,
+    price: 10,
+    stock: 99,
+    enabled: true,
+    image_url: 'https://cdn.example.com/bead.webp'
+  };
+  const metal = {
+    id: 'metal-spacer-8',
+    skuId: 'metal-sku-8',
+    material_code: 'silver_spacer',
+    top: 'accessory',
+    size: 3,
+    price: 6,
+    stock: 99,
+    enabled: true,
+    image_url: 'https://cdn.example.com/metal.webp'
+  };
+  const payload = {
+    bracelet_plan: {
+      items: [
+        { code: 'clear_quartz', material_id: bead.id },
+        { code: 'silver_spacer', material_id: metal.id, top: 'accessory' }
+      ],
+      layout: [
+        { crystal_code: 'clear_quartz', material_id: bead.id, top: 'bead' },
+        { crystal_code: 'silver_spacer', material_id: metal.id, top: 'accessory' }
+      ]
+    }
+  };
+  let requestedIds = [];
+  let appliedAfterFetch = false;
+  const instance = Object.assign({}, page, {
+    data: { ...page.data, selected: [], placements: [] },
+    materialCatalog: [bead],
+    materialPayloadReady: true,
+    pendingBackendRecommendation: true,
+    async fetchMaterialsByIds(ids) {
+      requestedIds = ids;
+      this.mergeMaterialCatalog([metal]);
+      return true;
+    },
+    applyBackendRecommendation() {
+      appliedAfterFetch = this.hasMaterial(metal.id);
+      return appliedAfterFetch;
+    }
+  });
+  instance.rebuildMaterialLookup(instance.materialCatalog);
+  global.wx = {
+    getStorageSync(key) {
+      return key === 'diyWorkbenchPayload' ? payload : '';
+    }
+  };
+
+  const applied = await instance.ensurePendingMaterialDetails({
+    silent: true,
+    keepPendingOnEmpty: true
+  });
+
+  assert.deepEqual(requestedIds, [metal.id]);
+  assert.equal(appliedAfterFetch, true);
+  assert.equal(applied, true);
+});
+
 test('workspace keeps large-screen tray controls above the material drawer', () => {
   const page = loadPage('miniprogram/pages/workspace/workspace.js');
   const viewportRpx = Math.round(932 * 750 / 430);
@@ -433,6 +560,8 @@ test('backend recommendation recalculates only after selected beads reach page d
   };
   let pendingSetData = null;
   let countSeenByRecalculate = -1;
+  let canvasInitCount = 0;
+  let canvasStopCount = 0;
   const instance = Object.assign({}, page, {
     data: { ...page.data, selected: [], placements: [], wristSize: 16 },
     materialPayloadReady: true,
@@ -447,6 +576,12 @@ test('backend recommendation recalculates only after selected beads reach page d
     },
     recalculate() {
       countSeenByRecalculate = this.data.selected.length;
+    },
+    initWorkspaceCanvases() {
+      canvasInitCount += 1;
+    },
+    stopCanvasRenderLoop() {
+      canvasStopCount += 1;
     }
   });
   global.wx = {
@@ -455,7 +590,10 @@ test('backend recommendation recalculates only after selected beads reach page d
       return '';
     },
     setStorageSync() {},
-    showToast() {}
+    showToast() {},
+    nextTick(callback) {
+      callback();
+    }
   };
 
   const applied = instance.applyBackendRecommendation({ silent: true });
@@ -467,6 +605,49 @@ test('backend recommendation recalculates only after selected beads reach page d
   pendingSetData.callback();
   assert.ok(instance.data.selected.length > 0);
   assert.equal(countSeenByRecalculate, instance.data.selected.length);
+  assert.equal(canvasStopCount, 1);
+  assert.equal(canvasInitCount, 1);
+  assert.equal(instance.braceletCanvasDirty, true);
+});
+
+test('workspace keeps a validated recommendation on the backend bead-count and wrist contract', () => {
+  const page = loadPage('miniprogram/pages/workspace/workspace.js');
+  const items = Array.from({ length: 24 }, (_, index) => ({
+    id: `bead-${index}`,
+    size: 8,
+    price: 10,
+    weight: 1,
+    top: 'bead'
+  }));
+  const instance = Object.assign({}, page, {
+    data: {
+      ...page.data,
+      wristSize: 16,
+      sourceContext: {
+        source: 'backend_recommendation',
+        source_label: '推荐方案',
+        target_bead_count: 24,
+        recommendation_validation: {
+          is_valid: true,
+          estimated_stringed_length_cm: 16.7,
+          target_stringed_length_cm: 16.8,
+          length_tolerance_cm: 0.5
+        }
+      }
+    },
+    materialCatalogDesignVersion: 1,
+    workspaceSummaryCache: null,
+    materialElementKey() {
+      return '';
+    }
+  });
+
+  const { summary } = instance.getCachedWorkspaceSummary(items, []);
+
+  assert.equal(summary.recommendedCount, 24);
+  assert.equal(summary.count, 24);
+  assert.equal(summary.warning, '合适');
+  assert.equal(summary.currentWrist, '15.9');
 });
 
 test('workspace retries the canvas renderer when drawing fails', () => {
@@ -704,6 +885,30 @@ test('workspace renders adjusted metal assets without synthetic highlights or fi
   assert.doesNotMatch(workspaceJs, /StudioMetalLight|MetalLightTexture|isSilverToneMetalMaterial/);
   assert.doesNotMatch(workspaceWxml, /materialToneClass|material-tone-silver/);
   assert.doesNotMatch(workspaceWxss, /workspace-silver-filter|material-tone-silver/);
+});
+
+test('workspace keeps the selected bead card inside the bracelet center', () => {
+  const workspaceWxml = fs.readFileSync(
+    path.resolve(__dirname, '../../miniprogram/pages/workspace/workspace.wxml'),
+    'utf8'
+  );
+  const workspaceWxss = fs.readFileSync(
+    path.resolve(__dirname, '../../miniprogram/pages/workspace/workspace.wxss'),
+    'utf8'
+  );
+  const circleStart = workspaceWxml.indexOf('<view class="bracelet-circle');
+  const cardStart = workspaceWxml.indexOf('class="order-panel bead-info-panel"');
+  const watermarkStart = workspaceWxml.indexOf('class="completion-watermark', cardStart);
+  const cardRule = workspaceWxss.match(/\.bead-info-panel\s*\{[^}]+\}/s);
+
+  assert.ok(circleStart >= 0);
+  assert.ok(cardStart > circleStart);
+  assert.ok(watermarkStart > cardStart);
+  assert.match(workspaceWxml, /class="order-panel bead-info-panel" catchtap="stopPropagation"/);
+  assert.ok(cardRule);
+  assert.match(cardRule[0], /top:\s*50%/);
+  assert.match(cardRule[0], /bottom:\s*auto/);
+  assert.match(cardRule[0], /transform:\s*translate\(-50%,\s*-50%\)/);
 });
 
 test('workspace material selection randomly uses gallery entries without primary or URL deduplication', () => {
@@ -999,7 +1204,8 @@ test('report leads with a plain-language answer and keeps technical evidence sec
   assert.doesNotMatch(reportWxml, /class="energy-score"/);
   assert.match(reportWxml, /class="state-prompt[^>]+aria-role="button"/);
   assert.doesNotMatch(reportWxml, /class="recommend-band/);
-  assert.equal((reportWxml.match(/查看专属手串方案/g) || []).length, 1);
+  assert.equal((reportWxml.match(/申请人工搭配/g) || []).length, 1);
+  assert.match(reportJs, /openCustomDesignService/);
   assert.doesNotMatch(reportWxml, /MBTI 偏好如何参与/);
   assert.match(reportWxml, />为什么这样推荐<\/view>/);
   assert.match(appJson, /pages\/report-basis\/report-basis/);

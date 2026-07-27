@@ -287,6 +287,41 @@ def test_recommendation_returns_three_distinct_editable_design_directions():
     )
 
 
+def test_refined_recommendation_rejects_old_plan_and_keeps_selected_material():
+    request = make_request(wrist_size_cm=16, bead_size_mm=8)
+    energy = EnergyCalculator().calculate(request)
+    engine = RecommendationEngine()
+    original = engine.recommend(request, energy)
+    rejected = original["bracelet_plans"][1]
+    locked = next(
+        item for item in rejected["items"]
+        if item.get("top") == "accessory"
+    )
+
+    refined = engine.recommend(
+        request,
+        energy,
+        {
+            "style_preference": "layered",
+            "accessory_preference": "more",
+            "locked_material_ids": [locked["material_id"]],
+            "rejected_plan_id": rejected["plan_id"],
+        },
+    )
+
+    assert len(refined["bracelet_plans"]) == 3
+    assert rejected["plan_id"] not in {
+        plan["plan_id"] for plan in refined["bracelet_plans"]
+    }
+    assert refined["bracelet_plan"]["style"] == "signature_accent"
+    assert all(
+        locked["material_id"] in {
+            item["material_id"] for item in plan["items"]
+        }
+        for plan in refined["bracelet_plans"]
+    )
+
+
 def test_at_least_one_recommendation_uses_sellable_symmetric_accessories():
     request = make_request(wrist_size_cm=16, bead_size_mm=8)
     energy = EnergyCalculator().calculate(request)
@@ -462,6 +497,38 @@ def test_recommendation_fails_closed_when_no_catalog_code_is_sellable():
             RecommendationEngine.primary_pools(catalog),
             available_codes=set(),
         )
+
+
+def test_recommendation_accepts_adjacent_commercial_bead_sizes(monkeypatch):
+    catalog = {
+        "near_size": {
+            "name": "邻近规格珠",
+            "element": "木",
+            "secondary_elements": [],
+            "color": "#7d9b6d",
+            "effects": ["舒展"],
+        }
+    }
+    materials = [
+        {
+            "id": "near-size-9mm",
+            "material_code": "near_size",
+            "name": "邻近规格珠 9mm",
+            "size": 9,
+            "enabled": True,
+            "stock": 20,
+            "price": 12,
+        }
+    ]
+    monkeypatch.setattr(
+        RecommendationEngine,
+        "load_bead_inventory",
+        staticmethod(lambda: (materials, True)),
+    )
+
+    assert RecommendationEngine.available_catalog_codes(catalog, 8) == {"near_size"}
+    assert RecommendationEngine.resolve_material_for_code("near_size", 8)["id"] == "near-size-9mm"
+    assert RecommendationEngine.resolve_material_for_code("near_size", 11) == {}
 
 
 def test_production_inventory_does_not_use_static_materials(monkeypatch):

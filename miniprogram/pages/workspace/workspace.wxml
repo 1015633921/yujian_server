@@ -8,11 +8,11 @@
   <view class="canvas-area">
     <view class="studio-metrics {{countOverClass}}" bindtap="openWristSetting">
       <view class="studio-metric">
-        <view class="studio-metric-label">手串颗数</view>
+        <view class="studio-metric-label">方案珠数</view>
         <view class="studio-metric-value">{{summary.count}}<text class="studio-metric-sub">/{{summary.recommendedCount}} 颗</text></view>
       </view>
       <view class="studio-metric">
-        <view class="studio-metric-label">有效腕围</view>
+        <view class="studio-metric-label">预计腕围 · 目标{{wristSize}}cm</view>
         <view class="studio-metric-value {{lengthOverClass}}">{{summary.currentWrist}}<text class="studio-metric-sub"> cm</text></view>
       </view>
     </view>
@@ -61,6 +61,33 @@
           <view class="canvas-error-subtitle">请重新加载后继续设计</view>
           <button class="canvas-error-retry" bindtap="retryCanvasRenderer">重新加载</button>
         </view>
+        <view wx:if="{{selectedBeadInfo}}" class="order-panel bead-info-panel" catchtap="stopPropagation">
+          <view class="bead-info-close" catchtap="closeSelectedBeadInfo" aria-role="button" aria-label="关闭">×</view>
+          <view class="bead-info-copy">
+            <view class="order-title">第 {{selectedBeadInfo.position}} 颗</view>
+            <view class="bead-info-name">{{selectedBeadInfo.name}}</view>
+            <view class="bead-info-details">
+              <view class="bead-info-row">
+                <text class="bead-info-label">珠径</text>
+                <text class="bead-info-value">{{selectedBeadInfo.diameterText}}</text>
+              </view>
+              <view class="bead-info-row">
+                <text class="bead-info-label">价格</text>
+                <text class="bead-info-value">{{selectedBeadInfo.priceText}}</text>
+              </view>
+            </view>
+            <view wx:if="{{selectedBeadInfo.capItems.length}}" class="bead-cap-list">
+              <view wx:for="{{selectedBeadInfo.capItems}}" wx:key="side" class="bead-cap-item">
+                <view class="bead-cap-copy">
+                  <text class="bead-cap-side">{{item.sideLabel}}</text>
+                  <text class="bead-cap-name">{{item.name}}</text>
+                  <text class="bead-cap-price">{{item.priceText}}</text>
+                </view>
+                <view class="bead-cap-remove" data-side="{{item.side}}" catchtap="removeSelectedBeadCap">移除</view>
+              </view>
+            </view>
+          </view>
+        </view>
         <view wx:if="{{isLooseMode}}" class="completion-watermark {{completionWatermarkClass}}">
           <view class="studio-compass">✦</view>
           <view class="completion-sub"></view>
@@ -91,37 +118,9 @@
       <image class="plate-tool-icon plate-tool-icon-image plate-tool-icon-image-clear" src="{{workspaceIcons.clear}}" mode="aspectFit"></image>
     </view>
 
-    <view class="plate-random-btn workspace-guide-anchor-string {{shuffleButtonClass}}" catchtap="toggleStringMode" hover-class="plate-random-press" aria-role="button" aria-label="随机成串">
+    <view class="plate-random-btn workspace-guide-anchor-string {{shuffleButtonClass}}" catchtap="toggleStringMode" hover-class="plate-random-press" aria-role="button" aria-label="{{randomTitle}}">
       <image class="plate-random-icon-image" src="{{workspaceIcons.string}}" mode="aspectFit"></image>
       <view class="plate-random-text">{{randomTitle}}</view>
-    </view>
-
-    <view wx:if="{{selectedBeadInfo}}" class="order-panel bead-info-panel">
-      <view class="bead-info-close" catchtap="closeSelectedBeadInfo" aria-role="button" aria-label="关闭">×</view>
-      <view class="bead-info-copy">
-        <view class="order-title">第 {{selectedBeadInfo.position}} 颗</view>
-        <view class="bead-info-name">{{selectedBeadInfo.name}}</view>
-        <view class="bead-info-details">
-          <view class="bead-info-row">
-            <text class="bead-info-label">珠径</text>
-            <text class="bead-info-value">{{selectedBeadInfo.diameterText}}</text>
-          </view>
-          <view class="bead-info-row">
-            <text class="bead-info-label">价格</text>
-            <text class="bead-info-value">{{selectedBeadInfo.priceText}}</text>
-          </view>
-        </view>
-        <view wx:if="{{selectedBeadInfo.capItems.length}}" class="bead-cap-list">
-          <view wx:for="{{selectedBeadInfo.capItems}}" wx:key="side" class="bead-cap-item">
-            <view class="bead-cap-copy">
-              <text class="bead-cap-side">{{item.sideLabel}}</text>
-              <text class="bead-cap-name">{{item.name}}</text>
-              <text class="bead-cap-price">{{item.priceText}}</text>
-            </view>
-            <view class="bead-cap-remove" data-side="{{item.side}}" catchtap="removeSelectedBeadCap">移除</view>
-          </view>
-        </view>
-      </view>
     </view>
   </view>
 
@@ -153,7 +152,7 @@
       <view wx:for="{{topTabs}}" wx:for-index="tabIndex" wx:key="key" class="top-tab {{item.className}} {{tabIndex === topTabs.length - 1 ? 'last' : ''}}" data-top="{{item.value}}" bindtap="selectTop">{{item.label}}</view>
       <view class="drawer-checkout">
         <view class="drawer-price-block">
-          <text>当前方案</text>
+          <text>{{workspacePlanLabel}}</text>
           <view>¥{{summary.priceText}}</view>
         </view>
       </view>
@@ -208,6 +207,7 @@
               data-id="{{item.id}}"
               data-index="{{index}}"
               bindtap="addMaterial"
+              bindlongpress="openMaterialDetail"
             >
               <image wx:if="{{item.image_url}}" class="material-sphere material-image {{item.material_shape_class}}" src="{{item.image_url}}" mode="aspectFit" lazy-load="{{true}}" webp="{{true}}" fade-in="{{false}}" data-id="{{item.id}}" binderror="onMaterialImageError"></image>
               <view wx:else class="material-sphere" style="background: radial-gradient(circle at 32% 26%, {{item.shine}} 0 10%, {{item.color}} 12% 58%, rgba(0,0,0,.22) 100%);"></view>
@@ -240,6 +240,37 @@
       </view>
     </view>
 
+  </view>
+
+  <view wx:if="{{showMaterialDetail}}" class="material-detail-mask" bindtap="closeMaterialDetail">
+    <view class="material-detail-sheet" catchtap="stopPropagation">
+      <view class="material-detail-head">
+        <view>
+          <view class="material-detail-eyebrow">{{materialDetail.typeLabel}}</view>
+          <view class="material-detail-title">材料详情</view>
+        </view>
+        <view class="material-detail-close" catchtap="closeMaterialDetail" aria-role="button" aria-label="关闭">×</view>
+      </view>
+      <scroll-view class="material-detail-body" scroll-y enhanced="{{true}}" show-scrollbar="{{false}}">
+        <swiper wx:if="{{materialDetail.images.length}}" class="material-detail-gallery" circular indicator-dots indicator-color="rgba(23,23,23,.18)" indicator-active-color="#171917">
+          <swiper-item wx:for="{{materialDetail.images}}" wx:key="index">
+            <image class="material-detail-image" src="{{item}}" mode="aspectFit"></image>
+          </swiper-item>
+        </swiper>
+        <view wx:else class="material-detail-image material-detail-image-placeholder" style="{{materialDetail.fallbackStyle}}"></view>
+        <view class="material-detail-summary">
+          <view class="material-detail-name">{{materialDetail.name}}</view>
+          <view class="material-detail-price">{{materialDetail.priceText}}</view>
+        </view>
+        <view class="material-detail-fields">
+          <view wx:for="{{materialDetail.fields}}" wx:key="label" class="material-detail-field">
+            <text class="material-detail-field-label">{{item.label}}</text>
+            <text class="material-detail-field-value">{{item.value}}</text>
+          </view>
+        </view>
+      </scroll-view>
+      <button class="material-detail-add" catchtap="addMaterialFromDetail">加入工作台</button>
+    </view>
   </view>
 
   <view wx:if="{{showWristPicker}}" class="wrist-picker-mask" bindtap="closeWristSetting">

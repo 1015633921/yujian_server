@@ -255,7 +255,9 @@ test('variety directory keeps search and cascading filters in one toolbar', () =
   assert.match(html, /id="catalogVarietyKeyword"[^>]*oninput="renderMaterialVarietiesPage\(\)"/);
   assert.match(html, /id="catalogVarietyTypeFilter"/);
   assert.match(html, /id="catalogVarietyCategoryFilter"/);
+  assert.match(html, /id="catalogVarietyStatusFilter"[^>]*onchange="renderMaterialVarietiesPage\(\)"/);
   assert.match(script, /formValue\('catalogVarietyKeyword'\)\.trim\(\)\.toLowerCase\(\)/);
+  assert.match(script, /formValue\('catalogVarietyStatusFilter'\)/);
   assert.match(script, /searchable\.includes\(keyword\)/);
 });
 
@@ -264,6 +266,7 @@ test('variety directory search matches variety, category, and workbench shape', 
     catalogVarietyKeyword: { value: '随形' },
     catalogVarietyTypeFilter: { value: '' },
     catalogVarietyCategoryFilter: { value: '' },
+    catalogVarietyStatusFilter: { value: '' },
   };
   const runtime = adminRuntime(elements);
   vm.runInContext(`
@@ -288,4 +291,24 @@ test('variety directory search matches variety, category, and workbench shape', 
 
   assert.equal(rows.length, 1);
   assert.equal(rows[0].item.id, 'red-nugget');
+});
+
+test('variety directory filters enabled and disabled entries by status', () => {
+  const elements = {
+    catalogVarietyKeyword: { value: '' },
+    catalogVarietyTypeFilter: { value: '' },
+    catalogVarietyCategoryFilter: { value: '' },
+    catalogVarietyStatusFilter: { value: 'disabled' },
+  };
+  const runtime = adminRuntime(elements);
+  vm.runInContext(`
+    state.cache.materialTaxonomy = [{ id: 'cat', kind: 'category', top: 'bead', name: '水晶', enabled: true, series: [
+      { id: 'enabled', name: '白水晶', enabled: true },
+      { id: 'disabled', name: '黑曜石', enabled: false }
+    ] }];
+  `, runtime);
+
+  assert.deepEqual(Array.from(runtime.materialVarietyRows(), row => row.item.id), ['disabled']);
+  elements.catalogVarietyStatusFilter.value = 'enabled';
+  assert.deepEqual(Array.from(runtime.materialVarietyRows(), row => row.item.id), ['enabled']);
 });

@@ -20,6 +20,9 @@ from app.migrations.versions import v20260714_10_material_physical_specs
 from app.migrations.versions import v20260715_11_material_types
 from app.migrations.versions import v20260723_12_ai_material_annotations
 from app.migrations.versions import v20260724_13_web_login_pairing
+from app.migrations.versions import v20260727_14_custom_design_service
+from app.migrations.versions import v20260727_15_report_codes
+from app.migrations.versions import v20260727_16_custom_design_workbench
 
 MIGRATIONS = [
     v20260712_01_p0a_security,
@@ -35,6 +38,9 @@ MIGRATIONS = [
     v20260715_11_material_types,
     v20260723_12_ai_material_annotations,
     v20260724_13_web_login_pairing,
+    v20260727_14_custom_design_service,
+    v20260727_15_report_codes,
+    v20260727_16_custom_design_workbench,
 ]
 
 

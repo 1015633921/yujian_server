@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import math
 import os
 
@@ -21,7 +22,7 @@ STRINGED_COMFORT_ALLOWANCE_MM = 8
 MIN_RECOMMENDED_BEAD_COUNT = 12
 MAX_RECOMMENDED_BEAD_COUNT = 40
 STRINGED_LENGTH_TOLERANCE_CM = 0.5
-BRACELET_COMPOSER_VERSION = "2026-07-24-v2"
+BRACELET_COMPOSER_VERSION = "2026-07-27-v3"
 
 CRYSTAL_CATALOG = {
     "titanium_quartz": {
@@ -212,7 +213,8 @@ class RecommendationEngine:
                     pool.append(code)
         return pools
 
-    def recommend(self, request: AssessmentRequest, energy: dict) -> dict:
+    def recommend(self, request: AssessmentRequest, energy: dict, refinement: dict | None = None) -> dict:
+        refinement = refinement or {}
         final = energy["final"]
         primary_wish = request.primary_core_wish
         context = self.recommendation_context(request, energy)
@@ -220,74 +222,133 @@ class RecommendationEngine:
         catalog = self.catalog()
         primary_pools = self.primary_pools(catalog)
         available_codes = self.available_catalog_codes(catalog, request.bead_size_mm)
-        primary_code = self.select_primary(request, energy, context, catalog, primary_pools, available_codes)
+        primary_codes = self.select_primary_candidates(
+            request, energy, context, catalog, primary_pools, available_codes
+        )
+        primary_code = primary_codes[0]
         primary_data = catalog[primary_code]
         excluded = {primary_data["element"], *primary_data["secondary_elements"]}
         support_element = self.select_support_element(final, excluded, useful_elements)
-        support_codes = self.select_supporting(
-            support_element,
-            excluded,
-            primary_code,
-            request,
-            energy,
-            context,
-            catalog,
-            primary_pools,
-            available_codes,
-        )
-
-        primary = self.build_item(
-            primary_code,
-            role="主石",
-            quantity=1,
-            bead_size_mm=request.bead_size_mm,
-            reason=f"你的首要佩戴目标是“{safe_wish_label(primary_wish)}”，主石优先承接这份当下诉求。",
-            catalog=catalog,
-        )
-        supporting = [
-            self.build_item(
-                support_codes[0],
+        accessory_preference = refinement.get("accessory_preference") or "balanced"
+        accessory_limit = 1 if accessory_preference == "less" else 2
+        palette_variants = []
+        for variant_index in range(3):
+            variant_primary_code = primary_codes[min(variant_index, len(primary_codes) - 1)]
+            variant_primary_data = catalog[variant_primary_code]
+            variant_excluded = {
+                variant_primary_data["element"],
+                *variant_primary_data["secondary_elements"],
+            }
+            variant_support_element = self.select_support_element(final, variant_excluded, useful_elements)
+            variant_support_codes = self.select_supporting(
+                variant_support_element,
+                variant_excluded,
+                variant_primary_code,
+                request,
+                energy,
+                context,
+                catalog,
+                primary_pools,
+                available_codes,
+                variant_index=variant_index,
+            )
+            variant_primary = self.build_item(
+                variant_primary_code,
+                role="主石",
+                quantity=1,
+                bead_size_mm=request.bead_size_mm,
+                reason=f"你的首要佩戴目标是“{safe_wish_label(primary_wish)}”，主石优先承接这份当下诉求。",
+                catalog=catalog,
+            )
+            variant_support = self.build_item(
+                variant_support_codes[0],
                 role="调和配珠",
                 quantity=1,
                 bead_size_mm=request.bead_size_mm,
-                reason=f"结合元素参考与当前状态，本次配珠优先照看{support_element}，用于{ELEMENT_LANGUAGE[support_element]}。",
+                reason=f"结合元素参考与当前状态，本次配珠优先照看{variant_support_element}，用于{ELEMENT_LANGUAGE[variant_support_element]}。",
                 catalog=catalog,
-            ),
-            self.build_item(
-                support_codes[1],
+            )
+            variant_accent = self.build_item(
+                variant_support_codes[1],
                 role="点睛配珠",
                 quantity=2,
                 bead_size_mm=request.bead_size_mm,
-                reason="作为两侧点睛珠，帮助主石与调和配珠之间形成更柔和的视觉过渡。",
-                catalog=catalog,
-            ),
-        ]
-        additional_code = self.select_additional_support(
-            selected_codes={primary_code, *support_codes},
-            request=request,
-            energy=energy,
-            context=context,
-            catalog=catalog,
-            primary_pools=primary_pools,
-            available_codes=available_codes,
-        )
-        additional = (
-            self.build_item(
-                additional_code,
-                role="过渡配珠",
-                quantity=1,
-                bead_size_mm=request.bead_size_mm,
-                reason="作为过渡材质加入少量层次，让颜色和质感变化更自然。",
+                reason="作为两侧点睛珠，帮助主石与调和配珠之间形成更自然的色彩与质感过渡。",
                 catalog=catalog,
             )
-            if additional_code
-            else supporting[0]
-        )
-        accessories = self.select_accessory_items(
-            request=request,
-            context=context,
-            bead_items=[primary, *supporting, additional],
-        )
+            additional_code = self.select_additional_support(
+                selected_codes={variant_primary_code, *variant_support_codes},
+                request=request,
+                energy=energy,
+                context=context,
+                catalog=catalog,
+                primary_pools=primary_pools,
+                available_codes=available_codes,
+                variant_index=variant_index,
+            )
+            variant_transition = (
+                self.build_item(
+                    additional_code,
+                    role="过渡配珠",
+                    quantity=1,
+                    bead_size_mm=request.bead_size_mm,
+                    reason="作为过渡材质加入少量层次，让颜色和质感变化更自然。",
+                    catalog=catalog,
+                )
+                if additional_code
+                else variant_support
+            )
+            variant_accessories = self.select_accessory_items(
+                request=request,
+                context=context,
+                bead_items=[variant_primary, variant_support, variant_accent, variant_transition],
+                limit=accessory_limit,
+            )
+            palette_variants.append(
+                {
+                    "primary": variant_primary,
+                    "support": variant_support,
+                    "accent": variant_accent,
+                    "transition": variant_transition,
+                    "accessories": variant_accessories,
+                }
+            )
+        primary = palette_variants[0]["primary"]
+        supporting = [palette_variants[0]["support"], palette_variants[0]["accent"]]
+        additional = palette_variants[0]["transition"]
+        accessories = palette_variants[0]["accessories"]
+        locked_ids = set(refinement.get("locked_material_ids") or [])
+        available_items = [
+            item
+            for palette in palette_variants
+            for item in (
+                palette["primary"],
+                palette["support"],
+                palette["accent"],
+                palette["transition"],
+                *palette["accessories"],
+            )
+        ]
+        locked_items = [
+            {**item, "locked": True}
+            for item in available_items
+            if self.item_identity(item) in locked_ids
+        ]
+        if locked_ids and len({self.item_identity(item) for item in locked_items}) != len(locked_ids):
+            raise ValueError("部分保留材料已不可用，请重新选择")
+        locked_accessories = [item for item in locked_items if item.get("top") == "accessory"]
+        if locked_accessories:
+            locked_identity = self.item_identity(locked_accessories[0])
+            for palette in palette_variants:
+                palette["accessories"] = [
+                    locked_accessories[0],
+                    *[
+                        item
+                        for item in palette["accessories"]
+                        if self.item_identity(item) != locked_identity
+                    ],
+                ][:accessory_limit]
+            accessories = palette_variants[0]["accessories"]
         bracelet_plans = self.compose_bracelet_plans(
             request=request,
             primary=primary,
@@ -295,20 +356,30 @@ class RecommendationEngine:
             accent=supporting[1],
             transition=additional,
             accessories=accessories,
+            palette_variants=palette_variants,
+            locked_items=locked_items,
+            style_preference=refinement.get("style_preference"),
+            accessory_preference=accessory_preference,
+            rejected_plan_id=refinement.get("rejected_plan_id"),
         )
         if not bracelet_plans:
             raise ValueError("暂无满足腕围、库存与材料规则的推荐方案，请调整珠径后重试")
+        preferred_style = {
+            "minimal": "daily_minimal",
+            "layered": "signature_accent",
+        }.get(refinement.get("style_preference"), "balanced_layers")
         recommended_index = next(
             (
                 index
                 for index, plan in enumerate(bracelet_plans)
-                if plan.get("style") == "balanced_layers" and plan.get("has_accessories")
+                if plan.get("style") == preferred_style
+                and (accessory_preference != "more" or plan.get("has_accessories"))
             ),
             next(
                 (
                     index
                     for index, plan in enumerate(bracelet_plans)
-                    if plan.get("style") == "balanced_layers"
+                    if plan.get("style") == preferred_style
                 ),
                 0,
             ),
@@ -537,6 +608,20 @@ class RecommendationEngine:
         primary_pools: dict[str, list[str]],
         available_codes: set[str] | None = None,
     ) -> str:
+        return RecommendationEngine.select_primary_candidates(
+            request, energy, context, catalog, primary_pools, available_codes
+        )[0]
+
+    @staticmethod
+    def select_primary_candidates(
+        request: AssessmentRequest,
+        energy: dict,
+        context: dict,
+        catalog: dict,
+        primary_pools: dict[str, list[str]],
+        available_codes: set[str] | None = None,
+        limit: int = 3,
+    ) -> list[str]:
         pool = set(primary_pools[request.primary_core_wish])
         candidates = [
             code
@@ -547,16 +632,17 @@ class RecommendationEngine:
             if available_codes is not None:
                 raise ValueError("暂无匹配当前珠径的可售材料，请调整珠径后重试")
             candidates = list(catalog)
-        return max(
+        ranked = RecommendationEngine.rank_aesthetic_candidates(
             candidates,
-            key=lambda code: (
-                RecommendationEngine.score_crystal(
-                    code, request, energy, context, role="primary", catalog=catalog, primary_pools=primary_pools
-                ),
-                10 if code in pool else 0,
-                -list(catalog).index(code),
-            ),
+            request=request,
+            energy=energy,
+            context=context,
+            role="primary",
+            catalog=catalog,
+            primary_pools=primary_pools,
+            preferred_codes=pool,
         )
+        return ranked[:max(1, limit)]
 
     @staticmethod
     def select_support_element(final: dict[str, float], excluded: set[str], useful_elements: list[str]) -> str:
@@ -577,6 +663,7 @@ class RecommendationEngine:
         catalog: dict,
         primary_pools: dict[str, list[str]],
         available_codes: set[str] | None = None,
+        variant_index: int = 0,
     ) -> list[str]:
         role_candidates = [
             code
@@ -616,19 +703,17 @@ class RecommendationEngine:
             raise ValueError("暂无可售的调和配珠，请调整珠径后重试")
         if not support_candidates:
             support_candidates = role_candidates or [code for code in catalog if code != primary_code]
-        first = max(
+        ranked_support = RecommendationEngine.rank_aesthetic_candidates(
             support_candidates,
-            key=lambda code: RecommendationEngine.score_crystal(
-                code,
-                request,
-                energy,
-                context,
-                role="support",
-                target_element=target_element,
-                catalog=catalog,
-                primary_pools=primary_pools,
-            ),
+            request=request,
+            energy=energy,
+            context=context,
+            role="support",
+            target_element=target_element,
+            catalog=catalog,
+            primary_pools=primary_pools,
         )
+        first = ranked_support[min(variant_index, len(ranked_support) - 1)]
         accent_candidates = [
             code
             for code, crystal in catalog.items()
@@ -650,13 +735,16 @@ class RecommendationEngine:
             accent_candidates = [first] if available_codes is not None else [
                 code for code in catalog if code not in {primary_code, first}
             ]
-        accent = max(
+        ranked_accents = RecommendationEngine.rank_aesthetic_candidates(
             accent_candidates,
-            key=lambda code: RecommendationEngine.score_crystal(
-                code, request, energy, context, role="accent", catalog=catalog, primary_pools=primary_pools
-            ),
-            default=first,
+            request=request,
+            energy=energy,
+            context=context,
+            role="accent",
+            catalog=catalog,
+            primary_pools=primary_pools,
         )
+        accent = ranked_accents[min(variant_index, len(ranked_accents) - 1)] if ranked_accents else first
         return [first, accent]
 
     @staticmethod
@@ -669,6 +757,7 @@ class RecommendationEngine:
         catalog: dict,
         primary_pools: dict[str, list[str]],
         available_codes: set[str] | None = None,
+        variant_index: int = 0,
     ) -> str:
         candidates = [
             code
@@ -679,19 +768,82 @@ class RecommendationEngine:
             and "avoid_dense" not in RecommendationEngine.rule_list(crystal, "match_rules")
             and not RecommendationEngine.conflicts_with(code, crystal, selected_codes, catalog)
         ]
-        return max(
+        ranked = RecommendationEngine.rank_aesthetic_candidates(
             candidates,
-            key=lambda code: RecommendationEngine.score_crystal(
-                code,
-                request,
-                energy,
-                context,
-                role="support",
-                catalog=catalog,
-                primary_pools=primary_pools,
-            ),
-            default="",
+            request=request,
+            energy=energy,
+            context=context,
+            role="support",
+            catalog=catalog,
+            primary_pools=primary_pools,
         )
+        return ranked[min(variant_index, len(ranked) - 1)] if ranked else ""
+
+    @staticmethod
+    def personal_resonance_score(code: str, request: AssessmentRequest) -> float:
+        """Stable light-weight tiebreaker so similar profiles are not all identical."""
+        identity = "|".join(
+            [
+                str(request.birthday),
+                str(request.birth_time),
+                str(request.mbti or ""),
+                str(request.primary_core_wish),
+                code,
+            ]
+        )
+        return int(hashlib.sha1(identity.encode("utf-8")).hexdigest()[:6], 16) / 0xFFFFFF * 3
+
+    @staticmethod
+    def rank_aesthetic_candidates(
+        candidates: list[str],
+        *,
+        request: AssessmentRequest,
+        energy: dict,
+        context: dict,
+        role: str,
+        catalog: dict,
+        primary_pools: dict[str, list[str]],
+        target_element: str | None = None,
+        preferred_codes: set[str] | None = None,
+    ) -> list[str]:
+        preferred_codes = preferred_codes or set()
+        scored = sorted(
+            dict.fromkeys(candidates),
+            key=lambda code: (
+                -(
+                    RecommendationEngine.score_crystal(
+                        code,
+                        request,
+                        energy,
+                        context,
+                        role=role,
+                        target_element=target_element,
+                        catalog=catalog,
+                        primary_pools=primary_pools,
+                    )
+                    + (8 if code in preferred_codes else 0)
+                    + RecommendationEngine.personal_resonance_score(code, request)
+                ),
+                str(code),
+            ),
+        )
+        # First expose different colour/element stories, then keep score order
+        # for the remaining candidates. This avoids three near-identical plans.
+        result: list[str] = []
+        seen_stories: set[tuple[str, str]] = set()
+        for code in scored:
+            crystal = catalog.get(code) or {}
+            taxonomy = merge_taxonomy(code, crystal)
+            story = (
+                str(crystal.get("element") or ""),
+                str((taxonomy.get("color_families") or [""])[0] or ""),
+            )
+            if story in seen_stories:
+                continue
+            result.append(code)
+            seen_stories.add(story)
+        result.extend(code for code in scored if code not in result)
+        return result
 
     @staticmethod
     def load_accessory_inventory() -> tuple[list[dict], bool]:
@@ -894,13 +1046,14 @@ class RecommendationEngine:
             or material.get("image_url")
             or ""
         )
+        inferred_spacer = "spacer" in allowed_roles or RecommendationEngine.accessory_is_metal(material)
         return {
             "code": material_code,
             "name": name,
             "top": "accessory",
             "kind": "accessory",
-            "role": "隔片配饰" if "spacer" in allowed_roles else "点睛配饰",
-            "role_key": "spacer" if "spacer" in allowed_roles else "accent",
+            "role": "隔片配饰" if inferred_spacer else "点睛配饰",
+            "role_key": "spacer" if inferred_spacer else "accent",
             "element": element_label(
                 energy.get("primary_element")
                 or material.get("primary_element")
@@ -975,7 +1128,10 @@ class RecommendationEngine:
             code = str(material.get("material_code") or material.get("id") or "")
             allowed_roles = set(RecommendationEngine.material_rule_values(material, "allowed_roles"))
             match_rules = set(RecommendationEngine.material_rule_values(material, "match_rules"))
-            if code in selected_codes or not (allowed_roles & {"spacer", "accent"}):
+            is_metal = RecommendationEngine.accessory_is_metal(material)
+            if code in selected_codes or (
+                not (allowed_roles & {"spacer", "accent"}) and not is_metal
+            ):
                 continue
             if not RecommendationEngine.material_is_sellable(material):
                 continue
@@ -1168,6 +1324,40 @@ class RecommendationEngine:
         return sequence
 
     @staticmethod
+    def ensure_locked_items(sequence: list[dict], locked_items: list[dict]) -> list[dict]:
+        if not locked_items:
+            return sequence
+        result = list(sequence)
+        present = {RecommendationEngine.item_identity(item) for item in result}
+        used_positions: set[int] = set()
+        count = len(result)
+        bead_positions = [
+            max(2, count // 4),
+            count // 2,
+            min(count - 2, count - count // 4),
+        ]
+        for item in locked_items:
+            identity = RecommendationEngine.item_identity(item)
+            if not identity or identity in present:
+                continue
+            positions = bead_positions
+            if item.get("top") == "accessory":
+                positions = RecommendationEngine.accessory_positions(item, count, near_primary=False)
+            placed = False
+            for position in positions:
+                normalized_position = max(1, min(count - 1, int(position)))
+                if normalized_position in used_positions:
+                    continue
+                result[normalized_position] = item
+                used_positions.add(normalized_position)
+                placed = True
+                if item.get("top") != "accessory":
+                    break
+            if placed:
+                present.add(identity)
+        return result
+
+    @staticmethod
     def fit_template_plan(
         *,
         style: str,
@@ -1180,6 +1370,7 @@ class RecommendationEngine:
         accent: dict,
         transition: dict,
         accessories: list[dict],
+        locked_items: list[dict] | None = None,
     ) -> dict | None:
         best: tuple[float, int, list[dict], list[dict], list[dict], dict] | None = None
         target_cm = float(request.wrist_size_cm) + STRINGED_COMFORT_ALLOWANCE_MM / 10
@@ -1193,6 +1384,7 @@ class RecommendationEngine:
                 transition,
                 accessories,
             )
+            sequence = RecommendationEngine.ensure_locked_items(sequence, locked_items or [])
             items = RecommendationEngine.summarized_items(sequence)
             layout = [
                 RecommendationEngine.item_layout_entry(item, index + 1)
@@ -1229,8 +1421,13 @@ class RecommendationEngine:
         ]
         if accessory_names:
             reasons.append(f"加入{'、'.join(accessory_names)}建立节奏")
+        layout_signature = "|".join(
+            str(item.get("material_id") or item.get("material_code") or "")
+            for item in layout
+        )
+        layout_hash = hashlib.sha1(layout_signature.encode("utf-8")).hexdigest()[:8]
         return {
-            "plan_id": f"{style}-{request.bead_size_mm}mm-{count}",
+            "plan_id": f"{style}-{request.bead_size_mm}mm-{count}-{layout_hash}",
             "style": style,
             "title": title,
             "subtitle": subtitle,
@@ -1260,6 +1457,11 @@ class RecommendationEngine:
         accent: dict,
         transition: dict,
         accessories: list[dict],
+        palette_variants: list[dict] | None = None,
+        locked_items: list[dict] | None = None,
+        style_preference: str | None = None,
+        accessory_preference: str = "balanced",
+        rejected_plan_id: str | None = None,
     ) -> list[dict]:
         specs = [
             (
@@ -1289,20 +1491,32 @@ class RecommendationEngine:
         ]
         candidates = []
         seen_layouts: set[tuple[str, ...]] = set()
-        for style, title, subtitle, pattern in specs:
+        default_palette = {
+            "primary": primary,
+            "support": support,
+            "accent": accent,
+            "transition": transition,
+            "accessories": accessories,
+        }
+        palettes = palette_variants or [default_palette]
+        for variant_index, (style, title, subtitle, pattern) in enumerate(specs):
+            palette = palettes[min(variant_index, len(palettes) - 1)]
             plan = RecommendationEngine.fit_template_plan(
                 style=style,
                 title=title,
                 subtitle=subtitle,
                 pattern=pattern,
                 request=request,
-                primary=primary,
-                support=support,
-                accent=accent,
-                transition=transition,
-                accessories=accessories,
+                primary=palette["primary"],
+                support=palette["support"],
+                accent=palette["accent"],
+                transition=palette["transition"],
+                accessories=palette["accessories"],
+                locked_items=locked_items,
             )
             if not plan:
+                continue
+            if rejected_plan_id and plan.get("plan_id") == rejected_plan_id:
                 continue
             signature = tuple(
                 str(item.get("material_id") or item.get("material_code") or "")
@@ -1312,11 +1526,16 @@ class RecommendationEngine:
                 continue
             seen_layouts.add(signature)
             candidates.append(plan)
-        preferred_styles = (
-            ["daily_minimal", "balanced_layers", "signature_accent"]
-            if accessories
-            else ["daily_minimal", "balanced_layers", "gradient_transition"]
-        )
+        if style_preference == "minimal" or accessory_preference == "less":
+            preferred_styles = ["daily_minimal", "gradient_transition", "balanced_layers"]
+        elif style_preference == "layered" or accessory_preference == "more":
+            preferred_styles = ["signature_accent", "balanced_layers", "gradient_transition"]
+        else:
+            preferred_styles = (
+                ["daily_minimal", "balanced_layers", "signature_accent"]
+                if accessories
+                else ["daily_minimal", "balanced_layers", "gradient_transition"]
+            )
         by_style = {plan["style"]: plan for plan in candidates}
         selected = [by_style[style] for style in preferred_styles if style in by_style]
         if len(selected) < 3:
@@ -1549,6 +1768,27 @@ class RecommendationEngine:
         return bool(target_size and size and abs(size - target_size) <= 0.25)
 
     @staticmethod
+    def recommendation_size_tolerance_mm(bead_size_mm: int) -> float:
+        """Permit adjacent commercial sizes without making a mixed-size bracelet."""
+        target = float(bead_size_mm or 0)
+        if target <= 10:
+            return 1.0
+        if target <= 14:
+            return 1.5
+        return 2.0
+
+    @staticmethod
+    def material_matches_recommendation_size(material: dict, bead_size_mm: int) -> bool:
+        target_size = float(bead_size_mm or 0)
+        size = RecommendationEngine.material_size_mm(material)
+        return bool(
+            target_size
+            and size
+            and abs(size - target_size)
+            <= RecommendationEngine.recommendation_size_tolerance_mm(bead_size_mm)
+        )
+
+    @staticmethod
     def load_bead_inventory() -> tuple[list[dict], bool]:
         from .materials import MATERIAL_CATALOG, list_db_materials
 
@@ -1573,14 +1813,14 @@ class RecommendationEngine:
         except Exception:
             return set()
         available: set[str] = set()
-        exact_materials = [
+        suitable_materials = [
             item
             for item in materials
-            if RecommendationEngine.material_matches_size(item, bead_size_mm)
+            if RecommendationEngine.material_matches_recommendation_size(item, bead_size_mm)
             and RecommendationEngine.material_is_sellable(item)
         ]
         for code, crystal in catalog.items():
-            if any(RecommendationEngine.material_matches_catalog_entry(item, code, crystal) for item in exact_materials):
+            if any(RecommendationEngine.material_matches_catalog_entry(item, code, crystal) for item in suitable_materials):
                 available.add(code)
         return available
 
@@ -1619,6 +1859,11 @@ class RecommendationEngine:
                     if RecommendationEngine.material_matches_name(item, crystal_name)
                     and RecommendationEngine.material_is_sellable(item)
                 ]
+            candidates = [
+                item
+                for item in candidates
+                if RecommendationEngine.material_matches_recommendation_size(item, bead_size_mm)
+            ]
             return RecommendationEngine.choose_closest_material(candidates, bead_size_mm)
         except Exception:
             return {}
