@@ -27,12 +27,13 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     environment: ${{ github.event_name == 'push' && 'test' || inputs.environment }}
+    env:
+      IMAGE_REPOSITORY: ${{ vars.DEPLOY_IMAGE_REPOSITORY || format('ghcr.io/{0}/api', github.repository) }}
+      REGISTRY_HOST: ${{ vars.DEPLOY_REGISTRY_HOST || 'ghcr.io' }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
-        with:
-          python-version: "3.12.13"
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+        if: ${{ (github.event_name == 'push' && 'test' || inputs.environment) == 'prod' }}
 
       - name: Create an immutable release identifier
         id: release
@@ -42,15 +43,37 @@ jobs:
           release="v$(date -u +%Y%m%d)-001-${GITHUB_RUN_ID}-${TARGET_ENVIRONMENT}"
           echo "release=${release}" >> "${GITHUB_OUTPUT}"
 
-      - name: Authenticate to GHCR
-        run: echo "${{ github.token }}" | docker login ghcr.io --username "${{ github.actor }}" --password-stdin
+      - name: Hash the minimal backend build context
+        id: context
+        run: |
+          context_hash="$(
+            git ls-files -z \
+              Dockerfile \
+              requirements.lock \
+              app \
+              static/admin \
+              scripts/migrate_sqlite_to_mysql.py \
+              scripts/regenerate_material_skus_and_knowledge.py |
+              sort -z |
+              xargs -0 sha256sum |
+              sha256sum |
+              awk '{print $1}'
+          )"
+          echo "hash=${context_hash}" >> "${GITHUB_OUTPUT}"
+
+      - name: Authenticate to the production image registry
+        if: ${{ (github.event_name == 'push' && 'test' || inputs.environment) == 'prod' }}
+        env:
+          REGISTRY_USER: ${{ secrets.DEPLOY_REGISTRY_USER || github.actor }}
+          REGISTRY_TOKEN: ${{ secrets.DEPLOY_REGISTRY_TOKEN || github.token }}
+        run: echo "${REGISTRY_TOKEN}" | docker login "${REGISTRY_HOST}" --username "${REGISTRY_USER}" --password-stdin
 
       - name: Build and push the immutable image
+        if: ${{ (github.event_name == 'push' && 'test' || inputs.environment) == 'prod' }}
         id: image
         env:
           RELEASE_VERSION: ${{ steps.release.outputs.release }}
-          IMAGE_REPOSITORY: ghcr.io/${{ github.repository }}/api
-          VCS_REF: ${{ github.sha }}
+          BUILD_CONTEXT_HASH: ${{ steps.context.outputs.hash }}
           IMAGE_REF_FILE: ${{ runner.temp }}/image-ref
           BUILD_CACHE_FROM: type=gha,scope=yujian-api-linux-amd64
           BUILD_CACHE_TO: type=gha,mode=max,scope=yujian-api-linux-amd64
@@ -69,7 +92,21 @@ jobs:
             scripts/release_state.py \
             scripts/validate_image_ref.py \
             scripts/validate_release_env.py \
-            scripts/backup_mysql.sh
+            scripts/backup_mysql.sh \
+            scripts/release/build_remote_test_image.sh
+
+      - name: Package the minimal test build context
+        if: ${{ (github.event_name == 'push' && 'test' || inputs.environment) == 'test' }}
+        env:
+          RELEASE_VERSION: ${{ steps.release.outputs.release }}
+        run: |
+          tar -czf "${RUNNER_TEMP}/yujian-context-${RELEASE_VERSION}.tar.gz" \
+            Dockerfile \
+            requirements.lock \
+            app \
+            static/admin \
+            scripts/migrate_sqlite_to_mysql.py \
+            scripts/regenerate_material_skus_and_knowledge.py
 
       - name: Configure pinned SSH host identity
         env:
@@ -87,22 +124,36 @@ jobs:
           TARGET_ENVIRONMENT: ${{ github.event_name == 'push' && 'test' || inputs.environment }}
           RELEASE_VERSION: ${{ steps.release.outputs.release }}
           APP_IMAGE: ${{ steps.image.outputs.ref }}
+          APP_CONTEXT_HASH: ${{ steps.context.outputs.hash }}
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
-          GHCR_TOKEN: ${{ github.token }}
-          GHCR_USER: ${{ github.actor }}
+          REGISTRY_TOKEN: ${{ secrets.DEPLOY_REGISTRY_TOKEN || github.token }}
+          REGISTRY_USER: ${{ secrets.DEPLOY_REGISTRY_USER || github.actor }}
         run: |
           archive="${RUNNER_TEMP}/yujian-docker-${RELEASE_VERSION}.tar.gz"
+          context_archive="${RUNNER_TEMP}/yujian-context-${RELEASE_VERSION}.tar.gz"
           remote_archive="/tmp/yujian-docker-${RELEASE_VERSION}.tar.gz"
+          remote_context_archive="/tmp/yujian-context-${RELEASE_VERSION}.tar.gz"
           release_dir="/opt/yujian/deployer/releases/${RELEASE_VERSION}"
+          context_dir="/opt/yujian/deployer/builds/${RELEASE_VERSION}"
           auth_dir="/tmp/yujian-docker-auth-${GITHUB_RUN_ID}"
           target="${DEPLOY_USER}@${DEPLOY_HOST}"
           ssh_args=(-i "${HOME}/.ssh/yujian-deploy")
 
           scp "${ssh_args[@]}" "${archive}" "${target}:${remote_archive}"
+          if [[ "${TARGET_ENVIRONMENT}" == "test" ]]; then
+            scp "${ssh_args[@]}" "${context_archive}" "${target}:${remote_context_archive}"
+          fi
           ssh "${ssh_args[@]}" "${target}" \
-            "set -e; umask 077; mkdir -p '${release_dir}'; tar -xzf '${remote_archive}' -C '${release_dir}'; rm -f '${remote_archive}'; mkdir -p '${auth_dir}'"
-          printf '%s' "${GHCR_TOKEN}" | ssh "${ssh_args[@]}" "${target}" \
-            "DOCKER_CONFIG='${auth_dir}' docker login ghcr.io --username '${GHCR_USER}' --password-stdin"
-          ssh "${ssh_args[@]}" "${target}" \
-            "set -e; trap 'rm -rf \"${auth_dir}\"' EXIT; export DOCKER_CONFIG='${auth_dir}'; cd '${release_dir}'; APP_IMAGE='${APP_IMAGE}' RELEASE_VERSION='${RELEASE_VERSION}' python3 scripts/deploy.py '${TARGET_ENVIRONMENT}'"
+            "set -e; umask 077; mkdir -p '${release_dir}'; tar -xzf '${remote_archive}' -C '${release_dir}'; rm -f '${remote_archive}'"
+
+          if [[ "${TARGET_ENVIRONMENT}" == "test" ]]; then
+            ssh "${ssh_args[@]}" "${target}" \
+              "set -e; umask 077; mkdir -p '${context_dir}'; tar -xzf '${remote_context_archive}' -C '${context_dir}'; rm -f '${remote_context_archive}'; cd '${release_dir}'; test_image=\$(scripts/release/build_remote_test_image.sh '${context_dir}' '${APP_CONTEXT_HASH}' | tail -n 1); YUJIAN_LOCAL_TEST_IMAGE=1 APP_CONTEXT_HASH='${APP_CONTEXT_HASH}' APP_IMAGE=\"\${test_image}\" RELEASE_VERSION='${RELEASE_VERSION}' python3 scripts/deploy.py test; rm -rf '${context_dir}'"
+          else
+            ssh "${ssh_args[@]}" "${target}" "set -e; umask 077; mkdir -p '${auth_dir}'"
+            printf '%s' "${REGISTRY_TOKEN}" | ssh "${ssh_args[@]}" "${target}" \
+              "DOCKER_CONFIG='${auth_dir}' docker login '${REGISTRY_HOST}' --username '${REGISTRY_USER}' --password-stdin"
+            ssh "${ssh_args[@]}" "${target}" \
+              "set -e; trap 'rm -rf \"${auth_dir}\"' EXIT; export DOCKER_CONFIG='${auth_dir}'; cd '${release_dir}'; YUJIAN_IMAGE_REPOSITORY='${IMAGE_REPOSITORY}' APP_CONTEXT_HASH='${APP_CONTEXT_HASH}' APP_IMAGE='${APP_IMAGE}' RELEASE_VERSION='${RELEASE_VERSION}' python3 scripts/deploy.py prod"
+          fi

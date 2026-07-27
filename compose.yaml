@@ -3,8 +3,7 @@ services:
     build:
       context: .
       args:
-        RELEASE_VERSION: "${RELEASE_VERSION:-dev}"
-        VCS_REF: "${VCS_REF:-unknown}"
+        BUILD_CONTEXT_HASH: "${BUILD_CONTEXT_HASH:-local}"
     container_name: yujian-api
     restart: unless-stopped
     ports:
@@ -87,8 +86,7 @@ services:
     build:
       context: .
       args:
-        RELEASE_VERSION: "${RELEASE_VERSION:-dev}"
-        VCS_REF: "${VCS_REF:-unknown}"
+        BUILD_CONTEXT_HASH: "${BUILD_CONTEXT_HASH:-local}"
     container_name: yujian-api-test
     restart: unless-stopped
     ports:
@@ -136,8 +134,7 @@ services:
     build:
       context: .
       args:
-        RELEASE_VERSION: "${RELEASE_VERSION:-dev}"
-        VCS_REF: "${VCS_REF:-unknown}"
+        BUILD_CONTEXT_HASH: "${BUILD_CONTEXT_HASH:-local}"
     container_name: yujian-logistics-worker
     restart: unless-stopped
     command: ["python", "-m", "app.logistics_worker"]
@@ -171,8 +168,7 @@ services:
     build:
       context: .
       args:
-        RELEASE_VERSION: "${RELEASE_VERSION:-dev}"
-        VCS_REF: "${VCS_REF:-unknown}"
+        BUILD_CONTEXT_HASH: "${BUILD_CONTEXT_HASH:-local}"
     container_name: yujian-commerce-worker
     restart: unless-stopped
     command: ["python", "-m", "app.commerce_worker"]

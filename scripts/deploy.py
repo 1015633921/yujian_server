@@ -37,6 +37,9 @@ SLOT_NAMES = ("blue", "green")
 UPSTREAM_NAME = re.compile(r"^[a-zA-Z][a-zA-Z0-9_]*$")
 PROJECT_NAME = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 ENV_KEY = re.compile(r"^[A-Z][A-Z0-9_]*$")
+CONTEXT_HASH = re.compile(r"^[a-f0-9]{64}$")
+LOCAL_TEST_IMAGE = re.compile(r"^yujian-test-local:ctx-[a-f0-9]{24}$")
+STALE_TEST_CONTAINER = re.compile(r"^yujian-test-[a-z0-9_-]+-api-1$")
 DEPLOY_ONLY_KEYS = {"MYSQL_ROOT_PASSWORD"}
 COMPOSE_FILE = ROOT / "compose.release.yaml"
 
@@ -85,13 +88,14 @@ class EnvironmentProfile:
             raise DeployError("invalid Nginx upstream name")
         runtime_override = os.getenv("YUJIAN_RUNTIME_ENV_FILE", "").strip()
         certs_override = os.getenv("YUJIAN_CERTS_DIR", "").strip()
+        image_repository_override = os.getenv("YUJIAN_IMAGE_REPOSITORY", "").strip()
         profile = cls(
             environment=environment,
             public_health_url=str(raw["publicHealthUrl"]),
             runtime_env_file=Path(runtime_override or raw["runtimeEnvFile"]),
             release_env_dir=Path(str(raw["releaseEnvDir"])),
             certs_dir=Path(certs_override or raw["certsDir"]),
-            image_repository=str(raw["imageRepository"]),
+            image_repository=image_repository_override or str(raw["imageRepository"]),
             backend_network=str(raw["backendNetwork"]),
             release_state_dir=Path(str(raw["releaseStateDir"])),
             nginx_config_file=Path(str(raw["nginxConfigFile"])),
@@ -181,11 +185,34 @@ def run_command(
     return completed
 
 
+def is_local_test_image(profile: EnvironmentProfile, image: str) -> bool:
+    return (
+        profile.environment == "test"
+        and os.getenv("YUJIAN_LOCAL_TEST_IMAGE") == "1"
+        and LOCAL_TEST_IMAGE.fullmatch(image) is not None
+    )
+
+
+def deployment_context_hash(profile: EnvironmentProfile, image: str) -> str | None:
+    value = os.getenv("APP_CONTEXT_HASH", "").strip()
+    if is_local_test_image(profile, image):
+        if not CONTEXT_HASH.fullmatch(value):
+            raise DeployError("APP_CONTEXT_HASH must be a 64-character lowercase sha256")
+        if image != f"yujian-test-local:ctx-{value[:24]}":
+            raise DeployError("local test image does not match APP_CONTEXT_HASH")
+        return value
+    if value and not CONTEXT_HASH.fullmatch(value):
+        raise DeployError("APP_CONTEXT_HASH must be a 64-character lowercase sha256")
+    return value or None
+
+
 def ensure_deploy_inputs(profile: EnvironmentProfile, image: str, release: str) -> dict[str, str]:
-    if not IMMUTABLE_IMAGE.fullmatch(image):
-        raise DeployError("APP_IMAGE must use repository@sha256:<64 hex digest>")
-    if not image.startswith(f"{profile.image_repository}@"):
-        raise DeployError("APP_IMAGE repository does not match the selected environment profile")
+    if not is_local_test_image(profile, image):
+        if not IMMUTABLE_IMAGE.fullmatch(image):
+            raise DeployError("APP_IMAGE must use an immutable digest")
+        if not image.startswith(f"{profile.image_repository}@"):
+            raise DeployError("APP_IMAGE repository does not match the selected environment profile")
+    deployment_context_hash(profile, image)
     if not RELEASE_PATTERN.fullmatch(release):
         raise DeployError("RELEASE_VERSION must match vYYYYMMDD-NNN[-suffix]")
     if not profile.runtime_env_file.is_file():
@@ -544,6 +571,27 @@ def prepare_candidate_slot(
         capture=True,
     )
     conflicts = [line.strip() for line in occupied.stdout.splitlines() if line.strip()]
+    removable = [
+        name
+        for name in conflicts
+        if profile.environment == "test" and STALE_TEST_CONTAINER.fullmatch(name)
+    ]
+    for name in removable:
+        run_command(["docker", "rm", "--force", name])
+        print(f"removed stale test container from reserved port {port}: {name}")
+    if removable:
+        occupied = run_command(
+            [
+                "docker",
+                "ps",
+                "--filter",
+                f"publish={port}",
+                "--format",
+                "{{.Names}}",
+            ],
+            capture=True,
+        )
+        conflicts = [line.strip() for line in occupied.stdout.splitlines() if line.strip()]
     if conflicts:
         raise DeployError(
             f"candidate port {port} is occupied by an unrelated container: {conflicts[0]}"
@@ -606,28 +654,74 @@ def run_migrations(
     )
 
 
+def pending_migrations(
+    profile: EnvironmentProfile,
+    image: str,
+    release: str,
+    slot: str,
+    env_file: Path,
+) -> list[str]:
+    environment = compose_environment(profile, image, release, slot, env_file)
+    completed = run_command(
+        compose_command(
+            profile,
+            slot,
+            "run",
+            "--rm",
+            "--no-deps",
+            "api",
+            "python",
+            "-m",
+            "app.migrations.runner",
+            "pending",
+            "--backend",
+            "mysql",
+        ),
+        env=environment,
+        capture=True,
+    )
+    line = next(
+        (line.strip() for line in completed.stdout.splitlines() if line.startswith("pending:")),
+        "",
+    )
+    if not line:
+        raise DeployError("migration preflight did not return a pending migration result")
+    payload = line.removeprefix("pending:").strip()
+    if payload == "no changes":
+        return []
+    versions = [item.strip() for item in payload.split(",") if item.strip()]
+    if not versions:
+        raise DeployError("migration preflight returned an invalid migration list")
+    return versions
+
+
 def pull_and_validate_image(
     profile: EnvironmentProfile,
     image: str,
     release: str,
     slot: str,
     env_file: Path,
+    context_hash: str | None,
 ) -> None:
     environment = compose_environment(profile, image, release, slot, env_file)
-    run_command(compose_command(profile, slot, "pull", "api"), env=environment)
-    inspected = run_command(
-        [
-            "docker",
-            "image",
-            "inspect",
-            image,
-            "--format",
-            '{{ index .Config.Labels "org.opencontainers.image.version" }}',
-        ],
-        capture=True,
-    )
-    if inspected.stdout.strip() != release:
-        raise DeployError("image release label does not match RELEASE_VERSION")
+    if is_local_test_image(profile, image):
+        run_command(["docker", "image", "inspect", image], capture=True)
+    else:
+        run_command(compose_command(profile, slot, "pull", "api"), env=environment)
+    if context_hash:
+        inspected = run_command(
+            [
+                "docker",
+                "image",
+                "inspect",
+                image,
+                "--format",
+                '{{ index .Config.Labels "org.opencontainers.image.source-hash" }}',
+            ],
+            capture=True,
+        )
+        if inspected.stdout.strip() != context_hash:
+            raise DeployError("image source label does not match APP_CONTEXT_HASH")
 
 
 def deploy_candidate(
@@ -659,8 +753,50 @@ def prune_release_env_files(profile: EnvironmentProfile, keep: int = 8) -> None:
         path.unlink()
 
 
+def prune_local_test_images(
+    profile: EnvironmentProfile,
+    current_image: str,
+    keep: int = 4,
+) -> None:
+    if profile.environment != "test" or not LOCAL_TEST_IMAGE.fullmatch(current_image):
+        return
+    protected = {current_image}
+    for state_name in ("current.json", "previous.json"):
+        state = read_record(profile.release_state_dir / state_name)
+        state_image = str(state.get("image", "")) if state else ""
+        if LOCAL_TEST_IMAGE.fullmatch(state_image):
+            protected.add(state_image)
+    listed = run_command(
+        [
+            "docker",
+            "image",
+            "ls",
+            "--filter",
+            "reference=yujian-test-local:ctx-*",
+            "--format",
+            "{{.Repository}}:{{.Tag}}",
+        ],
+        capture=True,
+    )
+    retained = 0
+    for candidate in dict.fromkeys(
+        line.strip() for line in listed.stdout.splitlines() if line.strip()
+    ):
+        if candidate in protected or retained < keep:
+            retained += 1
+            continue
+        removed = run_command(
+            ["docker", "image", "rm", candidate],
+            capture=True,
+            check=False,
+        )
+        if removed.returncode == 0:
+            print(f"pruned superseded local test image: {candidate}")
+
+
 def deploy(profile: EnvironmentProfile, image: str, release: str, dry_run: bool) -> None:
     values = ensure_deploy_inputs(profile, image, release)
+    context_hash = deployment_context_hash(profile, image)
     if dry_run:
         print(f"environment={profile.environment}")
         print(f"release={release}")
@@ -677,9 +813,14 @@ def deploy(profile: EnvironmentProfile, image: str, release: str, dry_run: bool)
     port = profile.slot_ports[slot]
     prepare_candidate_slot(profile, current, slot)
     release_env = write_release_env(profile, values, release)
-    pull_and_validate_image(profile, image, release, slot, release_env)
-    run_backup(profile, values, release)
-    run_migrations(profile, image, release, slot, release_env)
+    pull_and_validate_image(profile, image, release, slot, release_env, context_hash)
+    pending = pending_migrations(profile, image, release, slot, release_env)
+    if pending:
+        print(f"pending migrations detected: {', '.join(pending)}")
+        run_backup(profile, values, release)
+        run_migrations(profile, image, release, slot, release_env)
+    else:
+        print("database schema is current; backup and migration steps skipped")
     deploy_candidate(profile, image, release, slot, release_env)
     record = {
         "release": release,
@@ -687,6 +828,7 @@ def deploy(profile: EnvironmentProfile, image: str, release: str, dry_run: bool)
         "port": port,
         "project": profile.project(slot),
         "image": image,
+        "context_hash": context_hash,
     }
     switched = False
     try:
@@ -707,6 +849,7 @@ def deploy(profile: EnvironmentProfile, image: str, release: str, dry_run: bool)
             "deployment verification failed; traffic and release state were automatically rolled back"
         ) from exc
     prune_release_env_files(profile)
+    prune_local_test_images(profile, image)
     print(
         f"deployment complete: environment={profile.environment} "
         f"release={release} slot={slot} port={port}"
