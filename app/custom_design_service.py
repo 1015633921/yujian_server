@@ -200,6 +200,22 @@ class CustomDesignService:
             item["report_code"] = str(report["report_code"]) if report and report["report_code"] else item["report_id"]
             output = json_value(report["output_snapshot_json"], {}) if report else {}
             input_snapshot = json_value(report["input_snapshot_json"], {}) if report else {}
+
+            # 兼容报告版本化上线前创建的人工搭配工单：旧工单保存的是
+            # ``assessment:<assessment_id>``，报告正文仍在 energy_assessments.result_json。
+            # 如果只查 report_snapshots，会导致后台详情所有测算字段显示“未提供”。
+            if not report and str(item.get("report_id") or "").startswith("assessment:"):
+                legacy_assessment_id = str(item["report_id"])[len("assessment:"):].strip()
+                legacy = connection.execute(
+                    "SELECT name, core_wish, result_json FROM energy_assessments WHERE assessment_id = ?",
+                    (legacy_assessment_id,),
+                ).fetchone() if legacy_assessment_id else None
+                if legacy:
+                    output = json_value(legacy["result_json"], {})
+                    input_snapshot = output.get("input_summary") or {
+                        "name": legacy["name"] or "",
+                        "core_wishes": [legacy["core_wish"]] if legacy["core_wish"] else [],
+                    }
             projection = json_value(output.get("report_projection"), {})
             context = json_value(output.get("report_context"), {})
             if not projection and (

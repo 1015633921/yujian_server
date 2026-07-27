@@ -4169,6 +4169,9 @@ Page({
     this.stopCanvasRenderLoop();
     this.clearWorkspaceFlightCanvas();
     this.setData({
+      // 原生 canvas 在小程序中可能脱离普通 z-index/visibility 层级，
+      // 详情弹窗期间直接卸载节点，避免画布内容穿透到弹窗内部。
+      workspaceCanvasVisible: false,
       workspaceCanvasSuppressed: true,
       canvasFlightActive: false
     });
