@@ -197,7 +197,7 @@ class CustomDesignRequestCreate(BaseModel):
     report_id: str = Field(min_length=1, max_length=80)
     report_version: int = Field(ge=1, le=10000)
     assessment_id: str | None = Field(default=None, max_length=80)
-    wrist_size_cm: float = Field(ge=12, le=26)
+    wrist_size_cm: float = Field(ge=10, le=25)
     bead_size_mm: int = Field(ge=4, le=20)
     budget: str = Field(default="", max_length=80)
     style_preference: str = Field(default="", max_length=80)

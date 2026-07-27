@@ -915,3 +915,4 @@
     max-width: 260rpx;
   }
 }
+.payment-entry-card{padding:24rpx 26rpx;border-color:rgba(154,113,56,.16);background:#fffaf1}.payment-entry-title{color:#2a241b;font-size:27rpx;font-weight:800}.payment-entry-desc{margin-top:8rpx;color:#746957;font-size:22rpx;line-height:1.55}

@@ -151,8 +151,6 @@ const WORKSPACE_SOUND_VOLUME = {
 const TRAY_IMPACT_FEEDBACK_MIN_SPEED = 1.05;
 const WRIST_RULER_MIN = 10;
 const WRIST_RULER_MAX = 25;
-const WRIST_RULER_STEP = 0.1;
-const WRIST_RULER_TICK_RPX = 22;
 let materialCache = {};
 let materialCacheAt = {};
 
@@ -635,11 +633,6 @@ Page({
     wristOptionItems: [],
     showWristPicker: false,
     wristRulerValue: '16.0',
-    wristRulerTicks: [],
-    wristRulerScrollLeft: 0,
-    wristRulerTickWidth: 11,
-    wristRulerSidePadding: 180,
-    wristRulerRangeText: '10.0–25.0cm',
     energyChart: {
       hasProfile: false,
       matchScore: 0,
@@ -1758,6 +1751,14 @@ Page({
       series: repairMaybeMojibakeText(sku.series || item.series),
       grade: repairMaybeMojibakeText(sku.grade || item.grade),
       name: repairMaybeMojibakeText(sku.name || item.name),
+      description: safeMaterialDisplayText(
+        sku.description
+        || item.description
+        || item.introduction
+        || visual.description
+        || ''
+      ),
+      story: safeMaterialDisplayText(sku.story || item.story || visual.story || ''),
       price: Number(sku.price_per_bead ?? item.price ?? 0),
       size: Number(sku.size_mm ?? item.size ?? 8),
       weight: Number(sku.weight_g ?? item.weight ?? 1),
@@ -7274,57 +7275,12 @@ Page({
     }
     this.hideWorkspaceCanvasForOverlay();
     this.setData({ showWristPicker: true });
-    wx.nextTick(() => this.prepareWristRuler(this.data.wristSize));
   },
 
   closeWristSetting() {
     this.setData({ showWristPicker: false }, () => {
       this.restoreWorkspaceCanvasAfterOverlay();
       this.resumeWristGuideIfNeeded();
-    });
-  },
-
-  prepareWristRuler(value = this.data.wristSize || 16) {
-    const tickWidth = this.getWristTickWidthPx();
-    const viewportWidth = this.getWristRulerViewportWidth();
-    const sidePadding = Math.max(0, Math.round((viewportWidth - tickWidth) / 2));
-    const wristValue = this.normalizeWristValue(value);
-    const ticks = this.buildWristRulerTicks();
-    this.wristRulerTickWidthPx = tickWidth;
-    this.wristRulerLastTick = Math.round((wristValue - WRIST_RULER_MIN) * 10);
-    this.wristRulerLastDisplay = this.formatWristValue(wristValue);
-    this.setData({
-      wristRulerTicks: ticks,
-      wristRulerTickWidth: tickWidth,
-      wristRulerSidePadding: sidePadding,
-      wristRulerValue: this.formatWristValue(wristValue),
-      wristRulerScrollLeft: this.wristValueToScrollLeft(wristValue, tickWidth)
-    });
-  },
-
-  getWristTickWidthPx() {
-    const windowWidth = Number(this.data.deviceInfo && this.data.deviceInfo.windowWidth) || 375;
-    return Math.max(8, Math.round(WRIST_RULER_TICK_RPX * windowWidth / 750 * 10) / 10);
-  },
-
-  getWristRulerViewportWidth() {
-    const windowWidth = Number(this.data.deviceInfo && this.data.deviceInfo.windowWidth) || 375;
-    const horizontalPaddingPx = 60 * windowWidth / 750;
-    return Math.max(240, windowWidth - horizontalPaddingPx);
-  },
-
-  buildWristRulerTicks() {
-    const total = Math.round((WRIST_RULER_MAX - WRIST_RULER_MIN) / WRIST_RULER_STEP);
-    return Array.from({ length: total + 1 }).map((_, index) => {
-      const value = this.normalizeWristValue(WRIST_RULER_MIN + index * WRIST_RULER_STEP);
-      const isMajor = index % 10 === 0;
-      const isMid = index % 5 === 0;
-      return {
-        index,
-        value,
-        label: isMajor ? String(Math.round(value)) : '',
-        className: isMajor ? 'major' : (isMid ? 'middle' : 'minor')
-      };
     });
   },
 
@@ -7336,55 +7292,6 @@ Page({
 
   formatWristValue(value) {
     return this.normalizeWristValue(value).toFixed(1);
-  },
-
-  wristValueToScrollLeft(value, tickWidth = this.wristRulerTickWidthPx || this.getWristTickWidthPx()) {
-    return Math.round((this.normalizeWristValue(value) - WRIST_RULER_MIN) * 10 * tickWidth);
-  },
-
-  scrollLeftToWristValue(scrollLeft) {
-    const tickWidth = this.wristRulerTickWidthPx || this.getWristTickWidthPx();
-    const index = Math.max(0, Math.min(150, Math.round((Number(scrollLeft) || 0) / tickWidth)));
-    return this.normalizeWristValue(WRIST_RULER_MIN + index * WRIST_RULER_STEP);
-  },
-
-  onWristRulerTouchStart() {
-    this.wristRulerInteracting = true;
-    clearTimeout(this.wristRulerSnapTimer);
-  },
-
-  onWristRulerTouchEnd() {
-    this.wristRulerInteracting = false;
-    clearTimeout(this.wristRulerSnapTimer);
-    this.wristRulerSnapTimer = setTimeout(() => this.snapWristRuler(), 220);
-  },
-
-  onWristRulerScroll(e) {
-    const scrollLeft = Number(e.detail && e.detail.scrollLeft) || 0;
-    const tickWidth = this.wristRulerTickWidthPx || this.getWristTickWidthPx();
-    const index = Math.max(0, Math.min(150, Math.round(scrollLeft / tickWidth)));
-    const value = this.normalizeWristValue(WRIST_RULER_MIN + index * WRIST_RULER_STEP);
-    const display = this.formatWristValue(value);
-    this.currentWristRulerIndex = index;
-    this.currentWristRulerScrollLeft = scrollLeft;
-    if (display !== this.wristRulerLastDisplay) {
-      this.wristRulerLastDisplay = display;
-      this.setData({ wristRulerValue: display });
-    }
-    this.wristRulerLastTick = index;
-    if (!this.wristRulerInteracting) {
-      clearTimeout(this.wristRulerSnapTimer);
-      this.wristRulerSnapTimer = setTimeout(() => this.snapWristRuler(), 180);
-    }
-  },
-
-  snapWristRuler() {
-    if (!this.data.showWristPicker) return;
-    const value = this.scrollLeftToWristValue(this.currentWristRulerScrollLeft || this.data.wristRulerScrollLeft);
-    this.setData({
-      wristRulerValue: this.formatWristValue(value),
-      wristRulerScrollLeft: this.wristValueToScrollLeft(value)
-    });
   },
 
   confirmWristRuler() {
@@ -7410,6 +7317,12 @@ Page({
       this.resumeWristGuideIfNeeded(true);
     });
     wx.showToast({ title: `${this.formatWristValue(rememberedWristSize)}cm 手围`, icon: 'success' });
+  },
+
+  confirmWristPickerComponent(event) {
+    const value = Number(event && event.detail && event.detail.value);
+    this.setData({ wristRulerValue: this.formatWristValue(value) });
+    this.confirmWristRuler();
   },
 
   chooseWristSize(e) {
@@ -7981,8 +7894,18 @@ Page({
     const top = materialTop(material);
     const category = safeMaterialDisplayText(material.category || '未分类');
     const series = safeMaterialDisplayText(material.series || '');
+    const name = this.displayMaterialName(material);
     const price = Number(material.price || 0);
     const unit = top === 'accessory' ? '个' : '颗';
+    const effects = (Array.isArray(material.effects) ? material.effects : [material.effects])
+      .map(safeMaterialDisplayText)
+      .filter(Boolean);
+    const introduction = safeMaterialDisplayText(
+      material.description
+      || material.introduction
+      || `${name}，${physical.shape || '圆珠'}材质，适合用于日常 DIY 手串搭配。`
+    );
+    const story = safeMaterialDisplayText(material.story || '');
     const galleryImages = this.materialOwnImageUrls(material);
     const primaryImage = String(material.image_url || '').trim();
     // 图库优先；图库尚未配置时，详情仍应展示材料卡已在使用的主图。
@@ -7998,9 +7921,12 @@ Page({
     return {
       id: String(material.id || ''),
       cardIndex: Number((this.data.visibleMaterials || []).findIndex(item => String(item.id || '') === String(material.id || ''))),
-      name: this.displayMaterialName(material),
+      name,
       typeLabel: top === 'accessory' ? 'DIY 配饰' : 'DIY 珠材',
       priceText: Number.isFinite(price) ? `¥${price.toFixed(2)} / ${unit}` : '--',
+      introduction,
+      story,
+      effects,
       images,
       fields,
       fallbackStyle: `background:radial-gradient(circle at 32% 26%,${fallbackShine} 0 10%,${fallbackColor} 12% 58%,rgba(0,0,0,.22) 100%);`
@@ -8016,6 +7942,11 @@ Page({
       return;
     }
     this.lastMaterialLongPress = { id, at: Date.now() };
+    // 原生 canvas 可能脱离普通 z-index 层级，打开详情前先暂停并隐藏盘面模型，
+    // 避免手串渲染层穿透材料详情页。
+    if (typeof this.hideWorkspaceCanvasForOverlay === 'function') {
+      this.hideWorkspaceCanvasForOverlay();
+    }
     this.setData({
       showMaterialDetail: true,
       materialDetail: this.buildMaterialDetail(material)
@@ -8024,6 +7955,9 @@ Page({
 
   closeMaterialDetail() {
     this.setData({ showMaterialDetail: false, materialDetail: null });
+    if (typeof this.restoreWorkspaceCanvasAfterOverlay === 'function') {
+      this.restoreWorkspaceCanvasAfterOverlay();
+    }
   },
 
   addMaterialFromDetail() {

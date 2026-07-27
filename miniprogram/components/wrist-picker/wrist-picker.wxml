@@ -1,0 +1,47 @@
+<view wx:if="{{visible}}" class="wrist-picker-mask" bindtap="close">
+  <view class="wrist-picker" catchtap="stopPropagation">
+    <view class="wrist-picker-head">
+      <view>
+        <view class="wrist-picker-title">选择手围</view>
+        <view class="wrist-picker-subtitle">{{subtitle}}</view>
+      </view>
+      <view class="wrist-picker-close" bindtap="close">×</view>
+    </view>
+    <view class="wrist-ruler-value">
+      <text class="wrist-ruler-number">{{displayValue}}</text>
+      <text class="wrist-ruler-unit">cm</text>
+    </view>
+    <view class="wrist-ruler-caption">左右滑动软尺，松手后自动吸附到 0.1cm</view>
+    <view class="wrist-ruler-wrap">
+      <view class="wrist-ruler-pointer"></view>
+      <view class="wrist-ruler-fade left"></view>
+      <view class="wrist-ruler-fade right"></view>
+      <scroll-view
+        class="wrist-ruler-scroll"
+        scroll-x
+        enhanced="{{true}}"
+        bounces="{{true}}"
+        show-scrollbar="{{false}}"
+        scroll-left="{{scrollLeft}}"
+        bindtouchstart="onTouchStart"
+        bindtouchend="onTouchEnd"
+        bindtouchcancel="onTouchEnd"
+        bindscroll="onScroll"
+      >
+        <view class="wrist-ruler-track" style="padding-left:{{sidePadding}}px;padding-right:{{sidePadding}}px;">
+          <view
+            wx:for="{{ticks}}"
+            wx:key="index"
+            class="wrist-ruler-tick {{item.className}}"
+            style="width:{{tickWidth}}px;"
+          >
+            <view class="tick-line"></view>
+            <view wx:if="{{item.label}}" class="tick-label">{{item.label}}</view>
+          </view>
+        </view>
+      </scroll-view>
+    </view>
+    <view class="wrist-ruler-range">{{rangeText}}</view>
+    <button class="wrist-ruler-confirm" catchtap="confirm">确认手围</button>
+  </view>
+</view>

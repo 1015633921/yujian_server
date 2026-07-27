@@ -37,6 +37,9 @@ test('workspace material detail uses catalog data and suppresses a long-press gh
     price: 12.5,
     size: 8,
     color: '#d6d6d6',
+    description: '通透清爽的基础圆珠，适合做日常搭配的底色。',
+    story: '常被用作简洁风格的基础材质。',
+    effects: ['清透感', '舒缓氛围'],
     image_urls: ['https://example.com/a.webp', 'https://example.com/b.webp']
   };
   const instance = Object.assign({}, page, {
@@ -53,6 +56,9 @@ test('workspace material detail uses catalog data and suppresses a long-press gh
   assert.equal(instance.data.showMaterialDetail, true);
   assert.equal(instance.data.materialDetail.name, '白水晶');
   assert.deepEqual(instance.data.materialDetail.images, material.image_urls);
+  assert.equal(instance.data.materialDetail.introduction, material.description);
+  assert.equal(instance.data.materialDetail.story, material.story);
+  assert.deepEqual(instance.data.materialDetail.effects, material.effects);
   assert.match(instance.data.materialDetail.priceText, /¥12\.50 \/ 颗/);
   assert.match(instance.data.materialDetail.fields.find(item => item.label === '规格').value, /8mm/);
 

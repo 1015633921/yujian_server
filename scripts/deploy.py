@@ -315,6 +315,26 @@ def render_upstream(name: str, port: int) -> str:
     )
 
 
+def parse_upstream_port(content: str, upstream_name: str) -> int:
+    if not UPSTREAM_NAME.fullmatch(upstream_name):
+        raise DeployError("invalid Nginx upstream name")
+    block = re.search(
+        rf"upstream\s+{re.escape(upstream_name)}\s*\{{(?P<body>.*?)\}}",
+        content,
+        flags=re.DOTALL,
+    )
+    if not block:
+        raise DeployError(f"Nginx upstream not found: {upstream_name}")
+    servers = re.findall(
+        r"^\s*server\s+127\.0\.0\.1:(\d+)\s*;",
+        block.group("body"),
+        flags=re.MULTILINE,
+    )
+    if len(servers) != 1:
+        raise DeployError(f"Nginx upstream must contain exactly one loopback server: {upstream_name}")
+    return _valid_port(servers[0], "active upstream port")
+
+
 def replace_location_proxy(
     content: str,
     location: str,
@@ -431,8 +451,103 @@ def bootstrap_state(profile: EnvironmentProfile) -> dict[str, object]:
     return record
 
 
+def reconcile_active_routing(
+    profile: EnvironmentProfile,
+    current: dict[str, object],
+) -> dict[str, object]:
+    active_port = parse_upstream_port(
+        profile.nginx_upstream_file.read_text(encoding="utf-8"),
+        profile.nginx_upstream_name,
+    )
+    recorded_port = _valid_port(current.get("port"), "current port")
+    if active_port == recorded_port:
+        return current
+
+    data = health_payload(f"http://127.0.0.1:{active_port}/health/ready")
+    release = str(data.get("release_version") or f"external-{profile.environment}")
+    slot = next(
+        (name for name, port in profile.slot_ports.items() if port == active_port),
+        "external",
+    )
+    project = (
+        profile.project(slot)
+        if slot in SLOT_NAMES
+        else f"external-{profile.environment}"
+    )
+    inspected = run_command(
+        [
+            "docker",
+            "ps",
+            "--filter",
+            f"publish={active_port}",
+            "--format",
+            "{{.Image}}",
+        ],
+        capture=True,
+    )
+    images = [line.strip() for line in inspected.stdout.splitlines() if line.strip()]
+    image = images[0] if len(images) == 1 else "external-active-image"
+    reconciled: dict[str, object] = {
+        "release": release,
+        "slot": slot,
+        "port": active_port,
+        "project": project,
+        "image": image,
+    }
+    write_state_record(profile.release_state_dir / "current.json", reconciled)
+    print(
+        f"release state reconciled to active Nginx upstream: "
+        f"port={active_port} release={release}"
+    )
+    return reconciled
+
+
 def choose_candidate_slot(current: dict[str, object]) -> str:
     return "green" if current.get("slot") == "blue" else "blue"
+
+
+def prepare_candidate_slot(
+    profile: EnvironmentProfile,
+    current: dict[str, object],
+    slot: str,
+) -> None:
+    port = profile.slot_ports[slot]
+    if _valid_port(current.get("port"), "current port") == port:
+        raise DeployError("candidate port is already active")
+
+    container_name = f"{profile.project(slot)}-api-1"
+    inspected = run_command(
+        [
+            "docker",
+            "container",
+            "inspect",
+            container_name,
+            "--format",
+            "{{.Id}}",
+        ],
+        capture=True,
+        check=False,
+    )
+    if inspected.returncode == 0 and inspected.stdout.strip():
+        run_command(["docker", "rm", "--force", container_name])
+        print(f"removed stale candidate container: {container_name}")
+
+    occupied = run_command(
+        [
+            "docker",
+            "ps",
+            "--filter",
+            f"publish={port}",
+            "--format",
+            "{{.Names}}",
+        ],
+        capture=True,
+    )
+    conflicts = [line.strip() for line in occupied.stdout.splitlines() if line.strip()]
+    if conflicts:
+        raise DeployError(
+            f"candidate port {port} is occupied by an unrelated container: {conflicts[0]}"
+        )
 
 
 def restore_state(
@@ -555,13 +670,12 @@ def deploy(profile: EnvironmentProfile, image: str, release: str, dry_run: bool)
         return
     ensure_runtime_dependencies(profile)
     ensure_nginx_routing(profile)
-    current = bootstrap_state(profile)
+    current = reconcile_active_routing(profile, bootstrap_state(profile))
     current_port = _valid_port(current.get("port"), "current port")
     previous_before = read_record(profile.release_state_dir / "previous.json")
     slot = choose_candidate_slot(current)
     port = profile.slot_ports[slot]
-    if port == current_port:
-        raise DeployError("candidate port is already active")
+    prepare_candidate_slot(profile, current, slot)
     release_env = write_release_env(profile, values, release)
     pull_and_validate_image(profile, image, release, slot, release_env)
     run_backup(profile, values, release)

@@ -31,6 +31,8 @@
 GitHub Actions 手动选择 `prod`。工作流会：
 
 1. 构建并推送唯一的 `repository@sha256:<digest>` 镜像。
+   构建使用固定 scope 的 GitHub Actions BuildKit 缓存；只要 `requirements.lock`
+   未变化，Python 依赖层不会因 release 版本变化而重新生成。
 2. 上传最小部署控制包，不上传源码或环境配置。
 3. 使用临时 Docker 登录目录在服务器拉取镜像，任务结束立即删除登录文件。
 4. 执行 `python3 scripts/deploy.py <env>`，以候选服务 readiness 作为切流条件。
@@ -58,12 +60,14 @@ python3 scripts/deploy.py test
 2. 初始化环境级发布锁和当前 legacy 状态，不改变流量。
 3. 使用现有 MySQL 容器执行单库一致性备份并生成 SHA-256 和元数据。
 4. 从中央 env 生成不含部署专用凭据的 release env 快照。
-5. 使用候选镜像执行版本化、幂等的 MySQL migration。
-6. 在非活动 blue/green 槽位拉起候选，只绑定 `127.0.0.1`。
-7. 候选 `/health/ready` 必须返回本次 `release_version`。
-8. 原子改写该环境 Nginx upstream，执行 `nginx -t` 和 reload。
-9. 记录 current/previous，再验证公网 readiness 与 release。
-10. 公网验证失败时自动切回 previous；数据库默认不自动 downgrade。
+5. 以 Nginx 当前 upstream 为准校准发布状态，避免历史手工发布造成状态漂移。
+6. 只清理非活动候选槽位的同名历史容器；其他容器占用候选端口时停止发布并报错。
+7. 使用候选镜像执行版本化、幂等的 MySQL migration。
+8. 在非活动 blue/green 槽位拉起候选，只绑定 `127.0.0.1`。
+9. 候选 `/health/ready` 必须返回本次 `release_version`。
+10. 原子改写该环境 Nginx upstream，执行 `nginx -t` 和 reload。
+11. 记录 current/previous，再验证公网 readiness 与 release。
+12. 公网验证失败时自动切回 previous；数据库默认不自动 downgrade。
 
 成功后上一版本继续运行，作为快速回滚目标。下一次发布复用非活动槽位，不在服务器现场构建镜像。
 

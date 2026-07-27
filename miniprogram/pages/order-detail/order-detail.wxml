@@ -1,4 +1,8 @@
 <view class="page order-detail-page" wx:if="{{order}}">
+  <view wx:if="{{paymentEntry && order.canPay}}" class="card payment-entry-card">
+    <view class="payment-entry-title">设计师方案已生成订单</view>
+    <view class="payment-entry-desc">确认收货信息后将直接调起微信支付；若暂不支付，订单会保留在“待付款”中。</view>
+  </view>
   <view class="card hero-card {{order.statusTone}}">
     <view class="hero-head">
       <view class="hero-side">

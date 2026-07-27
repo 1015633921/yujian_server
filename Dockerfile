@@ -9,10 +9,6 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
-LABEL org.opencontainers.image.title="yujian-api" \
-      org.opencontainers.image.version="${RELEASE_VERSION}" \
-      org.opencontainers.image.revision="${VCS_REF}"
-
 WORKDIR /app
 
 COPY requirements.lock .
@@ -27,6 +23,10 @@ RUN groupadd --system --gid 10001 yujian \
     && useradd --system --uid 10001 --gid yujian --home-dir /app yujian \
     && mkdir -p /app/data \
     && chown -R yujian:yujian /app
+
+LABEL org.opencontainers.image.title="yujian-api" \
+      org.opencontainers.image.version="${RELEASE_VERSION}" \
+      org.opencontainers.image.revision="${VCS_REF}"
 
 USER 10001:10001
 

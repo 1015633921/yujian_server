@@ -41,6 +41,65 @@ test('custom design proposal is decorated with a deterministic ring preview', ()
     new Set(request.latest_proposal.preview_layout.map(item => item.preview_key)).size,
     3
   );
+  assert.equal(request.confirmation_proposal.preview_layout[0].preview_image_url, 'https://cdn.example.com/a.webp');
+});
+
+test('custom design confirmation opens a real-image review before creating an order', () => {
+  const page = loadPage('miniprogram/pages/design-service/design-service.js');
+  const instance = {
+    ...page,
+    data: {
+      ...page.data,
+      request: page.decorateRequest({
+        request_id: 'CD-CONFIRM',
+        status: 'proposed',
+        proposals: [{
+          proposal_id: 'proposal-confirm',
+          status: 'active',
+          workbench: {
+            layout: [{ id: 'a', selected_image_url: 'https://cdn.example.com/real-a.webp' }]
+          }
+        }]
+      })
+    },
+    setData(patch) {
+      Object.assign(this.data, patch);
+    }
+  };
+
+  instance.confirmProposal();
+
+  assert.equal(instance.data.confirmationOpen, true);
+  assert.equal(
+    instance.data.request.confirmation_proposal.preview_layout[0].preview_image_url,
+    'https://cdn.example.com/real-a.webp'
+  );
+});
+
+test('manual design wrist selection shares the workspace wrist storage contract', () => {
+  const page = loadPage('miniprogram/pages/design-service/design-service.js');
+  const storage = new Map();
+  global.wx = {
+    setStorageSync(key, value) {
+      storage.set(key, value);
+    }
+  };
+  const instance = {
+    ...page,
+    data: JSON.parse(JSON.stringify(page.data)),
+    setData(patch) {
+      Object.entries(patch).forEach(([key, value]) => {
+        if (key === 'form.wrist_size_cm') this.data.form.wrist_size_cm = value;
+        else this.data[key] = value;
+      });
+    }
+  };
+
+  instance.confirmWristPicker({ detail: { value: 17.3 } });
+
+  assert.equal(instance.data.form.wrist_size_cm, '17.3');
+  assert.equal(storage.get('workspaceWristSizeV1'), 17.3);
+  assert.equal(storage.get('workspaceWristConfirmed'), true);
 });
 
 test('opening a designer proposal stores a complete exact workspace import intent', () => {

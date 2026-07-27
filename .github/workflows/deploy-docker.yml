@@ -52,6 +52,8 @@ jobs:
           IMAGE_REPOSITORY: ghcr.io/${{ github.repository }}/api
           VCS_REF: ${{ github.sha }}
           IMAGE_REF_FILE: ${{ runner.temp }}/image-ref
+          BUILD_CACHE_FROM: type=gha,scope=yujian-api-linux-amd64
+          BUILD_CACHE_TO: type=gha,mode=max,scope=yujian-api-linux-amd64
         run: |
           scripts/release/build_image.sh --push
           echo "ref=$(cat "${IMAGE_REF_FILE}")" >> "${GITHUB_OUTPUT}"

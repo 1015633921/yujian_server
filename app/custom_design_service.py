@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 
 from .database import connect_database, runtime_schema_mutation_allowed, use_mysql
 from .order_service import OrderService
+from .reporting import build_report_projection, report_context
 from .repository import DB_PATH
 
 
@@ -192,13 +193,23 @@ class CustomDesignService:
         for row in rows:
             item = self._public({**dict(row), "proposals_json": "[]", "events_json": "[]"})
             report = connection.execute(
-                "SELECT report_code, output_snapshot_json FROM report_snapshots WHERE report_id = ?",
-                (item["report_id"],),
+                "SELECT report_code, input_snapshot_json, output_snapshot_json "
+                "FROM report_snapshots WHERE report_id = ? AND report_version = ?",
+                (item["report_id"], item["report_version"]),
             ).fetchone()
             item["report_code"] = str(report["report_code"]) if report and report["report_code"] else item["report_id"]
             output = json_value(report["output_snapshot_json"], {}) if report else {}
+            input_snapshot = json_value(report["input_snapshot_json"], {}) if report else {}
             projection = json_value(output.get("report_projection"), {})
             context = json_value(output.get("report_context"), {})
+            if not projection and (
+                output.get("final_energy_profile")
+                or output.get("interpretation")
+                or output.get("useful_elements")
+            ):
+                projection = build_report_projection(output)
+            if not context and input_snapshot:
+                context = report_context(input_snapshot)
             item["report_summary"] = {
                 "core_conclusion": projection.get("core_conclusion") or {},
                 "elements": projection.get("elements") or [],
@@ -208,6 +219,14 @@ class CustomDesignService:
                 "adjustment_strategy": projection.get("adjustment_strategy") or [],
                 "keywords": projection.get("keywords") or [],
                 "core_wishes": context.get("core_wishes") or [],
+                "useful_elements": output.get("useful_elements") or [],
+                "strongest_element": output.get("strongest_element") or output.get("strongest") or "",
+                "weakest_element": output.get("weakest_element") or output.get("weakest") or "",
+                "interpretation": output.get("interpretation") or {},
+                "mbti_analysis": output.get("mbti_analysis") or {},
+                "chakra_analysis": output.get("chakra_analysis") or {},
+                "mood_analysis": output.get("mood_analysis") or {},
+                "zodiac_analysis": output.get("zodiac_analysis") or {},
             }
             proposals = connection.execute(
                 "SELECT proposal_id, proposal_version, title, description, image_urls_json, "

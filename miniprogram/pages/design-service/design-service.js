@@ -15,7 +15,6 @@ const STATUS_TEXT = {
   closed: '服务已结束'
 };
 
-const WRIST_SIZE_OPTIONS = Array.from({ length: 29 }, (_, index) => (12 + index * 0.5).toFixed(1));
 const BEAD_SIZE_OPTIONS = Array.from({ length: 11 }, (_, index) => index + 6);
 const BUDGET_OPTIONS = ['100–200 元', '200–300 元', '300–500 元', '500–800 元', '800 元以上'];
 
@@ -38,10 +37,11 @@ Page({
     loading: true,
     submitting: false,
     revisionOpen: false,
-    wristSizeOptions: WRIST_SIZE_OPTIONS,
+    wristPickerOpen: false,
+    confirmationOpen: false,
+    confirming: false,
     beadSizeOptions: BEAD_SIZE_OPTIONS,
     budgetOptions: BUDGET_OPTIONS,
-    wristSizeIndex: 8,
     beadSizeIndex: 2,
     budgetIndex: 2,
     form: {
@@ -57,15 +57,22 @@ Page({
   },
 
   onLoad(options = {}) {
-    const wristSizeIndex = closestOptionIndex(WRIST_SIZE_OPTIONS, wx.getStorageSync('recommendedWristSize') || 16);
+    const storedWristSize = Number(
+      wx.getStorageSync('workspaceWristSizeV1')
+      || wx.getStorageSync('recommendedWristSize')
+      || 16
+    );
+    const wristSize = Math.max(
+      10,
+      Math.min(25, Number.isFinite(storedWristSize) ? storedWristSize : 16)
+    ).toFixed(1);
     const beadSizeIndex = closestOptionIndex(BEAD_SIZE_OPTIONS, wx.getStorageSync('recommendedBeadSize') || 8);
     this.setData({
       reportId: String(options.report_id || ''),
       reportVersion: Number(options.report_version) || 0,
       assessmentId: String(options.assessment_id || ''),
-      wristSizeIndex,
       beadSizeIndex,
-      'form.wrist_size_cm': WRIST_SIZE_OPTIONS[wristSizeIndex],
+      'form.wrist_size_cm': wristSize,
       'form.bead_size_mm': BEAD_SIZE_OPTIONS[beadSizeIndex]
     });
     this.loadRequests();
@@ -105,9 +112,24 @@ Page({
     this.setData({ [`form.${field}`]: field === 'bead_size_mm' ? Number(value) : String(value) });
   },
 
-  onWristSizeChange(event) {
-    const wristSizeIndex = Number(event.detail.value);
-    this.setData({ wristSizeIndex, 'form.wrist_size_cm': WRIST_SIZE_OPTIONS[wristSizeIndex] });
+  openWristPicker() {
+    this.setData({ wristPickerOpen: true });
+  },
+
+  closeWristPicker() {
+    this.setData({ wristPickerOpen: false });
+  },
+
+  confirmWristPicker(event) {
+    const wristSize = Math.round(Number(event.detail && event.detail.value) * 10) / 10;
+    if (!Number.isFinite(wristSize)) return;
+    wx.setStorageSync('workspaceWristSizeV1', wristSize);
+    wx.setStorageSync('recommendedWristSize', wristSize);
+    wx.setStorageSync('workspaceWristConfirmed', true);
+    this.setData({
+      wristPickerOpen: false,
+      'form.wrist_size_cm': wristSize.toFixed(1)
+    });
   },
 
   onBeadSizeChange(event) {
@@ -128,8 +150,8 @@ Page({
       wx.showToast({ title: '报告尚未准备好，请返回后重试', icon: 'none' });
       return;
     }
-    if (!Number.isFinite(wrist) || wrist < 12 || wrist > 26) {
-      wx.showToast({ title: '请填写 12–26cm 的手围', icon: 'none' });
+    if (!Number.isFinite(wrist) || wrist < 10 || wrist > 25) {
+      wx.showToast({ title: '请选择 10–25cm 的手围', icon: 'none' });
       return;
     }
     this.setData({ submitting: true });
@@ -151,31 +173,43 @@ Page({
     }
   },
 
-  async confirmProposal() {
+  confirmProposal() {
     const request = this.data.request;
-    if (!request) return;
-    const result = await new Promise(resolve => wx.showModal({
-      title: '确认这套搭配？',
-      content: '确认后会按当前材料和价格生成待支付订单，并为你保留库存 24 小时。',
-      confirmText: '确认并生成订单',
-      success: resolve
-    }));
-    if (!result.confirm) return;
+    if (!request || !request.has_structured_proposal) {
+      wx.showToast({ title: '方案图片尚未准备好', icon: 'none' });
+      return;
+    }
+    this.setData({ confirmationOpen: true });
+  },
+
+  closeConfirmation() {
+    if (!this.data.confirming) this.setData({ confirmationOpen: false });
+  },
+
+  async submitProposalConfirmation() {
+    const request = this.data.request;
+    if (!request || this.data.confirming) return;
+    this.setData({ confirming: true });
     try {
       const user = auth.getStoredUser() || {};
       const updated = await confirmCustomDesignRequest(request.request_id, { user_id: user.user_id });
-      this.setData({ request: this.decorateRequest(updated) });
+      this.setData({
+        request: this.decorateRequest(updated),
+        confirmationOpen: false
+      });
       const orderId = updated && updated.order && updated.order.order_id;
       if (orderId) {
         wx.showToast({ title: '待支付订单已生成', icon: 'success' });
-        setTimeout(() => wx.navigateTo({
-          url: `/pages/order-detail/order-detail?id=${encodeURIComponent(orderId)}`
-        }), 450);
+        setTimeout(() => wx.redirectTo({
+          url: `/pages/order-detail/order-detail?id=${encodeURIComponent(orderId)}&payment_entry=1`
+        }), 350);
       } else {
         wx.showToast({ title: '已确认方案', icon: 'success' });
       }
     } catch (error) {
       wx.showToast({ title: error.message || '操作失败', icon: 'none' });
+    } finally {
+      this.setData({ confirming: false });
     }
   },
 
@@ -203,6 +237,8 @@ Page({
     const urls = ((this.data.request || {}).proposals || []).flatMap(item => item.image_urls || []);
     wx.previewImage({ current, urls });
   },
+
+  noop() {},
 
   openProposalInWorkspace() {
     const request = this.data.request || {};
@@ -291,6 +327,7 @@ Page({
       proposals,
       latest_proposal: latestProposal,
       has_structured_proposal: !!(latestProposal && latestProposal.bead_count),
+      confirmation_proposal: latestProposal,
       status_text: STATUS_TEXT[request.status] || request.status || '处理中'
     };
   }

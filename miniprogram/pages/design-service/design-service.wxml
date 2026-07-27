@@ -43,7 +43,7 @@
   <view wx:else class="form-card">
     <view class="section-title">告诉设计师你的佩戴偏好</view>
     <view class="form-hint">报告中的搭配方向会保留在你的账户里；此处只收集你希望怎么佩戴。</view>
-    <view class="field"><text>手围</text><picker class="select-picker" mode="selector" range="{{wristSizeOptions}}" value="{{wristSizeIndex}}" bindchange="onWristSizeChange"><view class="select-value">{{form.wrist_size_cm}} cm<text class="select-arrow">⌄</text></view></picker></view>
+    <view class="field"><text>手围</text><view class="select-picker" bindtap="openWristPicker"><view class="select-value">{{form.wrist_size_cm}} cm<text class="select-arrow">⌄</text></view></view><view class="field-tip">与 DIY 工作台使用同一手围软尺</view></view>
     <view class="field"><text>珠径</text><picker class="select-picker" mode="selector" range="{{beadSizeOptions}}" value="{{beadSizeIndex}}" bindchange="onBeadSizeChange"><view class="select-value">{{form.bead_size_mm}} mm<text class="select-arrow">⌄</text></view></picker><view class="field-tip">可选 6–16mm</view></view>
     <view class="field"><text>预算</text><picker class="select-picker" mode="selector" range="{{budgetOptions}}" value="{{budgetIndex}}" bindchange="onBudgetChange"><view class="select-value">{{form.budget}}<text class="select-arrow">⌄</text></view></picker></view>
     <view class="field"><text>风格</text><view class="chips"><view wx:for="{{['清透自然','高级极简','温柔治愈','东方禅意']}}" wx:key="*this" class="chip {{form.style_preference === item ? 'active' : ''}}" data-field="style_preference" data-value="{{item}}" bindtap="chooseOption">{{item}}</view></view></view>
@@ -59,4 +59,38 @@
       <form bindsubmit="submitRevision"><textarea name="revision" placeholder="例如：颜色太深、想减少金属配饰、希望更日常" maxlength="500" auto-focus="{{true}}"></textarea><view class="proposal-actions"><button class="secondary" bindtap="closeRevision">取消</button><button class="primary" form-type="submit">提交调整</button></view></form>
     </view>
   </view>
+
+  <view wx:if="{{confirmationOpen}}" class="mask confirm-mask" bindtap="closeConfirmation">
+    <view class="confirm-card" catchtap="noop">
+      <view class="confirm-head">
+        <view><view class="confirm-eyebrow">FINAL CHECK</view><view class="section-title">确认设计师实物搭配</view></view>
+        <view class="confirm-close" bindtap="closeConfirmation">×</view>
+      </view>
+      <view class="confirm-hint">以下均为本方案选中的真实图库素材。确认后会按当前价格锁定库存并生成待支付订单。</view>
+      <view class="confirm-ring">
+        <image wx:for="{{request.confirmation_proposal.preview_layout}}" wx:for-item="bead" wx:key="preview_key" class="confirm-bead" src="{{bead.preview_image_url}}" mode="aspectFit" style="{{bead.preview_style}}"></image>
+      </view>
+      <view class="confirm-summary">
+        <text>{{request.confirmation_proposal.bead_count}} 颗 · 手围 {{request.confirmation_proposal.workbench.wrist_size_cm}} cm</text>
+        <text class="confirm-price">¥{{request.confirmation_proposal.price_text}}</text>
+      </view>
+      <scroll-view class="confirm-materials" scroll-x enhanced show-scrollbar="{{false}}">
+        <view wx:for="{{request.confirmation_proposal.preview_layout}}" wx:for-item="bead" wx:key="preview_key" class="confirm-material">
+          <image src="{{bead.preview_image_url}}" mode="aspectFit"></image>
+          <text>{{bead.name || bead.series || '搭配材料'}}</text>
+        </view>
+      </scroll-view>
+      <view class="proposal-actions confirm-actions">
+        <button class="secondary" disabled="{{confirming}}" bindtap="closeConfirmation">再看看</button>
+        <button class="primary" loading="{{confirming}}" disabled="{{confirming}}" bindtap="submitProposalConfirmation">确认并去支付</button>
+      </view>
+    </view>
+  </view>
+
+  <wrist-picker
+    visible="{{wristPickerOpen}}"
+    value="{{form.wrist_size_cm}}"
+    bindclose="closeWristPicker"
+    bindconfirm="confirmWristPicker"
+  />
 </view>

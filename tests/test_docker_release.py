@@ -15,6 +15,9 @@ from scripts.deploy import (
     DeployError,
     EnvironmentProfile,
     choose_candidate_slot,
+    parse_upstream_port,
+    prepare_candidate_slot,
+    reconcile_active_routing,
     render_upstream,
     replace_location_proxy,
     restore_state,
@@ -95,8 +98,23 @@ def test_nginx_location_conversion_is_scoped_and_preserves_prefix_semantics() ->
 
 def test_nginx_upstream_and_slot_selection_fail_closed() -> None:
     assert "server 127.0.0.1:8011;" in render_upstream("yujian_test_active", 8011)
+    assert (
+        parse_upstream_port(
+            "upstream yujian_test_active {\n    server 127.0.0.1:8033;\n}\n",
+            "yujian_test_active",
+        )
+        == 8033
+    )
     with pytest.raises(DeployError, match="invalid Nginx upstream"):
         render_upstream("bad-name;", 8011)
+    with pytest.raises(DeployError, match="exactly one"):
+        parse_upstream_port(
+            "upstream yujian_test_active {\n"
+            "    server 127.0.0.1:8011;\n"
+            "    server 127.0.0.1:8012;\n"
+            "}\n",
+            "yujian_test_active",
+        )
     assert choose_candidate_slot({"slot": "legacy"}) == "blue"
     assert choose_candidate_slot({"slot": "blue"}) == "green"
     assert choose_candidate_slot({"slot": "green"}) == "blue"
@@ -168,9 +186,106 @@ def test_deployment_workflow_has_one_environment_choice_and_no_kubernetes() -> N
     assert "python3 scripts/deploy.py '${TARGET_ENVIRONMENT}'" in workflow
     assert "compose.release.yaml" in workflow
     assert "docker/setup-buildx-action@" in workflow
+    assert "BUILD_CACHE_FROM: type=gha,scope=yujian-api-linux-amd64" in workflow
+    assert "BUILD_CACHE_TO: type=gha,mode=max,scope=yujian-api-linux-amd64" in workflow
     assert "kubectl" not in workflow
     assert "k3s" not in workflow.lower()
     assert "--password-stdin" in workflow
+
+
+def test_dockerfile_keeps_dynamic_labels_after_dependency_layer() -> None:
+    dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+    assert dockerfile.index("RUN python -m pip install") < dockerfile.index(
+        "org.opencontainers.image.version"
+    )
+    build_script = (ROOT / "scripts" / "release" / "build_image.sh").read_text(
+        encoding="utf-8"
+    )
+    assert '--cache-from "${BUILD_CACHE_FROM}"' in build_script
+    assert '--cache-to "${BUILD_CACHE_TO}"' in build_script
+
+
+def test_reconcile_active_routing_records_the_real_nginx_target(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    upstream = tmp_path / "upstream.conf"
+    upstream.write_text(
+        "upstream yujian_test_active {\n    server 127.0.0.1:8033;\n}\n",
+        encoding="utf-8",
+    )
+    profile = replace(
+        EnvironmentProfile.load("test"),
+        nginx_upstream_file=upstream,
+        release_state_dir=tmp_path / "state",
+    )
+    monkeypatch.setattr(
+        "scripts.deploy.health_payload",
+        lambda url: {"ready": True, "release_version": "v20260727-001-active"},
+    )
+    monkeypatch.setattr(
+        "scripts.deploy.run_command",
+        lambda *args, **kwargs: subprocess.CompletedProcess(
+            args[0],
+            0,
+            stdout="active-image\n",
+            stderr="",
+        ),
+    )
+
+    reconciled = reconcile_active_routing(
+        profile,
+        {
+            "release": "v20260721-001-stale",
+            "slot": "blue",
+            "port": 8011,
+            "project": "yujian-test-blue",
+            "image": "stale-image",
+        },
+    )
+
+    assert reconciled["port"] == 8033
+    assert reconciled["slot"] == "external"
+    assert reconciled["image"] == "active-image"
+    assert read_record(profile.release_state_dir / "current.json") == reconciled
+
+
+def test_prepare_candidate_slot_removes_only_the_named_inactive_slot(
+    monkeypatch,
+) -> None:
+    calls: list[list[str]] = []
+
+    def fake_run(command, **kwargs):
+        calls.append(command)
+        if command[:3] == ["docker", "container", "inspect"]:
+            return subprocess.CompletedProcess(command, 0, stdout="stale-id\n", stderr="")
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr("scripts.deploy.run_command", fake_run)
+    profile = EnvironmentProfile.load("test")
+    prepare_candidate_slot(profile, {"slot": "external", "port": 8033}, "blue")
+
+    assert ["docker", "rm", "--force", "yujian-test-blue-api-1"] in calls
+    assert any(command[:3] == ["docker", "ps", "--filter"] for command in calls)
+
+
+def test_prepare_candidate_slot_rejects_unrelated_port_owner(monkeypatch) -> None:
+    def fake_run(command, **kwargs):
+        if command[:3] == ["docker", "container", "inspect"]:
+            return subprocess.CompletedProcess(command, 1, stdout="", stderr="")
+        if command[:3] == ["docker", "ps", "--filter"]:
+            return subprocess.CompletedProcess(
+                command,
+                0,
+                stdout="unrelated-service\n",
+                stderr="",
+            )
+        raise AssertionError(command)
+
+    monkeypatch.setattr("scripts.deploy.run_command", fake_run)
+    profile = EnvironmentProfile.load("test")
+    with pytest.raises(DeployError, match="unrelated container"):
+        prepare_candidate_slot(profile, {"slot": "external", "port": 8033}, "blue")
 
 
 def test_miniprogram_environment_switch_writes_only_an_ignored_generated_file() -> None:

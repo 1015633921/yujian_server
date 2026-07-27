@@ -38,7 +38,7 @@ class AdminAccountPayload(BaseModel):
 
 
 class CustomDesignWorkbenchPayload(BaseModel):
-    wrist_size_cm: float = Field(ge=12, le=26)
+    wrist_size_cm: float = Field(ge=10, le=25)
     bead_size_mm: float = Field(ge=6, le=16)
     layout: list[dict[str, Any]] = Field(min_length=1, max_length=40)
     notes: str = Field(default="", max_length=1000)
@@ -112,14 +112,17 @@ def validated_custom_design_workbench(
     layout: list[dict[str, Any]] = []
     for requested, snapshot in zip(requested_layout, snapshots, strict=True):
         selected_image_url = str(requested.get("selected_image_url") or "").strip()
-        allowed_images = {
+        gallery_images = [
             str(url).strip()
             for url in snapshot.get("gallery_image_urls") or []
             if str(url).strip()
-        }
+        ]
+        allowed_images = set(gallery_images)
         if selected_image_url and selected_image_url not in allowed_images:
             raise ValueError(f"{snapshot.get('name') or '材料'}的图库图片已更新，请重新选择")
-        exact_image_url = selected_image_url or str(snapshot.get("image_url") or "")
+        if not allowed_images:
+            raise ValueError(f"{snapshot.get('name') or '材料'}暂无图库图片，不能用于实物搭配")
+        exact_image_url = selected_image_url or gallery_images[0]
         layout.append(
             {
                 **snapshot,

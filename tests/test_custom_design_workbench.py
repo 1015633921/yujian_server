@@ -5,6 +5,8 @@ from uuid import uuid4
 
 import pytest
 
+from app import admin_api
+from app.admin_api import CustomDesignWorkbenchPayload, validated_custom_design_workbench
 from app.admin_service import AdminService
 from app.custom_design_service import CustomDesignService
 from app.migrations.runner import upgrade
@@ -86,6 +88,39 @@ def workbench(material_id: str = "designer-bead") -> dict:
         "selected": [material_id] * len(layout),
         "summary": {"count": len(layout), "price": "30.00", "total_fee": 3000},
     }
+
+
+def test_admin_workbench_uses_gallery_asset_instead_of_primary_image(monkeypatch):
+    class FakeOrderService:
+        @staticmethod
+        def validate_and_refresh_material_prices(_layout):
+            return [{
+                "id": "gallery-bead",
+                "name": "图库测试珠",
+                "image_url": "https://cdn.example.com/primary.webp",
+                "gallery_image_urls": [
+                    "https://cdn.example.com/gallery-1.webp",
+                    "https://cdn.example.com/gallery-2.webp",
+                ],
+                "price": "10.00",
+                "subtotal_cents": 1000,
+            }]
+
+        @staticmethod
+        def cents_text(value):
+            return f"{value / 100:.2f}"
+
+    monkeypatch.setattr(admin_api, "order_service", FakeOrderService())
+    payload = CustomDesignWorkbenchPayload(
+        wrist_size_cm=16,
+        bead_size_mm=8,
+        layout=[{"material_id": "gallery-bead"}],
+    )
+
+    result = validated_custom_design_workbench(payload)
+
+    assert result["layout"][0]["selected_image_url"] == "https://cdn.example.com/gallery-1.webp"
+    assert result["layout"][0]["image_url"] != "https://cdn.example.com/primary.webp"
 
 
 def test_structured_draft_publish_and_confirm_creates_one_pending_order(

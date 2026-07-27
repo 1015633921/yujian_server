@@ -24,16 +24,25 @@ IMAGE_TAG="${IMAGE_REPOSITORY}:${RELEASE_VERSION}"
 METADATA_FILE="$(mktemp)"
 trap 'rm -f "${METADATA_FILE}"' EXIT
 
-docker buildx build "${ROOT}" \
-  --file "${ROOT}/Dockerfile" \
-  --platform "${TARGET_PLATFORM:-linux/amd64}" \
-  --tag "${IMAGE_TAG}" \
-  --build-arg "RELEASE_VERSION=${RELEASE_VERSION}" \
-  --build-arg "VCS_REF=${VCS_REF}" \
-  --provenance=false \
-  --sbom=false \
-  --metadata-file "${METADATA_FILE}" \
-  "${MODE}"
+build_args=(
+  --file "${ROOT}/Dockerfile"
+  --platform "${TARGET_PLATFORM:-linux/amd64}"
+  --tag "${IMAGE_TAG}"
+  --build-arg "RELEASE_VERSION=${RELEASE_VERSION}"
+  --build-arg "VCS_REF=${VCS_REF}"
+  --provenance=false
+  --sbom=false
+  --metadata-file "${METADATA_FILE}"
+)
+if [[ -n "${BUILD_CACHE_FROM:-}" ]]; then
+  build_args+=(--cache-from "${BUILD_CACHE_FROM}")
+fi
+if [[ -n "${BUILD_CACHE_TO:-}" ]]; then
+  build_args+=(--cache-to "${BUILD_CACHE_TO}")
+fi
+build_args+=("${MODE}" "${ROOT}")
+
+docker buildx build "${build_args[@]}"
 
 echo "built ${IMAGE_TAG} from ${VCS_REF}"
 if [[ "${MODE}" == "--push" ]]; then

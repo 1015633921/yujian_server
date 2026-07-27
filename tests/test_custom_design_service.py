@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
@@ -65,6 +66,23 @@ def test_custom_design_request_is_private_and_uses_independent_service_state(mon
     assert "birthday" not in str(request["report_summary"])
     assert request["proposals"] == []
     assert "birthday" not in str(request)
+
+    with api_module.custom_design_service.connect() as connection:
+        snapshot = connection.execute(
+            "SELECT output_snapshot_json FROM report_snapshots WHERE report_id = ? AND report_version = ?",
+            (report["report_id"], report["report_version"]),
+        ).fetchone()
+        legacy_output = json.loads(snapshot["output_snapshot_json"])
+        legacy_output.pop("report_projection", None)
+        legacy_output.pop("report_context", None)
+        connection.execute(
+            "UPDATE report_snapshots SET output_snapshot_json = ? WHERE report_id = ? AND report_version = ?",
+            (json.dumps(legacy_output, ensure_ascii=False), report["report_id"], report["report_version"]),
+        )
+    legacy_admin_view = api_module.custom_design_service.get_for_admin(request["request_id"])
+    assert legacy_admin_view["report_summary"]["core_conclusion"]
+    assert legacy_admin_view["report_summary"]["mbti_analysis"]["type"] == "INFJ"
+    assert legacy_admin_view["report_summary"]["core_wishes"] == ["健康护身/保持专注"]
 
     duplicate = client.post("/api/v1/custom-design-requests", headers=headers, json=payload)
     assert duplicate.status_code == 400

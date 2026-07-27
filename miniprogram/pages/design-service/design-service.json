@@ -1,5 +1,8 @@
 {
   "navigationBarTitleText": "人工搭配",
   "navigationBarBackgroundColor": "#FBFAF7",
-  "navigationBarTextStyle": "black"
+  "navigationBarTextStyle": "black",
+  "usingComponents": {
+    "wrist-picker": "/components/wrist-picker/wrist-picker"
+  }
 }

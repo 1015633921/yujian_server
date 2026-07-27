@@ -1,4 +1,4 @@
-<view class="studio-page {{deviceClass}}" style="{{workspaceLayoutStyle}}">
+<view class="studio-page {{deviceClass}} {{showMaterialDetail ? 'material-detail-open' : ''}}" style="{{workspaceLayoutStyle}}">
   <view class="studio-top">
     <view class="title-row">
       <view class="back-btn" catchtap="goBack" hover-class="back-btn-press" aria-role="button" aria-label="返回"></view>
@@ -262,6 +262,21 @@
           <view class="material-detail-name">{{materialDetail.name}}</view>
           <view class="material-detail-price">{{materialDetail.priceText}}</view>
         </view>
+        <view class="material-detail-section">
+          <view class="material-detail-section-title">简单介绍</view>
+          <view class="material-detail-introduction">{{materialDetail.introduction}}</view>
+        </view>
+        <view wx:if="{{materialDetail.story}}" class="material-detail-section">
+          <view class="material-detail-section-title">材质故事</view>
+          <view class="material-detail-introduction">{{materialDetail.story}}</view>
+        </view>
+        <view class="material-detail-section">
+          <view class="material-detail-section-title">核心功效</view>
+          <view wx:if="{{materialDetail.effects.length}}" class="material-detail-effects">
+            <text wx:for="{{materialDetail.effects}}" wx:key="*this" class="material-detail-effect">{{item}}</text>
+          </view>
+          <view wx:else class="material-detail-empty">暂无核心功效介绍</view>
+        </view>
         <view class="material-detail-fields">
           <view wx:for="{{materialDetail.fields}}" wx:key="label" class="material-detail-field">
             <text class="material-detail-field-label">{{item.label}}</text>
@@ -273,53 +288,12 @@
     </view>
   </view>
 
-  <view wx:if="{{showWristPicker}}" class="wrist-picker-mask" bindtap="closeWristSetting">
-    <view class="wrist-picker" catchtap="stopPropagation">
-      <view class="wrist-picker-head">
-        <view>
-          <view class="wrist-picker-title">选择手围</view>
-          <view class="wrist-picker-subtitle">设置腕围，系统会同步更新当前方案适配参考。</view>
-        </view>
-        <view class="wrist-picker-close" bindtap="closeWristSetting">×</view>
-      </view>
-      <view class="wrist-ruler-value">
-        <text class="wrist-ruler-number">{{wristRulerValue}}</text>
-        <text class="wrist-ruler-unit">cm</text>
-      </view>
-      <view class="wrist-ruler-caption">左右滑动软尺，松手后自动吸附到 0.1cm</view>
-      <view class="wrist-ruler-wrap">
-        <view class="wrist-ruler-pointer"></view>
-        <view class="wrist-ruler-fade left"></view>
-        <view class="wrist-ruler-fade right"></view>
-        <scroll-view
-          class="wrist-ruler-scroll"
-          scroll-x
-          enhanced="{{true}}"
-          bounces="{{true}}"
-          show-scrollbar="{{false}}"
-          scroll-left="{{wristRulerScrollLeft}}"
-          bindtouchstart="onWristRulerTouchStart"
-          bindtouchend="onWristRulerTouchEnd"
-          bindtouchcancel="onWristRulerTouchEnd"
-          bindscroll="onWristRulerScroll"
-        >
-          <view class="wrist-ruler-track" style="padding-left:{{wristRulerSidePadding}}px;padding-right:{{wristRulerSidePadding}}px;">
-            <view
-              wx:for="{{wristRulerTicks}}"
-              wx:key="index"
-              class="wrist-ruler-tick {{item.className}}"
-              style="width:{{wristRulerTickWidth}}px;"
-            >
-              <view class="tick-line"></view>
-              <view wx:if="{{item.label}}" class="tick-label">{{item.label}}</view>
-            </view>
-          </view>
-        </scroll-view>
-      </view>
-      <view class="wrist-ruler-range">{{wristRulerRangeText}}</view>
-      <button class="wrist-ruler-confirm" catchtap="confirmWristRuler">确认手围</button>
-    </view>
-  </view>
+  <wrist-picker
+    visible="{{showWristPicker}}"
+    value="{{wristSize}}"
+    bindclose="closeWristSetting"
+    bindconfirm="confirmWristPickerComponent"
+  />
 
   <view wx:if="{{showWristGuideModal}}" class="wrist-guide-mask" bindtap="closeWristGuideModal">
     <view class="wrist-guide-sheet" catchtap="stopPropagation">
