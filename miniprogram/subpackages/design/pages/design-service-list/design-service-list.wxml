@@ -1,0 +1,103 @@
+<view class="page design-list-page">
+  <view class="hero">
+    <view class="eyebrow">YU JIAN DESIGN SERVICE</view>
+    <view class="hero-row">
+      <view>
+        <view class="title">我的人工搭配</view>
+        <view class="desc">查看设计进度、确认方案或回顾已完成的专属设计。</view>
+      </view>
+      <view wx:if="{{requests.length}}" class="total">{{requests.length}} 份</view>
+    </view>
+  </view>
+
+  <scroll-view wx:if="{{requests.length}}" class="filters" scroll-x enhanced show-scrollbar="{{false}}">
+    <view
+      wx:for="{{filters}}"
+      wx:key="key"
+      class="filter {{activeFilter === item.key ? 'active' : ''}}"
+      data-key="{{item.key}}"
+      bindtap="chooseFilter"
+    >{{item.label}}</view>
+  </scroll-view>
+
+  <view wx:if="{{loading}}" class="state-card">
+    <view class="state-title">正在读取搭配记录</view>
+    <view class="state-copy">设计进度与方案会同步显示在这里。</view>
+  </view>
+
+  <view wx:elif="{{loadFailed && !requests.length}}" class="state-card">
+    <view class="state-title">暂时无法加载</view>
+    <view class="state-copy">请检查网络后重新尝试。</view>
+    <button class="state-action secondary" bindtap="retry">重新加载</button>
+  </view>
+
+  <view wx:elif="{{visibleRequests.length}}" class="request-list">
+    <view
+      wx:for="{{visibleRequests}}"
+      wx:for-item="request"
+      wx:key="request_id"
+      class="request-card"
+      data-id="{{request.request_id}}"
+      bindtap="openRequest"
+    >
+      <view class="card-head">
+        <view class="status-dot status-{{request.status}}"></view>
+        <view class="status">{{request.status_text}}</view>
+        <view class="time">{{request.updated_at_text}}</view>
+      </view>
+
+      <view class="card-body">
+        <view class="preview {{request.has_proposal ? 'has-proposal' : ''}}">
+          <view wx:if="{{request.preview_materials.length}}" class="material-stack">
+            <image
+              wx:for="{{request.preview_materials}}"
+              wx:for-item="material"
+              wx:key="key"
+              class="material-image material-{{index}}"
+              src="{{material.image_url}}"
+              mode="aspectFit"
+              data-request-id="{{request.request_id}}"
+              data-material-key="{{material.key}}"
+              binderror="onPreviewImageError"
+            ></image>
+          </view>
+          <view wx:else class="waiting-mark">
+            <view class="waiting-ring"></view>
+            <view class="waiting-core">设计</view>
+          </view>
+        </view>
+
+        <view class="card-copy">
+          <view class="proposal-title">{{request.proposal_title}}</view>
+          <view class="preferences">{{request.preferences_text}}</view>
+          <view wx:if="{{request.bead_count}}" class="bead-count">{{request.bead_count}} 颗材料 · 第 {{request.proposals.length}} 版方案</view>
+          <view wx:else class="bead-count">设计师正在准备方案</view>
+        </view>
+      </view>
+
+      <view class="card-foot">
+        <view class="request-id">{{request.request_id}}</view>
+        <view class="detail-link">{{request.action_text}} <text>›</text></view>
+      </view>
+    </view>
+  </view>
+
+  <view wx:elif="{{requests.length}}" class="state-card">
+    <view class="state-title">这个分类暂时没有记录</view>
+    <view class="state-copy">切换到其他状态查看历史人工搭配。</view>
+  </view>
+
+  <view wx:elif="{{!isLoggedIn}}" class="state-card empty-card">
+    <view class="empty-symbol">✦</view>
+    <view class="state-title">登录后查看人工搭配</view>
+    <view class="state-copy">登录后可同步查看设计进度、历史方案和确认状态。</view>
+    <button class="state-action primary" bindtap="goProfile">去登录</button>
+  </view>
+
+  <view wx:else class="state-card empty-card">
+    <view class="empty-symbol">✦</view>
+    <view class="state-title">还没有人工搭配记录</view>
+    <view class="state-copy">完成五行测算后，可把测算方向与佩戴偏好交给设计师。</view>
+    <button class="state-action primary" bindtap="goAssessment">去测算并申请</button>
+  </view>
+</view>

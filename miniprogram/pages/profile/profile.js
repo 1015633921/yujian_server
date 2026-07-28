@@ -610,7 +610,7 @@ Page({
       wx.showToast({ title: '请先登录后查看服务进度', icon: 'none' });
       return;
     }
-    wx.navigateTo({ url: '/pages/design-service/design-service' });
+    wx.navigateTo({ url: '/subpackages/design/pages/design-service-list/design-service-list' });
   },
 
   viewCommunityFavorites() {

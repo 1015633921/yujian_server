@@ -33,6 +33,7 @@ Page({
     reportId: '',
     reportVersion: 0,
     assessmentId: '',
+    requestId: '',
     request: null,
     loading: true,
     submitting: false,
@@ -71,6 +72,7 @@ Page({
       reportId: String(options.report_id || ''),
       reportVersion: Number(options.report_version) || 0,
       assessmentId: String(options.assessment_id || ''),
+      requestId: String(options.request_id || ''),
       beadSizeIndex,
       'form.wrist_size_cm': wristSize,
       'form.bead_size_mm': BEAD_SIZE_OPTIONS[beadSizeIndex]
@@ -79,7 +81,11 @@ Page({
   },
 
   async onShow() {
-    if (this.data.reportId) await this.loadRequests(true);
+    if (!this.hasShown) {
+      this.hasShown = true;
+      return;
+    }
+    if (this.data.reportId || this.data.requestId) await this.loadRequests(true);
   },
 
   async loadRequests(silent = false) {
@@ -90,9 +96,11 @@ Page({
     }
     try {
       const requests = await getCustomDesignRequests({ silent });
-      const request = this.data.reportId
-        ? ((requests || []).find(item => item.report_id === this.data.reportId && Number(item.report_version) === this.data.reportVersion) || null)
-        : ((requests || [])[0] || null);
+      const request = this.data.requestId
+        ? ((requests || []).find(item => item.request_id === this.data.requestId) || null)
+        : (this.data.reportId
+          ? ((requests || []).find(item => item.report_id === this.data.reportId && Number(item.report_version) === this.data.reportVersion) || null)
+          : null);
       this.setData({ request: this.decorateRequest(request), loading: false });
     } catch (error) {
       this.setData({ loading: false });
@@ -296,6 +304,10 @@ Page({
 
   goAssessment() {
     wx.switchTab({ url: '/pages/assessment/assessment' });
+  },
+
+  goRequestList() {
+    wx.redirectTo({ url: '/subpackages/design/pages/design-service-list/design-service-list' });
   },
 
   decorateRequest(request) {

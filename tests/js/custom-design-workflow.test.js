@@ -76,6 +76,56 @@ test('custom design confirmation opens a real-image review before creating an or
   );
 });
 
+test('custom design list keeps every request and groups statuses for client filtering', () => {
+  const page = loadPage('miniprogram/subpackages/design/pages/design-service-list/design-service-list.js');
+  const requests = [
+    page.decorateRequest({
+      request_id: 'CD-WAITING',
+      status: 'designing',
+      updated_at: '2026-07-28T08:00:00Z',
+      request: { wrist_size_cm: 16, bead_size_mm: 8, style_preference: '清透自然' },
+      proposals: []
+    }),
+    page.decorateRequest({
+      request_id: 'CD-PROPOSED',
+      status: 'proposed',
+      request: { wrist_size_cm: 15.5, bead_size_mm: 10, budget: '300–500 元' },
+      proposals: [{
+        proposal_id: 'proposal-list',
+        status: 'active',
+        title: '日常清透款',
+        workbench: {
+          layout: [
+            { selected_image_url: 'https://cdn.example.com/a.webp' },
+            { selected_image_url: 'https://cdn.example.com/b.webp' }
+          ]
+        }
+      }]
+    }),
+    page.decorateRequest({
+      request_id: 'CD-DONE',
+      status: 'confirmed',
+      proposals: []
+    })
+  ];
+  const instance = {
+    ...page,
+    data: { ...page.data, requests, activeFilter: 'proposed' },
+    setData(patch) {
+      Object.assign(this.data, patch);
+    }
+  };
+
+  instance.applyFilter();
+
+  assert.equal(requests[0].filter_key, 'active');
+  assert.equal(requests[1].filter_key, 'proposed');
+  assert.equal(requests[1].bead_count, 2);
+  assert.equal(requests[1].preview_materials.length, 2);
+  assert.equal(requests[2].filter_key, 'finished');
+  assert.deepEqual(instance.data.visibleRequests.map(item => item.request_id), ['CD-PROPOSED']);
+});
+
 test('manual design wrist selection shares the workspace wrist storage contract', () => {
   const page = loadPage('miniprogram/pages/design-service/design-service.js');
   const storage = new Map();

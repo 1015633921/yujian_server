@@ -38,6 +38,8 @@
     <view wx:else class="state-card">设计师正在逐颗完成真实材料搭配，完成后会在这里展示结构化方案。</view>
   </block>
 
+  <view wx:elif="{{requestId}}" class="state-card">这条人工搭配记录不存在或已失效。<button class="empty-action" bindtap="goRequestList">返回搭配列表</button></view>
+
   <view wx:elif="{{!reportId}}" class="state-card">你还没有人工搭配申请。完成测算后，可从报告页提交设计偏好。<button class="empty-action" bindtap="goAssessment">去测算</button></view>
 
   <view wx:else class="form-card">
