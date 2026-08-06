@@ -39,5 +39,15 @@ install -m 0644 "${HTTPS_TEMPLATE}" "${CONFIG_PATH}"
 nginx -t
 nginx -s reload
 
-curl --fail --silent --show-error --max-time 10 "https://${DOMAIN}/health/ready" >/dev/null
-echo "operation test domain configured: https://${DOMAIN}/"
+for attempt in {1..6}; do
+  if curl --ipv4 --fail --silent --show-error --max-time 10 "https://${DOMAIN}/health/ready" >/dev/null; then
+    echo "operation test domain configured: https://${DOMAIN}/"
+    exit 0
+  fi
+  if [[ "${attempt}" -lt 6 ]]; then
+    sleep 5
+  fi
+done
+
+echo "operation test HTTPS health check did not recover after Nginx reload" >&2
+exit 1
