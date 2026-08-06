@@ -1371,17 +1371,18 @@ class AdminService:
         if not self.table_exists(connection, "managed_materials"):
             return
         self._ensure_material_columns(connection)
+        collation = " COLLATE utf8mb4_unicode_ci" if use_mysql() and not self._force_sqlite else ""
         connection.execute(
-            """
+            f"""
             UPDATE managed_materials
             SET series_id=(
                 SELECT s.item_id
                 FROM material_taxonomy s
                 JOIN material_taxonomy c ON c.item_id=s.parent_id
                 WHERE s.kind='series' AND c.kind='category'
-                  AND s.top=managed_materials.top
-                  AND c.name=managed_materials.category
-                  AND s.name=COALESCE(NULLIF(managed_materials.series, ''), managed_materials.name)
+                  AND s.top{collation}=managed_materials.top{collation}
+                  AND c.name{collation}=managed_materials.category{collation}
+                  AND s.name{collation}=COALESCE(NULLIF(managed_materials.series, ''), managed_materials.name){collation}
                 ORDER BY s.created_at ASC, s.item_id ASC
                 LIMIT 1
             )
@@ -1391,9 +1392,9 @@ class AdminService:
                 FROM material_taxonomy s
                 JOIN material_taxonomy c ON c.item_id=s.parent_id
                 WHERE s.kind='series' AND c.kind='category'
-                  AND s.top=managed_materials.top
-                  AND c.name=managed_materials.category
-                  AND s.name=COALESCE(NULLIF(managed_materials.series, ''), managed_materials.name)
+                  AND s.top{collation}=managed_materials.top{collation}
+                  AND c.name{collation}=managed_materials.category{collation}
+                  AND s.name{collation}=COALESCE(NULLIF(managed_materials.series, ''), managed_materials.name){collation}
               )
             """
         )

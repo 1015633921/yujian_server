@@ -42,9 +42,9 @@ def test_mysql_material_revision_rejects_stale_single_and_batch_edits(monkeypatc
     from app.admin_service import AdminService, MaterialConflictError
     from app.migrations.runner import upgrade
 
+    service = AdminService()
     database_module._schema_ready.discard(config["MYSQL_DATABASE"])
     upgrade("mysql")
-    service = AdminService()
     sku_id = "material_mysql_revision_race"
     base = {
         "id": sku_id,
