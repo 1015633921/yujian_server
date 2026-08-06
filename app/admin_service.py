@@ -1187,14 +1187,19 @@ class AdminService:
 
     def _backfill_material_asset_versions(self, connection) -> None:
         """Capture a V1 audit snapshot for series that existed before asset history."""
+        # Old taxonomy databases were created with unicode_ci while the new
+        # audit table follows the MySQL 8 default 0900_ai_ci.  Explicitly
+        # normalize this legacy comparison; otherwise merely opening the
+        # admin service can fail before any material list query is served.
+        collation = " COLLATE utf8mb4_unicode_ci" if use_mysql() and not self._force_sqlite else ""
         rows = connection.execute(
-            """
+            f"""
             SELECT s.item_id, s.asset_version, s.image_url, s.image_urls_json, s.updated_at
             FROM material_taxonomy s
             WHERE s.kind='series'
               AND NOT EXISTS (
                 SELECT 1 FROM material_asset_versions v
-                WHERE v.series_id=s.item_id AND v.asset_version=s.asset_version
+                WHERE v.series_id{collation}=s.item_id{collation} AND v.asset_version=s.asset_version
               )
             """
         ).fetchall()
