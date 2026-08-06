@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 
 import PageEmptyState from '@/components/ui/PageEmptyState.vue'
 import PageErrorState from '@/components/ui/PageErrorState.vue'
@@ -46,7 +46,9 @@ const loading = ref(true)
 const error = ref('')
 const notice = ref('')
 const busy = ref(false)
-let controller: AbortController | null = null
+let typesController: AbortController | null = null
+let categoriesController: AbortController | null = null
+let categoryRequest = 0
 
 const canManage = computed(() => auth.admin?.role !== 'viewer')
 const currentCategories = computed(() => categories.value.filter((item) => item.top === top.value))
@@ -116,25 +118,53 @@ function download(item: AssetQueueItem): void {
 }
 
 async function load(): Promise<void> {
-  controller?.abort()
-  controller = new AbortController()
+  typesController?.abort()
+  typesController = new AbortController()
   loading.value = true
   error.value = ''
   try {
-    const [nextTypes, nextCategories] = await Promise.all([
-      listMaterialTypes(false, controller.signal),
-      listMaterialTaxonomy('', false, controller.signal),
-    ])
+    const nextTypes = await listMaterialTypes(false, typesController.signal)
     types.value = nextTypes
-    categories.value = nextCategories
     if (!nextTypes.some((item) => item.code === top.value)) top.value = nextTypes.at(0)?.code || ''
-    if (!currentCategories.value.some((item) => item.id === categoryId.value)) resetCategory()
-    if (!currentCategory.value?.series.some((item) => item.id === seriesId.value)) resetSeries()
+    else await loadCategories(top.value)
   } catch (cause) {
     if (cause instanceof DOMException && cause.name === 'AbortError') return
     error.value = cause instanceof Error ? cause.message : '素材目录加载失败'
   } finally {
     loading.value = false
+  }
+}
+
+async function loadCategories(nextTop: string): Promise<void> {
+  categoriesController?.abort()
+  const currentController = new AbortController()
+  categoriesController = currentController
+  const requestId = ++categoryRequest
+  if (!nextTop) {
+    categories.value = []
+    resetCategory()
+    loading.value = false
+    return
+  }
+  loading.value = true
+  error.value = ''
+  const timeout = window.setTimeout(() => currentController.abort('timeout'), 10_000)
+  try {
+    // 素材处理只需要当前类型的三级目录；避免一次加载全量图库目标。
+    const nextCategories = await listMaterialTaxonomy(nextTop, false, currentController.signal)
+    if (requestId !== categoryRequest) return
+    categories.value = nextCategories
+    if (!currentCategories.value.some((item) => item.id === categoryId.value)) resetCategory()
+    if (!currentCategory.value?.series.some((item) => item.id === seriesId.value)) resetSeries()
+  } catch (cause) {
+    if (cause instanceof DOMException && cause.name === 'AbortError') {
+      if (currentController.signal.reason === 'timeout') error.value = '该类型的素材目录加载超时，请重试。'
+      return
+    }
+    if (requestId === categoryRequest) error.value = cause instanceof Error ? cause.message : '素材目录加载失败'
+  } finally {
+    window.clearTimeout(timeout)
+    if (requestId === categoryRequest) loading.value = false
   }
 }
 
@@ -212,7 +242,15 @@ async function bind(): Promise<void> {
   busy.value = true
   notice.value = ''
   try {
-    const result = await bindMaterialAssets(currentSeries.value.id, queue.value.map((item) => item.key || ''), mode.value)
+    const result = await bindMaterialAssets(
+      currentSeries.value.id,
+      queue.value.map((item) => item.key || ''),
+      mode.value,
+      {
+        expectedVersion: currentSeries.value.asset_version,
+        idempotencyKey: `asset_${currentSeries.value.id}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      },
+    )
     notice.value = `图库已更新，共 ${result.bound_count || queue.value.length} 张；主图未改动，材料缓存已刷新。`
     await load()
   } catch (cause) {
@@ -230,8 +268,16 @@ function clear(): void {
   notice.value = ''
 }
 
+watch(top, (nextTop, previousTop) => {
+  if (nextTop && nextTop !== previousTop) {
+    resetCategory()
+    void loadCategories(nextTop)
+  }
+})
+
 onBeforeUnmount(() => {
-  controller?.abort()
+  typesController?.abort()
+  categoriesController?.abort()
   queue.value.forEach(revoke)
 })
 

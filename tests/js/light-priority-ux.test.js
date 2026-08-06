@@ -943,7 +943,7 @@ test('workspace canvas avoids redundant touch handlers and physics-frame snapsho
   assert.match(workspaceJs, /const maxCanvasDpr = this\.isLowPerformanceDevice \? 1\.75/);
 });
 
-test('workspace material selection randomly uses gallery entries without primary or URL deduplication', () => {
+test('workspace material selection uses only unique gallery entries, never the primary image', () => {
   const page = loadPage('miniprogram/pages/workspace/workspace.js');
   const instance = Object.assign({}, page);
   const material = {
@@ -962,8 +962,6 @@ test('workspace material selection randomly uses gallery entries without primary
 
   assert.deepEqual(urls, [
     'https://cdn.example.com/gallery-1.webp',
-    'https://cdn.example.com/primary.webp?v=2',
-    'https://cdn.example.com/gallery-1.webp',
     'https://cdn.example.com/gallery-2.webp'
   ]);
 
@@ -971,8 +969,8 @@ test('workspace material selection randomly uses gallery entries without primary
   Math.random = () => 0;
   try {
     assert.equal(instance.pickMaterialImageUrl(material), material.image_urls[0]);
-    Math.random = () => 0.5;
-    assert.equal(instance.pickMaterialImageUrl(material), material.image_urls[2]);
+    Math.random = () => 0.9;
+    assert.equal(instance.pickMaterialImageUrl(material), material.image_urls[3]);
   } finally {
     Math.random = originalRandom;
   }
@@ -980,7 +978,7 @@ test('workspace material selection randomly uses gallery entries without primary
   assert.deepEqual(instance.materialOwnImageUrls({
     ...material,
     image_urls: ['https://cdn.example.com/primary.webp?v=2']
-  }), ['https://cdn.example.com/primary.webp?v=2']);
+  }), []);
 });
 
 test('workspace preloads the exact gallery image reserved for the next selection', () => {

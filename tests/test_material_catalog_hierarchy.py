@@ -6,6 +6,8 @@ import pytest
 
 from app.admin_service import AdminService
 from app.migrations.versions import v20260715_11_material_types
+from app.migrations.versions import v20260806_19_material_series_identity
+from app.migrations.versions import v20260806_20_material_asset_versions
 
 
 def test_material_directory_is_managed_separately_from_skus(tmp_path):
@@ -354,6 +356,119 @@ def test_series_move_and_rename_does_not_duplicate_during_sku_sync(tmp_path):
     assert sku["series"] == "繁花圆片隔片"
 
 
+def test_stable_series_id_keeps_sku_links_when_variety_is_renamed(tmp_path):
+    service = AdminService(tmp_path / "stable-series-id.db")
+    source = service.save_material_category({"top": "bead", "name": "旧分类"})
+    target = service.save_material_category({"top": "bead", "name": "新分类"})
+    series = service.save_material_series({"category_id": source["id"], "name": "旧品种"})
+    service.save_material(
+        {
+            "id": "stable-series-id-8",
+            "top": "bead",
+            "category": "旧分类",
+            "series": "旧品种",
+            "name": "旧品种 8mm",
+            "price": 10,
+            "size": 8,
+            "weight": 1,
+            "stock": 1,
+            "enabled": True,
+        }
+    )
+
+    updated = service.update_material_series(
+        series["id"],
+        {"category_id": target["id"], "name": "新品种"},
+    )
+
+    assert updated["id"] == series["id"]
+    with service.connect() as connection:
+        sku = connection.execute(
+            "SELECT category, series, series_id FROM managed_materials WHERE id=?",
+            ("stable-series-id-8",),
+        ).fetchone()
+        taxonomy_rows = connection.execute(
+            "SELECT item_id FROM material_taxonomy WHERE kind='series' AND item_id=?",
+            (series["id"],),
+        ).fetchall()
+    assert sku["category"] == "新分类"
+    assert sku["series"] == "新品种"
+    assert sku["series_id"] == series["id"]
+    assert len(taxonomy_rows) == 1
+    group = service.list_material_spus(keyword="新品种")[0]
+    assert group["id"] == series["id"]
+    assert group["series_id"] == series["id"]
+
+
+def test_sku_patch_cannot_change_its_series_identity(tmp_path):
+    service = AdminService(tmp_path / "sku-patch-identity.db")
+    category = service.save_material_category({"top": "bead", "name": "水晶"})
+    series = service.save_material_series({"category_id": category["id"], "name": "月光石"})
+    service.save_material(
+        {
+            "id": "moonstone-8",
+            "top": "bead",
+            "category": "水晶",
+            "series": "月光石",
+            "name": "月光石 8mm",
+            "primary_element": "water",
+            "effects": ["focus"],
+            "price": 20,
+            "size": 8,
+            "weight": 1,
+            "stock": 2,
+            "enabled": True,
+        }
+    )
+
+    patched = service.patch_material_sku("moonstone-8", {"price": 28, "stock": 5, "enabled": True})
+
+    assert patched["sku"]["price_per_bead"] == 28
+    with service.connect() as connection:
+        row = connection.execute(
+            "SELECT category, series, series_id, stock FROM managed_materials WHERE id=?",
+            ("moonstone-8",),
+        ).fetchone()
+    assert dict(row) == {"category": "水晶", "series": "月光石", "series_id": series["id"], "stock": 5}
+
+
+def test_series_identity_migration_backfills_legacy_skus_and_rolls_back_index(tmp_path):
+    service = AdminService(tmp_path / "series-identity-migration.db")
+    category = service.save_material_category({"top": "bead", "name": "迁移分类"})
+    series = service.save_material_series({"category_id": category["id"], "name": "迁移品种"})
+    service.save_material(
+        {
+            "id": "legacy-series-link-8",
+            "top": "bead",
+            "category": "迁移分类",
+            "series": "迁移品种",
+            "name": "迁移品种 8mm",
+            "price": 10,
+            "size": 8,
+            "weight": 1,
+            "stock": 1,
+            "enabled": True,
+        }
+    )
+    with service.connect() as connection:
+        connection.execute("UPDATE managed_materials SET series_id='' WHERE id='legacy-series-link-8'")
+        connection.execute("DROP INDEX IF EXISTS idx_managed_materials_series_id")
+        v20260806_19_material_series_identity.upgrade(connection, "sqlite")
+        linked = connection.execute(
+            "SELECT series_id FROM managed_materials WHERE id='legacy-series-link-8'"
+        ).fetchone()["series_id"]
+        indexes = {row[1] for row in connection.execute("PRAGMA index_list(managed_materials)").fetchall()}
+        assert linked == series["id"]
+        assert "idx_managed_materials_series_id" in indexes
+        v20260806_19_material_series_identity.downgrade(connection, "sqlite")
+        retained = connection.execute(
+            "SELECT series_id FROM managed_materials WHERE id='legacy-series-link-8'"
+        ).fetchone()["series_id"]
+        indexes = {row[1] for row in connection.execute("PRAGMA index_list(managed_materials)").fetchall()}
+    assert retained == series["id"]
+    assert "idx_managed_materials_series_id" not in indexes
+
+
 def test_material_type_code_is_immutable(tmp_path):
     service = AdminService(tmp_path / "immutable-material-type.db")
     with pytest.raises(ValueError, match="编码创建后不可修改"):
@@ -380,4 +495,38 @@ def test_material_type_migration_seeds_defaults_and_existing_top(tmp_path):
     assert not connection.execute(
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name='material_types'"
     ).fetchone()
+    connection.close()
+
+
+def test_asset_version_migration_creates_an_idempotent_v1_snapshot(tmp_path):
+    connection = sqlite3.connect(tmp_path / "asset-version-migration.db")
+    connection.row_factory = sqlite3.Row
+    connection.execute(
+        """
+        CREATE TABLE material_taxonomy (
+            item_id TEXT PRIMARY KEY, kind TEXT NOT NULL, asset_version INTEGER NOT NULL DEFAULT 1,
+            image_url TEXT, image_urls_json TEXT, updated_at TEXT NOT NULL
+        )
+        """
+    )
+    connection.execute(
+        """
+        INSERT INTO material_taxonomy(item_id, kind, asset_version, image_url, image_urls_json, updated_at)
+        VALUES ('series-legacy', 'series', 1, 'https://cdn.example.com/cover.webp', '[\"https://cdn.example.com/side.webp\"]', '2026-08-06T00:00:00+00:00')
+        """
+    )
+
+    v20260806_20_material_asset_versions.upgrade(connection, "sqlite")
+    v20260806_20_material_asset_versions.upgrade(connection, "sqlite")
+
+    rows = connection.execute(
+        "SELECT series_id, asset_version, image_url, image_urls_json, source FROM material_asset_versions"
+    ).fetchall()
+    assert [dict(row) for row in rows] == [{
+        "series_id": "series-legacy",
+        "asset_version": 1,
+        "image_url": "https://cdn.example.com/cover.webp",
+        "image_urls_json": '["https://cdn.example.com/side.webp"]',
+        "source": "migration_snapshot",
+    }]
     connection.close()

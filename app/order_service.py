@@ -22,7 +22,7 @@ from .repository import DB_PATH
 from .bracelet_sizing import BRACELET_FIT_MODEL_VERSION, calculate_bracelet_fit
 from .database import connect_database, integrity_errors, runtime_schema_mutation_allowed, use_mysql
 from .feature_flags import kuaidi100_subscribe_enabled, mock_trade_enabled, payment_enabled
-from .materials import clean_image_urls, fetch_db_series_assets, series_asset_key
+from .materials import clean_gallery_image_urls, fetch_db_series_assets, series_asset_key
 from .money import stored_cents
 from .observability import current_request_id, log_event, metrics
 
@@ -1027,13 +1027,19 @@ class OrderService:
             require_receiver=True,
         )
 
-    def create_pending_order(self, payload: dict[str, Any]) -> dict[str, Any]:
+    def create_pending_order(
+        self,
+        payload: dict[str, Any],
+        *,
+        validate_bracelet_fit: bool = True,
+    ) -> dict[str, Any]:
         """Create an inventory-reserved order without opening a payment session."""
         return self._create_order(
             payload,
             initiate_payment=False,
             require_receiver=False,
             reservation_ttl_seconds=self.custom_design_order_reservation_ttl_seconds(),
+            validate_bracelet_fit=validate_bracelet_fit,
         )
 
     def _create_order(
@@ -1043,6 +1049,7 @@ class OrderService:
         initiate_payment: bool,
         require_receiver: bool,
         reservation_ttl_seconds: int | None = None,
+        validate_bracelet_fit: bool = True,
     ) -> dict[str, Any]:
         user_id = str(payload.get("user_id") or "").strip()
         if not user_id:
@@ -1084,7 +1091,8 @@ class OrderService:
                     (user_id, idempotency_key, request_hash, timestamp, timestamp),
                 )
                 snapshots, reservations = self.lock_validate_and_snapshot_items(connection, sequence)
-                design = self.validate_and_snapshot_bracelet_fit(design, snapshots)
+                if validate_bracelet_fit:
+                    design = self.validate_and_snapshot_bracelet_fit(design, snapshots)
                 total_fee = sum(int(item["subtotal_cents"]) for item in snapshots)
                 if total_fee <= 0:
                     raise OrderPricingError("订单金额无效，订单未创建")
@@ -1453,7 +1461,11 @@ class OrderService:
                 or ((item.get("placement") or {}).get("image_url") if isinstance(item.get("placement"), dict) else "")
                 or ""
             ).strip()
-            gallery_image_urls = clean_image_urls(material.get("image_urls_json"))
+            gallery_image_urls = clean_gallery_image_urls(
+                material.get("image_urls_json"),
+                material.get("image_url") or "",
+                top=material.get("top") or "",
+            )
             if selected_image_url and selected_image_url not in gallery_image_urls:
                 raise OrderPricingError(
                     f"材料图库已更新，请重新确认：{material.get('name') or reference}"
@@ -1483,10 +1495,10 @@ class OrderService:
                 "element": material.get("element") or "",
                 "size": material.get("size") or 0,
                 "image_url": material.get("image_url") or "",
-                "image_urls": clean_image_urls(
+                "image_urls": clean_gallery_image_urls(
                     material.get("image_urls_json"),
                     material.get("image_url") or "",
-                    material.get("image_path") or "",
+                    top=material.get("top") or "",
                 ),
                 "quantity": quantity,
                 "unit_price_cents": unit_cents,
@@ -2021,6 +2033,7 @@ class OrderService:
         return self.get_order(order_id)
 
     def confirm_receipt(self, order_id: str, user_id: str) -> dict[str, Any]:
+        completed = False
         with self.connect() as connection:
             self.begin_order_transaction(connection)
             row = self.order_row_for_update(connection, order_id)
@@ -2038,6 +2051,9 @@ class OrderService:
                 event_label="用户确认收货",
                 connection=connection,
             )
+            completed = True
+        if completed:
+            self.refund_custom_design_deposit_after_completion(order_id)
         return self.get_order(order_id)
 
     def cancel_order(self, order_id: str, user_id: str, reason: str = "") -> dict[str, Any]:
@@ -3965,6 +3981,7 @@ class OrderService:
         if current_time.tzinfo is None:
             current_time = current_time.replace(tzinfo=timezone.utc)
         current_time = current_time.astimezone(timezone.utc)
+        completed = False
         with self.connect() as connection:
             self.begin_order_transaction(connection)
             row = self.order_row_for_update(connection, order_id)
@@ -3985,7 +4002,22 @@ class OrderService:
                 event_label="快递签收满7天，订单自动完成",
                 connection=connection,
             )
-            return True
+            completed = True
+        if completed:
+            self.refund_custom_design_deposit_after_completion(order_id)
+        return completed
+
+    def refund_custom_design_deposit_after_completion(self, order_id: str) -> None:
+        """Refund a linked design deposit only after its merchandise order completes."""
+        try:
+            # Local import avoids a module import cycle between the two services.
+            from .custom_design_service import CustomDesignService
+
+            CustomDesignService(self.db_path, order_service=self).refund_deposit_for_completed_order(order_id)
+        except Exception:
+            # The order is already committed. A temporary refund-provider failure
+            # must not make a completed order look unsuccessful to the customer.
+            external_logger.exception("custom design deposit refund side effect failed")
 
     def complete_signed_orders_due(
         self,

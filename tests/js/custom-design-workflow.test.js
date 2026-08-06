@@ -20,8 +20,9 @@ test('custom design proposal is decorated with a deterministic ring preview', ()
     request_id: 'CD-1',
     status: 'proposed',
     proposals: [{
-      proposal_id: 'proposal-1',
-      status: 'active',
+        proposal_id: 'proposal-1',
+        status: 'active',
+        created_at: '2026-08-06 01:02:03',
       image_urls: [],
       workbench: {
         summary: { price: '26.00' },
@@ -37,6 +38,7 @@ test('custom design proposal is decorated with a deterministic ring preview', ()
   assert.equal(request.has_structured_proposal, true);
   assert.equal(request.latest_proposal.bead_count, 3);
   assert.equal(request.latest_proposal.price_text, '26.00');
+  assert.equal(request.latest_proposal.created_at_text, '2026-08-06 01:02:03');
   assert.equal(request.latest_proposal.preview_layout.length, 3);
   assert.equal(
     new Set(request.latest_proposal.preview_layout.map(item => item.preview_key)).size,
@@ -77,13 +79,26 @@ test('custom design confirmation opens a real-image review before creating an or
   );
 });
 
+test('custom design confirmation creates a payment-entry order and defers the deposit refund', () => {
+  const designWxml = fs.readFileSync(path.resolve(__dirname, '../../miniprogram/subpackages/design/pages/design-service/design-service.wxml'), 'utf8');
+  const designWxss = fs.readFileSync(path.resolve(__dirname, '../../miniprogram/subpackages/design/pages/design-service/design-service.wxss'), 'utf8');
+  const orderDetailJs = fs.readFileSync(path.resolve(__dirname, '../../miniprogram/pages/order-detail/order-detail.js'), 'utf8');
+
+  assert.doesNotMatch(designWxml, /确认设计并退保证金|确认完成并退保证金/);
+  assert.match(designWxml, /确认设计/);
+  assert.match(designWxml, /订单完成后，设计保证金会自动原路退回/);
+  assert.match(designWxss, /\.proposal-actions\{grid-template-columns:repeat\(2,minmax\(0,1fr\)\)\}/);
+  assert.match(orderDetailJs, /paymentEntry && order\.canPay && !this\.paymentEntryStarted/);
+  assert.match(orderDetailJs, /if \(autoContinue\) this\.continuePay\(nextOrder\.id, user\.user_id\)/);
+});
+
 test('custom design list keeps every request and groups statuses for client filtering', () => {
   const page = loadPage('miniprogram/subpackages/design/pages/design-service-list/design-service-list.js');
   const requests = [
     page.decorateRequest({
       request_id: 'CD-WAITING',
       status: 'designing',
-      updated_at: '2026-07-28T08:00:00Z',
+      updated_at: '2026-07-28 08:00:00',
       request: { wrist_size_cm: 16, bead_size_mm: 8, style_preference: '清透自然' },
       proposals: []
     }),
@@ -120,6 +135,7 @@ test('custom design list keeps every request and groups statuses for client filt
   instance.applyFilter();
 
   assert.equal(requests[0].filter_key, 'active');
+  assert.equal(requests[0].updated_at_text, '2026-07-28 08:00:00');
   assert.equal(requests[1].filter_key, 'proposed');
   assert.equal(requests[1].bead_count, 2);
   assert.equal(requests[1].preview_materials.length, 2);

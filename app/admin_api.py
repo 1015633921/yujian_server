@@ -186,6 +186,7 @@ class AdminAccountUpdatePayload(BaseModel):
 class MaterialPayload(BaseModel):
     id: str | None = None
     skuId: str | None = ""
+    series_id: str | None = ""
     material_code: str | None = ""
     top: str
     category: str
@@ -240,6 +241,26 @@ class MaterialPayload(BaseModel):
     sort_order: int = 0
 
 
+class MaterialSkuPatchPayload(BaseModel):
+    """Commercial and physical SKU fields; variety data is edited separately."""
+
+    skuId: str | None = None
+    name: str | None = Field(default=None, max_length=160)
+    grade: str | None = Field(default=None, max_length=40)
+    price: float | None = Field(default=None, ge=0, le=100000)
+    price_per_bead: float | None = Field(default=None, ge=0, le=100000)
+    size: float | None = Field(default=None, gt=0, le=1000)
+    size_mm: float | None = Field(default=None, gt=0, le=1000)
+    weight: float | None = Field(default=None, gt=0, le=100000)
+    weight_g: float | None = Field(default=None, gt=0, le=100000)
+    cost_price: float | None = Field(default=None, ge=0, le=100000)
+    safety_stock: int | None = Field(default=None, ge=0, le=1000000)
+    stock: int | None = Field(default=None, ge=0, le=1000000)
+    enabled: bool | None = None
+    sort_order: int | None = Field(default=None, ge=0, le=1000000)
+    physical_specs: dict | None = None
+
+
 class MaterialBatchPayload(BaseModel):
     ids: list[str]
     action: str
@@ -250,6 +271,8 @@ class MaterialAssetBindPayload(BaseModel):
     series_id: str = Field(min_length=1, max_length=120)
     asset_keys: list[str] = Field(min_length=1, max_length=MAX_MATERIAL_ASSET_COUNT)
     mode: Literal["replace", "append"] = "replace"
+    expected_version: int | None = Field(default=None, ge=1)
+    idempotency_key: str | None = Field(default=None, min_length=8, max_length=120)
     # Kept for older admin clients; series assets are now always authoritative.
     sync_sku_images: bool = True
 
@@ -281,6 +304,7 @@ class MaterialDirectoryBatchDeletePayload(BaseModel):
 
 class MaterialSeriesPayload(BaseModel):
     id: str | None = None
+    series_id: str | None = None
     category_id: str
     name: str
     material_code: str | None = ""
@@ -712,6 +736,8 @@ def bind_material_assets(
                 payload.series_id,
                 urls,
                 mode=payload.mode,
+                expected_version=payload.expected_version,
+                idempotency_key=payload.idempotency_key or "",
                 sync_sku_images=True,
                 actor=actor,
             ),
@@ -719,6 +745,19 @@ def bind_material_assets(
         )
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@admin_router.get("/material-taxonomy/series/{series_id}/asset-versions", summary="材料图库发布版本")
+def material_asset_versions(
+    series_id: str,
+    limit: int = Query(default=30, ge=1, le=100),
+    authorization: str | None = Header(default=None),
+):
+    require_admin(authorization)
+    try:
+        return success(admin_service.list_material_series_asset_versions(series_id, limit=limit))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -1544,6 +1583,9 @@ def material_spus(
     stock_state: str = Query(default="", max_length=20),
     margin: str = Query(default="", max_length=20),
     spec_state: str = Query(default="", max_length=20),
+    asset_state: str = Query(default="", max_length=40),
+    profile_state: str = Query(default="", max_length=40),
+    include_facets: bool = Query(default=False),
     sort_by: str = Query(default="sort_order", max_length=40),
     sort_order: str = Query(default="asc", max_length=10),
     page: int | None = Query(default=None, ge=1),
@@ -1562,6 +1604,9 @@ def material_spus(
             stock_state=stock_state,
             margin=margin,
             spec_state=spec_state,
+            asset_state=asset_state,
+            profile_state=profile_state,
+            include_facets=include_facets,
             sort_by=sort_by,
             sort_order=sort_order,
             page=page,
@@ -1672,6 +1717,22 @@ def save_material_series(payload: MaterialSeriesPayload, authorization: str | No
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@admin_router.put("/material-taxonomy/series/{series_id}", summary="按稳定 ID 更新材料品种")
+def update_material_series(
+    series_id: str,
+    payload: MaterialSeriesPayload,
+    authorization: str | None = Header(default=None),
+):
+    actor = require_admin(authorization)
+    try:
+        return success(
+            admin_service.update_material_series(series_id, payload.model_dump(exclude_unset=True), actor=actor),
+            "品种已更新",
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @admin_router.post("/material-taxonomy/series/batch-delete", summary="批量删除空材料品种")
 def delete_empty_material_series(
     payload: MaterialDirectoryBatchDeletePayload,
@@ -1752,6 +1813,22 @@ def update_material(material_id: str, payload: MaterialPayload, authorization: s
     actor = require_admin(authorization)
     try:
         return success(admin_service.save_material(payload.model_dump(), material_id=material_id, actor=actor), "材料已更新")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@admin_router.patch("/materials/{material_id}", summary="更新材料 SKU 规格与价格")
+def patch_material_sku(
+    material_id: str,
+    payload: MaterialSkuPatchPayload,
+    authorization: str | None = Header(default=None),
+):
+    actor = require_admin(authorization)
+    try:
+        return success(
+            admin_service.patch_material_sku(material_id, payload.model_dump(exclude_unset=True), actor=actor),
+            "SKU 已更新",
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

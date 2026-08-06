@@ -38,8 +38,8 @@ def test_public_catalog_ignores_legacy_sku_images_and_uses_series_images():
     material = normalize_db_material(row, series_assets)
 
     assert material["image_url"] == series_image
-    assert material["image_urls"] == [series_image, gallery_image]
-    assert material["image_pool"] == [series_image, gallery_image]
+    assert material["image_urls"] == [gallery_image]
+    assert material["image_pool"] == [gallery_image]
     assert material["color"] == "#c49a42"
 
 
@@ -72,7 +72,7 @@ def test_public_catalog_falls_back_to_series_image_when_sku_has_no_image():
     material = normalize_db_material(row, series_assets)
 
     assert material["image_url"] == series_image
-    assert material["image_urls"] == [series_image]
+    assert material["image_urls"] == []
 
 
 def test_legacy_sku_image_payload_is_promoted_to_the_series(tmp_path):
@@ -86,7 +86,7 @@ def test_legacy_sku_image_payload_is_promoted_to_the_series(tmp_path):
             "name": "合金配件",
             "material_code": "alloy_accessory",
             "image_url": series_image,
-            "image_urls": [series_image],
+            "image_urls": ["https://cdn-test.yustream.cn/materials/accessories/alloy/series-side.webp"],
         }
     )
 
@@ -106,12 +106,12 @@ def test_legacy_sku_image_payload_is_promoted_to_the_series(tmp_path):
             "weight_g": 0.4,
             "stock": 99,
             "thumbnail_url": sku_image,
-            "image_urls": [sku_image],
+            "image_urls": ["https://cdn-test.yustream.cn/materials/accessories/alloy/sku-side.webp"],
         }
     )
 
     assert saved["visual"]["thumbnail_url"] == sku_image
-    assert saved["visual"]["image_urls"] == [sku_image]
+    assert saved["visual"]["image_urls"] == ["https://cdn-test.yustream.cn/materials/accessories/alloy/sku-side.webp"]
     assert saved["visual"]["image_source"] == "series"
     assert saved["visual"]["sku_image_urls"] == []
     taxonomy = service.list_material_taxonomy(top="accessory", include_disabled=True)
@@ -126,7 +126,7 @@ def test_series_image_update_clears_legacy_sku_overrides_and_updates_all_skus(tm
             "category_id": category["id"],
             "name": "同步绿幽灵",
             "image_url": "https://cdn.example.com/series-old.webp",
-            "image_urls": ["https://cdn.example.com/series-old.webp"],
+            "image_urls": ["https://cdn.example.com/series-old-side.webp"],
             "primary_element": "wood",
             "effects": ["focus"],
         }
@@ -144,7 +144,7 @@ def test_series_image_update_clears_legacy_sku_overrides_and_updates_all_skus(tm
             "stock": 10,
             "enabled": True,
             "image_url": "https://cdn.example.com/sku-old.webp",
-            "image_urls": ["https://cdn.example.com/sku-old.webp"],
+            "image_urls": ["https://cdn.example.com/sku-old-side.webp"],
         }
     )
     with service.connect() as connection:
@@ -167,7 +167,7 @@ def test_series_image_update_clears_legacy_sku_overrides_and_updates_all_skus(tm
             "category_id": category["id"],
             "name": "同步绿幽灵",
             "image_url": "https://cdn.example.com/series-new.webp",
-            "image_urls": ["https://cdn.example.com/series-new.webp"],
+            "image_urls": ["https://cdn.example.com/series-new-side.webp"],
             "sync_sku_images": False,
         }
     )

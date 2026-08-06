@@ -13,6 +13,7 @@ export interface Material {
   physical_specs?: Record<string, unknown>
   image_url?: string
   image_urls?: string[]
+  asset_version?: number
   sku?: {
     sku_id?: string
     price_per_bead?: number
@@ -59,6 +60,7 @@ export interface MaterialSeries {
   shine?: string
   image_url?: string
   image_urls?: string[]
+  asset_version?: number
   sort_order: number
   enabled: boolean
   energy?: {
@@ -99,6 +101,7 @@ export interface MaterialCategoryInput {
 
 export interface MaterialSeriesInput {
   id?: string
+  series_id?: string
   category_id: string
   name: string
   material_code?: string
@@ -131,6 +134,7 @@ export interface MaterialAssetBindResult {
   image_urls: string[]
   bound_count: number
   image_source: 'series'
+  asset_version?: number
 }
 
 export function listMaterials(
@@ -169,6 +173,14 @@ export function updateMaterial(materialId: string, payload: Record<string, unkno
   })
 }
 
+/** Updates only commercial / physical SKU fields. Directory ownership stays on the series API. */
+export function patchMaterialSku(materialId: string, payload: Record<string, unknown>): Promise<Material> {
+  return apiRequest(`/api/v1/admin/materials/${encodeURIComponent(materialId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  })
+}
+
 export function saveMaterialType(input: MaterialTypeInput): Promise<MaterialType> {
   return apiRequest('/api/v1/admin/material-types', { method: 'POST', body: JSON.stringify(input) })
 }
@@ -179,6 +191,14 @@ export function saveMaterialCategory(input: MaterialCategoryInput): Promise<Mate
 
 export function saveMaterialSeries(input: MaterialSeriesInput): Promise<MaterialSeries> {
   return apiRequest('/api/v1/admin/material-taxonomy/series', { method: 'POST', body: JSON.stringify(input) })
+}
+
+/** Uses the immutable series ID so a rename can never be interpreted as a new product. */
+export function updateMaterialSeries(seriesId: string, input: MaterialSeriesInput): Promise<MaterialSeries> {
+  return apiRequest(`/api/v1/admin/material-taxonomy/series/${encodeURIComponent(seriesId)}`, {
+    method: 'PUT',
+    body: JSON.stringify(input),
+  })
 }
 
 export function disableMaterialType(typeCode: string): Promise<void> {
@@ -207,9 +227,20 @@ export function uploadMaterialAsset(file: Blob, filename: string): Promise<Mater
   return apiRequest('/api/v1/admin/material-assets/upload', { method: 'POST', body: form })
 }
 
-export function bindMaterialAssets(seriesId: string, assetKeys: string[], mode: 'replace' | 'append'): Promise<MaterialAssetBindResult> {
+export function bindMaterialAssets(
+  seriesId: string,
+  assetKeys: string[],
+  mode: 'replace' | 'append',
+  options: { expectedVersion?: number; idempotencyKey?: string } = {},
+): Promise<MaterialAssetBindResult> {
   return apiRequest('/api/v1/admin/material-assets/bind', {
     method: 'POST',
-    body: JSON.stringify({ series_id: seriesId, asset_keys: assetKeys, mode }),
+    body: JSON.stringify({
+      series_id: seriesId,
+      asset_keys: assetKeys,
+      mode,
+      ...(typeof options.expectedVersion === 'number' ? { expected_version: options.expectedVersion } : {}),
+      ...(options.idempotencyKey ? { idempotency_key: options.idempotencyKey } : {}),
+    }),
   })
 }

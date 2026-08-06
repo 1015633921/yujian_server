@@ -25,7 +25,9 @@ def test_p1b_migration_backfills_stable_legacy_snapshot_and_round_trips(tmp_path
     OrderService(db_path)
     AssessmentRepository(db_path)
     upgrade("sqlite", db_path)
-    assert downgrade("sqlite", db_path, steps=15) == [
+    assert downgrade("sqlite", db_path, steps=17) == [
+        "20260806_20_material_asset_versions",
+        "20260806_19_material_series_identity",
         "20260806_18_custom_design_queue_indexes",
         "20260806_17_custom_design_deposits",
         "20260727_16_custom_design_workbench",

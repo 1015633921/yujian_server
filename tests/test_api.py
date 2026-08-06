@@ -219,7 +219,7 @@ def test_slim_material_preserves_image_url_pool_for_workspace_randomization():
     })
 
     assert material["image_url"] == image_urls[0]
-    assert material["image_urls"] == image_urls
+    assert material["image_urls"] == [image_urls[1]]
 
 
 def test_admin_material_options_expose_field_governance_specs(tmp_path):
@@ -352,7 +352,7 @@ def test_pendant_material_allows_blank_primary_element(tmp_path):
             "series": "银色花托",
             "name": "银色花托",
             "effects": ["focus"],
-            "price_per_bead": 0.01,
+            "price_per_bead": 1,
             "size_mm": 8,
             "weight_g": 1,
             "stock": 5,
@@ -860,8 +860,63 @@ def test_admin_material_accepts_multiple_image_urls(tmp_path):
     assert saved["image_urls"] == [
         "https://cdn-test.yustream.cn/materials/beads/b.png",
         "https://cdn-test.yustream.cn/materials/beads/c.png",
-        "https://cdn-test.yustream.cn/materials/beads/a.png",
     ]
+
+
+def test_material_spu_supports_sku_search_asset_profile_facets_and_test_price_guard(tmp_path):
+    from app.admin_service import AdminService
+
+    service = AdminService(tmp_path / "material-spu-facets.db")
+    ensure_material_taxonomy(service, "筛选晶石", "筛选珠")
+    with pytest.raises(ValueError, match="不能直接启用销售"):
+        service.save_material(
+            {
+                "id": "test-price-guard",
+                "skuId": "TEST-SKU-0001",
+                "top": "bead",
+                "category": "筛选晶石",
+                "series": "筛选珠",
+                "name": "筛选珠 8mm",
+                "price": 0.01,
+                "size": 8,
+                "weight": 1,
+                "stock": 5,
+                "enabled": True,
+            }
+        )
+    service.save_material(
+        {
+            "id": "facet-sku-8",
+            "skuId": "20000000008",
+            "top": "bead",
+            "category": "筛选晶石",
+            "series": "筛选珠",
+            "name": "筛选珠 8mm",
+            "primary_element": "water",
+            "effects": ["calm"],
+            "match_rules": ["no_limit"],
+            "price": 10,
+            "size": 8,
+            "weight": 1,
+            "stock": 5,
+            "enabled": True,
+        }
+    )
+
+    result = service.list_material_spus(
+        keyword="20000000008",
+        asset_state="missing_primary",
+        profile_state="complete",
+        include_facets=True,
+        page=1,
+        page_size=20,
+    )
+
+    assert result["pagination"]["total"] == 1
+    assert result["items"][0]["assetState"] == "missing_primary"
+    assert result["items"][0]["profileState"] == "complete"
+    assert {item["value"] for item in result["facets"]["asset_state"]} == {"missing_primary"}
+    assert {item["value"] for item in result["facets"]["profile_state"]} == {"complete"}
 
 
 def test_material_cdn_url_deduplicates_materials_prefix(monkeypatch):
@@ -1040,9 +1095,12 @@ def test_order_rejects_legacy_zero_price_without_snapshot(tmp_path, monkeypatch)
             "size": 8,
             "weight": 1,
             "stock": 10,
-            "enabled": True,
+            "enabled": False,
         }
     )
+    # Simulate a legacy record created before the test-price publishing guard.
+    with admin.connect() as connection:
+        connection.execute("UPDATE managed_materials SET enabled=1 WHERE id=?", (saved["id"],))
     migrate_order_integrity(db_path)
     service = OrderService(db_path)
     service.get_user = lambda _user_id: None
@@ -1191,7 +1249,6 @@ def test_order_material_snapshot_survives_material_update_and_delete(tmp_path, m
         assert item["price"] == "8.80"
         assert item["image_url"].endswith("/original.png")
         assert item["image_urls"] == [
-            "https://cdn-test.yustream.cn/materials/beads/original.png",
             "https://cdn-test.yustream.cn/materials/beads/original-side.png",
         ]
         assert bom["name"] == "Original Snapshot Bead"

@@ -16,6 +16,7 @@ import {
   saveMaterialCategory,
   saveMaterialSeries,
   saveMaterialType,
+  updateMaterialSeries,
   type MaterialCategory,
   type MaterialSeries,
   type MaterialType,
@@ -59,7 +60,9 @@ const editor = reactive<DirectoryEditor>({
   shine: '#ffffff',
   enabled: true,
 })
-let controller: AbortController | null = null
+let typesController: AbortController | null = null
+let categoriesController: AbortController | null = null
+let categoryRequest = 0
 
 const canManage = computed(() => auth.admin?.role !== 'viewer')
 const selectedTop = computed(() => (typeof route.query.top === 'string' ? route.query.top : ''))
@@ -141,26 +144,75 @@ function selectedCategoryName(): string {
   return selectedCategories.value.find((item) => item.id === editor.parentId)?.name || '未选择分类'
 }
 
-async function load(): Promise<void> {
-  controller?.abort()
-  controller = new AbortController()
+async function requestWithTimeout<T>(
+  request: (signal: AbortSignal) => Promise<T>,
+  controller: AbortController,
+  timeoutMessage: string,
+): Promise<T> {
+  const timeout = window.setTimeout(() => controller.abort('timeout'), 10_000)
+  try {
+    return await request(controller.signal)
+  } catch (cause) {
+    if (controller.signal.reason === 'timeout') throw new Error(`${timeoutMessage}，请重试。`)
+    throw cause
+  } finally {
+    window.clearTimeout(timeout)
+  }
+}
+
+async function loadTypes(): Promise<void> {
+  typesController?.abort()
+  typesController = new AbortController()
   loading.value = true
   error.value = ''
   try {
-    const [nextTypes, nextCategories] = await Promise.all([
-      listMaterialTypes(true, controller.signal),
-      listMaterialTaxonomy('', true, controller.signal),
-    ])
+    const nextTypes = await requestWithTimeout(
+      (signal) => listMaterialTypes(true, signal),
+      typesController,
+      '材料类型加载超时',
+    )
     types.value = nextTypes
-    categories.value = nextCategories
     const firstType = nextTypes.at(0)
     if (!selectedTop.value && firstType) setTop(firstType.code)
+    else if (selectedTop.value) await loadCategories(selectedTop.value)
   } catch (cause) {
     if (cause instanceof DOMException && cause.name === 'AbortError') return
     error.value = cause instanceof Error ? cause.message : '材料三级目录加载失败'
   } finally {
     loading.value = false
   }
+}
+
+async function loadCategories(top: string): Promise<void> {
+  categoriesController?.abort()
+  const currentController = new AbortController()
+  categoriesController = currentController
+  const requestId = ++categoryRequest
+  if (!top) {
+    categories.value = []
+    loading.value = false
+    return
+  }
+  loading.value = true
+  error.value = ''
+  try {
+    const nextCategories = await requestWithTimeout(
+      (signal) => listMaterialTaxonomy(top, true, signal),
+      currentController,
+      '该类型的三级目录加载超时',
+    )
+    if (requestId !== categoryRequest) return
+    categories.value = nextCategories
+  } catch (cause) {
+    if (cause instanceof DOMException && cause.name === 'AbortError') return
+    if (requestId === categoryRequest) error.value = cause instanceof Error ? cause.message : '材料三级目录加载失败'
+  } finally {
+    if (requestId === categoryRequest) loading.value = false
+  }
+}
+
+async function load(): Promise<void> {
+  await loadTypes()
 }
 
 async function save(): Promise<void> {
@@ -206,8 +258,7 @@ async function save(): Promise<void> {
         enabled: editor.enabled,
       })
     } else {
-      await saveMaterialSeries({
-        ...(editor.id ? { id: editor.id } : {}),
+      const payload = {
         category_id: editor.parentId,
         name,
         ...(editor.code.trim() ? { material_code: editor.code.trim() } : {}),
@@ -215,7 +266,9 @@ async function save(): Promise<void> {
         shine: editor.shine,
         sort_order: Number(editor.sortOrder) || 0,
         enabled: editor.enabled,
-      })
+      }
+      if (editor.id) await updateMaterialSeries(editor.id, payload)
+      else await saveMaterialSeries(payload)
     }
     notice.value = '目录已保存，相关 SKU 将继续引用此层级。'
     wasEnabled.value = editor.enabled
@@ -265,11 +318,16 @@ async function remove(kind: EditorKind, id: string, name: string): Promise<void>
   }
 }
 
-watch(selectedTop, () => {
+watch(selectedTop, (top, previousTop) => {
   if (editor.kind !== 'type') resetEditor('category')
+  if (top && top !== previousTop) void loadCategories(top)
 })
 
-onBeforeUnmount(() => controller?.abort())
+void loadTypes()
+onBeforeUnmount(() => {
+  typesController?.abort()
+  categoriesController?.abort()
+})
 </script>
 
 <template>

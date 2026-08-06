@@ -300,10 +300,19 @@ def material_image_identity(url: str | None) -> str:
 
 def clean_gallery_image_urls(value, primary_url: str = "", *, top: str = "") -> list[str]:
     """Normalize only gallery entries; the primary image is a separate field."""
-    # Keep the arguments for backwards-compatible callers.  In particular, do
-    # not compare against primary_url here: a gallery may intentionally contain
-    # the same asset as the manually selected primary image.
-    return clean_image_urls(value)
+    # 主图仅用于目录和材料详情展示，不能参与工作台的随机抽图。用去掉
+    # query string 的 identity 比较，避免同一 COS 文件因版本参数不同而绕过
+    # 校验；图库本身也以相同规则去重，保证每张图的随机概率一致。
+    primary_identity = material_image_identity(primary_url)
+    result: list[str] = []
+    seen: set[str] = set()
+    for url in clean_image_urls(value):
+        identity = material_image_identity(url)
+        if not identity or identity == primary_identity or identity in seen:
+            continue
+        seen.add(identity)
+        result.append(url)
+    return result
 
 
 def with_cdn_url(item: dict) -> dict:
@@ -397,7 +406,10 @@ def slim_material(item: dict) -> dict:
         "effect": " / ".join(str(value) for value in effects if value) or item.get("effect") or "",
         "color": visual.get("color_hex") or item.get("color") or "",
         "shine": visual.get("shine_hex") or item.get("shine") or "",
-        "image_url": image_url,
+        # Legacy varieties can have only gallery data.  Use its first image as
+        # a display fallback, but keep it in the gallery: it was never a real
+        # primary image and must remain eligible for workspace randomization.
+        "image_url": image_url or (image_urls[0] if image_urls else ""),
         "image_urls": image_urls,
         "thumbnail_url": image_url,
         "material_params": material_params,
@@ -789,6 +801,9 @@ def list_db_materials(
 
 
 def series_asset_key(row: dict) -> tuple[str, str, str]:
+    series_id = str(row.get("series_id") or "").strip()
+    if series_id:
+        return ("series_id", series_id, "")
     return (
         str(row.get("top") or "bead"),
         str(row.get("category") or ""),
@@ -799,7 +814,11 @@ def series_asset_key(row: dict) -> tuple[str, str, str]:
 def fetch_db_series_assets(connection, rows: list[dict]) -> dict[tuple[str, str, str], dict]:
     if not rows:
         return {}
-    tops = sorted({series_asset_key(row)[0] for row in rows if series_asset_key(row)[0]})
+    # `series_asset_key` starts with the literal ``series_id`` once a SKU has
+    # been migrated.  The taxonomy query must still be constrained by the
+    # material type, not by that key marker; otherwise every linked SKU misses
+    # its shared images and recommendation/workspace previews turn blank.
+    tops = sorted({str(row.get("top") or "").strip() for row in rows if str(row.get("top") or "").strip()})
     if not tops:
         return {}
     placeholders = ", ".join(["?"] * len(tops))
@@ -829,6 +848,16 @@ def fetch_db_series_assets(connection, rows: list[dict]) -> dict[tuple[str, str,
             image_url,
             top=row.get("top") or "bead",
         )
+        result[("series_id", row.get("item_id") or "", "")] = {
+            "material_code": row.get("material_code") or "",
+            "color": row.get("color") or "",
+            "shine": row.get("shine") or "",
+            "image_path": image_path,
+            "image_url": image_url,
+            "image_urls": image_urls,
+        }
+        # The editable name/category key remains a compatibility fallback for
+        # legacy SKU rows that have not yet been linked by the migration.
         result[(row.get("top") or "bead", row.get("category_name") or "", row.get("name") or "")] = {
             "material_code": row.get("material_code") or "",
             "color": row.get("color") or "",
@@ -876,7 +905,10 @@ def normalize_db_material(row: dict, series_assets: dict[tuple[str, str, str], d
         "color": series_asset.get("color") or row.get("color") or "",
         "shine": series_asset.get("shine") or row.get("shine") or "",
         "image_path": image_path,
-        "image_url": image_url,
+        # Keep old gallery-only records usable for display until an operator
+        # sets a real primary image.  `image_urls` intentionally stays intact
+        # so the fallback image is not silently removed from the random pool.
+        "image_url": image_url or (image_urls[0] if image_urls else ""),
         "image_urls": image_urls,
         "image_pool": image_urls,
         "physical_specs": physical_specs,

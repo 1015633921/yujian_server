@@ -8,7 +8,9 @@ import {
   bindMaterialAssets,
   listMaterialTaxonomy,
   listMaterialTypes,
+  patchMaterialSku,
   saveMaterialSeries,
+  updateMaterialSeries,
   uploadMaterialAsset,
 } from './api'
 
@@ -52,6 +54,21 @@ describe('material directory api', () => {
     expect(fetchMock.mock.calls[2]?.[1]).toMatchObject({ method: 'POST' })
   })
 
+  it('keeps SKU edits and immutable series edits on separate endpoints', async () => {
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(
+      new Response(JSON.stringify({ code: 0, data: {} }), { status: 200, headers: { 'content-type': 'application/json' } }),
+    ))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await patchMaterialSku('sku-1', { price: 18, enabled: true })
+    await updateMaterialSeries('series-1', { category_id: 'category-1', name: '重命名品种', sort_order: 1, enabled: true })
+
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain('materials/sku-1')
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({ method: 'PATCH' })
+    expect(String(fetchMock.mock.calls[1]?.[0])).toContain('material-taxonomy/series/series-1')
+    expect(fetchMock.mock.calls[1]?.[1]).toMatchObject({ method: 'PUT' })
+  })
+
   it('uploads only processed file data and binds the returned COS keys to a series gallery', async () => {
     const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(
       new Response(JSON.stringify({ code: 0, data: { key: 'materials/processed/sample.webp' } }), { status: 200, headers: { 'content-type': 'application/json' } }),
@@ -59,12 +76,17 @@ describe('material directory api', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     await uploadMaterialAsset(new Blob(['webp'], { type: 'image/webp' }), 'sample.webp')
-    await bindMaterialAssets('series-1', ['materials/processed/sample.webp'], 'replace')
+    await bindMaterialAssets('series-1', ['materials/processed/sample.webp'], 'replace', {
+      expectedVersion: 3,
+      idempotencyKey: 'publish-1',
+    })
 
     expect(String(fetchMock.mock.calls[0]?.[0])).toContain('material-assets/upload')
     expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({ method: 'POST' })
     expect(fetchMock.mock.calls[0]?.[1]?.body).toBeInstanceOf(FormData)
     expect(String(fetchMock.mock.calls[1]?.[0])).toContain('material-assets/bind')
     expect(fetchMock.mock.calls[1]?.[1]).toMatchObject({ method: 'POST' })
+    expect(String(fetchMock.mock.calls[1]?.[1]?.body)).toContain('"expected_version":3')
+    expect(String(fetchMock.mock.calls[1]?.[1]?.body)).toContain('"idempotency_key":"publish-1"')
   })
 })

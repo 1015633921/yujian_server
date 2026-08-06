@@ -1194,7 +1194,13 @@ class CustomDesignService:
             )
         return self.get_for_user(request_id, user_id)
 
-    def _submit_deposit_refund(self, request_id: str, user_id: str) -> dict[str, Any]:
+    def _submit_deposit_refund(
+        self,
+        request_id: str,
+        user_id: str,
+        *,
+        reason: str = "人工搭配商品订单已完成，退还设计保证金",
+    ) -> dict[str, Any]:
         already_submitted = False
         with self.connect() as connection:
             row = connection.execute(
@@ -1221,7 +1227,7 @@ class CustomDesignService:
                 timestamp = now_iso()
                 connection.execute(
                     "UPDATE custom_design_deposits SET status = 'refund_submitting', out_refund_no = ?, refund_json = ?, refund_requested_at = ?, updated_at = ? WHERE deposit_id = ?",
-                    (refund_no, json.dumps({"status": "refund_submitting", "reason": "用户确认设计完成", "requested_at": timestamp}, ensure_ascii=False), timestamp, timestamp, deposit["deposit_id"]),
+                    (refund_no, json.dumps({"status": "refund_submitting", "reason": reason, "requested_at": timestamp}, ensure_ascii=False), timestamp, timestamp, deposit["deposit_id"]),
                 )
 
         if already_submitted:
@@ -1241,7 +1247,7 @@ class CustomDesignService:
                     refund_no,
                     int(deposit["amount_fee"]),
                     int(deposit["amount_fee"]),
-                    "用户确认设计完成，退还设计保证金",
+                    reason,
                     config,
                 )
                 if str(result.get("out_refund_no") or "") != refund_no:
@@ -1253,7 +1259,7 @@ class CustomDesignService:
                         (json.dumps({"status": "refund_failed", "failed_reason": str(exc)[:300]}, ensure_ascii=False), now_iso(), deposit["deposit_id"]),
                     )
                     self._event(connection, request_id, "deposit_refund_failed", "system", "wechat_pay", note="退款提交失败，等待重试")
-                raise ValueError("设计已确认，保证金退款提交失败，请稍后重试") from exc
+                raise ValueError("订单已完成，保证金退款提交失败，请稍后重试") from exc
         self.apply_deposit_refund_result(result)
         return self.get_for_user(request_id, user_id)
 
@@ -1334,6 +1340,35 @@ class CustomDesignService:
                 connection.execute("UPDATE custom_design_requests SET status = 'completed', confirmed_at = ?, updated_at = ? WHERE request_id = ?", (timestamp, timestamp, request_id))
                 connection.execute("UPDATE custom_design_proposals SET confirmed_at = ? WHERE proposal_id = ?", (timestamp, proposal["proposal_id"]))
                 self._event(connection, request_id, "proposal_confirmed", "user", user_id, from_status="proposed", to_status="completed", note=note or "用户确认设计方案完成")
+        # A confirmation creates the merchandise order. The deposit remains held
+        # until that linked order is completed, rather than being refunded here.
+        return self.create_order_from_proposal(request_id, user_id)
+
+    def refund_deposit_for_completed_order(self, order_id: str) -> dict[str, Any] | None:
+        """Submit a refundable design deposit after its linked order completes."""
+        order = self.order_service.get_order(order_id)
+        if order.get("status") != "completed" or order.get("payment_status") != "paid":
+            return None
+        with self.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT request.request_id, request.user_id, deposit.status AS deposit_status
+                FROM custom_design_proposals AS proposal
+                JOIN custom_design_requests AS request ON request.request_id = proposal.request_id
+                JOIN custom_design_deposits AS deposit ON deposit.request_id = request.request_id
+                WHERE proposal.order_id = ?
+                LIMIT 1
+                """,
+                (order_id,),
+            ).fetchone()
+        if not row:
+            return None
+        request_id = str(row["request_id"])
+        user_id = str(row["user_id"])
+        if user_id != str(order.get("user_id") or ""):
+            raise ValueError("人工搭配订单归属不匹配")
+        if str(row["deposit_status"]) in {"refunded", "refund_submitting", "refunding"}:
+            return self.get_for_user(request_id, user_id)
         return self._submit_deposit_refund(request_id, user_id)
 
     def create_order_from_proposal(self, request_id: str, user_id: str) -> dict[str, Any]:
@@ -1363,7 +1398,12 @@ class CustomDesignService:
             "sourceContext": {"source": "custom_design", "source_label": "设计师搭配", "request_id": request_id, "proposal_id": proposal_id, "title": proposal_record.get("title") or "专属手串方案"},
             "summary": workbench.get("summary") or {},
         }
-        order_result = self.order_service.create_pending_order({"user_id": user_id, "receiver": {}, "design": design, "sequence": layout, "remark": f"人工搭配服务单：{request_id}", "idempotency_key": f"custom-design:{proposal_id}"})
+        order_result = self.order_service.create_pending_order(
+            {"user_id": user_id, "receiver": {}, "design": design, "sequence": layout, "remark": f"人工搭配服务单：{request_id}", "idempotency_key": f"custom-design:{proposal_id}"},
+            # Physical sizing has already been set by the human designer. Keep
+            # SKU, price, stock and payment validation, but skip DIY wrist-fit.
+            validate_bracelet_fit=False,
+        )
         order = order_result["order"]
         with self.connect() as connection:
             connection.execute("UPDATE custom_design_proposals SET order_id = ? WHERE proposal_id = ?", (order["order_id"], proposal_id))

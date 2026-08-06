@@ -42,12 +42,16 @@ def test_p0b_migration_is_additive_idempotent_and_independently_reversible(tmp_p
 
         "20260806_17_custom_design_deposits",
         "20260806_18_custom_design_queue_indexes",
+        "20260806_19_material_series_identity",
+        "20260806_20_material_asset_versions",
     ]
     assert upgrade("sqlite", db_path) == []
     assert {"idempotency_key", "request_hash", "reservation_expires_at"}.issubset(columns(db_path, "orders"))
     assert "reserved_stock" in columns(db_path, "managed_materials")
     assert {"order_requests", "inventory_reservations", "user_sessions"}.issubset(tables(db_path))
 
+    assert downgrade("sqlite", db_path, steps=1) == ["20260806_20_material_asset_versions"]
+    assert downgrade("sqlite", db_path, steps=1) == ["20260806_19_material_series_identity"]
     assert downgrade("sqlite", db_path, steps=1) == ["20260806_18_custom_design_queue_indexes"]
     assert downgrade("sqlite", db_path, steps=1) == ["20260806_17_custom_design_deposits"]
     assert downgrade("sqlite", db_path, steps=1) == ["20260727_16_custom_design_workbench"]
@@ -95,4 +99,6 @@ def test_p0b_migration_is_additive_idempotent_and_independently_reversible(tmp_p
         "20260727_16_custom_design_workbench",
         "20260806_17_custom_design_deposits",
         "20260806_18_custom_design_queue_indexes",
+        "20260806_19_material_series_identity",
+        "20260806_20_material_asset_versions",
     ]

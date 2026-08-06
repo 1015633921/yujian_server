@@ -217,14 +217,26 @@ def test_bead_series_are_always_exposed_as_round_while_accessory_shape_is_preser
 def test_primary_and_gallery_images_are_stored_independently(tmp_path):
     service = AdminService(tmp_path / "material-gallery-primary.db")
     category = service.save_material_category({"top": "accessory", "name": "隔珠"})
+    with pytest.raises(ValueError, match="主图不能同时加入随机图库"):
+        service.save_material_series(
+            {
+                "category_id": category["id"],
+                "name": "测试隔珠",
+                "image_url": "https://cdn.example.com/main.webp",
+                "image_urls": [
+                    "https://cdn.example.com/main.webp",
+                    "https://cdn.example.com/side.webp",
+                ],
+            }
+        )
     series = service.save_material_series(
         {
             "category_id": category["id"],
             "name": "测试隔珠",
             "image_url": "https://cdn.example.com/main.webp",
             "image_urls": [
-                "https://cdn.example.com/main.webp",
                 "https://cdn.example.com/side.webp",
+                "https://cdn.example.com/angle.webp",
             ],
         }
     )
@@ -232,8 +244,8 @@ def test_primary_and_gallery_images_are_stored_independently(tmp_path):
     initially_saved = service.list_material_taxonomy(top="accessory", include_disabled=True)[0]["series"][0]
     assert initially_saved["image_url"] == "https://cdn.example.com/main.webp"
     assert initially_saved["image_urls"] == [
-        "https://cdn.example.com/main.webp",
         "https://cdn.example.com/side.webp",
+        "https://cdn.example.com/angle.webp",
     ]
 
     saved = service.save_material_series(
@@ -243,22 +255,22 @@ def test_primary_and_gallery_images_are_stored_independently(tmp_path):
             "name": "测试隔珠",
             "image_url": "https://cdn.example.com/main.webp",
             "image_urls": [
-                "https://cdn.example.com/main.webp",
                 "https://cdn.example.com/side.webp",
+                "https://cdn.example.com/angle.webp",
             ],
         }
     )
 
     assert saved["image_url"] == "https://cdn.example.com/main.webp"
     assert saved["image_urls"] == [
-        "https://cdn.example.com/main.webp",
         "https://cdn.example.com/side.webp",
+        "https://cdn.example.com/angle.webp",
     ]
     stored = service.list_material_taxonomy(top="accessory", include_disabled=True)[0]["series"][0]
     assert stored["image_url"] == "https://cdn.example.com/main.webp"
     assert stored["image_urls"] == [
-        "https://cdn.example.com/main.webp",
         "https://cdn.example.com/side.webp",
+        "https://cdn.example.com/angle.webp",
     ]
     with service.connect() as connection:
         row = connection.execute(
@@ -267,9 +279,54 @@ def test_primary_and_gallery_images_are_stored_independently(tmp_path):
         ).fetchone()
     assert row["image_url"] == "https://cdn.example.com/main.webp"
     assert json.loads(row["image_urls_json"]) == [
-        "https://cdn.example.com/main.webp",
         "https://cdn.example.com/side.webp",
+        "https://cdn.example.com/angle.webp",
     ]
+
+
+def test_gallery_publish_uses_version_and_idempotency_guards(tmp_path):
+    service = AdminService(tmp_path / "material-gallery-versions.db")
+    category = service.save_material_category({"top": "accessory", "name": "隔珠"})
+    series = service.save_material_series(
+        {
+            "category_id": category["id"],
+            "name": "版本隔珠",
+            "image_url": "https://cdn.example.com/main.webp",
+            "image_urls": ["https://cdn.example.com/old-side.webp"],
+        }
+    )
+    actor = {"admin_id": "operator-1", "role": "operator"}
+    first = service.bind_material_series_images(
+        series["id"],
+        ["https://cdn.example.com/new-side.webp", "https://cdn.example.com/new-angle.webp"],
+        mode="replace",
+        expected_version=1,
+        idempotency_key="gallery-publish-key-001",
+        actor=actor,
+    )
+    duplicate = service.bind_material_series_images(
+        series["id"],
+        ["https://cdn.example.com/ignored.webp"],
+        mode="replace",
+        expected_version=1,
+        idempotency_key="gallery-publish-key-001",
+        actor=actor,
+    )
+
+    assert first["asset_version"] == 2
+    assert duplicate == first
+    history = service.list_material_series_asset_versions(series["id"])
+    assert [item["asset_version"] for item in history] == [2, 1]
+    assert history[-1]["source"] == "series_profile"
+    with pytest.raises(ValueError, match="已被其他操作更新"):
+        service.bind_material_series_images(
+            series["id"],
+            ["https://cdn.example.com/another.webp"],
+            mode="replace",
+            expected_version=1,
+            idempotency_key="gallery-publish-key-002",
+            actor=actor,
+        )
 
 
 def test_series_primary_image_can_be_cleared_without_changing_gallery(tmp_path):
@@ -461,12 +518,14 @@ def test_material_asset_bind_endpoint_uses_server_built_urls(monkeypatch):
         lambda key: f"https://cdn.example.com/{key}",
     )
 
-    def fake_bind(series_id, urls, *, mode, sync_sku_images, actor):
+    def fake_bind(series_id, urls, *, mode, expected_version, idempotency_key, sync_sku_images, actor):
         calls.append(
             {
                 "series_id": series_id,
                 "urls": urls,
                 "mode": mode,
+                "expected_version": expected_version,
+                "idempotency_key": idempotency_key,
                 "sync_sku_images": sync_sku_images,
                 "actor": actor,
             }
@@ -489,9 +548,11 @@ def test_material_asset_bind_endpoint_uses_server_built_urls(monkeypatch):
     assert calls == [
         {
             "series_id": "series-green-phantom",
-            "urls": ["https://cdn.example.com/materials/processed/operator-1/a.webp"],
-            "mode": "replace",
-            "sync_sku_images": True,
+                "urls": ["https://cdn.example.com/materials/processed/operator-1/a.webp"],
+                "mode": "replace",
+                "expected_version": None,
+                "idempotency_key": "",
+                "sync_sku_images": True,
             "actor": {"admin_id": "operator-1", "username": "operator", "role": "operator"},
         }
     ]

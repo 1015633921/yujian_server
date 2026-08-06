@@ -491,7 +491,7 @@ def confirm_custom_design_request(
 ):
     safe_payload = owned_payload(payload, principal)
     try:
-        return success(custom_design_service.user_response(request_id, principal.user_id, "confirm", safe_payload.note), "设计已确认，保证金正在原路退回")
+        return success(custom_design_service.user_response(request_id, principal.user_id, "confirm", safe_payload.note), "设计已确认，商品订单已生成，请补充收货地址后支付")
     except (OrderPriceChangedError, OrderConflictError) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except OrderPricingError as exc:

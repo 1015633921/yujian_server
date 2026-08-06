@@ -570,6 +570,7 @@ def enrich_materials_with_knowledge(
             "top": item.get("top") or "",
             "category": item.get("category") or "",
             "series": item.get("series") or item.get("name") or "",
+            "series_id": item.get("series_id") or "",
             "grade": item.get("grade") or "",
             "name": item.get("name") or knowledge.get("name") or "",
             "price_per_bead": float(item.get("price") or item.get("price_per_bead") or 0),

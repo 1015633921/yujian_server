@@ -123,22 +123,23 @@ def test_admin_workbench_uses_gallery_asset_instead_of_primary_image(monkeypatch
     assert result["layout"][0]["image_url"] != "https://cdn.example.com/primary.webp"
 
 
-def test_structured_draft_publish_confirms_design_refunds_deposit_then_creates_one_pending_order(
+def test_confirming_design_creates_one_order_skips_diy_fit_and_refunds_deposit_after_completion(
     tmp_path,
     monkeypatch,
 ):
     monkeypatch.setenv("WECHAT_PAY_TEST_MODE", "true")
     custom, orders = build_services(tmp_path)
     add_material(orders)
+    designer_workbench = workbench(count=8)
     created = custom.create("designer-user", request_payload())
     paid = custom.mark_deposit_paid_for_dev(created["request_id"], "designer-user")
     assert paid["status"] == "submitted"
     assert paid["deposit"]["status"] == "paid"
 
-    drafted = custom.save_draft(created["request_id"], "designer-1", workbench())
+    drafted = custom.save_draft(created["request_id"], "designer-1", designer_workbench)
     assert drafted["status"] == "designing"
     assert drafted["draft"]["draft_version"] == 1
-    assert drafted["draft"]["workbench"]["selected"] == ["designer-bead"] * 24
+    assert drafted["draft"]["workbench"]["selected"] == ["designer-bead"] * 8
 
     published = custom.publish_proposal(
         created["request_id"],
@@ -147,7 +148,7 @@ def test_structured_draft_publish_confirms_design_refunds_deposit_then_creates_o
             "title": "清透专属款",
             "description": "二十四颗测试珠",
             "image_urls": [],
-            "workbench": workbench(),
+            "workbench": designer_workbench,
         },
     )
     assert published["status"] == "proposed"
@@ -159,16 +160,15 @@ def test_structured_draft_publish_confirms_design_refunds_deposit_then_creates_o
         "confirm",
     )
     assert confirmed["status"] == "completed"
-    assert confirmed["deposit"]["status"] == "refunded"
-    assert "order" not in confirmed
-
-    order_created = custom.create_order_from_proposal(created["request_id"], "designer-user")
-    order = order_created["order"]
+    assert confirmed["deposit"]["status"] == "paid"
+    order = confirmed["order"]
     assert order["status"] == "pending_payment"
     assert order["payment_status"] == "unpaid"
     assert order["receiver"] == {}
-    assert order["design"]["selected"] == ["designer-bead"] * 24
-    assert len(order["sequence"]) == 24
+    # Eight 8mm beads cannot fit a 16cm wrist. A human-design proposal must
+    # still be purchasable without being forced through DIY wrist-fit checks.
+    assert order["design"]["selected"] == ["designer-bead"] * 8
+    assert len(order["sequence"]) == 8
 
     replay = custom.create_order_from_proposal(
         created["request_id"],
@@ -182,7 +182,7 @@ def test_structured_draft_publish_confirms_design_refunds_deposit_then_creates_o
             "SELECT reserved_stock FROM managed_materials WHERE id = 'designer-bead'"
         ).fetchone()
         count = connection.execute("SELECT COUNT(*) AS n FROM orders").fetchone()["n"]
-    assert int(row["reserved_stock"]) == 24
+    assert int(row["reserved_stock"]) == 8
     assert int(count) == 1
 
     with pytest.raises(ValueError, match="收货人"):
@@ -194,6 +194,11 @@ def test_structured_draft_publish_confirms_design_refunds_deposit_then_creates_o
     )
     payment = orders.request_payment(order["order_id"], "designer-user")
     assert payment["order"]["order_id"] == order["order_id"]
+    orders.mark_paid_for_dev(order["order_id"], "designer-user")
+    orders.mark_shipped_for_dev(order["order_id"], "designer-user")
+    completed = orders.confirm_receipt(order["order_id"], "designer-user")
+    assert completed["status"] == "completed"
+    assert custom.get_for_user(created["request_id"], "designer-user")["deposit"]["status"] == "refunded"
 
 
 def test_deposit_payment_webhook_is_idempotent_and_rejects_reused_transaction(tmp_path, monkeypatch):
