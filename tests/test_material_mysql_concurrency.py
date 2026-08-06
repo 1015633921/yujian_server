@@ -46,12 +46,16 @@ def test_mysql_material_revision_rejects_stale_single_and_batch_edits(monkeypatc
     database_module._schema_ready.discard(config["MYSQL_DATABASE"])
     upgrade("mysql")
     sku_id = "material_mysql_revision_race"
+    category = service.save_material_category({"top": "bead", "name": "material-mysql-test"})
+    series = service.save_material_series(
+        {"category_id": category["id"], "name": "Revision Race", "material_code": "material_mysql_revision_race"}
+    )
     base = {
         "id": sku_id,
         "top": "bead",
-        "category": "test",
+        "category": "material-mysql-test",
         "series": "Revision Race",
-        "series_id": "series_material_mysql_revision_race",
+        "series_id": series["id"],
         "material_code": "material_mysql_revision_race",
         "name": "Revision Race",
         "element": "水",
