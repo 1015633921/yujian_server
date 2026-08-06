@@ -849,6 +849,7 @@ def fetch_db_series_assets(connection, rows: list[dict]) -> dict[tuple[str, str,
             top=row.get("top") or "bead",
         )
         result[("series_id", row.get("item_id") or "", "")] = {
+            "series_id": row.get("item_id") or "",
             "material_code": row.get("material_code") or "",
             "color": row.get("color") or "",
             "shine": row.get("shine") or "",
@@ -859,6 +860,7 @@ def fetch_db_series_assets(connection, rows: list[dict]) -> dict[tuple[str, str,
         # The editable name/category key remains a compatibility fallback for
         # legacy SKU rows that have not yet been linked by the migration.
         result[(row.get("top") or "bead", row.get("category_name") or "", row.get("name") or "")] = {
+            "series_id": row.get("item_id") or "",
             "material_code": row.get("material_code") or "",
             "color": row.get("color") or "",
             "shine": row.get("shine") or "",

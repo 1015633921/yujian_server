@@ -137,7 +137,7 @@ jobs:
         run: python -m pip install --require-hashes -r requirements-dev.lock
       - name: Create isolated databases
         run: |
-          for database in p0b_test_ci p1a_test_ci p1b_test_ci p1c_test_ci p1d_test_ci; do
+          for database in p0b_test_ci p1a_test_ci p1b_test_ci p1c_test_ci p1d_test_ci material_test_ci; do
             docker exec ${{ job.services.mysql.id }} mysql -uroot -pci-only-password -e "CREATE DATABASE \`${database}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
           done
       - name: Run P0/P1 MySQL gates
@@ -158,12 +158,17 @@ jobs:
           P1C_MYSQL_TEST_DATABASE: p1c_test_ci
           P1C_MYSQL_TEST_USER: root
           P1C_MYSQL_TEST_PASSWORD: ci-only-password
+          RUN_MATERIAL_MYSQL_INTEGRATION: "1"
+          MATERIAL_MYSQL_TEST_DATABASE: material_test_ci
+          MATERIAL_MYSQL_TEST_USER: root
+          MATERIAL_MYSQL_TEST_PASSWORD: ci-only-password
         run: >-
           pytest -q
           tests/test_p0b_mysql_concurrency.py
           tests/test_p1a_mysql_webhooks.py
           tests/test_p1b_mysql_reports.py
           tests/test_p1c_mysql_runtime.py
+          tests/test_material_mysql_concurrency.py
       - name: Validate MySQL migration round trip
         env:
           DATABASE_BACKEND: mysql

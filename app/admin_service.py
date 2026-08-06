@@ -21,6 +21,7 @@ from .materials import (
     MATERIAL_CATALOG,
     clean_gallery_image_urls,
     clean_image_urls,
+    fetch_db_series_assets,
     invalidate_material_cache,
     material_image_identity,
     material_url_from_path,
@@ -5345,6 +5346,95 @@ class AdminService:
         result["quality"] = self.material_quality(result)
         return result
 
+    def public_materials(self, rows: list[dict[str, Any]], connection) -> list[dict[str, Any]]:
+        """Build catalog rows in batches; list endpoints must never query per SKU.
+
+        A material list can contain more than one thousand SKUs.  Calling
+        ``public_material`` in a loop used to perform taxonomy, knowledge and
+        size lookups for every row.  The management list therefore spent most
+        of its time waiting on thousands of small MySQL queries.  Keep the
+        exact public payload, but resolve every shared dimension once.
+        """
+        if not rows:
+            return []
+        raw_rows = [dict(row) for row in rows]
+        series_assets = fetch_db_series_assets(connection, raw_rows)
+        materials: list[dict[str, Any]] = []
+        for row in raw_rows:
+            series = row.get("series") or row.get("name") or ""
+            series_id = str(row.get("series_id") or "").strip()
+            series_asset = (
+                series_assets.get(("series_id", series_id, ""))
+                if series_id
+                else series_assets.get((row.get("top") or "bead", row.get("category") or "", series))
+            ) or {}
+            image_urls = list(series_asset.get("image_urls") or [])
+            image_url = str(series_asset.get("image_url") or "").strip() or (image_urls[0] if image_urls else "")
+            material_code = row.get("material_code") or series_asset.get("material_code") or material_code_from_payload(row)
+            try:
+                price_cents = stored_cents(row.get("price_cents"), field_name="材料价格")
+                display_price = float(cents_to_text(price_cents))
+            except ValueError:
+                display_price = float(row.get("price") or 0)
+            materials.append(
+                {
+                    **row,
+                    "price": display_price,
+                    "material_code": material_code,
+                    "enabled": bool(row.get("enabled", 1)),
+                    "series": series,
+                    "series_id": series_id or str(series_asset.get("series_id") or ""),
+                    "grade": row.get("grade") or "",
+                    "color": series_asset.get("color") or row.get("color") or "",
+                    "shine": series_asset.get("shine") or row.get("shine") or "",
+                    "image_path": series_asset.get("image_path") or "",
+                    "image_url": image_url,
+                    "image_urls": image_urls,
+                    "image_urls_json": json_text(image_urls),
+                    "image_pool": image_urls,
+                }
+            )
+
+        enriched = enrich_materials_with_knowledge(materials, connection)
+        public_rows: list[dict[str, Any]] = []
+        for source, result in zip(raw_rows, enriched):
+            sku_physical_specs = normalize_sku_physical_specs(json_value(source.get("physical_specs_json"), {}))
+            merged_material_params = normalize_material_params(
+                {**((result.get("visual") or {}).get("material_params") or {}), **sku_physical_specs}
+            )
+            result["material_params"] = merged_material_params
+            result["physical_specs"] = sku_physical_specs
+            result["visual"] = {
+                **(result.get("visual") or {}),
+                "material_params": merged_material_params,
+                "image_source": "series",
+                "sku_image_url": "",
+                "sku_image_urls": [],
+            }
+            stock = int(float(source.get("stock") or 0))
+            safety_stock = int(float(source.get("safety_stock") or 0))
+            stock_status = "out" if stock <= 0 else "low" if safety_stock > 0 and stock <= safety_stock else "normal"
+            cost_price = float(source.get("cost_price") or 0)
+            price = float((result.get("sku") or {}).get("price_per_bead") or result.get("price") or 0)
+            ops = {
+                "revision": max(1, int(source.get("revision") or 1)),
+                "cost_price": cost_price,
+                "stock": stock,
+                "reserved_stock": int(float(source.get("reserved_stock") or 0)),
+                "available_stock": max(0, stock - int(float(source.get("reserved_stock") or 0))),
+                "safety_stock": safety_stock,
+                "supplier_name": source.get("supplier_name") or "",
+                "purchase_note": source.get("purchase_note") or "",
+                "stock_status": stock_status,
+                **self.material_margin(price, cost_price),
+                **self.material_inventory_value(price, cost_price, stock),
+            }
+            result["sku"] = {**(result.get("sku") or {}), **ops}
+            result["ops"] = ops
+            result["quality"] = self.material_quality(result)
+            public_rows.append(result)
+        return public_rows
+
     def material_quality(self, material: dict[str, Any]) -> dict[str, Any]:
         sku = material.get("sku") or {}
         energy = material.get("energy") or {}
@@ -5710,7 +5800,7 @@ class AdminService:
                 f"SELECT * FROM managed_materials {where} ORDER BY {order_by} {direction}, updated_at DESC",
                 params,
             ).fetchall()
-            materials = [self.public_material(dict(row), connection) for row in rows]
+            materials = self.public_materials([dict(row) for row in rows], connection)
         if quality:
             materials = [item for item in materials if self.material_matches_quality(item, quality)]
         if stock_state:
@@ -5767,7 +5857,7 @@ class AdminService:
                 f"SELECT * FROM managed_materials {where} ORDER BY {order_by} {direction}, updated_at DESC LIMIT ? OFFSET ?",
                 [*params, page_size, offset],
             ).fetchall()
-            materials = [self.public_material(dict(row), connection) for row in rows]
+            materials = self.public_materials([dict(row) for row in rows], connection)
         return self.paginated_payload(materials, int(total or 0), page, page_size)
 
     @staticmethod
@@ -6288,7 +6378,7 @@ class AdminService:
                 """,
                 [*row_params, *params],
             ).fetchall()
-            materials = [self.public_material(dict(row), connection) for row in sku_rows]
+            materials = self.public_materials([dict(row) for row in sku_rows], connection)
 
         groups: dict[tuple[str, str, str, str, str], list[dict[str, Any]]] = {}
         for item in materials:

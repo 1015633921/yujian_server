@@ -560,6 +560,42 @@ def test_admin_material_spu_search_has_stable_tie_breakers(tmp_path):
     assert [item["key"] for item in repeated["items"]] == [item["key"] for item in first["items"]]
 
 
+def test_admin_material_spu_list_uses_batched_hydration_not_single_sku_queries(tmp_path, monkeypatch):
+    """A paged list must not regress to taxonomy/knowledge queries per SKU."""
+    from app.admin_service import AdminService
+
+    service = AdminService(tmp_path / "material-spu-batch-hydration.db")
+    ensure_material_taxonomy(service, "batch-gem", "Batch Gem")
+    for size in (8, 10, 12):
+        service.save_material(
+            {
+                "id": f"batch_gem_{size}",
+                "skuId": f"batch_gem_{size}",
+                "material_code": "batch_gem",
+                "top": "bead",
+                "category": "batch-gem",
+                "series": "Batch Gem",
+                "name": "Batch Gem",
+                "primary_element": "water",
+                "effects": ["focus"],
+                "price_per_bead": 10,
+                "size_mm": size,
+                "weight_g": 1,
+                "stock": 10,
+            }
+        )
+
+    def fail_if_single_row_hydration_is_used(*_args, **_kwargs):
+        raise AssertionError("list endpoint must use public_materials() batch hydration")
+
+    monkeypatch.setattr(service, "public_material", fail_if_single_row_hydration_is_used)
+    page = service.list_material_spus(keyword="Batch Gem", include_facets=True, page=1, page_size=20)
+
+    assert page["pagination"]["total"] == 1
+    assert page["items"][0]["spu"]["sku_count"] == 3
+    assert page["facets"]["category"] == [{"value": "batch-gem", "count": 1}]
+
+
 def test_admin_material_saves_structured_knowledge_without_legacy_required_fields(tmp_path):
     from app.admin_service import AdminService
 
