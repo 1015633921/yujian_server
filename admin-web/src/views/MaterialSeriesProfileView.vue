@@ -2,11 +2,16 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 
+import MaterialOptionChecks from '@/components/materials/MaterialOptionChecks.vue'
 import PageErrorState from '@/components/ui/PageErrorState.vue'
 import PageHeading from '@/components/ui/PageHeading.vue'
 import {
   getMaterialSeries,
+  listMaterialOptions,
+  listMaterialTaxonomy,
   updateMaterialSeries,
+  type MaterialOption,
+  type MaterialOptionsPayload,
   type MaterialSeries,
   type MaterialSeriesInput,
 } from '@/features/materials/api'
@@ -22,28 +27,36 @@ interface SeriesDraft {
   imageUrl: string
   imageUrls: string[]
   primaryElement: string
-  secondaryElements: string
-  chakras: string
-  effects: string
-  wishPools: string
+  secondaryElements: string[]
+  chakras: string[]
+  effects: string[]
+  wishPools: string[]
   colorFamily: string
-  moodTags: string
-  visualTags: string
+  moodTags: string[]
+  visualTags: string[]
   story: string
-  allowedRoles: string
-  conflictCodes: string
-  matchRules: string
-  careTags: string
+  allowedRoles: string[]
+  conflictCodes: string[]
+  matchRules: string[]
+  careTags: string[]
   beadShape: string
   placementMode: string
   visualAxis: string
-  textureFeatures: string
+  surfaceFinish: string
+  transparencyLevel: string
+  textureFeatures: string[]
+  batchVariation: string
 }
+
+type MaterialOptionKey = Exclude<keyof MaterialOptionsPayload, 'option_items'>
+type DisplayOption = MaterialOption & { unavailable?: boolean }
 
 const route = useRoute()
 const auth = useAuthStore()
 const profile = ref<MaterialSeries | null>(null)
 const draft = ref<SeriesDraft | null>(null)
+const materialOptions = ref<MaterialOptionsPayload | null>(null)
+const relatedSeries = ref<MaterialSeries[]>([])
 const loading = ref(true)
 const saving = ref(false)
 const error = ref('')
@@ -52,38 +65,46 @@ let controller: AbortController | null = null
 
 const seriesId = computed(() => String(route.params.seriesId || '').trim())
 const canManage = computed(() => auth.admin?.role !== 'viewer')
-const elementOptions = [
-  { value: '', label: '暂未设置' },
-  { value: 'metal', label: '金' },
-  { value: 'wood', label: '木' },
-  { value: 'water', label: '水' },
-  { value: 'fire', label: '火' },
-  { value: 'earth', label: '土' },
-]
 
-const operatorLabels: Record<string, string> = {
-  metal: '金', wood: '木', water: '水', fire: '火', earth: '土',
-  calm: '平静安定', focus: '专注', vitality: '活力', clarity: '清晰',
-  communication: '沟通表达', clear: '清透', transparent: '通透',
-  primary: '主石', support: '辅助石', accent: '点缀石',
-  no_limit: '无特殊限制', avoid_sun: '避免暴晒', avoid_sunlight: '避免暴晒',
-  not_together: '不建议搭配', threaded: '穿线', round: '圆珠', nugget: '随形',
-  horizontal: '横向', vertical: '纵向', radial: '环绕',
-}
-const operatorCodes = Object.fromEntries(Object.entries(operatorLabels).map(([code, label]) => [label, code]))
-
-function listText(value: unknown): string {
-  return Array.isArray(value) ? value.filter(Boolean).map((item) => operatorLabels[String(item)] || String(item)).join('、') : ''
+function stringList(value: unknown): string[] {
+  return Array.isArray(value) ? [...new Set(value.map(String).map(item => item.trim()).filter(Boolean))] : []
 }
 
-function splitList(value: string): string[] {
-  return [...new Set(value.split(/[,，、\n\r]+/).map((item) => item.trim()).filter(Boolean).map((item) => operatorCodes[item] || item))]
+function optionsFor(optionType: MaterialOptionKey, selected: string[] = []): DisplayOption[] {
+  const active = materialOptions.value?.[optionType]
+  const base = Array.isArray(active) ? active : []
+  const activeKeys = new Set(base.map(item => item.key))
+  const itemLabels = new Map(
+    (materialOptions.value?.option_items || [])
+      .filter(item => item.option_type === optionType)
+      .map(item => [item.key, item.label]),
+  )
+  const historical = selected
+    .filter(key => key && !activeKeys.has(key))
+    .map(key => ({ key, label: itemLabels.get(key) || `历史值：${key}`, unavailable: true }))
+  return [...base, ...historical]
 }
 
-function elementKey(value: string | undefined): string {
-  const map: Record<string, string> = { 金: 'metal', 木: 'wood', 水: 'water', 火: 'fire', 土: 'earth' }
-  return map[value || ''] || value || ''
+function unavailableValues(optionType: MaterialOptionKey, selected: string[]): string[] {
+  const activeKeys = new Set(optionsFor(optionType).map(item => item.key))
+  return selected.filter(value => value && !activeKeys.has(value))
 }
+
+function secondaryElementOptions(selected: string[], primary: string): DisplayOption[] {
+  return optionsFor('elements', selected).filter(option => option.key !== primary)
+}
+
+const conflictOptions = computed<DisplayOption[]>(() => {
+  const selected = draft.value?.conflictCodes || []
+  const known = relatedSeries.value
+    .filter(item => item.id !== profile.value?.id && item.material_code)
+    .map(item => ({ key: String(item.material_code), label: item.name }))
+  const knownKeys = new Set(known.map(item => item.key))
+  return [
+    ...known,
+    ...selected.filter(code => !knownKeys.has(code)).map(code => ({ key: code, label: `历史关联：${code}` })),
+  ]
+})
 
 function makeDraft(item: MaterialSeries): SeriesDraft {
   const energy = item.energy || {}
@@ -98,23 +119,26 @@ function makeDraft(item: MaterialSeries): SeriesDraft {
     enabled: item.enabled,
     imageUrl: item.image_url || '',
     imageUrls: [...(item.image_urls || [])],
-    primaryElement: elementKey(energy.primary_element),
-    secondaryElements: listText(energy.secondary_elements),
-    chakras: listText(energy.chakras),
-    effects: listText(energy.effects),
-    wishPools: listText(energy.wish_pools),
+    primaryElement: String(energy.primary_element || ''),
+    secondaryElements: stringList(energy.secondary_elements),
+    chakras: stringList(energy.chakras),
+    effects: stringList(energy.effects),
+    wishPools: stringList(energy.wish_pools),
     colorFamily: energy.color_family || '',
-    moodTags: listText(energy.mood_tags),
-    visualTags: listText(energy.visual_tags),
+    moodTags: stringList(energy.mood_tags),
+    visualTags: stringList(energy.visual_tags),
     story: energy.story || '',
-    allowedRoles: listText(rules.allowed_roles),
-    conflictCodes: listText(rules.conflict_codes),
-    matchRules: listText(rules.match_rules),
-    careTags: listText(rules.care_tags),
+    allowedRoles: stringList(rules.allowed_roles),
+    conflictCodes: stringList(rules.conflict_codes),
+    matchRules: stringList(rules.match_rules),
+    careTags: stringList(rules.care_tags),
     beadShape: String(params.bead_shape || 'round'),
     placementMode: String(params.placement_mode || 'threaded'),
     visualAxis: String(params.visual_axis || 'radial'),
-    textureFeatures: listText(params.texture_features),
+    surfaceFinish: String(params.surface_finish || ''),
+    transparencyLevel: String(params.transparency_level || ''),
+    textureFeatures: stringList(params.texture_features),
+    batchVariation: String(params.batch_variation || ''),
   }
 }
 
@@ -130,8 +154,14 @@ async function load(): Promise<void> {
   error.value = ''
   notice.value = ''
   try {
-    const item = await getMaterialSeries(seriesId.value, controller.signal)
+    const [item, nextOptions] = await Promise.all([
+      getMaterialSeries(seriesId.value, controller.signal),
+      listMaterialOptions(controller.signal),
+    ])
+    const taxonomy = await listMaterialTaxonomy(item.top, true, controller.signal)
     profile.value = item
+    materialOptions.value = nextOptions
+    relatedSeries.value = taxonomy.flatMap(category => category.series)
     draft.value = makeDraft(item)
   } catch (cause) {
     if (!(cause instanceof DOMException && cause.name === 'AbortError')) {
@@ -182,15 +212,45 @@ async function save(): Promise<void> {
     notice.value = '请先填写品种名称。'
     return
   }
+  const optionFields: Array<[MaterialOptionKey, string, string[]]> = [
+    ['elements', '主五行', [current.primaryElement]],
+    ['elements', '副五行', current.secondaryElements],
+    ['chakras', '脉轮', current.chakras],
+    ['effects', '核心功效', current.effects],
+    ['wish_pools', '愿望池', current.wishPools],
+    ['color_families', '色系', [current.colorFamily]],
+    ['mood_tags', '情绪标签', current.moodTags],
+    ['visual_tags', '视觉标签', current.visualTags],
+    ['roles', '适配角色', current.allowedRoles],
+    ['match_rules', '搭配规则', current.matchRules],
+    ['care_tags', '养护标签', current.careTags],
+    ['bead_shapes', '珠子形制', [current.beadShape]],
+    ['placement_modes', '安装方式', [current.placementMode]],
+    ['visual_axes', '视觉轴向', [current.visualAxis]],
+    ['surface_finishes', '表面工艺', [current.surfaceFinish]],
+    ['transparency_levels', '通透度', [current.transparencyLevel]],
+    ['texture_features', '纹理特征', current.textureFeatures],
+    ['batch_variation_levels', '批次差异', [current.batchVariation]],
+  ]
+  const invalid = optionFields
+    .map(([type, label, values]) => ({ label, values: unavailableValues(type, values) }))
+    .find(item => item.values.length)
+  if (invalid) {
+    notice.value = `${invalid.label}包含已停用或未维护的历史值，请取消或替换后再保存。`
+    return
+  }
   saving.value = true
   notice.value = ''
   const previousParams = profile.value.material_params || {}
   const materialParams = {
     ...previousParams,
-    bead_shape: current.beadShape.trim(),
-    placement_mode: current.placementMode.trim(),
-    visual_axis: current.visualAxis.trim(),
-    texture_features: splitList(current.textureFeatures),
+    bead_shape: current.beadShape,
+    placement_mode: current.placementMode,
+    visual_axis: current.visualAxis,
+    surface_finish: current.surfaceFinish,
+    transparency_level: current.transparencyLevel,
+    texture_features: current.textureFeatures,
+    batch_variation: current.batchVariation,
   }
   const payload: MaterialSeriesInput = {
     category_id: profile.value.parent_id,
@@ -201,19 +261,19 @@ async function save(): Promise<void> {
     image_url: current.imageUrl,
     image_urls: current.imageUrls,
     primary_element: current.primaryElement,
-    secondary_elements: splitList(current.secondaryElements).map(elementKey),
-    chakras: splitList(current.chakras),
+    secondary_elements: current.secondaryElements,
+    chakras: current.chakras,
     chakra_weights: profile.value.energy?.chakra_weights || {},
-    effects: splitList(current.effects),
-    wish_pools: splitList(current.wishPools),
-    color_family: current.colorFamily.trim(),
-    mood_tags: splitList(current.moodTags),
-    visual_tags: splitList(current.visualTags),
+    effects: current.effects,
+    wish_pools: current.wishPools,
+    color_family: current.colorFamily,
+    mood_tags: current.moodTags,
+    visual_tags: current.visualTags,
     story: current.story.trim(),
-    allowed_roles: splitList(current.allowedRoles),
-    conflict_codes: splitList(current.conflictCodes),
-    match_rules: splitList(current.matchRules),
-    care_tags: splitList(current.careTags),
+    allowed_roles: current.allowedRoles,
+    conflict_codes: current.conflictCodes,
+    match_rules: current.matchRules,
+    care_tags: current.careTags,
     material_params: materialParams,
     asset: profile.value.asset || {},
     sort_order: Number(current.sortOrder) || 0,
@@ -403,46 +463,67 @@ onBeforeUnmount(() => controller?.abort())
             <label><span>主五行</span><select
               v-model="draft.primaryElement"
               :disabled="!canManage || saving"
-            ><option
-              v-for="option in elementOptions"
-              :key="option.value"
-              :value="option.value"
-            >{{ option.label }}</option></select></label>
-            <label><span>副五行</span><input
-              v-model="draft.secondaryElements"
-              :disabled="!canManage || saving"
-              placeholder="例如 金、土"
-            ></label>
-            <label><span>脉轮</span><input
-              v-model="draft.chakras"
-              :disabled="!canManage || saving"
-              placeholder="用顿号或逗号分隔"
-            ></label>
-            <label><span>核心功效</span><input
-              v-model="draft.effects"
-              :disabled="!canManage || saving"
-              placeholder="例如 专注、平静"
-            ></label>
-            <label><span>愿望池</span><input
-              v-model="draft.wishPools"
-              :disabled="!canManage || saving"
-              placeholder="例如 学业、关系"
-            ></label>
-            <label><span>色系</span><input
+            ><option value="">暂未设置</option><option
+              v-for="option in optionsFor('elements', [draft.primaryElement])"
+              :key="option.key"
+              :value="option.key"
+            >{{ option.label }}{{ option.unavailable ? '（已停用）' : '' }}</option></select></label>
+            <div class="material-profile__field">
+              <span>副五行</span><MaterialOptionChecks
+                v-model="draft.secondaryElements"
+                label="副五行"
+                :disabled="!canManage || saving"
+                :options="secondaryElementOptions(draft.secondaryElements, draft.primaryElement)"
+              />
+            </div>
+            <div class="material-profile__field">
+              <span>对应脉轮</span><MaterialOptionChecks
+                v-model="draft.chakras"
+                label="对应脉轮"
+                :disabled="!canManage || saving"
+                :options="optionsFor('chakras', draft.chakras)"
+              />
+            </div>
+            <div class="material-profile__field">
+              <span>核心功效</span><MaterialOptionChecks
+                v-model="draft.effects"
+                label="核心功效"
+                :disabled="!canManage || saving"
+                :options="optionsFor('effects', draft.effects)"
+              />
+            </div>
+            <div class="material-profile__field">
+              <span>适用愿景</span><MaterialOptionChecks
+                v-model="draft.wishPools"
+                label="适用愿景"
+                :disabled="!canManage || saving"
+                :options="optionsFor('wish_pools', draft.wishPools)"
+              />
+            </div>
+            <label><span>主色系</span><select
               v-model="draft.colorFamily"
               :disabled="!canManage || saving"
-              placeholder="例如 透明白"
-            ></label>
-            <label><span>情绪标签</span><input
-              v-model="draft.moodTags"
-              :disabled="!canManage || saving"
-              placeholder="用顿号或逗号分隔"
-            ></label>
-            <label><span>视觉标签</span><input
-              v-model="draft.visualTags"
-              :disabled="!canManage || saving"
-              placeholder="例如 通透、清冷"
-            ></label>
+            ><option value="">暂未设置</option><option
+              v-for="option in optionsFor('color_families', [draft.colorFamily])"
+              :key="option.key"
+              :value="option.key"
+            >{{ option.label }}{{ option.unavailable ? '（已停用）' : '' }}</option></select></label>
+            <div class="material-profile__field">
+              <span>情绪标签</span><MaterialOptionChecks
+                v-model="draft.moodTags"
+                label="情绪标签"
+                :disabled="!canManage || saving"
+                :options="optionsFor('mood_tags', draft.moodTags)"
+              />
+            </div>
+            <div class="material-profile__field">
+              <span>视觉标签</span><MaterialOptionChecks
+                v-model="draft.visualTags"
+                label="视觉标签"
+                :disabled="!canManage || saving"
+                :options="optionsFor('visual_tags', draft.visualTags)"
+              />
+            </div>
             <label class="material-profile__full"><span>材料故事 / 说明</span><textarea
               v-model="draft.story"
               :disabled="!canManage || saving"
@@ -458,46 +539,98 @@ onBeforeUnmount(() => controller?.abort())
             <label><span>珠子形制</span><select
               v-model="draft.beadShape"
               :disabled="!canManage || saving"
-            ><option value="round">圆珠</option><option value="nugget">随形</option><option value="faceted">切面珠</option><option value="flat">扁珠</option></select></label>
+            ><option
+              v-for="option in optionsFor('bead_shapes', [draft.beadShape])"
+              :key="option.key"
+              :value="option.key"
+            >{{ option.label }}{{ option.unavailable ? '（已停用）' : '' }}</option></select></label>
             <label><span>安装方式</span><select
               v-model="draft.placementMode"
               :disabled="!canManage || saving"
-            ><option value="threaded">穿线</option><option value="strung">串接</option><option value="pendant">吊挂</option><option value="spacer">隔珠</option></select></label>
+            ><option
+              v-for="option in optionsFor('placement_modes', [draft.placementMode])"
+              :key="option.key"
+              :value="option.key"
+            >{{ option.label }}{{ option.unavailable ? '（历史值）' : '' }}</option></select></label>
             <label><span>视觉轴向</span><select
               v-model="draft.visualAxis"
               :disabled="!canManage || saving"
-            ><option value="radial">环绕</option><option value="horizontal">横向</option><option value="vertical">纵向</option><option value="none">无固定方向</option></select></label>
-            <label><span>纹理 / 内含特征</span><input
-              v-model="draft.textureFeatures"
+            ><option
+              v-for="option in optionsFor('visual_axes', [draft.visualAxis])"
+              :key="option.key"
+              :value="option.key"
+            >{{ option.label }}{{ option.unavailable ? '（历史值）' : '' }}</option></select></label>
+            <label><span>表面工艺</span><select
+              v-model="draft.surfaceFinish"
               :disabled="!canManage || saving"
-              placeholder="用顿号或逗号分隔"
-            ></label>
+            ><option value="">暂未设置</option><option
+              v-for="option in optionsFor('surface_finishes', [draft.surfaceFinish])"
+              :key="option.key"
+              :value="option.key"
+            >{{ option.label }}{{ option.unavailable ? '（已停用）' : '' }}</option></select></label>
+            <label><span>通透度</span><select
+              v-model="draft.transparencyLevel"
+              :disabled="!canManage || saving"
+            ><option value="">暂未设置</option><option
+              v-for="option in optionsFor('transparency_levels', [draft.transparencyLevel])"
+              :key="option.key"
+              :value="option.key"
+            >{{ option.label }}{{ option.unavailable ? '（已停用）' : '' }}</option></select></label>
+            <label><span>批次差异</span><select
+              v-model="draft.batchVariation"
+              :disabled="!canManage || saving"
+            ><option value="">暂未设置</option><option
+              v-for="option in optionsFor('batch_variation_levels', [draft.batchVariation])"
+              :key="option.key"
+              :value="option.key"
+            >{{ option.label }}{{ option.unavailable ? '（已停用）' : '' }}</option></select></label>
+            <div class="material-profile__field material-profile__full">
+              <span>纹理 / 内含特征</span><MaterialOptionChecks
+                v-model="draft.textureFeatures"
+                label="纹理和内含特征"
+                :disabled="!canManage || saving"
+                :options="optionsFor('texture_features', draft.textureFeatures)"
+              />
+            </div>
           </div>
         </section>
 
         <section>
           <header><span>05 / 搭配与养护</span><h2>使用规则</h2><p>这些信息只影响推荐和运营说明，不会替代库存或价格规则。</p></header>
           <div class="material-profile__fields material-profile__fields--two">
-            <label><span>适配角色</span><input
-              v-model="draft.allowedRoles"
-              :disabled="!canManage || saving"
-              placeholder="用顿号或逗号分隔"
-            ></label>
-            <label><span>冲突品种编码</span><input
-              v-model="draft.conflictCodes"
-              :disabled="!canManage || saving"
-              placeholder="仅维护确有冲突的品种"
-            ></label>
-            <label class="material-profile__full"><span>搭配规则</span><textarea
-              v-model="draft.matchRules"
-              :disabled="!canManage || saving"
-              placeholder="一条规则用顿号、逗号或换行分隔"
-            /></label>
-            <label class="material-profile__full"><span>养护标签</span><input
-              v-model="draft.careTags"
-              :disabled="!canManage || saving"
-              placeholder="例如 避免暴晒、单独收纳"
-            ></label>
+            <div class="material-profile__field">
+              <span>适配角色</span><MaterialOptionChecks
+                v-model="draft.allowedRoles"
+                label="适配角色"
+                :disabled="!canManage || saving"
+                :options="optionsFor('roles', draft.allowedRoles)"
+              />
+            </div>
+            <div class="material-profile__field">
+              <span>冲突品种</span><MaterialOptionChecks
+                v-model="draft.conflictCodes"
+                label="冲突品种"
+                :disabled="!canManage || saving"
+                :options="conflictOptions"
+                empty-text="暂无其他可选品种。"
+              />
+            </div>
+            <div class="material-profile__field material-profile__full">
+              <span>搭配规则</span><MaterialOptionChecks
+                v-model="draft.matchRules"
+                label="搭配规则"
+                :disabled="!canManage || saving"
+                :options="optionsFor('match_rules', draft.matchRules)"
+              />
+            </div>
+            <div class="material-profile__field material-profile__full">
+              <span>养护标签</span><MaterialOptionChecks
+                v-model="draft.careTags"
+                label="养护标签"
+                :disabled="!canManage || saving"
+                :options="optionsFor('care_tags', draft.careTags)"
+              />
+            </div>
           </div>
         </section>
 

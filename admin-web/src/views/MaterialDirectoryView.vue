@@ -243,6 +243,8 @@ async function save(): Promise<void> {
   }
   saving.value = true
   notice.value = ''
+  const creatingSeries = editor.kind === 'series' && !editor.id
+  let createdSeries: MaterialSeries | null = null
   try {
     if (editor.kind === 'type') {
       const result = await saveMaterialType({
@@ -272,10 +274,14 @@ async function save(): Promise<void> {
         enabled: editor.enabled,
       }
       if (editor.id) await updateMaterialSeries(editor.id, payload)
-      else await saveMaterialSeries(payload)
+      else createdSeries = await saveMaterialSeries(payload)
     }
     notice.value = '目录已保存，相关 SKU 将继续引用此层级。'
     wasEnabled.value = editor.enabled
+    if (creatingSeries && createdSeries) {
+      await router.push({ name: 'material-series-profile', params: { seriesId: createdSeries.id } })
+      return
+    }
     await load()
   } catch (cause) {
     notice.value = cause instanceof Error ? cause.message : '保存失败，请稍后重试。'
@@ -604,15 +610,6 @@ onBeforeUnmount(() => {
               placeholder="用于运营识别，不会展示给小程序用户"
             />
           </label>
-          <label v-if="editor.kind === 'series'">
-            <span>材料编码</span>
-            <input
-              v-model.trim="editor.code"
-              :disabled="!canManage"
-              maxlength="160"
-              placeholder="留空时按目录自动生成"
-            >
-          </label>
           <div
             v-if="editor.kind === 'series'"
             class="directory-form__colors"
@@ -660,8 +657,11 @@ onBeforeUnmount(() => {
             type="submit"
             :disabled="!canManage || saving"
           >
-            {{ saving ? '正在保存…' : '保存目录' }}
+            {{ saving ? '正在保存…' : editor.kind === 'series' && !editor.id ? '创建并完善资料' : '保存目录' }}
           </button>
+          <small v-if="editor.kind === 'series' && !editor.id">
+            创建后将进入完整资料页，继续选择五行、功效、形制和养护等标准选项。
+          </small>
           <p
             v-if="notice"
             class="directory-notice"

@@ -5,7 +5,8 @@ const props = defineProps<{
   modelValue: string[]
   options: Array<MaterialOption & { unavailable?: boolean }>
   disabled?: boolean
-  ariaLabel: string
+  label: string
+  emptyText?: string
 }>()
 
 const emit = defineEmits<{
@@ -23,7 +24,7 @@ function toggle(key: string, checked: boolean): void {
 <template>
   <fieldset
     class="material-option-checks"
-    :aria-label="ariaLabel"
+    :aria-label="label"
     :disabled="disabled"
   >
     <label
@@ -40,7 +41,7 @@ function toggle(key: string, checked: boolean): void {
       <small v-if="option.unavailable">已停用，请取消或替换</small>
     </label>
     <p v-if="!options.length">
-      暂无可用选项，请先到材料字段字典维护。
+      {{ emptyText || '暂无可用选项，请先到材料字段字典维护。' }}
     </p>
   </fieldset>
 </template>

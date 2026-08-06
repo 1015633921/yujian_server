@@ -236,6 +236,13 @@ def test_admin_material_options_expose_field_governance_specs(tmp_path):
     assert option_specs["wish_pools"]["control"] == "multi_select"
     assert option_specs["match_rules"]["value_kind"] == "rule_key"
     assert option_specs["bead_shapes"]["cardinality"] == "one"
+    assert option_specs["placement_modes"]["mutable"] is False
+    assert option_specs["visual_axes"]["control"] == "single_select"
+    assert payload["placement_modes"] == [
+        {"key": "threaded", "label": "穿线串珠"},
+        {"key": "hanging", "label": "悬挂"},
+        {"key": "attached_side", "label": "贴附主珠"},
+    ]
     assert form_specs["primary_element"]["value_kind"] == "enum_key"
     assert form_specs["purchase_note"]["value_kind"] == "free_text"
     assert form_specs["thumbnail_url"]["control"] == "upload"

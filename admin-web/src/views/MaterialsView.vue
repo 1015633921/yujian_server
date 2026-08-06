@@ -7,11 +7,14 @@ import PageHeading from '@/components/ui/PageHeading.vue'
 import {
   batchUpdateMaterialSkus,
   createMaterialSku,
+  listMaterialOptions,
   listMaterialSpus,
   listMaterialTypes,
   patchMaterialSku,
   type Material,
+  type MaterialOption,
   type MaterialSpu,
+  type MaterialOptionsPayload,
   type MaterialType,
 } from '@/features/materials/api'
 
@@ -21,6 +24,7 @@ const route = useRoute()
 const router = useRouter()
 const groups = ref<MaterialSpu[]>([])
 const types = ref<MaterialType[]>([])
+const materialOptions = ref<MaterialOptionsPayload | null>(null)
 const facets = ref<Record<string, Array<{ value: string; count: number }>>>({})
 const loading = ref(true)
 const error = ref('')
@@ -59,6 +63,14 @@ function keyOf(group: MaterialSpu) { return group.series_id || group.id }
 function price(value: unknown) { return Number(value || 0) }
 function elementLabel(value?: string) {
   return ({ metal: '金', wood: '木', water: '水', fire: '火', earth: '土', 金: '金', 木: '木', 水: '水', 火: '火', 土: '土' } as Record<string, string>)[value || ''] || '待补'
+}
+function gradeOptions(current = ''): Array<MaterialOption & { unavailable?: boolean }> {
+  const active = materialOptions.value?.grades || []
+  if (!current || active.some(option => option.key === current)) return active
+  const historical = materialOptions.value?.option_items?.find(
+    option => option.option_type === 'grades' && option.key === current,
+  )
+  return [...active, { key: current, label: historical?.label || `历史等级：${current}`, unavailable: true }]
 }
 function draftFor(item: Material): Draft {
   const sku = item.sku || {}
@@ -128,15 +140,17 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    const [result, materialTypes] = await Promise.all([
+    const [result, materialTypes, nextOptions] = await Promise.all([
       listMaterialSpus({ keyword: keyword.value, top: top.value, category: category.value, status: status.value, stockState: stockState.value, assetState: assetState.value, specState: specState.value, profileState: profileState.value, page: page.value, pageSize: 20 }, controller.signal),
       types.value.length ? Promise.resolve(types.value) : listMaterialTypes(false, controller.signal),
+      materialOptions.value ? Promise.resolve(materialOptions.value) : listMaterialOptions(controller.signal),
     ])
     groups.value = result.items
     total.value = result.pagination.total
     hasNext.value = result.pagination.has_next
     facets.value = result.facets || {}
     types.value = materialTypes
+    materialOptions.value = nextOptions
     resetDrafts()
     const validIds = new Set(groups.value.flatMap(group => group.items.map(item => item.id)))
     selected.value = Object.fromEntries(Object.entries(selected.value).filter(([id]) => validIds.has(id)))
@@ -442,10 +456,19 @@ onBeforeUnmount(() => controller?.abort())
                       step="0.1"
                     ><small>mm</small>
                   </td><td>
-                    <input
+                    <select
                       v-model="skuDraft(item).grade"
-                      placeholder="—"
                     >
+                      <option value="">
+                        暂未分级
+                      </option><option
+                        v-for="option in gradeOptions(skuDraft(item).grade)"
+                        :key="option.key"
+                        :value="option.key"
+                      >
+                        {{ option.label }}{{ option.unavailable ? '（已停用）' : '' }}
+                      </option>
+                    </select>
                   </td><td>
                     <input
                       v-model.number="skuDraft(item).price"
@@ -505,10 +528,19 @@ onBeforeUnmount(() => controller?.abort())
                       step="0.1"
                     ><small>mm</small>
                   </td><td>
-                    <input
+                    <select
                       v-model="addDraft(group)!.grade"
-                      placeholder="等级"
                     >
+                      <option value="">
+                        暂未分级
+                      </option><option
+                        v-for="option in gradeOptions(addDraft(group)!.grade)"
+                        :key="option.key"
+                        :value="option.key"
+                      >
+                        {{ option.label }}{{ option.unavailable ? '（已停用）' : '' }}
+                      </option>
+                    </select>
                   </td><td>
                     <input
                       v-model.number="addDraft(group)!.price"

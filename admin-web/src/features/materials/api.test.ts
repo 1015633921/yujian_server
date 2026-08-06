@@ -9,6 +9,7 @@ import {
   batchUpdateMaterialSkus,
   createMaterialSku,
   getMaterialSeries,
+  listMaterialOptions,
   listMaterialSpus,
   listMaterialTaxonomy,
   listMaterialTypes,
@@ -40,6 +41,19 @@ describe('material directory api', () => {
     const [, request] = fetchMock.mock.calls[1] as [string, RequestInit]
     expect(new Headers(request.headers).get('authorization')).toBe('Bearer operator-token')
     expect(String(fetchMock.mock.calls[2]?.[0])).toContain('material-taxonomy/series/series-1')
+  })
+
+  it('loads the shared material option dictionary for enum-driven editors', async () => {
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(
+      new Response(JSON.stringify({ code: 0, data: { elements: [], grades: [] } }), { status: 200, headers: { 'content-type': 'application/json' } }),
+    ))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await listMaterialOptions()
+
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain('/api/v1/admin/material-options')
+    const [, request] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(new Headers(request.headers).get('authorization')).toBe('Bearer operator-token')
   })
 
   it('uses the guarded directory mutations instead of a direct SKU mutation', async () => {
