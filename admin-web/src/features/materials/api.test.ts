@@ -8,6 +8,7 @@ import {
   bindMaterialAssets,
   batchUpdateMaterialSkus,
   createMaterialSku,
+  getMaterialSeries,
   listMaterialSpus,
   listMaterialTaxonomy,
   listMaterialTypes,
@@ -32,11 +33,13 @@ describe('material directory api', () => {
 
     await listMaterialTypes(true)
     await listMaterialTaxonomy('bead', true)
+    await getMaterialSeries('series-1')
 
     expect(String(fetchMock.mock.calls[0]?.[0])).toContain('material-types?include_disabled=true')
     expect(String(fetchMock.mock.calls[1]?.[0])).toContain('material-taxonomy?top=bead&include_disabled=true')
     const [, request] = fetchMock.mock.calls[1] as [string, RequestInit]
     expect(new Headers(request.headers).get('authorization')).toBe('Bearer operator-token')
+    expect(String(fetchMock.mock.calls[2]?.[0])).toContain('material-taxonomy/series/series-1')
   })
 
   it('uses the guarded directory mutations instead of a direct SKU mutation', async () => {

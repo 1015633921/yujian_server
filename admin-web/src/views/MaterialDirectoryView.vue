@@ -71,6 +71,10 @@ const selectedCategories = computed(() => categories.value.filter((item) => item
 const selectedSeriesCount = computed(() => selectedCategories.value.reduce((total, item) => total + item.series.length, 0))
 const activeCategories = computed(() => selectedCategories.value.filter((item) => item.enabled).length)
 
+function elementLabel(value?: string): string {
+  return ({ metal: '金', wood: '木', water: '水', fire: '火', earth: '土', 金: '金', 木: '木', 水: '水', 火: '火', 土: '土' } as Record<string, string>)[value || ''] || '待补五行'
+}
+
 function setTop(top: string): void {
   void router.replace({ query: top ? { top } : {} })
 }
@@ -505,10 +509,16 @@ onBeforeUnmount(() => {
                 />
                 <div>
                   <strong>{{ series.name }}</strong>
-                  <small>{{ series.material_code || '编码将在首次保存后生成' }}</small>
+                  <small>主五行：{{ elementLabel(series.energy?.primary_element) }} · {{ series.image_url ? '已设主图' : '缺主图' }}</small>
                 </div>
                 <span>{{ series.enabled ? '已启用' : '已停用' }}</span>
                 <div class="directory-row-actions">
+                  <RouterLink
+                    class="directory-profile-link"
+                    :to="{ name: 'material-series-profile', params: { seriesId: series.id } }"
+                  >
+                    完善资料
+                  </RouterLink>
                   <button
                     v-if="canManage"
                     type="button"

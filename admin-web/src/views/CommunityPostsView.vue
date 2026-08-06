@@ -20,7 +20,7 @@ async function save(): Promise<void> { if (!canManage.value || saving.value) ret
 async function remove(): Promise<void> { if (!canManage.value || !editor.id || saving.value || !window.confirm(`删除「${editor.title}」后无法恢复，确定继续吗？`)) return; saving.value = true; try { await deleteCommunityPost(editor.id); reset(); await load(); notice.value = '灵感内容已删除。' } catch (cause) { notice.value = cause instanceof Error ? cause.message : '删除失败。' } finally { saving.value = false } }
 async function upload(event: Event): Promise<void> { const next = (event.target as HTMLInputElement).files?.[0]; if (!next || !next.type.startsWith('image/')) { notice.value = '请选择图片文件。'; return }; uploading.value = true; try { editor.imageUrl = (await uploadAdminMedia(next, 'community')).image_url; notice.value = '封面已上传。' } catch (cause) { notice.value = cause instanceof Error ? cause.message : '图片上传失败。' } finally { uploading.value = false; if (file.value) file.value.value = '' } }
 async function searchMaterials(): Promise<void> { materialController?.abort(); materialController = new AbortController(); materialLoading.value = true; try { materialRows.value = (await listMaterials({ keyword: materialKeyword.value, top: '', status: 'enabled', page: 1, pageSize: 12 }, materialController.signal)).items } catch (cause) { if (!(cause instanceof DOMException && cause.name === 'AbortError')) notice.value = cause instanceof Error ? cause.message : '材料搜索失败。' } finally { materialLoading.value = false } }
-function addMaterial(item: Material): void { const id = item.sku?.sku_id || item.id; const recipe = split(editor.recipeText); if (!recipe.includes(id)) editor.recipeText = [...recipe, id].join('\n'); notice.value = `已加入 ${item.name || item.series || id}。` }
+function addMaterial(item: Material): void { const id = item.sku?.sku_id || item.id; const recipe = split(editor.recipeText); if (!recipe.includes(id)) editor.recipeText = [...recipe, id].join('\n'); notice.value = `已加入 ${item.name || item.series || '材料规格'}。` }
 watch([keyword, status, homeHot], () => void load()); onBeforeUnmount(() => { controller?.abort(); materialController?.abort() }); void load()
 </script>
 
@@ -29,7 +29,7 @@ watch([keyword, status, homeHot], () => void load()); onBeforeUnmount(() => { co
     <PageHeading
       eyebrow="COMMUNITY CONTENT"
       title="社区灵感"
-      description="管理社区灵感与首页热门展示；材料 ID 会作为配方原样保存。"
+      description="管理社区灵感与首页热门展示；配方材料会由系统自动关联。"
     >
       <template #actions>
         <button
@@ -171,7 +171,7 @@ watch([keyword, status, homeHot], () => void load()); onBeforeUnmount(() => { co
           v-model="editor.status"
           :disabled="!canManage"
         ><option value="draft">草稿</option><option value="published">已发布</option><option value="hidden">隐藏</option></select></label><section class="community-material-picker content-banners__full">
-          <header><span>配方材料</span><small>搜索后添加真实 SKU / 材料 ID；不会加载整库。</small></header><div>
+          <header><span>配方材料</span><small>搜索后添加真实材料规格；不会加载整库。</small></header><div>
             <input
               v-model.trim="materialKeyword"
               placeholder="搜索材料名称、SKU 或品种"
@@ -193,7 +193,7 @@ watch([keyword, status, homeHot], () => void load()); onBeforeUnmount(() => { co
                 v-if="item.image_url"
                 :src="item.image_url"
                 :alt="item.name || item.series"
-              ><i v-else /><p><strong>{{ item.name || item.series || item.id }}</strong><small>{{ item.sku?.sku_id || item.id }} · {{ item.size || item.sku?.size_mm || '—' }}mm</small></p><button
+              ><i v-else /><p><strong>{{ item.name || item.series || '未命名材料' }}</strong><small>{{ item.series || '材料规格' }} · {{ item.size || item.sku?.size_mm || '—' }}mm</small></p><button
                 type="button"
                 :disabled="!canManage"
                 @click="addMaterial(item)"
@@ -202,11 +202,13 @@ watch([keyword, status, homeHot], () => void load()); onBeforeUnmount(() => { co
               </button>
             </li>
           </ol>
-        </section><label class="content-banners__full">已选配方材料 ID（每行一个）<textarea
-          v-model="editor.recipeText"
-          placeholder="material_xxx 或 sku_xxx"
-          :disabled="!canManage"
-        /></label><label class="content-banners__full">标签（逗号或换行）<textarea
+        </section><details class="content-banners__full">
+          <summary>内部配方标识（仅技术排查）</summary><label>已选配方材料标识（每行一个）<textarea
+            v-model="editor.recipeText"
+            placeholder="由搜索材料自动填入"
+            :disabled="!canManage"
+          /></label>
+        </details><label class="content-banners__full">标签（逗号或换行）<textarea
           v-model="editor.tagsText"
           :disabled="!canManage"
         /></label><label class="content-banners__full">故事正文<textarea

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from io import BytesIO
 from types import SimpleNamespace
+from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
@@ -86,6 +87,38 @@ def test_material_asset_validator_rejects_truncated_webp_and_unsafe_keys():
     ):
         with pytest.raises(ValueError):
             validate_material_asset_key(key)
+
+
+def test_admin_can_read_a_complete_series_profile_by_stable_id():
+    username = f"series-profile-{uuid4().hex[:12]}"
+    password = "ProfileTest123"
+    admin_api_module.admin_service.register(username, password)
+    login = client.post("/api/v1/admin/login", json={"username": username, "password": password})
+    assert login.status_code == 200
+    headers = {"Authorization": f"Bearer {login.json()['data']['token']}"}
+
+    category = admin_api_module.admin_service.save_material_category({"top": "accessory", "name": f"资料读取-{uuid4().hex[:8]}"})
+    series = admin_api_module.admin_service.save_material_series(
+        {
+            "category_id": category["id"],
+            "name": "接口完整资料",
+            "image_url": "https://cdn.example.com/profile-main.webp",
+            "image_urls": ["https://cdn.example.com/profile-gallery.webp"],
+            "primary_element": "water",
+            "effects": ["calm"],
+            "material_params": {"bead_shape": "nugget"},
+        }
+    )
+
+    response = client.get(f"/api/v1/admin/material-taxonomy/series/{series['id']}", headers=headers)
+
+    assert response.status_code == 200
+    profile = response.json()["data"]
+    assert profile["id"] == series["id"]
+    assert profile["category_name"] == category["name"]
+    assert profile["image_url"].endswith("profile-main.webp")
+    assert profile["energy"]["primary_element"] == "water"
+    assert profile["material_params"]["bead_shape"] == "nugget"
 
 
 def test_binding_material_assets_preserves_profile_and_supports_append(tmp_path):

@@ -85,9 +85,9 @@ onMounted(loadDashboard)
 
       <section class="migration-note">
         <div>
-          <span>MIGRATION STATUS · STEP 01</span>
-          <h2>基础框架已连接真实后台</h2>
-          <p>下一阶段迁移人工搭配列表，并将工单详情改造成独立路由页面。</p>
+          <span>运营提示</span>
+          <h2>常用功能已连接当前后台</h2>
+          <p>在这里查看经营数据、处理订单，并进入各项运营工作。</p>
         </div>
         <a :href="legacyUrl">继续使用当前后台 <span>↗</span></a>
       </section>

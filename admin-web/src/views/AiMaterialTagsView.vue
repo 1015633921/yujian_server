@@ -159,14 +159,14 @@ void load()
               :src="item.image_urls[0]"
               :alt="item.series"
             ><i v-else />
-            <span><strong>{{ item.series || item.material_code }}</strong><small>{{ item.category }} · {{ item.material_code }}</small><em>{{ date(item.created_at) }}</em></span><b :class="`status-${item.status}`">{{ label(item.status) }}</b>
+            <span><strong>{{ item.series || '未命名品种' }}</strong><small>{{ item.category || '未分类' }} · 已提交视觉审核</small><em>{{ date(item.created_at) }}</em></span><b :class="`status-${item.status}`">{{ label(item.status) }}</b>
           </button>
         </aside>
         <main
           v-if="selected"
           class="ai-tags__inspector"
         >
-          <header><div><span>{{ selected.top === 'accessory' ? 'ACCESSORY VISION' : 'BEAD VISION' }}</span><h2>{{ selected.series }}</h2><p>{{ selected.category }} · {{ selected.material_code }} · {{ selected.model_id || '—' }}</p></div><b :class="`status-${selected.status}`">{{ label(selected.status) }}</b></header>
+          <header><div><span>{{ selected.top === 'accessory' ? '配饰视觉审核' : '珠材视觉审核' }}</span><h2>{{ selected.series || '未命名品种' }}</h2><p>{{ selected.category || '未分类' }} · 系统已记录审核模型与材料关联</p></div><b :class="`status-${selected.status}`">{{ label(selected.status) }}</b></header>
           <div class="ai-tags__detail">
             <section class="ai-tags__gallery">
               <div class="ai-tags__hero">

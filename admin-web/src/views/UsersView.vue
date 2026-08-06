@@ -29,7 +29,7 @@ watch([keyword, profileStatus, energyTag, spendLevel, startDate, endDate], () =>
     </PageHeading><div class="warehouse-filter users-filter">
       <input
         v-model.trim="keyword"
-        placeholder="搜索昵称、手机号或用户 ID"
+        placeholder="搜索昵称或手机号"
       ><select v-model="profileStatus">
         <option value="">
           全部资料

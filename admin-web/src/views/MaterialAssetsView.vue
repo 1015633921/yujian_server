@@ -306,6 +306,13 @@ void load()
     >
       <template #actions>
         <RouterLink
+          v-if="currentSeries"
+          class="heading-link"
+          :to="{ name: 'material-series-profile', params: { seriesId: currentSeries.id } }"
+        >
+          返回「{{ currentSeries.name }}」资料 ↗
+        </RouterLink>
+        <RouterLink
           class="heading-link"
           :to="{ name: 'material-directory', query: top ? { top } : {} }"
         >
@@ -330,7 +337,7 @@ void load()
       <aside class="material-assets__target">
         <span>绑定位置</span>
         <h2>共享图库</h2>
-        <p>图片绑定到品种后，全部 SKU 会引用图库；主图不在这里修改。</p>
+        <p>图片绑定到品种后，全部 SKU 会引用图库；回到品种资料页可选择主图并调整图库顺序。</p>
         <label>
           <span>材料类型</span>
           <select

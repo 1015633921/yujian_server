@@ -29,7 +29,7 @@ watch(id, () => void load(), { immediate: true }); onBeforeUnmount(() => control
       @retry="load"
     /><template v-else-if="item">
       <header class="detail-heading">
-        <div><span>MATERIAL SKU · {{ item.sku?.sku_id || item.id }}</span><h1>{{ item.name || item.id }}</h1><p>{{ item.top || '-' }} · {{ item.sku?.size_mm || item.size || '-' }}mm · ¥{{ Number(item.sku?.price_per_bead || 0).toFixed(2) }}</p></div>
+        <div><span>材料规格</span><h1>{{ item.name || '未命名材料' }}</h1><p>{{ item.top || '-' }} · {{ item.sku?.size_mm || item.size || '-' }}mm · ¥{{ Number(item.sku?.price_per_bead || 0).toFixed(2) }}</p></div>
       </header><p
         v-if="message"
         class="order-action-message"

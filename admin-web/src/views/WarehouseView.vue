@@ -269,7 +269,7 @@ async function submitSetting(): Promise<void> {
                 v-for="movement in overview.recent_movements"
                 :key="movement.movement_id"
               >
-                <small>{{ movement.occurred_at || '—' }}</small><strong>{{ movement.item_name || movement.item_code }}</strong><span>{{ movement.movement_type }} · {{ movement.quantity }}</span>
+                <small>{{ movement.occurred_at || '—' }}</small><strong>{{ movement.item_name || movement.item_code }}</strong><span>{{ movementLabel(movement.movement_type) }} · {{ movement.quantity }}</span>
               </li>
             </ol>
           </section>

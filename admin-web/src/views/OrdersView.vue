@@ -213,7 +213,7 @@ onBeforeUnmount(() => controller?.abort())
             class="order-request-cell order-request-cell--identity"
             data-label="订单 / 方案"
           >
-            <strong>{{ item.order_id }}</strong><span>{{ item.design_id || '订单材料快照' }}</span>
+            <strong>{{ item.order_id }}</strong><span>{{ item.design_id ? '已关联 DIY 方案' : '订单材料快照' }}</span>
           </div>
           <div
             class="order-request-cell"

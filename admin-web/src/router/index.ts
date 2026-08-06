@@ -83,6 +83,12 @@ const router = createRouter({
           meta: { title: '材料三级目录' },
         },
         {
+          path: 'material-directory/series/:seriesId',
+          name: 'material-series-profile',
+          component: () => import('@/views/MaterialSeriesProfileView.vue'),
+          meta: { title: '品种资料' },
+        },
+        {
           path: 'material-assets',
           name: 'material-assets',
           component: () => import('@/views/MaterialAssetsView.vue'),

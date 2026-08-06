@@ -1687,6 +1687,15 @@ def material_taxonomy(
     return success(admin_service.list_material_taxonomy(top=top, include_disabled=include_disabled))
 
 
+@admin_router.get("/material-taxonomy/series/{series_id}", summary="后台材料品种完整资料")
+def material_series_detail(series_id: str, authorization: str | None = Header(default=None)):
+    require_admin(authorization)
+    try:
+        return success(admin_service.get_material_series(series_id))
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
 @admin_router.post("/material-taxonomy/categories", summary="新增或更新材料分类")
 def save_material_category(payload: MaterialCategoryPayload, authorization: str | None = Header(default=None)):
     actor = require_admin(authorization)

@@ -1927,6 +1927,36 @@ class AdminService:
         with self.connect() as conn:
             return run(conn)
 
+    def get_material_series(self, series_id: str) -> dict[str, Any]:
+        """Return the complete, series-owned profile for one material variety.
+
+        A SKU is intentionally not used as the source of visual or energy data:
+        those fields live on the shared series and must be edited as one complete
+        snapshot.  Keeping this read path beside ``list_material_taxonomy`` also
+        makes it safe for an editor to round-trip fields it does not render yet.
+        """
+        clean_id = str(series_id or "").strip()
+        if not clean_id:
+            raise ValueError("品种 ID 不能为空")
+        with self.connect() as connection:
+            self._ensure_material_taxonomy_schema(connection)
+            row = connection.execute(
+                "SELECT item_id, top FROM material_taxonomy WHERE item_id=? AND kind='series'",
+                (clean_id,),
+            ).fetchone()
+            if not row:
+                raise ValueError("品种不存在")
+            categories = self.list_material_taxonomy(
+                top=str(row["top"] or ""),
+                include_disabled=True,
+                connection=connection,
+            )
+            for category in categories:
+                for series in category.get("series", []):
+                    if series.get("id") == clean_id:
+                        return {**series, "category_name": category.get("name") or ""}
+        raise ValueError("品种资料暂时无法读取")
+
     def save_material_category(self, payload: dict[str, Any], actor: dict[str, Any] | None = None) -> dict[str, Any]:
         top = str(payload.get("top") or "bead").strip()
         name = str(payload.get("name") or "").strip()

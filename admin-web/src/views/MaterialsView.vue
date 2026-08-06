@@ -57,6 +57,9 @@ function updateQuery(updates: Record<string, string | undefined>) {
 }
 function keyOf(group: MaterialSpu) { return group.series_id || group.id }
 function price(value: unknown) { return Number(value || 0) }
+function elementLabel(value?: string) {
+  return ({ metal: '金', wood: '木', water: '水', fire: '火', earth: '土', 金: '金', 木: '木', 水: '水', 火: '火', 土: '土' } as Record<string, string>)[value || ''] || '待补'
+}
 function draftFor(item: Material): Draft {
   const sku = item.sku || {}
   return {
@@ -203,58 +206,365 @@ onBeforeUnmount(() => controller?.abort())
 
 <template>
   <section class="workspace-page materials-page">
-    <PageHeading eyebrow="MATERIAL OPERATIONS" title="珠材管理" description="按品种查看所有规格、库存和售价；一个品种只出现一次，展开后再管理 SKU。">
+    <PageHeading
+      eyebrow="MATERIAL OPERATIONS"
+      title="珠材管理"
+      description="按品种查看所有规格、库存和售价；一个品种只出现一次，展开后再管理 SKU。"
+    >
       <template #actions>
-        <RouterLink class="heading-link" :to="{ name: 'material-directory' }">目录与品种设置 →</RouterLink>
-        <RouterLink class="heading-link" :to="{ name: 'material-assets' }">图库处理 →</RouterLink>
+        <RouterLink
+          class="heading-link"
+          :to="{ name: 'material-directory' }"
+        >
+          目录与品种设置 →
+        </RouterLink>
+        <RouterLink
+          class="heading-link"
+          :to="{ name: 'material-assets' }"
+        >
+          图库处理 →
+        </RouterLink>
       </template>
     </PageHeading>
-    <form class="material-query" @submit.prevent="search">
-      <input name="keyword" :value="keyword" placeholder="搜索品种、规格、SKU 或材料编码"><button>搜索</button>
-      <select :value="top" @change="updateQuery({ top: ($event.target as HTMLSelectElement).value || undefined, page: undefined })"><option value="">全部类型</option><option v-for="type in types" :key="type.code" :value="type.code">{{ type.name }}</option></select>
-      <select :value="category" @change="updateQuery({ category: ($event.target as HTMLSelectElement).value || undefined, page: undefined })"><option value="">全部分类</option><option v-for="item in categories" :key="item.value" :value="item.value">{{ item.value }}（{{ item.count }}）</option></select>
-      <select :value="status" @change="updateQuery({ status: ($event.target as HTMLSelectElement).value || undefined, page: undefined })"><option value="">全部状态</option><option value="enabled">已启用</option><option value="disabled">已停用</option></select>
+    <form
+      class="material-query"
+      @submit.prevent="search"
+    >
+      <input
+        name="keyword"
+        :value="keyword"
+        placeholder="搜索品种、规格、SKU 或材料编码"
+      ><button>搜索</button>
+      <select
+        :value="top"
+        @change="updateQuery({ top: ($event.target as HTMLSelectElement).value || undefined, page: undefined })"
+      >
+        <option value="">
+          全部类型
+        </option><option
+          v-for="type in types"
+          :key="type.code"
+          :value="type.code"
+        >
+          {{ type.name }}
+        </option>
+      </select>
+      <select
+        :value="category"
+        @change="updateQuery({ category: ($event.target as HTMLSelectElement).value || undefined, page: undefined })"
+      >
+        <option value="">
+          全部分类
+        </option><option
+          v-for="item in categories"
+          :key="item.value"
+          :value="item.value"
+        >
+          {{ item.value }}（{{ item.count }}）
+        </option>
+      </select>
+      <select
+        :value="status"
+        @change="updateQuery({ status: ($event.target as HTMLSelectElement).value || undefined, page: undefined })"
+      >
+        <option value="">
+          全部状态
+        </option><option value="enabled">
+          已启用
+        </option><option value="disabled">
+          已停用
+        </option>
+      </select>
     </form>
     <div class="material-quick-filters">
-      <button :class="{ active: stockState === 'low' }" @click="setQuickFilter('stock_state', 'low')">低库存</button>
-      <button :class="{ active: stockState === 'out' }" @click="setQuickFilter('stock_state', 'out')">缺货</button>
-      <button :class="{ active: assetState === 'missing_primary' }" @click="setQuickFilter('asset_state', 'missing_primary')">缺主图</button>
-      <button :class="{ active: specState === 'incomplete' }" @click="setQuickFilter('spec_state', 'incomplete')">规格不全</button>
-      <button :class="{ active: profileState === 'incomplete' }" @click="setQuickFilter('profile_state', 'incomplete')">资料待补</button>
+      <button
+        :class="{ active: stockState === 'low' }"
+        @click="setQuickFilter('stock_state', 'low')"
+      >
+        低库存
+      </button>
+      <button
+        :class="{ active: stockState === 'out' }"
+        @click="setQuickFilter('stock_state', 'out')"
+      >
+        缺货
+      </button>
+      <button
+        :class="{ active: assetState === 'missing_primary' }"
+        @click="setQuickFilter('asset_state', 'missing_primary')"
+      >
+        缺主图
+      </button>
+      <button
+        :class="{ active: specState === 'incomplete' }"
+        @click="setQuickFilter('spec_state', 'incomplete')"
+      >
+        规格不全
+      </button>
+      <button
+        :class="{ active: profileState === 'incomplete' }"
+        @click="setQuickFilter('profile_state', 'incomplete')"
+      >
+        资料待补
+      </button>
       <span>{{ total }} 个品种</span>
     </div>
-    <div v-if="selectedItems.length" class="material-batch-bar">
+    <div
+      v-if="selectedItems.length"
+      class="material-batch-bar"
+    >
       <b>已选择 {{ selectedItems.length }} 个 SKU</b>
-      <select v-model="batchAction"><option value="enable">启用销售</option><option value="disable">停用销售</option><option value="price">设定售价</option><option value="stock">设定库存</option><option value="safety_stock">设定安全库存</option><option value="delete">删除 SKU</option></select>
-      <input v-if="needsBatchValue" v-model.number="batchValue" type="number" min="0" step="0.01" :placeholder="batchAction === 'price' ? '单颗售价' : '数量'">
-      <button :disabled="applyingBatch" @click="applyBatch">{{ applyingBatch ? '处理中…' : '执行操作' }}</button><button class="text-button" @click="clearSelected">取消选择</button>
+      <select v-model="batchAction">
+        <option value="enable">
+          启用销售
+        </option><option value="disable">
+          停用销售
+        </option><option value="price">
+          设定售价
+        </option><option value="stock">
+          设定库存
+        </option><option value="safety_stock">
+          设定安全库存
+        </option><option value="delete">
+          删除 SKU
+        </option>
+      </select>
+      <input
+        v-if="needsBatchValue"
+        v-model.number="batchValue"
+        type="number"
+        min="0"
+        step="0.01"
+        :placeholder="batchAction === 'price' ? '单颗售价' : '数量'"
+      >
+      <button
+        :disabled="applyingBatch"
+        @click="applyBatch"
+      >
+        {{ applyingBatch ? '处理中…' : '执行操作' }}
+      </button><button
+        class="text-button"
+        @click="clearSelected"
+      >
+        取消选择
+      </button>
       <small>提交时会校验每个 SKU 的版本；有其他人先修改则整批不会执行。</small>
     </div>
-    <div v-if="loading" class="order-list-skeleton"><i /><i /><i /></div>
-    <PageErrorState v-else-if="error && !groups.length" eyebrow="CATALOG UNAVAILABLE" title="珠材目录暂时无法读取" :message="error" @retry="load" />
-    <PageEmptyState v-else-if="!groups.length" title="暂无符合条件的品种" message="调整筛选条件，或在目录设置中建立新品种。" @clear="updateQuery({ keyword: undefined, top: undefined, category: undefined, status: undefined, stock_state: undefined, asset_state: undefined, spec_state: undefined, profile_state: undefined })" />
+    <div
+      v-if="loading"
+      class="order-list-skeleton"
+    >
+      <i /><i /><i />
+    </div>
+    <PageErrorState
+      v-else-if="error && !groups.length"
+      eyebrow="CATALOG UNAVAILABLE"
+      title="珠材目录暂时无法读取"
+      :message="error"
+      @retry="load"
+    />
+    <PageEmptyState
+      v-else-if="!groups.length"
+      title="暂无符合条件的品种"
+      message="调整筛选条件，或在目录设置中建立新品种。"
+      @clear="updateQuery({ keyword: undefined, top: undefined, category: undefined, status: undefined, stock_state: undefined, asset_state: undefined, spec_state: undefined, profile_state: undefined })"
+    />
     <template v-else>
-      <p v-if="error" class="material-inline-error">{{ error }} <button @click="load">重新读取</button></p>
+      <p
+        v-if="error"
+        class="material-inline-error"
+      >
+        {{ error }} <button @click="load">
+          重新读取
+        </button>
+      </p>
       <div class="material-spu-list">
-        <article v-for="group in groups" :key="keyOf(group)" class="material-spu">
-          <button class="material-spu-summary" :aria-expanded="isExpanded(group)" @click="toggle(group)">
-            <span class="material-spu-expand">{{ isExpanded(group) ? '−' : '+' }}</span><img v-if="group.spu.image" :src="group.spu.image" alt=""><i v-else />
-            <span class="material-spu-name"><strong>{{ group.spu.series || group.id }}</strong><small>{{ group.spu.category || '未分类' }} · {{ group.spu.material_code || '待补材料编码' }}</small></span>
+        <article
+          v-for="group in groups"
+          :key="keyOf(group)"
+          class="material-spu"
+        >
+          <button
+            class="material-spu-summary"
+            :aria-expanded="isExpanded(group)"
+            @click="toggle(group)"
+          >
+            <span class="material-spu-expand">{{ isExpanded(group) ? '−' : '+' }}</span><img
+              v-if="group.spu.image"
+              :src="group.spu.image"
+              alt=""
+            ><i v-else />
+            <span class="material-spu-name"><strong>{{ group.spu.series || group.id }}</strong><small>{{ group.spu.category || '未分类' }} · 主五行：{{ elementLabel(group.energy?.primary_element) }}</small></span>
             <span class="material-spu-specs">{{ group.spu.size_values?.join(' / ') || '—' }}<small>规格（mm）</small></span>
             <span>¥{{ Number(group.spu.min_price || 0).toFixed(2) }}<template v-if="group.spu.max_price !== group.spu.min_price"> – ¥{{ Number(group.spu.max_price || 0).toFixed(2) }}</template><small>单颗售价</small></span>
             <span>{{ group.spu.total_stock || 0 }}<small>总库存</small></span>
-            <span class="material-spu-badges"><em v-if="group.outStockCount" class="risk">{{ group.outStockCount }} 缺货</em><em v-else-if="group.lowStockCount" class="warn">{{ group.lowStockCount }} 低库存</em><em v-if="group.assetState !== 'ready'" class="muted">图片待补</em><em v-if="group.specStatus === 'partial'" class="muted">规格待补</em></span>
+            <span class="material-spu-badges"><em
+              v-if="group.outStockCount"
+              class="risk"
+            >{{ group.outStockCount }} 缺货</em><em
+              v-else-if="group.lowStockCount"
+              class="warn"
+            >{{ group.lowStockCount }} 低库存</em><em
+              v-if="group.assetState !== 'ready'"
+              class="muted"
+            >图片待补</em><em
+              v-if="group.specStatus === 'partial'"
+              class="muted"
+            >规格待补</em></span>
           </button>
-          <div v-if="isExpanded(group)" class="material-sku-table-wrap">
-            <div class="material-sku-table-head"><span>{{ group.spu.sku_count }} 个 SKU · {{ group.spu.enabled_count }} 个已启用</span><span><button class="add-sku" @click="startAdd(group)">{{ addDrafts[keyOf(group)] ? '取消新增' : '新增规格' }}</button><RouterLink :to="{ name: 'material-assets', query: { series_id: group.series_id, top: group.spu.top } }">管理品种图库 →</RouterLink></span></div>
-            <table class="material-sku-table"><thead><tr><th></th><th>规格</th><th>等级</th><th>售价</th><th>成本</th><th>库存 / 可售</th><th>安全库存</th><th>销售状态</th><th></th></tr></thead><tbody>
-              <tr v-for="item in group.items" :key="item.id"><td><input type="checkbox" :checked="isSelected(item)" @change="toggleSelected(item)"></td><td><input v-model.number="skuDraft(item).size" type="number" min="0.1" step="0.1"><small>mm</small></td><td><input v-model="skuDraft(item).grade" placeholder="—"></td><td><input v-model.number="skuDraft(item).price" type="number" min="0" step="0.01"></td><td><input v-model.number="skuDraft(item).costPrice" type="number" min="0" step="0.01"></td><td><input v-model.number="skuDraft(item).stock" type="number" min="0" step="1"><small>可售 {{ item.sku?.available_stock ?? item.sku?.stock ?? 0 }}</small></td><td><input v-model.number="skuDraft(item).safetyStock" type="number" min="0" step="1"></td><td><button class="status-switch" :class="{ on: item.sku?.enabled }" :disabled="saving[item.id]" @click="toggleEnabled(item)">{{ item.sku?.enabled ? '已启用' : '已停用' }}</button></td><td><button class="row-save" :disabled="saving[item.id]" @click="saveSku(item)">{{ saving[item.id] ? '保存中' : '保存' }}</button></td></tr>
-              <tr v-if="addDraft(group)" class="new-sku-row"><td></td><td><input v-model.number="addDraft(group)!.size" type="number" min="0.1" step="0.1"><small>mm</small></td><td><input v-model="addDraft(group)!.grade" placeholder="等级"></td><td><input v-model.number="addDraft(group)!.price" type="number" min="0" step="0.01"></td><td><input v-model.number="addDraft(group)!.costPrice" type="number" min="0" step="0.01"></td><td><input v-model.number="addDraft(group)!.stock" type="number" min="0" step="1"><small>库存为 0 时默认停用</small></td><td><input v-model.number="addDraft(group)!.safetyStock" type="number" min="0" step="1"></td><td><small>新规格</small></td><td><button class="row-save" :disabled="saving[addDraft(group)!.id]" @click="addSku(group)">{{ saving[addDraft(group)!.id] ? '创建中' : '创建' }}</button></td></tr>
-            </tbody></table>
+          <div
+            v-if="isExpanded(group)"
+            class="material-sku-table-wrap"
+          >
+            <div class="material-sku-table-head">
+              <span>{{ group.spu.sku_count }} 个 SKU · {{ group.spu.enabled_count }} 个已启用</span><span><RouterLink :to="{ name: 'material-series-profile', params: { seriesId: group.series_id || group.id } }">完善品种资料 →</RouterLink><button
+                class="add-sku"
+                @click="startAdd(group)"
+              >{{ addDrafts[keyOf(group)] ? '取消新增' : '新增规格' }}</button><RouterLink :to="{ name: 'material-assets', query: { series_id: group.series_id, top: group.spu.top } }">管理品种图库 →</RouterLink></span>
+            </div>
+            <table class="material-sku-table">
+              <thead><tr><th /><th>规格</th><th>等级</th><th>售价</th><th>成本</th><th>库存 / 可售</th><th>安全库存</th><th>销售状态</th><th /></tr></thead><tbody>
+                <tr
+                  v-for="item in group.items"
+                  :key="item.id"
+                >
+                  <td>
+                    <input
+                      type="checkbox"
+                      :checked="isSelected(item)"
+                      @change="toggleSelected(item)"
+                    >
+                  </td><td>
+                    <input
+                      v-model.number="skuDraft(item).size"
+                      type="number"
+                      min="0.1"
+                      step="0.1"
+                    ><small>mm</small>
+                  </td><td>
+                    <input
+                      v-model="skuDraft(item).grade"
+                      placeholder="—"
+                    >
+                  </td><td>
+                    <input
+                      v-model.number="skuDraft(item).price"
+                      type="number"
+                      min="0"
+                      step="0.01"
+                    >
+                  </td><td>
+                    <input
+                      v-model.number="skuDraft(item).costPrice"
+                      type="number"
+                      min="0"
+                      step="0.01"
+                    >
+                  </td><td>
+                    <input
+                      v-model.number="skuDraft(item).stock"
+                      type="number"
+                      min="0"
+                      step="1"
+                    ><small>可售 {{ item.sku?.available_stock ?? item.sku?.stock ?? 0 }}</small>
+                  </td><td>
+                    <input
+                      v-model.number="skuDraft(item).safetyStock"
+                      type="number"
+                      min="0"
+                      step="1"
+                    >
+                  </td><td>
+                    <button
+                      class="status-switch"
+                      :class="{ on: item.sku?.enabled }"
+                      :disabled="saving[item.id]"
+                      @click="toggleEnabled(item)"
+                    >
+                      {{ item.sku?.enabled ? '已启用' : '已停用' }}
+                    </button>
+                  </td><td>
+                    <button
+                      class="row-save"
+                      :disabled="saving[item.id]"
+                      @click="saveSku(item)"
+                    >
+                      {{ saving[item.id] ? '保存中' : '保存' }}
+                    </button>
+                  </td>
+                </tr>
+                <tr
+                  v-if="addDraft(group)"
+                  class="new-sku-row"
+                >
+                  <td /><td>
+                    <input
+                      v-model.number="addDraft(group)!.size"
+                      type="number"
+                      min="0.1"
+                      step="0.1"
+                    ><small>mm</small>
+                  </td><td>
+                    <input
+                      v-model="addDraft(group)!.grade"
+                      placeholder="等级"
+                    >
+                  </td><td>
+                    <input
+                      v-model.number="addDraft(group)!.price"
+                      type="number"
+                      min="0"
+                      step="0.01"
+                    >
+                  </td><td>
+                    <input
+                      v-model.number="addDraft(group)!.costPrice"
+                      type="number"
+                      min="0"
+                      step="0.01"
+                    >
+                  </td><td>
+                    <input
+                      v-model.number="addDraft(group)!.stock"
+                      type="number"
+                      min="0"
+                      step="1"
+                    ><small>库存为 0 时默认停用</small>
+                  </td><td>
+                    <input
+                      v-model.number="addDraft(group)!.safetyStock"
+                      type="number"
+                      min="0"
+                      step="1"
+                    >
+                  </td><td><small>新规格</small></td><td>
+                    <button
+                      class="row-save"
+                      :disabled="saving[addDraft(group)!.id]"
+                      @click="addSku(group)"
+                    >
+                      {{ saving[addDraft(group)!.id] ? '创建中' : '创建' }}
+                    </button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
           </div>
         </article>
       </div>
-      <nav class="design-pagination"><button :disabled="page === 1" @click="updateQuery({ page: page > 2 ? String(page - 1) : undefined })">← 上一页</button><span>第 {{ page }} 页</span><button :disabled="!hasNext" @click="updateQuery({ page: String(page + 1) })">下一页 →</button></nav>
+      <nav class="design-pagination">
+        <button
+          :disabled="page === 1"
+          @click="updateQuery({ page: page > 2 ? String(page - 1) : undefined })"
+        >
+          ← 上一页
+        </button><span>第 {{ page }} 页</span><button
+          :disabled="!hasNext"
+          @click="updateQuery({ page: String(page + 1) })"
+        >
+          下一页 →
+        </button>
+      </nav>
     </template>
   </section>
 </template>

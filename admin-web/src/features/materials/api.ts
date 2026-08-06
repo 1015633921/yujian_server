@@ -105,6 +105,7 @@ export interface MaterialType {
 export interface MaterialSeries {
   id: string
   parent_id: string
+  category_name?: string
   kind: 'series'
   top: string
   name: string
@@ -118,10 +119,24 @@ export interface MaterialSeries {
   enabled: boolean
   energy?: {
     primary_element?: string
+    secondary_elements?: string[]
+    chakras?: string[]
+    chakra_weights?: Record<string, number>
     effects?: string[]
+    wish_pools?: string[]
     color_family?: string
+    mood_tags?: string[]
     visual_tags?: string[]
+    story?: string
   }
+  rules?: {
+    allowed_roles?: string[]
+    conflict_codes?: string[]
+    match_rules?: string[]
+    care_tags?: string[]
+  }
+  material_params?: Record<string, unknown>
+  asset?: Record<string, unknown>
 }
 
 export interface MaterialCategory {
@@ -160,6 +175,26 @@ export interface MaterialSeriesInput {
   material_code?: string
   color?: string
   shine?: string
+  image_path?: string
+  image_url?: string
+  image_urls?: string[]
+  sync_sku_images?: boolean
+  primary_element?: string
+  secondary_elements?: string[]
+  chakras?: string[]
+  chakra_weights?: Record<string, number>
+  effects?: string[]
+  wish_pools?: string[]
+  color_family?: string
+  mood_tags?: string[]
+  visual_tags?: string[]
+  story?: string
+  allowed_roles?: string[]
+  conflict_codes?: string[]
+  match_rules?: string[]
+  care_tags?: string[]
+  material_params?: Record<string, unknown>
+  asset?: Record<string, unknown>
   sort_order: number
   enabled: boolean
 }
@@ -232,6 +267,11 @@ export function listMaterialTypes(includeDisabled = false, signal?: AbortSignal)
 export function listMaterialTaxonomy(top: string, includeDisabled = true, signal?: AbortSignal): Promise<MaterialCategory[]> {
   const params = new URLSearchParams({ top, include_disabled: String(includeDisabled) })
   return apiRequest(`/api/v1/admin/material-taxonomy?${params}`, { signal })
+}
+
+/** Reads the full series-owned profile before editing, so omitted fields cannot be overwritten. */
+export function getMaterialSeries(seriesId: string, signal?: AbortSignal): Promise<MaterialSeries> {
+  return apiRequest(`/api/v1/admin/material-taxonomy/series/${encodeURIComponent(seriesId)}`, { signal })
 }
 
 export function getMaterial(materialId: string, signal?: AbortSignal): Promise<Material> {

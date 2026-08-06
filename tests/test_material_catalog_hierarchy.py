@@ -288,6 +288,46 @@ def test_basic_variety_edit_preserves_optional_profile(tmp_path):
     assert saved["material_params"]["bead_shape"] == "nugget"
 
 
+def test_series_profile_read_returns_the_complete_series_owned_snapshot(tmp_path):
+    service = AdminService(tmp_path / "series-profile-read.db")
+    category = service.save_material_category({"top": "accessory", "name": "资料完整分类"})
+    series = service.save_material_series(
+        {
+            "category_id": category["id"],
+            "name": "资料完整品种",
+            "image_url": "https://cdn-test.yustream.cn/materials/profile-main.webp",
+            "image_urls": ["https://cdn-test.yustream.cn/materials/profile-gallery.webp"],
+            "primary_element": "water",
+            "secondary_elements": ["metal"],
+            "chakras": ["throat"],
+            "effects": ["calm"],
+            "wish_pools": ["communication"],
+            "mood_tags": ["clear"],
+            "visual_tags": ["transparent"],
+            "story": "完整资料应由品种统一维护。",
+            "allowed_roles": ["accent"],
+            "conflict_codes": ["not_together"],
+            "match_rules": ["cool-tone"],
+            "care_tags": ["avoid-sun"],
+            "material_params": {"bead_shape": "nugget", "placement_mode": "threaded"},
+            "asset": {"source": "series_profile"},
+        }
+    )
+
+    profile = service.get_material_series(series["id"])
+
+    assert profile["id"] == series["id"]
+    assert profile["parent_id"] == category["id"]
+    assert profile["category_name"] == "资料完整分类"
+    assert profile["image_url"].endswith("profile-main.webp")
+    assert profile["image_urls"] == ["https://cdn-test.yustream.cn/materials/profile-gallery.webp"]
+    assert profile["energy"]["primary_element"] == "water"
+    assert profile["energy"]["secondary_elements"] == ["metal"]
+    assert profile["energy"]["effects"] == ["calm"]
+    assert profile["rules"]["care_tags"] == ["avoid-sun"]
+    assert profile["material_params"]["bead_shape"] == "nugget"
+
+
 def test_series_move_and_rename_does_not_duplicate_during_sku_sync(tmp_path):
     service = AdminService(tmp_path / "series-move-rename.db")
     old_category = service.save_material_category({"top": "accessory", "name": "隔珠"})

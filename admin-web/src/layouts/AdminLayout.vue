@@ -51,12 +51,11 @@ async function logout(): Promise<void> {
         class="admin-navigation"
         aria-label="新版后台导航"
       >
-        <span class="admin-navigation__label">当前阶段</span>
+        <span class="admin-navigation__label">运营工作台</span>
         <RouterLink
           to="/overview"
           @click="navigationOpen = false"
         >
-          <span>01</span>
           经营概览
         </RouterLink>
 
@@ -64,7 +63,6 @@ async function logout(): Promise<void> {
           to="/design-requests"
           @click="navigationOpen = false"
         >
-          <span>02</span>
           人工搭配
         </RouterLink>
 
@@ -72,7 +70,6 @@ async function logout(): Promise<void> {
           to="/orders"
           @click="navigationOpen = false"
         >
-          <span>03</span>
           订单履约
         </RouterLink>
 
@@ -80,88 +77,87 @@ async function logout(): Promise<void> {
           to="/after-sales"
           @click="navigationOpen = false"
         >
-          <span>04</span>
           售后服务
         </RouterLink>
         <RouterLink
           to="/materials"
           @click="navigationOpen = false"
         >
-          <span>05</span>珠材管理
+          珠材管理
         </RouterLink>
         <RouterLink
           to="/material-directory"
           @click="navigationOpen = false"
         >
-          <span>06</span>目录设置
+          目录设置
         </RouterLink>
         <RouterLink
           to="/material-assets"
           @click="navigationOpen = false"
         >
-          <span>07</span>图库处理
+          图库处理
         </RouterLink>
         <RouterLink
           to="/ai-material-tags"
           @click="navigationOpen = false"
         >
-          <span>08</span>AI 打标审核
+          AI 打标审核
         </RouterLink>
         <RouterLink
           to="/warehouse"
           @click="navigationOpen = false"
         >
-          <span>09</span>仓库库存
+          仓库库存
         </RouterLink>
 
         <RouterLink
           to="/home-banners"
           @click="navigationOpen = false"
         >
-          <span>10</span>首页 Banner
+          首页 Banner
         </RouterLink>
         <RouterLink
           to="/community-posts"
           @click="navigationOpen = false"
         >
-          <span>11</span>社区灵感
+          社区灵感
         </RouterLink>
         <RouterLink
           to="/content-blocks"
           @click="navigationOpen = false"
         >
-          <span>12</span>内容板块
+          内容板块
         </RouterLink>
         <RouterLink
           to="/users"
           @click="navigationOpen = false"
         >
-          <span>13</span>用户中心
+          用户中心
         </RouterLink>
         <RouterLink
           to="/energy-insights"
           @click="navigationOpen = false"
         >
-          <span>14</span>能量数据
+          能量数据
         </RouterLink>
         <RouterLink
           to="/daily-energy-rules"
           @click="navigationOpen = false"
         >
-          <span>15</span>每日能量规则
+          每日能量规则
         </RouterLink>
         <RouterLink
           to="/system-status"
           @click="navigationOpen = false"
         >
-          <span>16</span>系统配置
+          系统配置
         </RouterLink>
 
         <RouterLink
           to="/admin-accounts"
           @click="navigationOpen = false"
         >
-          <span>17</span>管理员账号
+          管理员账号
         </RouterLink>
       </nav>
 
@@ -194,7 +190,7 @@ async function logout(): Promise<void> {
           导航
         </button>
         <div>
-          <span>ADMIN WEB · V2</span>
+          <span>运营工作台</span>
           <strong>{{ environmentLabel() }}</strong>
         </div>
       </header>

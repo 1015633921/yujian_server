@@ -251,7 +251,7 @@ onBeforeUnmount(() => controller?.abort())
             <div class="detail-section-head">
               <div><span>DESIGN</span><h3>定制参数</h3></div>
             </div><dl class="order-definition-list">
-              <div><dt>DIY 方案</dt><dd>{{ order.design_id || '订单材料快照' }}</dd></div><div><dt>用户手围</dt><dd>{{ order.design?.wristSize || '-' }} cm</dd></div><div><dt>佩戴方式</dt><dd>{{ order.design?.wearStyle === 'double' ? '双圈' : '单圈' }}</dd></div><div><dt>订单备注</dt><dd>{{ order.remark || '-' }}</dd></div>
+              <div><dt>DIY 方案</dt><dd>{{ order.design_id ? '已关联 DIY 方案' : '订单材料快照' }}</dd></div><div><dt>用户手围</dt><dd>{{ order.design?.wristSize || '-' }} cm</dd></div><div><dt>佩戴方式</dt><dd>{{ order.design?.wearStyle === 'double' ? '双圈' : '单圈' }}</dd></div><div><dt>订单备注</dt><dd>{{ order.remark || '-' }}</dd></div>
             </dl>
           </section>
           <section class="order-detail-section">

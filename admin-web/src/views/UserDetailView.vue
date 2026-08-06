@@ -15,7 +15,7 @@ onBeforeUnmount(() => controller?.abort()); void load()
     <PageHeading
       eyebrow="CUSTOMER PROFILE"
       :title="detail?.user.nickname || '用户详情'"
-      :description="`用户 ID：${userId}`"
+      description="查看用户资料、能量画像与消费记录。"
     >
       <template #actions>
         <button
