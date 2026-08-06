@@ -150,6 +150,40 @@ export interface MaterialCategory {
   series: MaterialSeries[]
 }
 
+export interface MaterialOption {
+  key: string
+  label: string
+}
+
+export interface MaterialOptionItem extends MaterialOption {
+  id: string
+  option_type: string
+  enabled: boolean
+  sort_order: number
+}
+
+export interface MaterialOptionsPayload {
+  elements: MaterialOption[]
+  wish_pools: MaterialOption[]
+  chakras: MaterialOption[]
+  color_families: MaterialOption[]
+  grades: MaterialOption[]
+  effects: MaterialOption[]
+  mood_tags: MaterialOption[]
+  visual_tags: MaterialOption[]
+  roles: MaterialOption[]
+  match_rules: MaterialOption[]
+  care_tags: MaterialOption[]
+  bead_shapes: MaterialOption[]
+  placement_modes: MaterialOption[]
+  visual_axes: MaterialOption[]
+  surface_finishes: MaterialOption[]
+  transparency_levels: MaterialOption[]
+  texture_features: MaterialOption[]
+  batch_variation_levels: MaterialOption[]
+  option_items?: MaterialOptionItem[]
+}
+
 export interface MaterialTypeInput {
   id?: string
   code?: string
@@ -262,6 +296,10 @@ export function listMaterialSpus(query: MaterialSpuQuery, signal?: AbortSignal):
 
 export function listMaterialTypes(includeDisabled = false, signal?: AbortSignal): Promise<MaterialType[]> {
   return apiRequest(`/api/v1/admin/material-types?include_disabled=${includeDisabled}`, { signal })
+}
+
+export function listMaterialOptions(signal?: AbortSignal): Promise<MaterialOptionsPayload> {
+  return apiRequest('/api/v1/admin/material-options', { signal })
 }
 
 export function listMaterialTaxonomy(top: string, includeDisabled = true, signal?: AbortSignal): Promise<MaterialCategory[]> {

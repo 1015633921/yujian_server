@@ -314,6 +314,19 @@ PLACEMENT_MODE_ALIASES = {
     "attached_pair": "attached_side",
 }
 
+PLACEMENT_MODE_OPTIONS: tuple[dict[str, str], ...] = (
+    {"key": "threaded", "label": "穿线串珠"},
+    {"key": "hanging", "label": "悬挂"},
+    {"key": "attached_side", "label": "贴附主珠"},
+)
+
+VISUAL_AXIS_OPTIONS: tuple[dict[str, str], ...] = (
+    {"key": "radial", "label": "环绕"},
+    {"key": "horizontal", "label": "横向"},
+    {"key": "vertical", "label": "纵向"},
+    {"key": "none", "label": "无固定方向"},
+)
+
 SURFACE_FINISH_ALIASES = {
     **{item["key"]: item["key"] for item in SURFACE_FINISH_OPTIONS},
     **{item["label"]: item["key"] for item in SURFACE_FINISH_OPTIONS},
@@ -444,6 +457,24 @@ MATERIAL_OPTION_FIELD_SPECS: tuple[dict[str, Any], ...] = (
         "cardinality": "one",
         "mutable": True,
         "description": "圆珠、切面珠、桶珠、隔片等形制需要统一枚举。",
+    },
+    {
+        "key": "placement_modes",
+        "label": "安装方式",
+        "control": "single_select",
+        "value_kind": "enum_key",
+        "cardinality": "one",
+        "mutable": False,
+        "description": "决定材料在 DIY 工作台中按穿线、悬挂或贴附方式参与排布。",
+    },
+    {
+        "key": "visual_axes",
+        "label": "视觉轴向",
+        "control": "single_select",
+        "value_kind": "enum_key",
+        "cardinality": "one",
+        "mutable": False,
+        "description": "描述异形材料在工作台中的默认朝向。",
     },
     {
         "key": "surface_finishes",
@@ -739,6 +770,8 @@ def public_material_options() -> dict[str, Any]:
         "match_rules": list(MATCH_RULE_OPTIONS),
         "care_tags": list(CARE_TAG_OPTIONS),
         "bead_shapes": list(BEAD_SHAPE_OPTIONS),
+        "placement_modes": list(PLACEMENT_MODE_OPTIONS),
+        "visual_axes": list(VISUAL_AXIS_OPTIONS),
         "surface_finishes": list(SURFACE_FINISH_OPTIONS),
         "transparency_levels": list(TRANSPARENCY_LEVEL_OPTIONS),
         "texture_features": list(TEXTURE_FEATURE_OPTIONS),
