@@ -186,6 +186,7 @@ MYSQL_SCHEMA = [
       color VARCHAR(40) NOT NULL, shine VARCHAR(40) NOT NULL, image_path VARCHAR(1000),
       image_url VARCHAR(2000), image_urls_json LONGTEXT, physical_specs_json LONGTEXT,
       stock INT NOT NULL DEFAULT 0, enabled TINYINT NOT NULL DEFAULT 1, sort_order INT NOT NULL DEFAULT 0,
+      revision INT NOT NULL DEFAULT 1,
       created_at VARCHAR(40) NOT NULL, updated_at VARCHAR(40) NOT NULL
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     """,

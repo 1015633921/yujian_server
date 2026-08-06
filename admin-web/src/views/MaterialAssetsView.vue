@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 
 import PageEmptyState from '@/components/ui/PageEmptyState.vue'
 import PageErrorState from '@/components/ui/PageErrorState.vue'
@@ -35,6 +36,7 @@ interface AssetQueueItem {
 }
 
 const auth = useAuthStore()
+const route = useRoute()
 const types = ref<MaterialType[]>([])
 const categories = ref<MaterialCategory[]>([])
 const top = ref('')
@@ -125,7 +127,9 @@ async function load(): Promise<void> {
   try {
     const nextTypes = await listMaterialTypes(false, typesController.signal)
     types.value = nextTypes
-    if (!nextTypes.some((item) => item.code === top.value)) top.value = nextTypes.at(0)?.code || ''
+    const requestedTop = typeof route.query.top === 'string' ? route.query.top : ''
+    if (requestedTop && nextTypes.some((item) => item.code === requestedTop)) top.value = requestedTop
+    else if (!nextTypes.some((item) => item.code === top.value)) top.value = nextTypes.at(0)?.code || ''
     else await loadCategories(top.value)
   } catch (cause) {
     if (cause instanceof DOMException && cause.name === 'AbortError') return
@@ -154,8 +158,17 @@ async function loadCategories(nextTop: string): Promise<void> {
     const nextCategories = await listMaterialTaxonomy(nextTop, false, currentController.signal)
     if (requestId !== categoryRequest) return
     categories.value = nextCategories
-    if (!currentCategories.value.some((item) => item.id === categoryId.value)) resetCategory()
-    if (!currentCategory.value?.series.some((item) => item.id === seriesId.value)) resetSeries()
+    const requestedSeriesId = typeof route.query.series_id === 'string' ? route.query.series_id : ''
+    const requestedCategory = requestedSeriesId
+      ? currentCategories.value.find((item) => item.series.some((series) => series.id === requestedSeriesId))
+      : undefined
+    if (requestedCategory) {
+      categoryId.value = requestedCategory.id
+      seriesId.value = requestedSeriesId
+    } else {
+      if (!currentCategories.value.some((item) => item.id === categoryId.value)) resetCategory()
+      if (!currentCategory.value?.series.some((item) => item.id === seriesId.value)) resetSeries()
+    }
   } catch (cause) {
     if (cause instanceof DOMException && cause.name === 'AbortError') {
       if (currentController.signal.reason === 'timeout') error.value = '该类型的素材目录加载超时，请重试。'

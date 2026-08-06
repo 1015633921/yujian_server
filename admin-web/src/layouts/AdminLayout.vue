@@ -87,19 +87,19 @@ async function logout(): Promise<void> {
           to="/materials"
           @click="navigationOpen = false"
         >
-          <span>05</span>材料 SKU
+          <span>05</span>珠材管理
         </RouterLink>
         <RouterLink
           to="/material-directory"
           @click="navigationOpen = false"
         >
-          <span>06</span>材料三级目录
+          <span>06</span>目录设置
         </RouterLink>
         <RouterLink
           to="/material-assets"
           @click="navigationOpen = false"
         >
-          <span>07</span>素材处理
+          <span>07</span>图库处理
         </RouterLink>
         <RouterLink
           to="/ai-material-tags"

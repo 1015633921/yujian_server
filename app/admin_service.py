@@ -57,6 +57,10 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z")
 
 
+class MaterialConflictError(ValueError):
+    """A SKU changed after the operator opened it; never overwrite it blindly."""
+
+
 def json_text(value: Any) -> str:
     return json.dumps(value if value is not None else [], ensure_ascii=False)
 
@@ -294,6 +298,7 @@ class AdminService:
                     stock INTEGER NOT NULL DEFAULT 0,
                     enabled INTEGER NOT NULL DEFAULT 1,
                     sort_order INTEGER NOT NULL DEFAULT 0,
+                    revision INTEGER NOT NULL DEFAULT 1,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 )
@@ -574,6 +579,8 @@ class AdminService:
                 connection.execute("ALTER TABLE managed_materials ADD COLUMN purchase_note TEXT")
             if "reserved_stock" not in columns:
                 connection.execute("ALTER TABLE managed_materials ADD COLUMN reserved_stock INT NOT NULL DEFAULT 0")
+            if "revision" not in columns:
+                connection.execute("ALTER TABLE managed_materials ADD COLUMN revision INT NOT NULL DEFAULT 1")
             connection.execute("UPDATE managed_materials SET series = name WHERE COALESCE(series, '') = ''")
             database = str(os.getenv("MYSQL_DATABASE") or "").strip()
             indexes = {
@@ -610,6 +617,8 @@ class AdminService:
             connection.execute("ALTER TABLE managed_materials ADD COLUMN purchase_note TEXT")
         if "reserved_stock" not in columns:
             connection.execute("ALTER TABLE managed_materials ADD COLUMN reserved_stock INTEGER NOT NULL DEFAULT 0")
+        if "revision" not in columns:
+            connection.execute("ALTER TABLE managed_materials ADD COLUMN revision INTEGER NOT NULL DEFAULT 1")
         connection.execute("UPDATE managed_materials SET series = name WHERE COALESCE(series, '') = ''")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_managed_materials_series_id ON managed_materials (series_id)")
 
@@ -5318,6 +5327,7 @@ class AdminService:
         cost_price = float(row.get("cost_price") or 0)
         price = float((result.get("sku") or {}).get("price_per_bead") or display_price)
         ops = {
+            "revision": max(1, int(row.get("revision") or 1)),
             "cost_price": cost_price,
             "stock": stock,
             "reserved_stock": int(float(row.get("reserved_stock") or 0)),
@@ -6123,8 +6133,11 @@ class AdminService:
         groups: dict[str, list[dict[str, Any]]] = {}
         for item in materials:
             sku = item.get("sku") or {}
-            key = (
-                f"{sku.get('top') or item.get('top') or ''}::"
+            # A display name/material code can be duplicated by historical data.
+            # The taxonomy ID is immutable and is the only safe primary grouping key.
+            series_id = str(sku.get("series_id") or item.get("series_id") or "").strip()
+            key = series_id or (
+                f"legacy::{sku.get('top') or item.get('top') or ''}::"
                 f"{sku.get('category') or item.get('category') or ''}::"
                 f"{sku.get('series') or item.get('series') or item.get('name') or ''}::"
                 f"{sku.get('material_code') or item.get('material_code') or ''}"
@@ -6201,15 +6214,19 @@ class AdminService:
             status=status,
         )
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        # Stable taxonomy IDs take precedence.  The remaining fields are only
+        # a legacy fallback for rows that have not been linked to a series yet.
+        has_series_id = "COALESCE(NULLIF(series_id, ''), '') <> ''"
         group_exprs = [
-            "COALESCE(top, '')",
-            "COALESCE(category, '')",
-            "COALESCE(NULLIF(series, ''), name, '')",
-            "COALESCE(material_code, '')",
+            "COALESCE(NULLIF(series_id, ''), '')",
+            f"CASE WHEN {has_series_id} THEN '' ELSE COALESCE(top, '') END",
+            f"CASE WHEN {has_series_id} THEN '' ELSE COALESCE(category, '') END",
+            f"CASE WHEN {has_series_id} THEN '' ELSE COALESCE(NULLIF(series, ''), name, '') END",
+            f"CASE WHEN {has_series_id} THEN '' ELSE COALESCE(material_code, '') END",
         ]
         group_select = ", ".join(
             f"{expr} AS {alias}"
-            for expr, alias in zip(group_exprs, ("group_top", "group_category", "group_series", "group_material_code"))
+            for expr, alias in zip(group_exprs, ("group_series_id", "group_top", "group_category", "group_series", "group_material_code"))
         )
         group_by = ", ".join(group_exprs)
         order_by, direction = self.material_spu_sort_sql(sort_by, sort_order)
@@ -6241,19 +6258,24 @@ class AdminService:
 
             row_clauses = []
             row_params: list[Any] = []
-            group_order: dict[tuple[str, str, str, str], int] = {}
+            group_order: dict[tuple[str, str, str, str, str], int] = {}
             for index, row in enumerate(group_rows):
                 key = (
+                    row["group_series_id"] or "",
                     row["group_top"] or "",
                     row["group_category"] or "",
                     row["group_series"] or "",
                     row["group_material_code"] or "",
                 )
                 group_order[key] = index
-                row_clauses.append(
-                    "(COALESCE(top, '') = ? AND COALESCE(category, '') = ? AND COALESCE(NULLIF(series, ''), name, '') = ? AND COALESCE(material_code, '') = ?)"
-                )
-                row_params.extend(key)
+                if key[0]:
+                    row_clauses.append("COALESCE(NULLIF(series_id, ''), '') = ?")
+                    row_params.append(key[0])
+                else:
+                    row_clauses.append(
+                        "(COALESCE(NULLIF(series_id, ''), '') = '' AND COALESCE(top, '') = ? AND COALESCE(category, '') = ? AND COALESCE(NULLIF(series, ''), name, '') = ? AND COALESCE(material_code, '') = ?)"
+                    )
+                    row_params.extend(key[1:])
 
             sku_where = [f"({' OR '.join(row_clauses)})"]
             if clauses:
@@ -6268,10 +6290,12 @@ class AdminService:
             ).fetchall()
             materials = [self.public_material(dict(row), connection) for row in sku_rows]
 
-        groups: dict[tuple[str, str, str, str], list[dict[str, Any]]] = {}
+        groups: dict[tuple[str, str, str, str, str], list[dict[str, Any]]] = {}
         for item in materials:
             sku = item.get("sku") or {}
-            key = (
+            series_id = str(sku.get("series_id") or item.get("series_id") or "").strip()
+            key = (series_id, "", "", "", "") if series_id else (
+                "",
                 sku.get("top") or item.get("top") or "",
                 sku.get("category") or item.get("category") or "",
                 sku.get("series") or item.get("series") or item.get("name") or "",
@@ -6289,6 +6313,7 @@ class AdminService:
         payload: dict[str, Any],
         material_id: str | None = None,
         actor: dict[str, Any] | None = None,
+        expected_revision: int | None = None,
     ) -> dict[str, Any]:
         timestamp = now_iso()
         item_id = material_id or payload.get("id") or self.generate_material_id(payload)
@@ -6337,25 +6362,30 @@ class AdminService:
                 reserved_stock = int(dict(existing).get("reserved_stock") or 0)
                 if int(item["stock"]) < reserved_stock:
                     raise ValueError(f"库存不能低于已预占数量 {reserved_stock}")
+                revision_condition = " AND revision=?" if expected_revision is not None else ""
+                update_params: list[Any] = [
+                    item["skuId"], item["top"], item["category"], item["series"], item["series_id"], item["material_code"], item["grade"],
+                    item["name"], item["effect"], item["element"],
+                    item["price"], item["price_cents"], item["size"], item["weight"], item["cost_price"], item["safety_stock"],
+                    item["supplier_name"], item["purchase_note"], item["color"], item["shine"],
+                    item.get("image_path", ""), item.get("image_url", ""), item["image_urls_json"], item["physical_specs_json"], item["stock"], item["enabled"],
+                    item["sort_order"], timestamp, item_id, item["stock"],
+                ]
+                if expected_revision is not None:
+                    update_params.append(expected_revision)
                 cursor = connection.execute(
                     """
                     UPDATE managed_materials SET
                     skuId=?, top=?, category=?, series=?, series_id=?, material_code=?, grade=?, name=?, effect=?, element=?, price=?, price_cents=?, size=?, weight=?,
                     cost_price=?, safety_stock=?, supplier_name=?, purchase_note=?,
-                    color=?, shine=?, image_path=?, image_url=?, image_urls_json=?, physical_specs_json=?, stock=?, enabled=?, sort_order=?, updated_at=?
-                    WHERE id=? AND reserved_stock <= ?
-                    """,
-                    (
-                        item["skuId"], item["top"], item["category"], item["series"], item["series_id"], item["material_code"], item["grade"],
-                        item["name"], item["effect"], item["element"],
-                        item["price"], item["price_cents"], item["size"], item["weight"], item["cost_price"], item["safety_stock"],
-                        item["supplier_name"], item["purchase_note"], item["color"], item["shine"],
-                        item.get("image_path", ""), item.get("image_url", ""), item["image_urls_json"], item["physical_specs_json"], item["stock"], item["enabled"],
-                        item["sort_order"], timestamp, item_id, item["stock"],
-                    ),
+                    color=?, shine=?, image_path=?, image_url=?, image_urls_json=?, physical_specs_json=?, stock=?, enabled=?, sort_order=?, updated_at=?, revision=revision+1
+                    WHERE id=? AND reserved_stock <= ?""" + revision_condition,
+                    update_params,
                 )
+                if expected_revision is not None and cursor.rowcount != 1:
+                    raise MaterialConflictError("该 SKU 已被其他操作更新，请刷新后再保存")
                 current = connection.execute(
-                    "SELECT stock, reserved_stock FROM managed_materials WHERE id = ?",
+                    "SELECT stock, reserved_stock, revision FROM managed_materials WHERE id = ?",
                     (item_id,),
                 ).fetchone()
                 if (
@@ -6411,6 +6441,7 @@ class AdminService:
         material_id: str,
         patch: dict[str, Any],
         actor: dict[str, Any] | None = None,
+        expected_revision: int | None = None,
     ) -> dict[str, Any]:
         """Patch SKU-only data without allowing a variety record to be recreated."""
         clean_id = str(material_id or "").strip()
@@ -6451,7 +6482,12 @@ class AdminService:
             "physical_specs": json_value(current.get("physical_specs_json"), {}),
         }
         payload.update(changes)
-        return self.save_material(payload, material_id=clean_id, actor=actor)
+        return self.save_material(
+            payload,
+            material_id=clean_id,
+            actor=actor,
+            expected_revision=expected_revision,
+        )
 
     def material_token(self, value: Any, fallback: str = "mat") -> str:
         text = str(value or "").strip().lower()
@@ -6587,7 +6623,12 @@ class AdminService:
         if not row:
             raise ValueError("材料不存在")
 
-    def delete_material(self, material_id: str, actor: dict[str, Any] | None = None) -> None:
+    def delete_material(
+        self,
+        material_id: str,
+        actor: dict[str, Any] | None = None,
+        expected_revision: int | None = None,
+    ) -> None:
         with self.connect() as connection:
             self._ensure_material_columns(connection)
             if use_mysql() and not self._force_sqlite:
@@ -6597,16 +6638,24 @@ class AdminService:
             has_reserved_stock = "reserved_stock" in material_columns
             row = connection.execute("SELECT * FROM managed_materials WHERE id = ?", (material_id,)).fetchone()
             before = dict(row) if row else None
+            if expected_revision is not None and before and int(before.get("revision") or 1) != expected_revision:
+                raise MaterialConflictError("该 SKU 已被其他操作更新，请刷新后再删除")
             if before and int(before.get("reserved_stock") or 0) > 0:
                 raise ValueError("SKU 存在未完成库存预占，不能删除")
+            revision_condition = " AND revision = ?" if expected_revision is not None else ""
+            params: list[Any] = [material_id]
+            if expected_revision is not None:
+                params.append(expected_revision)
             if has_reserved_stock:
                 cursor = connection.execute(
-                    "DELETE FROM managed_materials WHERE id = ? AND reserved_stock = 0",
-                    (material_id,),
+                    "DELETE FROM managed_materials WHERE id = ? AND reserved_stock = 0" + revision_condition,
+                    params,
                 )
             else:
-                cursor = connection.execute("DELETE FROM managed_materials WHERE id = ?", (material_id,))
+                cursor = connection.execute("DELETE FROM managed_materials WHERE id = ?" + revision_condition, params)
             if before and cursor.rowcount != 1:
+                if expected_revision is not None:
+                    raise MaterialConflictError("该 SKU 已被其他操作更新，请刷新后再删除")
                 raise ValueError("SKU 存在未完成库存预占，不能删除")
             if before:
                 self.record_material_audit(connection, action="delete", before=before, actor=actor)
@@ -6618,8 +6667,9 @@ class AdminService:
         action: str,
         value: Any = None,
         actor: dict[str, Any] | None = None,
+        expected_revisions: dict[str, int] | None = None,
     ) -> dict[str, Any]:
-        clean_ids = [str(item).strip() for item in ids if str(item).strip()]
+        clean_ids = list(dict.fromkeys(str(item).strip() for item in ids if str(item).strip()))
         if not clean_ids:
             raise ValueError("请选择要操作的珠材")
         placeholders = ", ".join(["?"] * len(clean_ids))
@@ -6638,6 +6688,23 @@ class AdminService:
                     clean_ids,
                 ).fetchall()
             ]
+            if len(before_rows) != len(clean_ids):
+                raise ValueError("部分 SKU 已不存在，请刷新列表后重试")
+            revision_guard = ""
+            revision_params: list[Any] = []
+            if expected_revisions is not None:
+                missing = [item_id for item_id in clean_ids if item_id not in expected_revisions]
+                if missing:
+                    raise ValueError("批量操作缺少 SKU 版本号，请刷新列表后重试")
+                stale = [
+                    row["id"] for row in before_rows
+                    if int(row.get("revision") or 1) != int(expected_revisions.get(row["id"]) or 0)
+                ]
+                if stale:
+                    raise MaterialConflictError("部分 SKU 已被其他操作更新，请刷新后重新选择")
+                revision_guard = " AND (" + " OR ".join("(id=? AND revision=?)" for _ in clean_ids) + ")"
+                for item_id in clean_ids:
+                    revision_params.extend([item_id, int(expected_revisions[item_id])])
             if action == "enable":
                 out_of_stock = [row for row in before_rows if int(row.get("stock") or 0) <= 0]
                 if out_of_stock:
@@ -6657,13 +6724,13 @@ class AdminService:
                 if test_price_rows:
                     raise ValueError("0.01 元及以下为测试价，不能批量启用销售")
                 cursor = connection.execute(
-                    f"UPDATE managed_materials SET enabled=1, updated_at=? WHERE id IN ({placeholders})",
-                    [timestamp, *clean_ids],
+                    f"UPDATE managed_materials SET enabled=1, updated_at=?, revision=revision+1 WHERE id IN ({placeholders}){revision_guard}",
+                    [timestamp, *clean_ids, *revision_params],
                 )
             elif action == "disable":
                 cursor = connection.execute(
-                    f"UPDATE managed_materials SET enabled=0, updated_at=? WHERE id IN ({placeholders})",
-                    [timestamp, *clean_ids],
+                    f"UPDATE managed_materials SET enabled=0, updated_at=?, revision=revision+1 WHERE id IN ({placeholders}){revision_guard}",
+                    [timestamp, *clean_ids, *revision_params],
                 )
             elif action == "price":
                 price_cents = money_to_cents(value, field_name="价格")
@@ -6671,8 +6738,8 @@ class AdminService:
                 if price_cents <= 1 and any(bool(row.get("enabled")) for row in before_rows):
                     raise ValueError("0.01 元及以下为测试价，请先停用 SKU 后再修改价格")
                 cursor = connection.execute(
-                    f"UPDATE managed_materials SET price=?, price_cents=?, updated_at=? WHERE id IN ({placeholders})",
-                    [price, price_cents, timestamp, *clean_ids],
+                    f"UPDATE managed_materials SET price=?, price_cents=?, updated_at=?, revision=revision+1 WHERE id IN ({placeholders}){revision_guard}",
+                    [price, price_cents, timestamp, *clean_ids, *revision_params],
                 )
             elif action == "stock":
                 stock = max(0, int(float(value)))
@@ -6683,10 +6750,12 @@ class AdminService:
                 if blocked:
                     raise ValueError("库存不能低于已预占数量")
                 cursor = connection.execute(
-                    f"UPDATE managed_materials SET stock=?, enabled=CASE WHEN ? > 0 THEN enabled ELSE 0 END, updated_at=? "
-                    f"WHERE id IN ({placeholders}) AND reserved_stock <= ?",
-                    [stock, stock, timestamp, *clean_ids, stock],
+                    f"UPDATE managed_materials SET stock=?, enabled=CASE WHEN ? > 0 THEN enabled ELSE 0 END, updated_at=?, revision=revision+1 "
+                    f"WHERE id IN ({placeholders}) AND reserved_stock <= ?{revision_guard}",
+                    [stock, stock, timestamp, *clean_ids, stock, *revision_params],
                 )
+                if expected_revisions is not None and cursor.rowcount != len(clean_ids):
+                    raise MaterialConflictError("部分 SKU 已被其他操作更新，请刷新列表后重新选择")
                 current_rows = connection.execute(
                     f"SELECT id, stock, reserved_stock FROM managed_materials WHERE id IN ({placeholders})",
                     clean_ids,
@@ -6702,21 +6771,23 @@ class AdminService:
             elif action == "safety_stock":
                 safety_stock = max(0, int(float(value)))
                 cursor = connection.execute(
-                    f"UPDATE managed_materials SET safety_stock=?, updated_at=? WHERE id IN ({placeholders})",
-                    [safety_stock, timestamp, *clean_ids],
+                    f"UPDATE managed_materials SET safety_stock=?, updated_at=?, revision=revision+1 WHERE id IN ({placeholders}){revision_guard}",
+                    [safety_stock, timestamp, *clean_ids, *revision_params],
                 )
             elif action == "delete":
                 if has_reserved_stock and any(int(row.get("reserved_stock") or 0) > 0 for row in before_rows):
                     raise ValueError("SKU 存在未完成库存预占，不能删除")
                 delete_condition = " AND reserved_stock = 0" if has_reserved_stock else ""
                 cursor = connection.execute(
-                    f"DELETE FROM managed_materials WHERE id IN ({placeholders}){delete_condition}",
-                    clean_ids,
+                    f"DELETE FROM managed_materials WHERE id IN ({placeholders}){delete_condition}{revision_guard}",
+                    [*clean_ids, *revision_params],
                 )
                 if cursor.rowcount != len(before_rows):
                     raise ValueError("SKU 存在未完成库存预占，不能删除")
             else:
                 raise ValueError("不支持的批量操作")
+            if expected_revisions is not None and cursor.rowcount != len(clean_ids):
+                raise MaterialConflictError("部分 SKU 已被其他操作更新，请刷新列表后重新选择")
             affected = cursor.rowcount if cursor.rowcount is not None else len(clean_ids)
             after_by_id = {}
             if action != "delete" and before_rows:

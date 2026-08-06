@@ -5,7 +5,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, File, Form, Header, HTTPException, Query, Request, UploadFile
 from pydantic import BaseModel, Field, field_validator
 
-from .admin_service import AdminService
+from .admin_service import AdminService, MaterialConflictError
 from .avatar_storage import AvatarStorage
 from .design_candidates import build_design_candidates
 from .custom_design_service import CustomDesignService
@@ -239,6 +239,8 @@ class MaterialPayload(BaseModel):
     stock: int = 0
     enabled: bool = True
     sort_order: int = 0
+    # Required only for PUT.  Creation receives a new server-side revision.
+    expected_revision: int | None = Field(default=None, ge=1)
 
 
 class MaterialSkuPatchPayload(BaseModel):
@@ -259,12 +261,29 @@ class MaterialSkuPatchPayload(BaseModel):
     enabled: bool | None = None
     sort_order: int | None = Field(default=None, ge=0, le=1000000)
     physical_specs: dict | None = None
+    expected_revision: int = Field(ge=1)
 
 
 class MaterialBatchPayload(BaseModel):
-    ids: list[str]
-    action: str
+    ids: list[str] = Field(min_length=1, max_length=100)
+    action: Literal["enable", "disable", "price", "stock", "safety_stock", "delete"]
     value: float | int | str | None = None
+    expected_revisions: dict[str, int]
+
+    @field_validator("ids")
+    @classmethod
+    def validate_ids(cls, values: list[str]) -> list[str]:
+        cleaned = list(dict.fromkeys(str(value or "").strip() for value in values if str(value or "").strip()))
+        if not cleaned or any(len(value) > 160 for value in cleaned):
+            raise ValueError("SKU ID 无效")
+        return cleaned
+
+    @field_validator("expected_revisions")
+    @classmethod
+    def validate_expected_revisions(cls, values: dict[str, int]) -> dict[str, int]:
+        if len(values) > 100 or any(not str(key).strip() or int(value) < 1 for key, value in values.items()):
+            raise ValueError("SKU 版本号无效")
+        return {str(key).strip(): int(value) for key, value in values.items()}
 
 
 class MaterialAssetBindPayload(BaseModel):
@@ -1717,7 +1736,7 @@ def save_material_series(payload: MaterialSeriesPayload, authorization: str | No
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@admin_router.put("/material-taxonomy/series/{series_id}", summary="按稳定 ID 更新材料品种")
+@admin_router.patch("/material-taxonomy/series/{series_id}", summary="按稳定 ID 更新材料品种")
 def update_material_series(
     series_id: str,
     payload: MaterialSeriesPayload,
@@ -1799,6 +1818,17 @@ def create_material(payload: MaterialPayload, authorization: str | None = Header
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@admin_router.get("/materials/audit-logs", summary="材料资料变更记录")
+def material_audit_logs(
+    material_id: str = Query(default="", max_length=120),
+    target_type: str = Query(default="", max_length=40),
+    limit: int = Query(default=100, ge=1, le=300),
+    authorization: str | None = Header(default=None),
+):
+    require_admin(authorization)
+    return success(admin_service.list_material_audit_logs(material_id=material_id, target_type=target_type, limit=limit))
+
+
 @admin_router.get("/materials/{material_id}", summary="后台材料详情")
 def material_detail(material_id: str, authorization: str | None = Header(default=None)):
     require_admin(authorization)
@@ -1811,8 +1841,20 @@ def material_detail(material_id: str, authorization: str | None = Header(default
 @admin_router.put("/materials/{material_id}", summary="更新材料")
 def update_material(material_id: str, payload: MaterialPayload, authorization: str | None = Header(default=None)):
     actor = require_admin(authorization)
+    if payload.expected_revision is None:
+        raise HTTPException(status_code=422, detail="更新 SKU 必须携带 expected_revision")
     try:
-        return success(admin_service.save_material(payload.model_dump(), material_id=material_id, actor=actor), "材料已更新")
+        return success(
+            admin_service.save_material(
+                payload.model_dump(exclude={"expected_revision"}),
+                material_id=material_id,
+                actor=actor,
+                expected_revision=payload.expected_revision,
+            ),
+            "材料已更新",
+        )
+    except MaterialConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -1826,38 +1868,54 @@ def patch_material_sku(
     actor = require_admin(authorization)
     try:
         return success(
-            admin_service.patch_material_sku(material_id, payload.model_dump(exclude_unset=True), actor=actor),
+            admin_service.patch_material_sku(
+                material_id,
+                payload.model_dump(exclude={"expected_revision"}, exclude_unset=True),
+                actor=actor,
+                expected_revision=payload.expected_revision,
+            ),
             "SKU 已更新",
         )
+    except MaterialConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @admin_router.delete("/materials/{material_id}", summary="删除材料")
-def delete_material(material_id: str, authorization: str | None = Header(default=None)):
+def delete_material(
+    material_id: str,
+    expected_revision: int = Query(ge=1),
+    authorization: str | None = Header(default=None),
+):
     actor = require_admin(authorization)
-    admin_service.delete_material(material_id, actor=actor)
-    return success({"deleted": material_id}, "材料已删除")
+    try:
+        admin_service.delete_material(material_id, actor=actor, expected_revision=expected_revision)
+        return success({"deleted": material_id}, "材料已删除")
+    except MaterialConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @admin_router.post("/materials/batch", summary="批量操作珠材")
 def batch_materials(payload: MaterialBatchPayload, authorization: str | None = Header(default=None)):
     actor = require_admin(authorization)
     try:
-        return success(admin_service.batch_update_materials(payload.ids, payload.action, payload.value, actor=actor), "批量操作已完成")
+        return success(
+            admin_service.batch_update_materials(
+                payload.ids,
+                payload.action,
+                payload.value,
+                actor=actor,
+                expected_revisions=payload.expected_revisions,
+            ),
+            "批量操作已完成",
+        )
+    except MaterialConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-
-@admin_router.get("/materials/audit-logs", summary="材料资料变更记录")
-def material_audit_logs(
-    material_id: str = Query(default="", max_length=120),
-    target_type: str = Query(default="", max_length=40),
-    limit: int = Query(default=100, ge=1, le=300),
-    authorization: str | None = Header(default=None),
-):
-    require_admin(authorization)
-    return success(admin_service.list_material_audit_logs(material_id=material_id, target_type=target_type, limit=limit))
 
 
 @admin_router.get("/home-banners", summary="home banners")
