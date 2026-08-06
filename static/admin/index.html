@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>宇涧运营后台</title>
-  <link rel="stylesheet" href="static/admin/admin.css?v=20260720-gallery-independent-v4">
+  <link rel="stylesheet" href="static/admin/admin.css?v=20260724-ai-material-apply-v2">
 </head>
 <body>
   <section id="authView" class="auth-screen">
@@ -38,14 +38,15 @@
       <nav>
         <button class="nav-item active" data-page="overview" onclick="switchPage('overview')"><i>⌂</i>经营概览</button>
         <button class="nav-item" data-page="orders" onclick="switchPage('orders')"><i>▤</i>订单履约<span id="orderBadge" class="nav-badge hide">0</span></button>
+        <button class="nav-item" data-page="designRequests" onclick="switchPage('designRequests')"><i>✦</i>人工搭配</button>
         <button class="nav-item" data-page="afterSales" onclick="switchPage('afterSales')"><i>↺</i>售后审核<span id="afterSaleBadge" class="nav-badge hide">0</span></button>
         <button class="nav-item" data-page="materials" onclick="switchPage('materials')"><i>◇</i>SKU 管理</button>
         <button class="nav-item" data-page="materialTypes" onclick="switchPage('materialTypes')"><i>Ⅰ</i>材料类型</button>
         <button class="nav-item" data-page="materialCategories" onclick="switchPage('materialCategories')"><i>Ⅱ</i>材料分类</button>
         <button class="nav-item" data-page="materialVarieties" onclick="switchPage('materialVarieties')"><i>Ⅲ</i>品种 / 款式</button>
         <button class="nav-item" data-page="materialAssets" onclick="switchPage('materialAssets')"><i>▧</i>素材处理</button>
+        <button class="nav-item" data-page="aiMaterialTags" onclick="switchPage('aiMaterialTags')"><i>AI</i>AI 打标审核<span id="aiTagBadge" class="nav-badge hide">0</span></button>
         <button class="nav-item" data-page="warehouse" onclick="switchPage('warehouse')"><i>▦</i>仓库库存</button>
-        <button class="nav-item" data-page="content" onclick="switchPage('content')"><i>✦</i>运营内容</button>
         <button class="nav-item" data-page="bannerContent" onclick="switchPage('bannerContent')"><i>B</i>Home Banner</button>
         <button class="nav-item" data-page="communityContent" onclick="switchPage('communityContent')"><i>◎</i>社区灵感</button>
         <button class="nav-item" data-page="recommendContent" onclick="switchPage('recommendContent')"><i>★</i>热门推荐</button>
@@ -107,6 +108,15 @@
         <article class="panel table-panel"><div id="ordersTable"></div></article>
       </section>
 
+      <section id="designRequests" class="page-view hide">
+        <div class="page-toolbar">
+          <div class="filter-group"><select id="designRequestStatus" onchange="loadCustomDesignRequests()"><option value="">全部状态</option><option value="submitted">待设计</option><option value="designing">设计中</option><option value="proposed">待用户确认</option><option value="revision_requested">待调整</option><option value="confirmed">已确认</option></select></div>
+          <div class="table-actions"><button class="btn secondary" onclick="openCustomDesignStandard()">设计规范</button><button class="btn secondary" onclick="openCustomDesignSettings()">服务设置</button><button class="btn secondary" onclick="loadCustomDesignRequests()">刷新工单</button></div>
+        </div>
+        <div class="content-hint">设计师需在工作台逐颗完成真实搭配；发布方案时固化材料、价格和图库图，用户确认后系统才会生成待支付订单并预占库存。</div>
+        <article class="panel table-panel"><div id="designRequestsTable"></div></article>
+      </section>
+
       <section id="afterSales" class="page-view hide">
         <div id="afterSaleSummary" class="after-sale-summary-grid"></div>
         <div class="page-toolbar after-sale-toolbar">
@@ -140,7 +150,7 @@
       <section id="materials" class="page-view hide">
         <div class="page-toolbar">
           <div class="filter-group">
-            <div class="search-control">⌕<input id="materialKeyword" placeholder="搜索名称、分类、品种或功效" oninput="handleMaterialKeywordInput(event)" oncompositionstart="handleMaterialKeywordCompositionStart()" oncompositionend="handleMaterialKeywordCompositionEnd()"></div>
+            <div class="search-control material-search-control">⌕<input id="materialKeyword" placeholder="搜索名称、分类、品种或功效" oninput="handleMaterialKeywordInput(event)" onkeydown="handleMaterialKeywordKeydown(event)" onblur="handleMaterialKeywordBlur()" oncompositionstart="handleMaterialKeywordCompositionStart()" oncompositionend="handleMaterialKeywordCompositionEnd()"><span id="materialSearchLoading" class="search-loading" role="status" aria-label="正在搜索" hidden></span></div>
             <select id="materialTop" onchange="handleMaterialTopChange()">
               <option value="">全部类型</option>
             </select>
@@ -212,7 +222,7 @@
       <section id="materialCategories" class="page-view hide">
         <div class="catalog-intro">
           <div><span>STEP 2</span><h2>在类型下创建材料分类</h2><p>珠子可建幽灵水晶、白水晶；配饰可建幽灵随形、隔珠、花托、吊坠。</p></div>
-          <button class="btn primary compact" onclick="newMaterialCategory()">＋ 新增分类</button>
+          <div class="table-actions"><span id="materialCategorySelectedCount" class="bulk-count">未选择</span><button id="materialCategoryDeleteButton" class="btn secondary compact danger-outline" disabled onclick="batchDeleteMaterialCategories()">删除已选（仅空分类）</button><button class="btn primary compact" onclick="newMaterialCategory()">＋ 新增分类</button></div>
         </div>
         <div class="page-toolbar catalog-toolbar">
           <div class="filter-group"><select id="catalogCategoryTypeFilter" onchange="renderMaterialCategoriesPage()"></select></div>
@@ -230,6 +240,7 @@
             <div class="search-control catalog-variety-search">⌕<input id="catalogVarietyKeyword" aria-label="搜索品种或款式" placeholder="搜索品种、分类或形制" oninput="renderMaterialVarietiesPage()"></div>
             <select id="catalogVarietyTypeFilter" onchange="handleVarietyTypeFilterChange()"></select>
             <select id="catalogVarietyCategoryFilter" onchange="renderMaterialVarietiesPage()"></select>
+            <select id="catalogVarietyStatusFilter" aria-label="筛选品种状态" onchange="renderMaterialVarietiesPage()"><option value="">全部状态</option><option value="enabled">已启用</option><option value="disabled">已停用</option></select>
           </div>
         </div>
         <article class="panel table-panel"><div id="materialVarietiesTable"></div></article>
@@ -283,6 +294,34 @@
               <div class="material-asset-empty"><b>暂无素材</b><span>处理完成后会同时检查浅色与深色背景效果</span></div>
             </div>
           </div>
+        </div>
+      </section>
+
+      <section id="aiMaterialTags" class="page-view hide">
+        <div id="aiTagStats" class="ai-tag-stats" aria-label="AI 打标状态概览"></div>
+        <div class="page-toolbar ai-tag-toolbar">
+          <div class="filter-group">
+            <div class="search-control"><span aria-hidden="true">⌕</span><input id="aiTagKeyword" placeholder="搜索材料名称、编码或分类" oninput="renderAiMaterialTags()"></div>
+            <select id="aiTagStatus" onchange="renderAiMaterialTags()">
+              <option value="">全部状态</option>
+              <option value="pending_review">待审核</option>
+              <option value="approved">已通过</option>
+              <option value="applied">已应用</option>
+              <option value="rejected">已驳回</option>
+              <option value="failed">标注失败</option>
+            </select>
+          </div>
+          <button class="btn secondary compact" onclick="loadAiMaterialTags()">刷新记录</button>
+        </div>
+        <div class="content-hint ai-tag-hint">AI 只分析图库中的视觉与设计属性，不判断真假、产地、等级或功效。先人工审核，再单独确认应用；系统不会修改名称、价格、库存、尺寸、图片、五行或功效。</div>
+        <div class="ai-tag-workspace">
+          <aside class="ai-tag-queue" aria-label="打标记录列表">
+            <div class="ai-tag-queue-head"><b id="aiTagQueueTitle">审核队列</b><span id="aiTagQueueCount">0 条</span></div>
+            <div id="aiTagList" class="ai-tag-list"><div class="ai-tag-empty">正在加载打标记录…</div></div>
+          </aside>
+          <section id="aiTagInspector" class="ai-tag-inspector" aria-live="polite">
+            <div class="ai-tag-empty ai-tag-inspector-empty"><b>选择一条打标记录</b><span>在左侧队列中查看材料图片、视觉评分和搭配建议</span></div>
+          </section>
         </div>
       </section>
 
@@ -368,15 +407,6 @@
             </article>
           </div>
         </div>
-      </section>
-
-      <section id="content" class="page-view hide">
-        <div class="page-toolbar">
-          <div class="filter-group"><div class="search-control">⌕<input id="blockSection" placeholder="筛选页面：home / community / daily" oninput="debouncedLoadBlocks()"></div></div>
-          <button class="btn primary compact" onclick="newBlock()">＋ 新增内容</button>
-        </div>
-        <div class="content-hint">用于管理首页文案、每日能量提示、热门推荐和社区运营位。发布后小程序可通过内容接口读取。</div>
-        <article class="panel table-panel"><div id="blocksTable"></div></article>
       </section>
 
       <section id="bannerContent" class="page-view hide">
@@ -521,6 +551,6 @@
     <div id="drawerBody" class="drawer-body"></div>
   </aside>
   <div id="toast" class="toast hide"></div>
-  <script src="static/admin/admin.js?v=20260720-gallery-independent-v4"></script>
+  <script src="static/admin/admin.js?v=20260724-ai-material-apply-v2"></script>
 </body>
 </html>

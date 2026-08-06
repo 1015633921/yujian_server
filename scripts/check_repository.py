@@ -17,7 +17,12 @@ def tracked_paths() -> list[Path]:
 
 def main() -> int:
     errors: list[str] = []
-    required = ["requirements.lock", "requirements-dev.lock", "miniprogram/package-lock.json"]
+    required = [
+        "requirements.lock",
+        "requirements-dev.lock",
+        "miniprogram/package-lock.json",
+        "admin-web/package-lock.json",
+    ]
     for relative in required:
         if not (ROOT / relative).is_file():
             errors.append(f"missing lock file: {relative}")

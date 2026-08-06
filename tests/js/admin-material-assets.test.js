@@ -152,3 +152,13 @@ test('adding gallery images does not populate an empty primary field', () => {
   assert.equal(elements.tax_series_image.value, '');
   assert.equal(elements.tax_series_images.value, 'https://cdn.example.com/gallery.webp');
 });
+
+test('an enabled variety may save without a primary image because its gallery is independent', () => {
+  const saveStart = script.indexOf('async function saveMaterialSeries()');
+  const saveEnd = script.indexOf('\nasync function disableMaterialTaxonomy', saveStart);
+  const saveSource = script.slice(saveStart, saveEnd);
+
+  assert.ok(saveStart >= 0 && saveEnd > saveStart);
+  assert.doesNotMatch(saveSource, /if\(enabled&&!image_url\)/);
+  assert.match(saveSource, /image_url,image_urls:imageUrls/);
+});

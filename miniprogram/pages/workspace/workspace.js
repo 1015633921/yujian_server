@@ -42,12 +42,13 @@ const ALL_OPTION_LABEL = '\u5168\u90e8';
 const LEGACY_ALL_OPTION_LABELS = [ALL_OPTION_LABEL, '鍏ㄩ儴'];
 const TRAY_THEME_STORAGE_KEY = 'workspaceTrayThemeV1';
 const WORKSPACE_WRIST_SIZE_STORAGE_KEY = 'workspaceWristSizeV1';
-const WORKSPACE_GUIDE_STORAGE_KEY = 'workspaceFirstGuideDismissedV1';
+const WORKSPACE_GUIDE_STORAGE_KEY = 'workspaceFirstGuideDismissedV2';
 const MAX_WORKSPACE_BEADS = 40;
 const MAX_RECOMMENDED_RECIPE_BEADS = 40;
 const MIN_STRING_BEAD_COUNT = 8;
 const MAX_MATERIAL_FLIGHT_QUEUE = 6;
 const MATERIAL_TAP_GUARD_MS = 80;
+const MATERIAL_LONG_PRESS_TAP_SUPPRESS_MS = 520;
 const MATERIAL_QUEUE_TOAST_GUARD_MS = 1200;
 const MATERIAL_SEARCH_DEBOUNCE_MS = 260;
 const MATERIAL_PRELOAD_BATCH_SIZE = 3;
@@ -61,9 +62,6 @@ const STRINGED_COMFORT_ALLOWANCE_MM = 8;
 const RING_SLIDE_EDGE_RATIO = 0.38;
 const RING_REORDER_CENTER_DEAD_ZONE_RATIO = 0.35;
 const RING_SLIDE_MIN_MOVE_RAD = 0.018;
-const RING_GESTURE_INTENT_MIN_RPX = 7;
-const RING_SLIDE_TANGENTIAL_BIAS = 0.74;
-const RING_REORDER_RADIAL_BIAS = 1.16;
 const MAX_BEAD_ANGULAR_VELOCITY = 0.16;
 const COLLISION_SPIN_FACTOR = 0.018;
 const ROLLING_SPIN_FACTOR = 0.10;
@@ -142,7 +140,8 @@ const WORKSPACE_ICON_URLS = {
   string: assetUrl('workspace-icons/workspace-string-dice.png')
 };
 const WORKSPACE_SOUND_POOL_SIZE = {
-  collisionSoft: 1,
+  // 连续选材的落地声允许短暂重叠，避免同一个音频实例 stop/play 连发时被系统吞掉。
+  collisionSoft: 4,
   shuffle: 2
 };
 const WORKSPACE_SOUND_VOLUME = {
@@ -152,8 +151,6 @@ const WORKSPACE_SOUND_VOLUME = {
 const TRAY_IMPACT_FEEDBACK_MIN_SPEED = 1.05;
 const WRIST_RULER_MIN = 10;
 const WRIST_RULER_MAX = 25;
-const WRIST_RULER_STEP = 0.1;
-const WRIST_RULER_TICK_RPX = 22;
 let materialCache = {};
 let materialCacheAt = {};
 
@@ -543,15 +540,17 @@ const WORKSPACE_USAGE_GUIDE_WITH_ICONS = [
   { tag: '保存', iconUrl: WORKSPACE_ICON_URLS.save, previewClass: 'preview-square preview-save', title: '保存方案', desc: '把当前搭配保存为草稿，之后可以继续编辑。' },
   { tag: '五行', iconUrl: WORKSPACE_ICON_URLS.energy, previewClass: 'preview-square preview-energy', title: '五行图', desc: '查看当前方案的五行元素占比。' },
   { tag: '清空', iconUrl: WORKSPACE_ICON_URLS.clear, previewClass: 'preview-square preview-clear', title: '清空盘面', desc: '移除当前盘面所有珠子，重新开始搭配。' },
-  { tag: '成串', iconUrl: WORKSPACE_ICON_URLS.string, previewClass: 'preview-dark preview-string', buttonText: '随机成串', title: '随机成串 / 解除成串', desc: '在自由摆放和圆串整理之间切换，快速预览佩戴效果。' },
+  { tag: '成串', iconUrl: WORKSPACE_ICON_URLS.string, previewClass: 'preview-dark preview-string', buttonText: '随机成串', title: '随机成串 / 解除成串', desc: '成串后拖动珠子调整顺序，拖动外环旋转整串。' },
   { tag: '托盘', previewClass: 'preview-tray', buttonText: '托盘颜色', showSwatch: true, title: '切换托盘颜色', desc: '顺序切换托盘底色，方便看清不同颜色的珠子。' },
   { tag: '结算', previewClass: 'preview-dark preview-cart', buttonText: '去结算', title: '去结算', desc: '确认方案后直接进入订单确认页。' }
 ];
 
-const WORKSPACE_GUIDE_ITEMS = [
-  { index: '01', title: '点击材料', desc: '珠子会投入圆盘，先从喜欢的材质开始。' },
-  { index: '02', title: '拖动调整', desc: '轻触珠子移动位置，长按材料看实拍。' },
-  { index: '03', title: '一键成串', desc: '用成串/打散按钮，在规整和自由编辑间切换。' }
+const WORKSPACE_GUIDE_STEPS = [
+  { target: 'wrist', eyebrow: '01 · 设置腕围', title: '先确认你的佩戴腕围', desc: '点击高亮的腕围按钮，确认后继续下一步。' },
+  { target: 'materials', eyebrow: '02 · 选择材料', title: '从这里挑选珠子和配饰', desc: '轻点下方材料卡片，即可把它加入托盘。' },
+  { target: 'tray', eyebrow: '03 · 调整位置', title: '在托盘内自由排列', desc: '材料进入后可拖动调整；长按材料卡片还能查看实拍。' },
+  { target: 'string', eyebrow: '04 · 一键成串', title: '切换成串，预览佩戴效果', desc: '成串后拖动珠子可换位，拖动外环可旋转整串。' },
+  { target: 'checkout', eyebrow: '05 · 保存或结算', title: '完成后保存方案或去结算', desc: '你可以随时从左侧 ? 重新查看完整使用说明。' }
 ];
 
 Page({
@@ -567,6 +566,8 @@ Page({
     workspaceLoadingSubtext: '同步盘面与珠材...',
     materialSkeletons: [1, 2, 3, 4],
     materialSearchKeyword: '',
+    showMaterialDetail: false,
+    materialDetail: null,
     categories: [],
     seriesOptions: ['全部'],
     filterSummary: '全部 · 全部 · 0 款',
@@ -582,7 +583,10 @@ Page({
     activeSeriesAnchor: '',
     showTip: true,
     showWorkspaceGuide: false,
-    workspaceGuideItems: WORKSPACE_GUIDE_ITEMS,
+    workspaceGuideStep: 0,
+    workspaceGuideSteps: WORKSPACE_GUIDE_STEPS,
+    activeWorkspaceGuide: WORKSPACE_GUIDE_STEPS[0],
+    workspaceGuideFocusStyle: '',
     workspaceIcons: WORKSPACE_ICON_URLS,
     wristSize: 16,
     wearStyle: 'single',
@@ -592,6 +596,7 @@ Page({
     selectedItems: [],
     attachedPendantItems: [],
     workspaceCanvasVisible: true,
+    workspaceCanvasSuppressed: false,
     canvasRenderError: false,
     trayImageUrl: TRAY_THEMES[0].imageUrl,
     trayTheme: 'warm',
@@ -599,7 +604,6 @@ Page({
     trayImageFailed: false,
     canvasFlightActive: false,
     stringStyle: '',
-    scaleTicks: [],
     countOverClass: '',
     braceletStringClass: 'empty',
     completionWatermarkClass: '',
@@ -607,6 +611,7 @@ Page({
     randomIconText: '串',
     randomTitle: '随机成串',
     randomSubtitle: '随机排列珠面',
+    workspacePlanLabel: '当前方案',
     cartActionText: '去结算',
     isAddingToCart: false,
     flightBead: null,
@@ -628,11 +633,6 @@ Page({
     wristOptionItems: [],
     showWristPicker: false,
     wristRulerValue: '16.0',
-    wristRulerTicks: [],
-    wristRulerScrollLeft: 0,
-    wristRulerTickWidth: 11,
-    wristRulerSidePadding: 180,
-    wristRulerRangeText: '10.0–25.0cm',
     energyChart: {
       hasProfile: false,
       matchScore: 0,
@@ -686,6 +686,7 @@ Page({
     this.flightQueue = [];
     this.flightActive = false;
     this.lastMaterialTapAt = 0;
+    this.lastMaterialLongPress = { id: '', at: 0 };
     this.lastQueueToastAt = 0;
     this.physicsBodies = [];
     this.canvasRecoveryAttempts = 0;
@@ -694,13 +695,18 @@ Page({
     this.audioPlayers = {};
     this.audioPlayerCursors = {};
     this.audioPlayersReady = false;
+    this.interactionRuntimeWarmed = false;
     this.lastSoundAt = {};
     this.sourceContext = null;
     this.pendingBackendRecommendation = false;
+    this.pendingBackendRecommendationRevision = 0;
     this.pendingRecommendedRecipe = false;
+    this.pendingRecommendedRecipeRevision = 0;
     this.pendingSharedDesign = null;
     this.pendingShareToken = '';
     this.materialPayloadReady = false;
+    this.workspaceDesignRevision = 0;
+    this.activeWorkspaceImportId = '';
     this.materialPayloadVersion = '';
     this.lastMaterialRefreshAt = 0;
     this.workspaceHasShown = false;
@@ -722,11 +728,15 @@ Page({
       this.pendingShareToken = shareToken;
       this.loadSharedDesign(shareToken);
     } else if (query.preset === 'backend-recommended') {
+      const importRevision = this.beginWorkspaceImportSession('query:backend-recommended');
       this.pendingBackendRecommendation = true;
-      this.applyBackendRecommendation();
+      this.pendingBackendRecommendationRevision = importRevision;
+      this.applyBackendRecommendation({ importRevision });
     } else if (query.preset === 'recommended') {
+      const importRevision = this.beginWorkspaceImportSession('query:recommended');
       this.pendingRecommendedRecipe = true;
-      this.applyRecommendedRecipe();
+      this.pendingRecommendedRecipeRevision = importRevision;
+      this.applyRecommendedRecipe({ importRevision });
     } else {
       this.loadDraft();
     }
@@ -771,7 +781,9 @@ Page({
         workspaceLoadingSubtext: '开始定制你的手串'
       });
       this.workspaceLoadingHideTimer = setTimeout(() => {
-        this.setData({ workspaceLoading: false, workspaceLoadingClass: '' });
+        this.setData({ workspaceLoading: false, workspaceLoadingClass: '' }, () => {
+          this.maybeShowWorkspaceGuide();
+        });
       }, 220);
     }, delay);
   },
@@ -781,6 +793,36 @@ Page({
     this.nonCriticalTaskTimer = setTimeout(() => {
       this.loadProfileEnergy();
     }, this.isLowPerformanceDevice ? 520 : 260);
+  },
+
+  scheduleWorkspaceInteractionWarmup() {
+    if (this.interactionRuntimeWarmed || this.interactionRuntimeWarmupTimer) return;
+    this.interactionRuntimeWarmupTimer = setTimeout(() => {
+      this.interactionRuntimeWarmupTimer = null;
+      this.warmWorkspaceInteractionRuntime();
+    }, this.isLowPerformanceDevice ? 90 : 40);
+  },
+
+  warmWorkspaceInteractionRuntime() {
+    if (this.interactionRuntimeWarmed) return;
+    try {
+      this.ensurePhysicsRuntime();
+      if (!this.physicsEngine && this.data.isLooseMode && !(this.data.selected || []).length) {
+        this.createPhysicsEngine();
+      }
+    } catch (error) {
+      logWorkspaceWarning('workspace physics warmup failed:', error && (error.message || error));
+    }
+    clearTimeout(this.audioRuntimeWarmupTimer);
+    this.audioRuntimeWarmupTimer = setTimeout(() => {
+      this.audioRuntimeWarmupTimer = null;
+      try {
+        this.ensureAudioPlayers();
+      } catch (error) {
+        logWorkspaceWarning('workspace audio warmup failed:', error && (error.message || error));
+      }
+      this.interactionRuntimeWarmed = true;
+    }, this.isLowPerformanceDevice ? 80 : 40);
   },
 
   getShareTokenFromQuery(query = {}) {
@@ -1524,18 +1566,27 @@ Page({
 
   materialPagePayloadSignature(payload = {}) {
     const pagination = payload.pagination || {};
-    const materials = (payload.materials || []).map(item => [
-      item.id || '',
-      item.skuId || item.sku_id || '',
-      item.material_code || '',
-      item.name || '',
-      item.series || '',
-      item.category || '',
-      item.image_url || '',
-      item.size || '',
-      item.price || '',
-      item.grade || ''
-    ].join('~'));
+    const materials = (payload.materials || []).map(item => {
+      const physical = resolveMaterialGeometry(item);
+      return [
+        item.id || '',
+        item.skuId || item.sku_id || '',
+        item.material_code || '',
+        item.name || '',
+        item.series || '',
+        item.category || '',
+        item.image_url || '',
+        item.size || '',
+        item.price || '',
+        item.grade || '',
+        physical.shape,
+        physical.placementMode,
+        physical.imageStringAxisDeg,
+        physical.stringAxisWidthMm,
+        physical.bodyWidthMm,
+        physical.bodyHeightMm
+      ].join('~');
+    });
     return JSON.stringify({
       version: payload.version || payload.updated_at || '',
       page: pagination.page || '',
@@ -1700,6 +1751,14 @@ Page({
       series: repairMaybeMojibakeText(sku.series || item.series),
       grade: repairMaybeMojibakeText(sku.grade || item.grade),
       name: repairMaybeMojibakeText(sku.name || item.name),
+      description: safeMaterialDisplayText(
+        sku.description
+        || item.description
+        || item.introduction
+        || visual.description
+        || ''
+      ),
+      story: safeMaterialDisplayText(sku.story || item.story || visual.story || ''),
       price: Number(sku.price_per_bead ?? item.price ?? 0),
       size: Number(sku.size_mm ?? item.size ?? 8),
       weight: Number(sku.weight_g ?? item.weight ?? 1),
@@ -1826,6 +1885,7 @@ Page({
       || this.rebuildMaterialLookup(this.materialCatalog || DEFAULT_MATERIALS, { resetDesignCaches: false });
     return (selected || []).map(id => {
       const material = lookup[String(id || '').trim()] || {};
+      const physical = resolveMaterialGeometry(material);
       const effects = Array.isArray(material.effects) ? material.effects.join('|') : String(material.effects || '');
       const secondary = Array.isArray(material.secondary_elements)
         ? material.secondary_elements.join('|')
@@ -1849,7 +1909,13 @@ Page({
         material.primary_element,
         material.element_key,
         secondary,
-        effects
+        effects,
+        physical.shape,
+        physical.placementMode,
+        physical.imageStringAxisDeg,
+        physical.stringAxisWidthMm,
+        physical.bodyWidthMm,
+        physical.bodyHeightMm
       ].map(value => String(value || '').trim()).join('~');
     }).join('||');
   },
@@ -1951,7 +2017,13 @@ Page({
           ...placement,
           id,
           image_url: this.findCurrentMaterialImageUrl(id, placement.image_url)
-            || this.pickMaterialImageUrl(material)
+            || this.pickMaterialImageUrl(material),
+          material_params: {
+            ...(placement.material_params || {}),
+            ...(material.material_params || {})
+          },
+          string_axis_width_mm: material.string_axis_width_mm || 0,
+          beadSize: this.getMaterialDisplaySize(id)
         };
       });
     }
@@ -2014,14 +2086,27 @@ Page({
   },
 
   async ensurePendingMaterialDetails(options = {}) {
+    const importRevision = Number(
+      options.importRevision
+      || (this.pendingBackendRecommendation ? this.pendingBackendRecommendationRevision : 0)
+      || (this.pendingRecommendedRecipe ? this.pendingRecommendedRecipeRevision : 0)
+      || 0
+    );
+    if (importRevision && !this.isWorkspaceDesignRevisionCurrent(importRevision)) {
+      return false;
+    }
     const missing = this.pendingMaterialIds().filter(id => !this.hasResolvableMaterialIdentifier(id));
     if (missing.length) {
       await this.fetchMaterialsByIds(missing);
     }
+    if (importRevision && !this.isWorkspaceDesignRevisionCurrent(importRevision)) {
+      return false;
+    }
     let applied = false;
     const applyOptions = {
       silent: options.silent !== false,
-      keepPendingOnEmpty: options.keepPendingOnEmpty !== false
+      keepPendingOnEmpty: options.keepPendingOnEmpty !== false,
+      importRevision
     };
     if (this.pendingSharedDesign) {
       applied = (await this.applySharedDesign(this.pendingSharedDesign, applyOptions)) || applied;
@@ -2157,6 +2242,7 @@ Page({
     this.canvasImageCache = {};
     this.canvasTextureCache = {};
     this.materialImagePreloadSet = {};
+    this.materialNextImageUrlByGroup = Object.create(null);
     this.invalidateDesignMaterialCaches();
     return true;
   },
@@ -2268,18 +2354,10 @@ Page({
   materialOwnImageUrls(material = {}) {
     const urls = material.image_urls || material.image_pool || [];
     const list = Array.isArray(urls) ? urls : [urls];
-    const seen = Object.create(null);
-    const gallery = list.filter(url => {
-      const key = this.normalizeImageUrlIdentity(url);
-      if (!key || seen[key]) return false;
-      seen[key] = true;
-      return true;
-    });
-    if (materialTop(material) === 'accessory') {
-      const primaryKey = this.normalizeImageUrlIdentity(material.image_url);
-      return gallery.filter(url => this.normalizeImageUrlIdentity(url) !== primaryKey);
-    }
-    return gallery.length ? gallery : [material.image_url].filter(Boolean);
+    // The gallery is the sole source for workspace material images.  Keep its
+    // entries exactly as configured: duplicate URLs deliberately retain their
+    // weighting in the random draw, and the primary image is unrelated.
+    return list.map(url => String(url || '').trim()).filter(Boolean);
   },
 
   buildMaterialImagePoolIndex(materials = []) {
@@ -2302,30 +2380,7 @@ Page({
   },
 
   materialImageCandidates(material = {}) {
-    const pool = [];
-    const seen = {};
-    const addUrls = item => {
-      this.materialOwnImageUrls(item).forEach(url => {
-        const key = this.normalizeImageUrlIdentity(url);
-        if (!key || seen[key]) return;
-        seen[key] = true;
-        pool.push(url);
-      });
-    };
-    addUrls(material);
-    if (materialTop(material) !== 'bead') return pool;
-    const groupKey = this.materialImageGroupKey(material);
-    if (!this.materialImagePoolIndex) {
-      this.materialImagePoolIndex = this.buildMaterialImagePoolIndex(this.materialCatalog || DEFAULT_MATERIALS);
-    }
-    const groupUrls = this.materialImagePoolIndex && this.materialImagePoolIndex[groupKey];
-    (groupUrls || []).forEach(url => {
-      const key = this.normalizeImageUrlIdentity(url);
-      if (!key || seen[key]) return;
-      seen[key] = true;
-      pool.push(url);
-    });
-    return pool;
+    return this.materialOwnImageUrls(material);
   },
 
   mergeMaterialImagePool(material = {}) {
@@ -2409,7 +2464,7 @@ Page({
     this.materialImagePoolWarmTimers[groupKey] = setTimeout(() => {
       delete this.materialImagePoolWarmTimers[groupKey];
       this.ensureMaterialImagePool(material).then(hydrated => {
-        const imageUrl = this.pickMaterialImageUrl(hydrated || material);
+        const imageUrl = this.peekNextMaterialImageUrl(hydrated || material);
         if (imageUrl && this.braceletCanvasState) {
           this.getCanvasImage(imageUrl);
         }
@@ -2420,15 +2475,33 @@ Page({
   pickMaterialImageUrl(material = {}) {
     const pool = this.materialImageCandidates(material);
     if (!pool.length) return '';
+    return pool[Math.floor(Math.random() * pool.length)] || '';
+  },
+
+  peekNextMaterialImageUrl(material = {}) {
+    const pool = this.materialImageCandidates(material);
+    if (!pool.length) return '';
     const groupKey = this.materialImageGroupKey(material);
-    const lastPicked = this.lastPickedMaterialImages && this.lastPickedMaterialImages[groupKey];
-    const candidates = pool.length > 1 && lastPicked
-      ? pool.filter(url => this.normalizeImageUrlIdentity(url) !== lastPicked)
-      : pool;
-    const picked = candidates[Math.floor(Math.random() * candidates.length)] || pool[Math.floor(Math.random() * pool.length)] || '';
-    this.lastPickedMaterialImages = this.lastPickedMaterialImages || {};
-    this.lastPickedMaterialImages[groupKey] = this.normalizeImageUrlIdentity(picked);
-    return picked;
+    if (!groupKey) return this.pickMaterialImageUrl(material);
+    this.materialNextImageUrlByGroup = this.materialNextImageUrlByGroup || Object.create(null);
+    const lockedUrl = this.materialNextImageUrlByGroup[groupKey];
+    if (lockedUrl && pool.includes(lockedUrl)) return lockedUrl;
+    const nextUrl = this.pickMaterialImageUrl(material);
+    this.materialNextImageUrlByGroup[groupKey] = nextUrl;
+    return nextUrl;
+  },
+
+  consumeNextMaterialImageUrl(material = {}) {
+    const imageUrl = this.peekNextMaterialImageUrl(material);
+    if (!imageUrl) return '';
+    const groupKey = this.materialImageGroupKey(material);
+    if (groupKey) {
+      this.materialNextImageUrlByGroup[groupKey] = this.pickMaterialImageUrl(material);
+    }
+    if (this.braceletCanvasState && this.data.visibleMaterials && this.data.visibleMaterials.length) {
+      this.scheduleMaterialPreload(this.data.visibleMaterials);
+    }
+    return imageUrl;
   },
 
   normalizeImageUrlIdentity(url = '') {
@@ -2761,6 +2834,7 @@ Page({
 
   buildBackendRecommendationSelected(payload = {}) {
     const plan = payload.bracelet_plan || {};
+    const layout = Array.isArray(plan.layout) ? plan.layout : [];
     const sizeByCode = {};
     const materialByCode = {};
     (plan.items || []).forEach(item => {
@@ -2769,11 +2843,22 @@ Page({
         materialByCode[item.code] = item.material_id || item.source_material_id || item.id;
       }
     });
-    return (plan.layout || [])
+    return layout
       .map(item => {
-        const explicitId = item.material_id || item.source_material_id || materialByCode[item.crystal_code] || '';
-        const resolvedExplicitId = explicitId ? this.resolveMaterialId(explicitId) : '';
-        if (resolvedExplicitId && this.hasMaterial(resolvedExplicitId)) return resolvedExplicitId;
+        const explicitIds = [
+          item.material_id,
+          item.source_material_id,
+          item.sku_id,
+          item.skuId,
+          item.material_code,
+          materialByCode[item.crystal_code]
+        ].map(value => String(value || '').trim()).filter(Boolean);
+        const resolvedExplicitId = explicitIds
+          .map(id => this.resolveMaterialId(id))
+          .find(id => id && this.hasMaterial(id));
+        if (resolvedExplicitId) return resolvedExplicitId;
+        const itemTop = String(item.top || item.kind || '').trim().toLowerCase();
+        if (itemTop === 'accessory') return '';
         return this.resolveBackendCrystalMaterialId(
           item.crystal_code,
           sizeByCode[item.crystal_code] || Number(item.bead_size_mm) || Number(plan.bead_size_mm) || Number(payload.bead_size_mm) || 8
@@ -2788,12 +2873,42 @@ Page({
 
   onShow() {
     wx.hideTabBar({ animation: false });
+    const workspacePreset = wx.getStorageSync('workspacePreset');
+    if (workspacePreset === 'backend-recommended') {
+      const intent = wx.getStorageSync('workspaceImportIntent') || {};
+      wx.removeStorageSync('workspacePreset');
+      wx.removeStorageSync('workspaceImportIntent');
+      wx.removeStorageSync('workspaceOpenDesign');
+      const importRevision = this.beginWorkspaceImportSession(
+        intent.id || `backend-recommended:${Date.now()}`
+      );
+      this.pendingBackendRecommendation = true;
+      this.pendingBackendRecommendationRevision = importRevision;
+      if (this.materialPayloadReady) {
+        this.ensurePendingMaterialDetails({
+          silent: false,
+          keepPendingOnEmpty: false,
+          importRevision
+        });
+      }
+      return;
+    }
+    if (workspacePreset === 'recommended') {
+      wx.removeStorageSync('workspacePreset');
+      const importRevision = this.beginWorkspaceImportSession(`recommended:${Date.now()}`);
+      this.pendingRecommendedRecipe = true;
+      this.pendingRecommendedRecipeRevision = importRevision;
+      if (this.materialPayloadReady) {
+        this.applyRecommendedRecipe({ importRevision });
+      }
+      return;
+    }
     if (this.workspaceHasShown) {
       this.refreshMaterialCatalogInBackground();
     } else {
       this.workspaceHasShown = true;
     }
-    if (this.data.workspaceCanvasVisible === false) {
+    if (this.data.workspaceCanvasVisible === false || this.data.workspaceCanvasSuppressed) {
       this.restoreWorkspaceCanvasAfterOverlay();
     } else if (this.braceletCanvasState) {
       this.scheduleMaterialPreload(this.data.visibleMaterials);
@@ -2810,18 +2925,6 @@ Page({
       this.pendingBackendRecommendation = false;
       this.pendingRecommendedRecipe = false;
       this.loadDraft();
-      return;
-    }
-    if (wx.getStorageSync('workspacePreset') === 'backend-recommended') {
-      wx.removeStorageSync('workspacePreset');
-      this.pendingBackendRecommendation = true;
-      this.applyBackendRecommendation();
-      return;
-    }
-    if (wx.getStorageSync('workspacePreset') === 'recommended') {
-      wx.removeStorageSync('workspacePreset');
-      this.pendingRecommendedRecipe = true;
-      this.applyRecommendedRecipe();
     }
   },
 
@@ -2865,17 +2968,25 @@ Page({
     clearTimeout(this.canvasRecoveryTimer);
     clearTimeout(this.physicsFrameRetryTimer);
     clearTimeout(this.dragPhysicsSyncTimer);
+    this.cancelCanvasFrame(this.pendingPhysicsLaunchFrame);
+    this.pendingPhysicsLaunchFrame = null;
     this.flightAnimationTimer = null;
     this.canvasFlightRetryTimer = null;
     this.canvasRecoveryTimer = null;
     this.physicsFrameRetryTimer = null;
     this.dragPhysicsSyncTimer = null;
     clearTimeout(this.audioPrewarmTimer);
+    clearTimeout(this.interactionRuntimeWarmupTimer);
+    clearTimeout(this.audioRuntimeWarmupTimer);
+    clearTimeout(this.canvasTextureWarmupTimer);
+    this.canvasTextureWarmupTimer = null;
+    this.canvasTextureWarmupByUrl = Object.create(null);
     clearTimeout(this.nonCriticalTaskTimer);
     clearTimeout(this.workspaceLoadingFallbackTimer);
     clearTimeout(this.workspaceLoadingDoneTimer);
     clearTimeout(this.workspaceLoadingHideTimer);
     clearTimeout(this.wristRulerSnapTimer);
+    this.flushWorkspaceHistoryPersistence();
     this.pauseMaterialBackgroundPreload();
     this.stopCanvasRenderLoop();
     this.clearWorkspaceFlightCanvas();
@@ -2890,6 +3001,7 @@ Page({
     this.audioPlayers = {};
     this.audioPlayerCursors = {};
     this.audioPlayersReady = false;
+    this.interactionRuntimeWarmed = false;
     this.stopPhysics();
     wx.showTabBar({ animation: false });
   },
@@ -2900,6 +3012,8 @@ Page({
     clearTimeout(this.dragPhysicsSyncTimer);
     clearTimeout(this.canvasFlightRetryTimer);
     clearTimeout(this.flightAnimationTimer);
+    clearTimeout(this.canvasTextureWarmupTimer);
+    this.canvasTextureWarmupTimer = null;
     this.physicsFrameRetryTimer = null;
     this.dragPhysicsSyncTimer = null;
     this.canvasFlightRetryTimer = null;
@@ -2914,6 +3028,8 @@ Page({
     const draft = wx.getStorageSync('currentDesign');
     this.resetWorkspaceRuntime();
     if (draft && draft.selected && draft.selected.length) {
+      const sourceContext = draft.sourceContext || draft.source_context || null;
+      this.sourceContext = sourceContext;
       this.setData({
         selected: draft.selected.map(id => LEGACY_ID_MAP[id] || id),
         placements: this.normalizePlacements(draft.selected, draft.placements, draft.sequence),
@@ -2929,10 +3045,13 @@ Page({
         isReleasingString: false,
         selectedBeadIndex: -1,
         draggingBeadIndex: -1,
-        dragDeleteArmed: false
+        dragDeleteArmed: false,
+        sourceContext,
+        workspacePlanLabel: this.workspaceSourceLabel(sourceContext || {})
       });
       this.recalculate();
     } else {
+      this.sourceContext = null;
       this.resetInteractionData({
         selected: [],
         placements: [],
@@ -2940,7 +3059,9 @@ Page({
         selectedItems: [],
         attachedPendantItems: [],
         selectedBeadIndex: -1,
-        isLooseMode: true
+        isLooseMode: true,
+        sourceContext: null,
+        workspacePlanLabel: '当前方案'
       }, () => this.recalculate());
     }
   },
@@ -2954,7 +3075,34 @@ Page({
     wx.setStorageSync('currentDesign', draft);
   },
 
+  beginWorkspaceImportSession(importId = '') {
+    this.workspaceDesignRevision = Number(this.workspaceDesignRevision || 0) + 1;
+    this.activeWorkspaceImportId = String(importId || `workspace-import:${Date.now()}`);
+    clearTimeout(this.persistDraftTimer);
+    this.persistDraftTimer = null;
+    this.resetWorkspaceRuntime();
+    this.historyStack = [];
+    this.redoStack = [];
+    if (wx.setStorageSync) wx.setStorageSync('workspaceHistory', []);
+    this.setData({ canUndo: false, canRedo: false });
+    return this.workspaceDesignRevision;
+  },
+
+  isWorkspaceDesignRevisionCurrent(revision) {
+    return Number(revision || 0) === Number(this.workspaceDesignRevision || 0);
+  },
+
+  workspaceSourceLabel(sourceContext = {}) {
+    const sourceLabel = String(sourceContext.source_label || '').trim();
+    const title = String(sourceContext.title || '').trim();
+    if (sourceLabel && title) return `${sourceLabel} · ${title}`;
+    return sourceLabel || title || '当前方案';
+  },
+
   applyRecommendedRecipe(options = {}) {
+    if (options.importRevision && !this.isWorkspaceDesignRevisionCurrent(options.importRevision)) {
+      return false;
+    }
     if (!this.materialPayloadReady) return false;
     const rawRecipe = wx.getStorageSync('recommendedRecipe') || ['aquamarine', 'amethyst', 'clearQuartz', 'moonstone'];
     const recipe = this.normalizedRecommendedRecipe(rawRecipe);
@@ -3004,17 +3152,27 @@ Page({
     const selected = expandSequenceToCount(recipeMaterialIds, targetCount);
     if (!selected.length) {
       if (!options.silent) wx.showToast({ title: '暂未匹配到可用珠材', icon: 'none' });
-      if (!options.keepPendingOnEmpty) this.pendingRecommendedRecipe = false;
+      if (!options.keepPendingOnEmpty) {
+        this.pendingRecommendedRecipe = false;
+        this.pendingRecommendedRecipeRevision = 0;
+      }
+      return false;
+    }
+    if (options.importRevision && !this.isWorkspaceDesignRevisionCurrent(options.importRevision)) {
       return false;
     }
     this.pendingRecommendedRecipe = false;
+    this.pendingRecommendedRecipeRevision = 0;
     this.resetWorkspaceRuntime();
-    this.pushHistory();
+    this.historyStack = [];
+    this.redoStack = [];
+    if (wx.setStorageSync) wx.setStorageSync('workspaceHistory', []);
     wx.removeStorageSync('recommendedRecipeContext');
     wx.setStorageSync('recommendedWristSize', wristSize);
     wx.setStorageSync('workspaceWristConfirmed', true);
     this.sourceContext = sourceContext;
-    const placements = this.normalizePlacements(selected);
+    const loosePlacements = this.normalizePlacements(selected);
+    const placements = this.rebuildRingPlacementsForVisualSlots(selected, loosePlacements, 0);
     this.replaceCurrentDesignWithImportedDraft({
       name: sourceContext.title,
       selected,
@@ -3037,26 +3195,42 @@ Page({
       isReleasingString: false,
       draggingBeadIndex: -1,
       dragDeleteArmed: false,
-      sourceContext
-    }, () => this.recalculate());
+      sourceContext,
+      workspacePlanLabel: this.workspaceSourceLabel(sourceContext),
+      canUndo: false,
+      canRedo: false
+    }, () => {
+      if (options.importRevision && !this.isWorkspaceDesignRevisionCurrent(options.importRevision)) return;
+      this.recalculate({ persist: false });
+    });
     return true;
   },
 
   applyBackendRecommendation(options = {}) {
+    if (options.importRevision && !this.isWorkspaceDesignRevisionCurrent(options.importRevision)) {
+      return false;
+    }
     const payload = wx.getStorageSync('diyWorkbenchPayload');
     if (!payload || !payload.bracelet_plan || !payload.bracelet_plan.layout) {
       if (!options.silent) wx.showToast({ title: '未找到推荐方案', icon: 'none' });
       if (!options.keepPendingOnEmpty) {
         this.pendingBackendRecommendation = false;
+        this.pendingBackendRecommendationRevision = 0;
         this.loadDraft();
       }
       return false;
     }
     if (!this.materialPayloadReady) return false;
     const baseSelected = this.buildBackendRecommendationSelected(payload);
-    if (!baseSelected.length) {
+    const backendLayout = Array.isArray(payload.bracelet_plan.layout)
+      ? payload.bracelet_plan.layout
+      : [];
+    if (!baseSelected.length || baseSelected.length !== backendLayout.length) {
       if (!options.silent) wx.showToast({ title: '推荐方案暂未匹配到可用珠材', icon: 'none' });
-      if (!options.keepPendingOnEmpty) this.pendingBackendRecommendation = false;
+      if (!options.keepPendingOnEmpty) {
+        this.pendingBackendRecommendation = false;
+        this.pendingBackendRecommendationRevision = 0;
+      }
       return false;
     }
     const sourceContext = payload.source_context || {
@@ -3073,24 +3247,60 @@ Page({
     if (recommendationItems.length !== baseSelected.length
       || recommendationItems.some(item => !materialIsWorkspaceSupported(item))) {
       if (!options.silent) wx.showToast({ title: '推荐材料已更新，请重新生成方案', icon: 'none' });
-      if (!options.keepPendingOnEmpty) this.pendingBackendRecommendation = false;
+      if (!options.keepPendingOnEmpty) {
+        this.pendingBackendRecommendation = false;
+        this.pendingBackendRecommendationRevision = 0;
+      }
       return false;
     }
     const recommendedCount = recommendedStringedBeadCount(recommendationItems, wristSize);
-    const selected = expandSequenceToCount(baseSelected, recommendedCount);
+    const backendValidation = payload.bracelet_plan.validation || {};
+    const isDesignerLayout = payload.source === 'custom_design'
+      || (payload.source_context || {}).source === 'custom_design';
+    const backendLayoutIsTrusted = backendValidation.is_valid === true
+      && baseSelected.length === backendLayout.length
+      && (isDesignerLayout || baseSelected.length >= MIN_STRING_BEAD_COUNT)
+      && baseSelected.length > 0
+      && baseSelected.length <= MAX_RECOMMENDED_RECIPE_BEADS;
+    const selected = backendLayoutIsTrusted
+      ? baseSelected
+      : expandSequenceToCount(baseSelected, recommendedCount);
+    if (options.importRevision && !this.isWorkspaceDesignRevisionCurrent(options.importRevision)) {
+      return false;
+    }
     this.pendingBackendRecommendation = false;
+    this.pendingBackendRecommendationRevision = 0;
     this.resetWorkspaceRuntime();
-    this.pushHistory();
+    this.historyStack = [];
+    this.redoStack = [];
+    if (wx.setStorageSync) wx.setStorageSync('workspaceHistory', []);
     wx.setStorageSync('recommendedWristSize', wristSize);
     wx.setStorageSync('workspaceWristConfirmed', true);
-    this.sourceContext = sourceContext;
-    const placements = this.normalizePlacements(selected);
+    const resolvedSourceContext = {
+      ...sourceContext,
+      recommendation_validation: backendValidation,
+      target_bead_count: selected.length
+    };
+    this.sourceContext = resolvedSourceContext;
+    const exactPlacements = backendLayoutIsTrusted
+      ? backendLayout.map((item, index) => ({
+          ...item,
+          id: selected[index],
+          image_url: item.selected_image_url || item.image_url || ''
+        }))
+      : [];
+    const loosePlacements = this.normalizePlacements(
+      selected,
+      exactPlacements,
+      backendLayoutIsTrusted ? backendLayout : []
+    );
+    const placements = this.rebuildRingPlacementsForVisualSlots(selected, loosePlacements, 0);
     this.replaceCurrentDesignWithImportedDraft({
       name: sourceContext.title || payload.name || payload.bracelet_plan.title,
       selected,
       placements,
       wristSize,
-      sourceContext
+      sourceContext: resolvedSourceContext
     });
     this.setData({
       wristSize,
@@ -3098,6 +3308,7 @@ Page({
       placements,
       isLooseMode: false,
       selectedBeadIndex: -1,
+      selectedBeadInfo: null,
       showTip: false,
       canvasFlightActive: false,
       flightBead: null,
@@ -3107,8 +3318,28 @@ Page({
       isReleasingString: false,
       draggingBeadIndex: -1,
       dragDeleteArmed: false,
-      sourceContext
-    }, () => this.recalculate());
+      sourceContext: resolvedSourceContext,
+      workspacePlanLabel: this.workspaceSourceLabel(resolvedSourceContext),
+      canUndo: false,
+      canRedo: false
+    }, () => {
+      if (options.importRevision && !this.isWorkspaceDesignRevisionCurrent(options.importRevision)) return;
+      this.recalculate({ persist: false });
+      // switchTab reuses the existing workspace page. In some WeChat runtimes
+      // the 2D canvas backing surface remains stale after the recommendation
+      // replaces the complete design, even though draw calls succeed. Resetting
+      // the canvas dimensions through initWorkspaceCanvases makes the imported
+      // bracelet visible immediately.
+      wx.nextTick(() => {
+        if (options.importRevision && !this.isWorkspaceDesignRevisionCurrent(options.importRevision)) return;
+        // recalculate() may already have queued a frame. Cancel it before
+        // setupCanvasNode resets the backing bitmap, otherwise the init render
+        // can be skipped because canvasFramePending is still true.
+        this.stopCanvasRenderLoop();
+        this.braceletCanvasDirty = true;
+        this.initWorkspaceCanvases();
+      });
+    });
     if (!options.silent) wx.showToast({ title: '已载入专属推荐', icon: 'success' });
     return true;
   },
@@ -3122,6 +3353,14 @@ Page({
         ? previous
         : this.createLoosePlacement(index, id, normalized);
       const material = this.findMaterialById(id) || {};
+      const storedImageUrl = previous && previous.image_url
+        || snapshot.image_url
+        || firstWorkspaceImageUrl(snapshot)
+        || '';
+      const imageCandidates = this.materialImageCandidates(material);
+      const imageUrl = imageCandidates.length
+        ? (this.findCurrentMaterialImageUrl(id, storedImageUrl) || this.pickMaterialImageUrl(material))
+        : storedImageUrl;
       const size = material.size
         || material.size_mm
         || previous && (previous.size || previous.diameter || previous.size_mm)
@@ -3146,10 +3385,7 @@ Page({
       });
       normalized.push({
         id,
-        image_url: this.findCurrentMaterialImageUrl(id, previous && previous.image_url)
-          || snapshot.image_url
-          || firstWorkspaceImageUrl(snapshot)
-          || this.pickMaterialImageUrl(material),
+        image_url: imageUrl,
         name: material.name
           || material.series
           || previous && (previous.name || previous.material_name || previous.materialName)
@@ -3189,7 +3425,7 @@ Page({
     return material ? resolveMaterialGeometry(material).displaySizeRpx : 54;
   },
 
-  createLoosePlacement(index, id, existingPlacements = []) {
+  createLoosePlacement(index, id, existingPlacements = [], imageUrl = '') {
     const layout = this.getStageLayout();
     const seed = Array.from(String(id)).reduce((sum, char) => sum + char.charCodeAt(0), index * 53);
     const beadSize = this.getMaterialDisplaySize(id);
@@ -3213,7 +3449,7 @@ Page({
     }
     return {
       id,
-      image_url: this.pickMaterialImageUrl(this.findMaterialById(id) || {}),
+      image_url: imageUrl || this.pickMaterialImageUrl(this.findMaterialById(id) || {}),
       dx: 0,
       dy: 0,
       looseX,
@@ -3310,6 +3546,7 @@ Page({
       }
       if (audio.onError) {
         audio.onError(error => {
+          audio.__playing = false;
           const now = Date.now();
           if (now - Number(audio.__lastErrorLogAt || 0) > 3000) {
             audio.__lastErrorLogAt = now;
@@ -3346,6 +3583,8 @@ Page({
   pickAudioPlayer(name) {
     const pool = this.audioPlayers && this.audioPlayers[name];
     if (!Array.isArray(pool) || !pool.length) return pool || null;
+    const idlePlayer = pool.find(audio => audio && !audio.__playing);
+    if (idlePlayer) return idlePlayer;
     const cursor = Number(this.audioPlayerCursors[name] || 0);
     this.audioPlayerCursors[name] = cursor + 1;
     return pool[cursor % pool.length];
@@ -3729,16 +3968,20 @@ Page({
     query.select('#braceletCanvas').fields({ node: true, size: true });
     query.select('#workspaceFlightCanvas').fields({ node: true, size: true });
     query.select('.bracelet-circle').boundingClientRect();
+    query.select('.material-drawer').boundingClientRect();
     query.exec(res => {
       const braceletInfo = res && res[0];
       const flightInfo = res && res[1];
       const circleRect = res && res[2];
+      const drawerRect = res && res[3];
       const braceletCanvasState = this.setupCanvasNode(braceletInfo, circleRect);
       if (!braceletCanvasState || !braceletCanvasState.ctx) {
         this.handleCanvasRendererFailure('bracelet canvas unavailable');
         return;
       }
       this.braceletCanvasState = braceletCanvasState;
+      this.workspaceCircleRect = circleRect;
+      this.materialDrawerRect = drawerRect;
       this.flightCanvasState = this.setupCanvasNode(flightInfo, {
         left: 0,
         top: 0,
@@ -3750,6 +3993,7 @@ Page({
       if (this.data.canvasRenderError) this.setData({ canvasRenderError: false });
       this.scheduleCanvasRender();
       this.scheduleMaterialPreload(this.data.visibleMaterials);
+      this.scheduleWorkspaceInteractionWarmup();
       this.markWorkspaceReady('canvas');
       if (this.flightQueue && this.flightQueue.length) this.processCanvasFlightQueue();
     });
@@ -3760,6 +4004,8 @@ Page({
     this.stopCanvasRenderLoop();
     this.braceletCanvasState = null;
     this.flightCanvasState = null;
+    this.workspaceCircleRect = null;
+    this.materialDrawerRect = null;
     this.canvasImageCache = {};
     this.canvasTextureCache = {};
     this.canvasShadowCache = {};
@@ -3921,19 +4167,28 @@ Page({
 
   hideWorkspaceCanvasForOverlay() {
     this.stopCanvasRenderLoop();
+    this.clearWorkspaceFlightCanvas();
     this.setData({
+      // 原生 canvas 在小程序中可能脱离普通 z-index/visibility 层级，
+      // 详情弹窗期间直接卸载节点，避免画布内容穿透到弹窗内部。
       workspaceCanvasVisible: false,
+      workspaceCanvasSuppressed: true,
       canvasFlightActive: false
     });
   },
 
   restoreWorkspaceCanvasAfterOverlay() {
-    if (this.data.workspaceCanvasVisible) return;
-    this.setData({ workspaceCanvasVisible: true }, () => {
-      wx.nextTick(() => {
-        this.initWorkspaceCanvases();
-        this.scheduleCanvasRender();
-      });
+    const canvasNodeMissing = this.data.workspaceCanvasVisible === false || !this.braceletCanvasState;
+    if (!this.data.workspaceCanvasSuppressed && !canvasNodeMissing) return;
+    this.setData({
+      workspaceCanvasVisible: true,
+      workspaceCanvasSuppressed: false
+    }, () => {
+      if (canvasNodeMissing) {
+        wx.nextTick(() => this.initWorkspaceCanvases());
+        return;
+      }
+      this.scheduleCanvasRender();
     });
   },
 
@@ -4387,6 +4642,7 @@ Page({
       entry.loading = false;
       entry.loaded = true;
       entry.lastUsedAt = Date.now();
+      this.scheduleCanvasTextureWarmup();
       this.scheduleCanvasImageReadyRender(url);
     };
     image.onerror = () => {
@@ -4397,6 +4653,42 @@ Page({
     };
     image.src = url;
     return null;
+  },
+
+  warmCanvasMaterialTextures(material = {}, imageUrl = '') {
+    const url = String(imageUrl || material.image_url || '').trim();
+    if (!url) return false;
+    const item = { ...material, image_url: url };
+    const image = this.getCanvasImage(url);
+    if (!image) {
+      this.canvasTextureWarmupByUrl = this.canvasTextureWarmupByUrl || Object.create(null);
+      const key = `${item.id || item.skuId || item.sku_id || item.material_code || item.name || ''}::${url}`;
+      const entries = this.canvasTextureWarmupByUrl[url] || [];
+      if (!entries.some(entry => entry.key === key)) entries.push({ key, item });
+      this.canvasTextureWarmupByUrl[url] = entries;
+      return false;
+    }
+    const textureSize = resolveMaterialGeometry(item, { maxDisplayRpx: 72 }).displaySizeRpx;
+    this.getCanvasBeadTexture(item, textureSize);
+    return true;
+  },
+
+  scheduleCanvasTextureWarmup() {
+    clearTimeout(this.canvasTextureWarmupTimer);
+    this.canvasTextureWarmupTimer = setTimeout(() => {
+      this.canvasTextureWarmupTimer = null;
+      if (this.isMaterialPreloadBusy()) {
+        this.scheduleCanvasTextureWarmup();
+        return;
+      }
+      const pending = this.canvasTextureWarmupByUrl || {};
+      const url = Object.keys(pending)[0];
+      if (!url) return;
+      const entries = pending[url] || [];
+      delete pending[url];
+      entries.forEach(entry => this.warmCanvasMaterialTextures(entry.item, url));
+      if (Object.keys(pending).length) this.scheduleCanvasTextureWarmup();
+    }, this.isLowPerformanceDevice ? 90 : 32);
   },
 
   hasCanvasImagePreloadRecord(url) {
@@ -4417,7 +4709,11 @@ Page({
 
   materialPreloadSignature(materials = []) {
     return (materials || [])
-      .map(item => item && item.image_url)
+      .map(item => {
+        if (!item) return '';
+        const url = this.peekNextMaterialImageUrl(item);
+        return url ? `${this.materialImageGroupKey(item)}::${url}` : '';
+      })
       .filter(Boolean)
       .join('|');
   },
@@ -4489,13 +4785,13 @@ Page({
     let infoQueued = 0;
     let canvasQueued = 0;
     (materials || []).some(item => {
-      const url = item && item.image_url;
+      const url = item && this.peekNextMaterialImageUrl(item);
       if (!url || seen[url]) return false;
       seen[url] = true;
       const preloadInfo = infoQueued < preloadCount && !this.hasMaterialImagePreloadRecord(url);
       const preloadCanvas = canvasQueued < canvasPreloadCount && !this.hasCanvasImagePreloadRecord(url);
       if (!preloadInfo && !preloadCanvas) return false;
-      queue.push({ url, preloadInfo, preloadCanvas });
+      queue.push({ url, preloadInfo, preloadCanvas, material: item });
       if (preloadInfo) infoQueued += 1;
       if (preloadCanvas) canvasQueued += 1;
       return infoQueued >= preloadCount && canvasQueued >= canvasPreloadCount;
@@ -4560,7 +4856,7 @@ Page({
     queue.splice(0, batchSize).forEach(task => {
       if (!task || !task.url) return;
       if (task.preloadCanvas && this.braceletCanvasState && this.braceletCanvasState.canvas) {
-        this.getCanvasImage(task.url);
+        this.warmCanvasMaterialTextures(task.material || {}, task.url);
       }
       if (task.preloadInfo && wx.getImageInfo) {
         if (!this.hasMaterialImagePreloadRecord(task.url)) {
@@ -4609,7 +4905,7 @@ Page({
     return Math.max(safeMin, Math.min(safeMax, bucket));
   },
 
-  getCanvasBeadTexture(item = {}, size = 64) {
+  getCanvasBeadTexture(item = {}, size = 64, options = {}) {
     const dpr = (this.braceletCanvasState && this.braceletCanvasState.dpr) || 1;
     const baseSize = Math.round(Number(size) || 64);
     const bucket = this.canvasRenderBucket(
@@ -4626,6 +4922,7 @@ Page({
       return cached.canvas;
     }
     if (cached && cached.failed) return null;
+    if (options.allowCreate === false) return null;
     if (!wx.createOffscreenCanvas) return null;
     const sourceImage = item.image_url ? this.getCanvasImage(item.image_url) : null;
     if (item.image_url && !sourceImage) return null;
@@ -4680,12 +4977,12 @@ Page({
   drawCanvasBeadShadowFallback(ctx, radius, hasImage) {
     const shadowStrength = hasImage ? 1 : 0.82;
     ctx.save();
-    ctx.translate(radius * 0.26, radius * 0.90);
-    ctx.scale(1.22, 0.44);
+    ctx.translate(0, radius * 0.18);
+    ctx.scale(1.08, 0.56);
     const softShadow = ctx.createRadialGradient(0, 0, radius * 0.10, 0, 0, radius * 0.96);
-    softShadow.addColorStop(0, `rgba(42, 33, 24, ${0.30 * shadowStrength})`);
-    softShadow.addColorStop(0.40, `rgba(42, 33, 24, ${0.16 * shadowStrength})`);
-    softShadow.addColorStop(0.72, `rgba(42, 33, 24, ${0.055 * shadowStrength})`);
+    softShadow.addColorStop(0, `rgba(42, 33, 24, ${0.22 * shadowStrength})`);
+    softShadow.addColorStop(0.40, `rgba(42, 33, 24, ${0.11 * shadowStrength})`);
+    softShadow.addColorStop(0.72, `rgba(42, 33, 24, ${0.035 * shadowStrength})`);
     softShadow.addColorStop(1, 'rgba(44, 36, 26, 0)');
     ctx.fillStyle = softShadow;
     ctx.beginPath();
@@ -4694,12 +4991,12 @@ Page({
     ctx.restore();
 
     ctx.save();
-    ctx.translate(radius * 0.22, radius * 1.02);
-    ctx.scale(0.78, 0.20);
+    ctx.translate(0, radius * 0.28);
+    ctx.scale(0.80, 0.26);
     const contactShadow = ctx.createRadialGradient(0, 0, radius * 0.02, 0, 0, radius * 0.76);
-    contactShadow.addColorStop(0, `rgba(30, 24, 18, ${0.38 * shadowStrength})`);
-    contactShadow.addColorStop(0.42, `rgba(30, 24, 18, ${0.20 * shadowStrength})`);
-    contactShadow.addColorStop(0.72, `rgba(30, 24, 18, ${0.07 * shadowStrength})`);
+    contactShadow.addColorStop(0, `rgba(30, 24, 18, ${0.28 * shadowStrength})`);
+    contactShadow.addColorStop(0.42, `rgba(30, 24, 18, ${0.14 * shadowStrength})`);
+    contactShadow.addColorStop(0.72, `rgba(30, 24, 18, ${0.045 * shadowStrength})`);
     contactShadow.addColorStop(1, 'rgba(34, 27, 20, 0)');
     ctx.fillStyle = contactShadow;
     ctx.beginPath();
@@ -4712,7 +5009,7 @@ Page({
     if (!wx.createOffscreenCanvas) return null;
     const dpr = (this.braceletCanvasState && this.braceletCanvasState.dpr) || 1;
     const bucket = this.canvasRenderBucket(radius * 2 * dpr, 20, Infinity, CANVAS_SHADOW_BUCKET_STEP);
-    const key = `${hasImage ? 'image' : 'fallback'}::${bucket}`;
+    const key = `vertical-v2::${hasImage ? 'image' : 'fallback'}::${bucket}`;
     this.canvasShadowCache = this.canvasShadowCache || {};
     const cached = this.canvasShadowCache[key];
     if (cached && cached.ready) {
@@ -4759,9 +5056,9 @@ Page({
 
   drawCanvasNonRoundShadow(ctx, width, height) {
     const radiusX = Math.max(6, width * 0.48);
-    const radiusY = Math.max(3, height * 0.18);
+    const radiusY = Math.max(3, height * 0.22);
     ctx.save();
-    ctx.translate(width * 0.10, height * 0.48);
+    ctx.translate(0, height * 0.10);
     ctx.scale(radiusX, radiusY);
     const shadow = ctx.createRadialGradient(0, 0, 0.08, 0, 0, 1);
     shadow.addColorStop(0, 'rgba(35,29,23,.26)');
@@ -4772,124 +5069,6 @@ Page({
     ctx.arc(0, 0, 1, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
-  },
-
-  isSilverToneMetalMaterial(item = {}) {
-    const sku = item.sku || {};
-    const fields = [
-      item.id,
-      item.skuId,
-      item.material_code,
-      item.name,
-      item.category,
-      item.series,
-      item.grade,
-      item.color_name,
-      sku.id,
-      sku.sku_id,
-      sku.material_code,
-      sku.name,
-      sku.category,
-      sku.series,
-      sku.grade
-    ];
-    const text = fields.map(value => repairMaybeMojibakeText(value)).filter(Boolean).join(' ').toLowerCase();
-    if (!text) return false;
-    if (/金色|黄金|亮金|古金|玫瑰金|黄铜|红铜|古铜|gold|rose[ _-]?gold|brass|bronze|copper/.test(text)) return false;
-    const isExplicitSilver = /银色|纯银|银隔|s925|925银|silver|white[ _-]?metal/.test(text);
-    const isMetalAccessory = /合金|alloy|accessory[_-]?metal|metal[_-]?(?:spacer|accessory)/.test(text)
-      && String(sku.top || item.top || '') === 'accessory';
-    return isExplicitSilver || isMetalAccessory;
-  },
-
-  getStudioMetalLightIntensity(sprite = {}) {
-    const state = sprite.screenSpace ? this.flightCanvasState : this.braceletCanvasState;
-    const width = Math.max(1, Number(state && state.width) || Number(this.stageLayout && this.stageLayout.size) || 600);
-    const height = Math.max(1, Number(state && state.height) || Number(this.stageLayout && this.stageLayout.size) || 600);
-    const x = Number.isFinite(Number(sprite.x)) ? Number(sprite.x) : width / 2;
-    const y = Number.isFinite(Number(sprite.y)) ? Number(sprite.y) : height / 2;
-    const vertical = 1 - Math.max(0, Math.min(1, y / height));
-    const centerProximity = 1 - Math.max(0, Math.min(1, Math.abs(x - width / 2) / (width * 0.62)));
-    return Math.max(0.68, Math.min(1, 0.68 + vertical * 0.22 + centerProximity * 0.10));
-  },
-
-  drawStudioMetalLightMask(ctx, width, height, rotationDeg = 0, mirrorX = false) {
-    if (!ctx || !ctx.createLinearGradient || !ctx.createRadialGradient) return;
-    const safeWidth = Math.max(1, Number(width) || 1);
-    const safeHeight = Math.max(1, Number(height) || 1);
-    const centerX = safeWidth / 2;
-    const centerY = safeHeight / 2;
-    const rotation = Number(rotationDeg || 0) * Math.PI / 180;
-    const sin = Math.sin(rotation);
-    const cos = Math.cos(rotation);
-    const inverseScreenPoint = (screenX, screenY) => {
-      let localX = cos * screenX + sin * screenY;
-      const localY = -sin * screenX + cos * screenY;
-      if (mirrorX) localX *= -1;
-      return { x: centerX + localX, y: centerY + localY };
-    };
-    const lightStart = inverseScreenPoint(0, -safeHeight * 0.58);
-    const lightEnd = inverseScreenPoint(0, safeHeight * 0.58);
-    const highlightCenter = inverseScreenPoint(-safeWidth * 0.16, -safeHeight * 0.28);
-
-    const silverLift = ctx.createLinearGradient(lightStart.x, lightStart.y, lightEnd.x, lightEnd.y);
-    silverLift.addColorStop(0, 'rgba(252, 254, 255, 0.66)');
-    silverLift.addColorStop(0.30, 'rgba(232, 239, 244, 0.38)');
-    silverLift.addColorStop(0.64, 'rgba(255, 255, 255, 0.18)');
-    silverLift.addColorStop(1, 'rgba(209, 219, 226, 0.12)');
-    ctx.fillStyle = silverLift;
-    ctx.fillRect(0, 0, safeWidth, safeHeight);
-
-    const specular = ctx.createRadialGradient(
-      highlightCenter.x,
-      highlightCenter.y,
-      0,
-      highlightCenter.x,
-      highlightCenter.y,
-      Math.max(safeWidth, safeHeight) * 0.42
-    );
-    specular.addColorStop(0, 'rgba(255, 255, 255, 0.98)');
-    specular.addColorStop(0.14, 'rgba(255, 255, 255, 0.76)');
-    specular.addColorStop(0.46, 'rgba(246, 250, 252, 0.26)');
-    specular.addColorStop(1, 'rgba(255, 255, 255, 0)');
-    ctx.fillStyle = specular;
-    ctx.fillRect(0, 0, safeWidth, safeHeight);
-  },
-
-  getCanvasMetalLightTexture(item = {}, size = 64, rotationDeg = 0, mirrorX = false) {
-    if (!this.isSilverToneMetalMaterial(item) || !item.image_url || !wx.createOffscreenCanvas) return null;
-    const sourceImage = this.getCanvasImage(item.image_url);
-    if (!sourceImage) return null;
-    const dpr = (this.braceletCanvasState && this.braceletCanvasState.dpr) || 1;
-    const bucket = this.canvasRenderBucket(Math.round(Number(size) || 64) * dpr, 64, 256, CANVAS_TEXTURE_BUCKET_STEP);
-    const rotationStep = this.isLowPerformanceDevice ? 90 : 45;
-    let rotationBucket = Math.round((Number(rotationDeg) || 0) / rotationStep) * rotationStep;
-    rotationBucket = ((rotationBucket % 360) + 360) % 360;
-    const key = `studio-light::${item.id || item.skuId || item.image_url || item.name || 'metal'}::${item.image_url}::${bucket}::${rotationBucket}::${mirrorX ? 1 : 0}`;
-    this.canvasTextureCache = this.canvasTextureCache || {};
-    const cached = this.canvasTextureCache[key];
-    if (cached && cached.ready) {
-      cached.lastUsedAt = Date.now();
-      return cached.canvas;
-    }
-    if (cached && cached.failed) return null;
-    try {
-      const canvas = wx.createOffscreenCanvas({ type: '2d', width: bucket, height: bucket });
-      const ctx = canvas.getContext('2d');
-      if (!ctx) return null;
-      ctx.clearRect(0, 0, bucket, bucket);
-      this.drawStudioMetalLightMask(ctx, bucket, bucket, rotationBucket, mirrorX);
-      ctx.globalCompositeOperation = 'destination-in';
-      ctx.drawImage(sourceImage, 0, 0, bucket, bucket);
-      ctx.globalCompositeOperation = 'source-over';
-      this.canvasTextureCache[key] = { ready: true, canvas, lastUsedAt: Date.now() };
-      this.trimCanvasTextureCache();
-      return canvas;
-    } catch (error) {
-      this.canvasTextureCache[key] = { ready: false, failed: true, lastUsedAt: Date.now() };
-      this.trimCanvasTextureCache();
-      return null;
-    }
   },
 
   drawCanvasBead(ctx, sprite) {
@@ -4945,7 +5124,9 @@ Page({
       ctx.clip();
     }
     const textureSize = Math.max(drawWidth, drawHeight);
-    const texture = this.getCanvasBeadTexture(sprite.item, textureSize);
+    const texture = this.getCanvasBeadTexture(sprite.item, textureSize, {
+      allowCreate: !sprite.screenSpace
+    });
     const image = texture ? null : this.getCanvasImage(sprite.item.image_url);
     if (texture) {
       ctx.drawImage(texture, -drawWidth / 2, -drawHeight / 2, drawWidth, drawHeight);
@@ -4963,18 +5144,6 @@ Page({
       ctx.beginPath();
       ctx.arc(-radius * 0.24, -radius * 0.30, radius * 0.20, 0, Math.PI * 2);
       ctx.fill();
-    }
-    const metalLightTexture = this.getCanvasMetalLightTexture(
-      sprite.item,
-      textureSize,
-      Number(sprite.rotation) || 0,
-      Boolean(sprite.mirrorX)
-    );
-    if (metalLightTexture) {
-      ctx.save();
-      ctx.globalAlpha = (sprite.deleteReady ? 0.58 : 1) * opacity * this.getStudioMetalLightIntensity(sprite);
-      ctx.drawImage(metalLightTexture, -drawWidth / 2, -drawHeight / 2, drawWidth, drawHeight);
-      ctx.restore();
     }
     if (!hasImage) {
       const shade = ctx.createRadialGradient(-radius * 0.24, -radius * 0.28, radius * 0.08, 0, 0, radius);
@@ -5958,15 +6127,58 @@ Page({
     });
   },
 
+  getAdaptivePhysicsInterval(now = Date.now()) {
+    const baseInterval = Number(this.physicsTimerInterval) || 33;
+    const bodies = this.physicsBodies || [];
+    const data = this.data || {};
+    const hasActiveMotion = bodies.some(body => {
+      if (!body || body.isStatic) return false;
+      const plugin = body.plugin || {};
+      if (Number(plugin.launchAssistUntil) > now) return true;
+      const velocity = body.velocity || {};
+      return Math.hypot(
+        Number(velocity.x) || 0,
+        Number(velocity.y) || 0
+      ) > 12;
+    });
+    const needsResponsivePhysics = !!(
+      this.physicsTargets
+      || this.pendingFrozenImpact
+      || this.dragState
+      || this.ringDragState
+      || this.ringSlideState
+      || data.isShuffling
+      || data.isStringingFinishing
+      || data.isReleasingString
+      || hasActiveMotion
+    );
+    if (needsResponsivePhysics || bodies.length <= 18) return baseInterval;
+    if (bodies.length <= 28) {
+      return Math.max(baseInterval, this.isLowPerformanceDevice ? 38 : (this.isRealDevice ? 28 : 24));
+    }
+    return Math.max(baseInterval, this.isLowPerformanceDevice ? 42 : (this.isRealDevice ? 34 : 30));
+  },
+
   runPhysics() {
     if (!this.physicsEngine || this.physicsTimer) return;
     this.physicsLastTime = Date.now();
+    this.physicsLoopLastAt = this.physicsLastTime;
+    this.physicsAccumulatorMs = 0;
     this.physicsLastRender = 0;
     this.physicsStillFrames = 0;
     this.scheduleCanvasRender(true);
     this.physicsTimer = setInterval(() => {
       try {
         const now = Date.now();
+        const adaptiveInterval = this.getAdaptivePhysicsInterval(now);
+        const elapsed = Math.max(0, now - Number(this.physicsLoopLastAt || now));
+        this.physicsLoopLastAt = now;
+        this.physicsAccumulatorMs = Math.min(
+          adaptiveInterval * 2,
+          Number(this.physicsAccumulatorMs || 0) + elapsed
+        );
+        if (this.physicsAccumulatorMs + 0.5 < adaptiveInterval) return;
+        this.physicsAccumulatorMs = Math.max(0, this.physicsAccumulatorMs - adaptiveInterval);
         const layout = this.getStageLayout();
         this.physicsLastTime = now;
         this.sanitizePhysicsBodies(layout);
@@ -5978,7 +6190,7 @@ Page({
         };
         const useSubsteps = this.shouldUsePhysicsSubsteps(now, layout, motionProfile);
         const substepCount = useSubsteps ? (this.isLowPerformanceDevice ? 2 : 3) : 1;
-        const substepMs = (this.physicsStepMs || 1000 / 30) / substepCount;
+        const substepMs = adaptiveInterval / substepCount;
         for (let substepIndex = 0; substepIndex < substepCount; substepIndex += 1) {
           const substepNow = now + substepIndex * substepMs;
           if (this.physicsTargets) this.applyStringingForces(layout);
@@ -6403,6 +6615,7 @@ Page({
     }, () => {
       this.recalculate();
       this.stopPhysics();
+      this.refreshWorkspaceCanvasAfterDesignTransition();
     });
   },
 
@@ -6411,6 +6624,8 @@ Page({
       clearInterval(this.physicsTimer);
       this.physicsTimer = null;
     }
+    this.physicsLoopLastAt = 0;
+    this.physicsAccumulatorMs = 0;
     if (this.data.isLooseMode && this.physicsBodies && this.physicsBodies.length) {
       this.setLivePlacements(this.buildPhysicsPlacementsSnapshot());
     }
@@ -6441,10 +6656,13 @@ Page({
     this.pendingFrozenImpactAt = 0;
     this.physicsFramePending = false;
     this.suppressStringingSounds = false;
+    this.stringingStartQueued = false;
     this.clearLivePlacements();
   },
 
   clearFlightRuntime() {
+    this.cancelCanvasFrame(this.pendingPhysicsLaunchFrame);
+    this.pendingPhysicsLaunchFrame = null;
     clearTimeout(this.flightTimer);
     this.flightTimer = null;
     clearTimeout(this.flightSafetyTimer);
@@ -6464,6 +6682,7 @@ Page({
     this.clearFlightRuntime();
     this.clearLivePlacements();
     this.stopPhysics();
+    this.invalidateCanvasInteractionSnapshot();
     this.dragState = null;
     this.ringDragState = null;
     this.ringSlideState = null;
@@ -6474,6 +6693,24 @@ Page({
     this.workspaceSummaryCache = null;
     this.suppressBeadTapUntil = 0;
     this.lastPersistedDraftSignature = '';
+  },
+
+  invalidateCanvasInteractionSnapshot() {
+    // 推荐方案会一次替换整条手串。触摸命中必须等待新方案完成绘制，
+    // 不能继续复用上一条手串的画布精灵快照。
+    this.lastBraceletCanvasRenderSignature = '';
+    this.lastBraceletCanvasRenderSnapshot = null;
+    this.latestCanvasDrawSnapshot = null;
+    this.canvasHitTestSpritesCache = null;
+    this.braceletCanvasDirty = true;
+  },
+
+  refreshWorkspaceCanvasAfterDesignTransition() {
+    wx.nextTick(() => {
+      this.stopCanvasRenderLoop();
+      this.braceletCanvasDirty = true;
+      this.initWorkspaceCanvases();
+    });
   },
 
   resetInteractionData(extra = {}, callback) {
@@ -6571,8 +6808,32 @@ Page({
     });
     this.historyStack = history.slice(-30);
     this.redoStack = [];
-    wx.setStorage({ key: 'workspaceHistory', data: this.historyStack });
+    this.scheduleWorkspaceHistoryPersistence();
     this.setData({ canUndo: true, canRedo: false });
+  },
+
+  persistWorkspaceHistory() {
+    try {
+      wx.setStorage({ key: 'workspaceHistory', data: this.historyStack || [] });
+    } catch (error) {
+      logWorkspaceWarning('persist workspace history failed:', error && (error.message || error));
+    }
+  },
+
+  scheduleWorkspaceHistoryPersistence() {
+    clearTimeout(this.historyPersistTimer);
+    const delay = Number(this.historyPersistDelayMs) || 650;
+    this.historyPersistTimer = setTimeout(() => {
+      this.historyPersistTimer = null;
+      this.persistWorkspaceHistory();
+    }, delay);
+  },
+
+  flushWorkspaceHistoryPersistence() {
+    if (!this.historyPersistTimer) return;
+    clearTimeout(this.historyPersistTimer);
+    this.historyPersistTimer = null;
+    this.persistWorkspaceHistory();
   },
 
   currentDesignSnapshot() {
@@ -6627,7 +6888,7 @@ Page({
     }
     this.historyStack = history;
     this.redoStack = [...(this.redoStack || []), this.currentDesignSnapshot()].slice(-30);
-    wx.setStorage({ key: 'workspaceHistory', data: history });
+    this.scheduleWorkspaceHistoryPersistence();
     this.restoreDesignSnapshot(previous);
   },
 
@@ -6641,7 +6902,7 @@ Page({
     }
     this.redoStack = redo;
     this.historyStack = [...(this.historyStack || []), this.currentDesignSnapshot()].slice(-30);
-    wx.setStorage({ key: 'workspaceHistory', data: this.historyStack });
+    this.scheduleWorkspaceHistoryPersistence();
     this.restoreDesignSnapshot(next);
   },
 
@@ -6834,21 +7095,10 @@ Page({
         const cardClass = this.materialCardClass(cached, displayIndex, launchingMaterialId);
         return cached.cardClass === cardClass ? cached : { ...cached, cardClass };
       }
-      const seriesText = repairMaybeMojibakeText(item.series);
-      const effectsText = (item.effects || [])
-        .map(effect => safeMaterialDisplayText(effect))
-        .filter(effect => effect && !isMaterialGradeText(effect))
-        .slice(0, 2)
-        .join(' / ');
       const decorated = {
         ...item,
         baseCardClass: `material-card-${displayIndex}`,
-        cardClass: this.materialCardClass(item, displayIndex, launchingMaterialId),
-        materialToneClass: this.isSilverToneMetalMaterial(item) ? 'material-tone-silver' : '',
-        effectText: [
-          seriesText && seriesText !== item.name && !isMaterialGradeText(seriesText) ? seriesText : '',
-          effectsText
-        ].filter(Boolean).join(' / ')
+        cardClass: this.materialCardClass(item, displayIndex, launchingMaterialId)
       };
       this.rememberDecoratedMaterial(cacheKey, decorated);
       return decorated;
@@ -6949,69 +7199,91 @@ Page({
   },
 
   initWorkspaceGuide() {
-    if (wx.getStorageSync(WORKSPACE_GUIDE_STORAGE_KEY)) return;
-    this.setData({ showWorkspaceGuide: true });
+    this.workspaceGuideDismissed = !!wx.getStorageSync(WORKSPACE_GUIDE_STORAGE_KEY);
+    this.workspaceGuideStarted = false;
+  },
+
+  maybeShowWorkspaceGuide() {
+    if (this.workspaceGuideDismissed || this.workspaceGuideStarted || this.data.sharedDesignLoading) return;
+    this.workspaceGuideStarted = true;
+    this.showWorkspaceGuideStep(0);
+  },
+
+  showWorkspaceGuideStep(step) {
+    const safeStep = Math.max(0, Math.min(WORKSPACE_GUIDE_STEPS.length - 1, Number(step) || 0));
+    this.setData({
+      showWorkspaceGuide: true,
+      workspaceGuideStep: safeStep,
+      activeWorkspaceGuide: WORKSPACE_GUIDE_STEPS[safeStep],
+      workspaceGuideFocusStyle: ''
+    }, () => this.measureWorkspaceGuideFocus());
+  },
+
+  measureWorkspaceGuideFocus() {
+    const target = this.data.activeWorkspaceGuide && this.data.activeWorkspaceGuide.target;
+    if (!target || !this.data.showWorkspaceGuide) return;
+    wx.nextTick(() => {
+      wx.createSelectorQuery().in(this).select(`.workspace-guide-anchor-${target}`).boundingClientRect(rect => {
+        if (!rect || !this.data.showWorkspaceGuide || this.data.activeWorkspaceGuide.target !== target) return;
+        const padding = target === 'tray' ? 5 : 7;
+        this.setData({
+          workspaceGuideFocusStyle: [
+            `left:${Math.max(0, rect.left - padding)}px`,
+            `top:${Math.max(0, rect.top - padding)}px`,
+            `width:${rect.width + padding * 2}px`,
+            `height:${rect.height + padding * 2}px`
+          ].join(';')
+        });
+      }).exec();
+    });
   },
 
   dismissWorkspaceGuide(e) {
     const dataset = (e && e.currentTarget && e.currentTarget.dataset) || {};
     if (dataset.forever) {
       wx.setStorageSync(WORKSPACE_GUIDE_STORAGE_KEY, true);
+      this.workspaceGuideDismissed = true;
     }
     this.setData({ showWorkspaceGuide: false });
   },
 
-  openWristSetting() {
-    this.hideWorkspaceCanvasForOverlay();
-    this.setData({ showWristPicker: true });
-    wx.nextTick(() => this.prepareWristRuler(this.data.wristSize));
+  advanceWorkspaceGuide() {
+    const nextStep = Number(this.data.workspaceGuideStep || 0) + 1;
+    if (nextStep >= WORKSPACE_GUIDE_STEPS.length) {
+      this.dismissWorkspaceGuide({ currentTarget: { dataset: { forever: true } } });
+      return;
+    }
+    this.showWorkspaceGuideStep(nextStep);
   },
 
-  closeWristSetting() {
-    this.setData({ showWristPicker: false }, () => this.restoreWorkspaceCanvasAfterOverlay());
+  resumeWristGuideIfNeeded(confirmed = false) {
+    if (!this.workspaceGuideWaitingForWrist) return;
+    this.workspaceGuideWaitingForWrist = false;
+    this.showWorkspaceGuideStep(confirmed ? 1 : 0);
   },
 
-  prepareWristRuler(value = this.data.wristSize || 16) {
-    const tickWidth = this.getWristTickWidthPx();
-    const viewportWidth = this.getWristRulerViewportWidth();
-    const sidePadding = Math.max(0, Math.round((viewportWidth - tickWidth) / 2));
-    const wristValue = this.normalizeWristValue(value);
-    const ticks = this.buildWristRulerTicks();
-    this.wristRulerTickWidthPx = tickWidth;
-    this.wristRulerLastTick = Math.round((wristValue - WRIST_RULER_MIN) * 10);
-    this.wristRulerLastDisplay = this.formatWristValue(wristValue);
-    this.setData({
-      wristRulerTicks: ticks,
-      wristRulerTickWidth: tickWidth,
-      wristRulerSidePadding: sidePadding,
-      wristRulerValue: this.formatWristValue(wristValue),
-      wristRulerScrollLeft: this.wristValueToScrollLeft(wristValue, tickWidth)
+  restartWorkspaceGuide() {
+    this.workspaceGuideStarted = true;
+    this.setData({ showWristGuideModal: false }, () => {
+      this.restoreWorkspaceCanvasAfterOverlay();
+      this.showWorkspaceGuideStep(0);
     });
   },
 
-  getWristTickWidthPx() {
-    const windowWidth = Number(this.data.deviceInfo && this.data.deviceInfo.windowWidth) || 375;
-    return Math.max(8, Math.round(WRIST_RULER_TICK_RPX * windowWidth / 750 * 10) / 10);
+  openWristSetting() {
+    const guidingWrist = this.data.showWorkspaceGuide && this.data.activeWorkspaceGuide.target === 'wrist';
+    if (guidingWrist) {
+      this.workspaceGuideWaitingForWrist = true;
+      this.setData({ showWorkspaceGuide: false, workspaceGuideFocusStyle: '' });
+    }
+    this.hideWorkspaceCanvasForOverlay();
+    this.setData({ showWristPicker: true });
   },
 
-  getWristRulerViewportWidth() {
-    const windowWidth = Number(this.data.deviceInfo && this.data.deviceInfo.windowWidth) || 375;
-    const horizontalPaddingPx = 60 * windowWidth / 750;
-    return Math.max(240, windowWidth - horizontalPaddingPx);
-  },
-
-  buildWristRulerTicks() {
-    const total = Math.round((WRIST_RULER_MAX - WRIST_RULER_MIN) / WRIST_RULER_STEP);
-    return Array.from({ length: total + 1 }).map((_, index) => {
-      const value = this.normalizeWristValue(WRIST_RULER_MIN + index * WRIST_RULER_STEP);
-      const isMajor = index % 10 === 0;
-      const isMid = index % 5 === 0;
-      return {
-        index,
-        value,
-        label: isMajor ? String(Math.round(value)) : '',
-        className: isMajor ? 'major' : (isMid ? 'middle' : 'minor')
-      };
+  closeWristSetting() {
+    this.setData({ showWristPicker: false }, () => {
+      this.restoreWorkspaceCanvasAfterOverlay();
+      this.resumeWristGuideIfNeeded();
     });
   },
 
@@ -7025,61 +7297,15 @@ Page({
     return this.normalizeWristValue(value).toFixed(1);
   },
 
-  wristValueToScrollLeft(value, tickWidth = this.wristRulerTickWidthPx || this.getWristTickWidthPx()) {
-    return Math.round((this.normalizeWristValue(value) - WRIST_RULER_MIN) * 10 * tickWidth);
-  },
-
-  scrollLeftToWristValue(scrollLeft) {
-    const tickWidth = this.wristRulerTickWidthPx || this.getWristTickWidthPx();
-    const index = Math.max(0, Math.min(150, Math.round((Number(scrollLeft) || 0) / tickWidth)));
-    return this.normalizeWristValue(WRIST_RULER_MIN + index * WRIST_RULER_STEP);
-  },
-
-  onWristRulerTouchStart() {
-    this.wristRulerInteracting = true;
-    clearTimeout(this.wristRulerSnapTimer);
-  },
-
-  onWristRulerTouchEnd() {
-    this.wristRulerInteracting = false;
-    clearTimeout(this.wristRulerSnapTimer);
-    this.wristRulerSnapTimer = setTimeout(() => this.snapWristRuler(), 220);
-  },
-
-  onWristRulerScroll(e) {
-    const scrollLeft = Number(e.detail && e.detail.scrollLeft) || 0;
-    const tickWidth = this.wristRulerTickWidthPx || this.getWristTickWidthPx();
-    const index = Math.max(0, Math.min(150, Math.round(scrollLeft / tickWidth)));
-    const value = this.normalizeWristValue(WRIST_RULER_MIN + index * WRIST_RULER_STEP);
-    const display = this.formatWristValue(value);
-    this.currentWristRulerIndex = index;
-    this.currentWristRulerScrollLeft = scrollLeft;
-    if (display !== this.wristRulerLastDisplay) {
-      this.wristRulerLastDisplay = display;
-      this.setData({ wristRulerValue: display });
-    }
-    this.wristRulerLastTick = index;
-    if (!this.wristRulerInteracting) {
-      clearTimeout(this.wristRulerSnapTimer);
-      this.wristRulerSnapTimer = setTimeout(() => this.snapWristRuler(), 180);
-    }
-  },
-
-  snapWristRuler() {
-    if (!this.data.showWristPicker) return;
-    const value = this.scrollLeftToWristValue(this.currentWristRulerScrollLeft || this.data.wristRulerScrollLeft);
-    this.setData({
-      wristRulerValue: this.formatWristValue(value),
-      wristRulerScrollLeft: this.wristValueToScrollLeft(value)
-    });
-  },
-
   confirmWristRuler() {
     const wristSize = this.normalizeWristValue(Number(this.data.wristRulerValue));
     const isSameWristSize = wristSize === Number(this.data.wristSize);
     const rememberedWristSize = this.rememberWristSize(wristSize);
     if (isSameWristSize) {
-      this.setData({ wristSize: rememberedWristSize, showWristPicker: false }, () => this.restoreWorkspaceCanvasAfterOverlay());
+      this.setData({ wristSize: rememberedWristSize, showWristPicker: false }, () => {
+        this.restoreWorkspaceCanvasAfterOverlay();
+        this.resumeWristGuideIfNeeded(true);
+      });
       wx.showToast({ title: `已是 ${this.formatWristValue(wristSize)}cm`, icon: 'none' });
       return;
     }
@@ -7091,8 +7317,15 @@ Page({
     this.setData({ wristSize: rememberedWristSize, showWristPicker: false }, () => {
       this.recalculate();
       this.restoreWorkspaceCanvasAfterOverlay();
+      this.resumeWristGuideIfNeeded(true);
     });
     wx.showToast({ title: `${this.formatWristValue(rememberedWristSize)}cm 手围`, icon: 'success' });
+  },
+
+  confirmWristPickerComponent(event) {
+    const value = Number(event && event.detail && event.detail.value);
+    this.setData({ wristRulerValue: this.formatWristValue(value) });
+    this.confirmWristRuler();
   },
 
   chooseWristSize(e) {
@@ -7101,7 +7334,10 @@ Page({
     const isSameWristSize = wristSize === Number(this.data.wristSize);
     const rememberedWristSize = this.rememberWristSize(wristSize);
     if (isSameWristSize) {
-      this.setData({ wristSize: rememberedWristSize, showWristPicker: false }, () => this.restoreWorkspaceCanvasAfterOverlay());
+      this.setData({ wristSize: rememberedWristSize, showWristPicker: false }, () => {
+        this.restoreWorkspaceCanvasAfterOverlay();
+        this.resumeWristGuideIfNeeded(true);
+      });
       wx.showToast({ title: `已是 ${this.formatWristValue(wristSize)}cm`, icon: 'none' });
       return;
     }
@@ -7113,11 +7349,13 @@ Page({
     this.setData({ wristSize: rememberedWristSize, showWristPicker: false }, () => {
       this.recalculate();
       this.restoreWorkspaceCanvasAfterOverlay();
+      this.resumeWristGuideIfNeeded(true);
     });
     wx.showToast({ title: `${this.formatWristValue(rememberedWristSize)}cm 手围`, icon: 'success' });
   },
 
   promptInitialWristSize() {
+    if (!this.workspaceGuideDismissed) return;
     if (wx.getStorageSync('workspaceWristConfirmed')) return;
     if (this.pendingSharedDesign || this.pendingShareToken || this.pendingBackendRecommendation || this.pendingRecommendedRecipe) return;
     const workspacePreset = wx.getStorageSync('workspacePreset');
@@ -7242,17 +7480,91 @@ Page({
       dragDeleteArmed: false
     }, () => {
       this.recalculate({ persistDelay: 260 });
-      wx.nextTick(() => this.startPhysicsFromCurrentDesign());
+      wx.nextTick(() => {
+        this.startPhysicsFromCurrentDesign();
+        this.refreshWorkspaceCanvasAfterDesignTransition();
+      });
     });
   },
 
   toggleStringMode() {
+    if (this.hasActiveStringModeTransition()) {
+      wx.showToast({ title: this.data.isReleasingString ? '正在散开，请稍候' : '正在成串，请稍候', icon: 'none' });
+      return;
+    }
+    if (this.hasStaleStringModeTransition()) {
+      const keepLooseMode = !!this.data.isLooseMode;
+      this.stopPhysics();
+      this.resetInteractionData({ isLooseMode: keepLooseMode }, () => {
+        this.recalculate({ persist: false });
+        this.toggleStringMode();
+      });
+      return;
+    }
     if (this.data.sharedDesignFrozen) this.setData({ sharedDesignFrozen: false });
     if (this.data.isLooseMode) {
+      if (this.isRecommendationWorkspaceSource()) {
+        this.stringCurrentDesign();
+        return;
+      }
       this.shuffleDesign();
       return;
     }
     this.releaseString();
+  },
+
+  hasActiveStringModeTransition() {
+    if (this.data.isReleasingString) return !!this.releaseStringTimer;
+    if (!this.data.isShuffling && !this.data.isStringingFinishing) return false;
+    return !!(
+      this.stringingStartQueued
+      || this.stringingFinishTimer
+      || this.stringingCompleteTimer
+      || this.physicsTargets
+      || this.physicsTimer
+    );
+  },
+
+  hasStaleStringModeTransition() {
+    return !!(
+      (this.data.isShuffling || this.data.isStringingFinishing || this.data.isReleasingString)
+      && !this.hasActiveStringModeTransition()
+    );
+  },
+
+  isRecommendationWorkspaceSource() {
+    const context = this.data.sourceContext || this.sourceContext || {};
+    const source = String(context.source || '').trim().toLowerCase();
+    const sourceLabel = String(context.source_label || '').trim();
+    return source === 'backend_recommendation'
+      || source === 'recommended_recipe'
+      || sourceLabel === '推荐方案';
+  },
+
+  stringCurrentDesign() {
+    if (this.data.selected.length < MIN_STRING_BEAD_COUNT) {
+      wx.showToast({ title: `至少选择${MIN_STRING_BEAD_COUNT}颗珠子成串`, icon: 'none' });
+      return;
+    }
+    this.pushHistory();
+    this.stopPhysics();
+    this.setData({
+      isLooseMode: true,
+      isShuffling: true,
+      isStringingFinishing: false,
+      isReleasingString: false,
+      selectedBeadIndex: -1,
+      selectedBeadInfo: null,
+      draggingBeadIndex: -1,
+      dragDeleteArmed: false
+    }, () => {
+      this.recalculate({ persist: false });
+      this.stringingStartQueued = true;
+      wx.nextTick(() => {
+        this.stringingStartQueued = false;
+        this.startStringingPhysics();
+      });
+    });
   },
 
   buildCurrentPersistedPlacements() {
@@ -7565,7 +7877,7 @@ Page({
   showWorkspaceHelp() {
     wx.showModal({
       title: 'DIY工作台帮助',
-      content: '点击材料可投入圆盘；拖动珠子调整位置，拖出圆盘可移除；随机成串会重新排列并随机旋转珠面；解除组串后可继续自由滚动和编辑。',
+      content: '点击材料可投入圆盘；成串后拖动珠子调整顺序，拖动外环旋转整串；拖出圆盘可移除；解除成串后可继续自由滚动和编辑。',
       showCancel: false,
       confirmText: '知道了'
     });
@@ -7573,27 +7885,98 @@ Page({
 
   stopPropagation() {},
 
-  openToolbox() {
-    wx.showActionSheet({
-      itemList: ['撤回上一步', '还原排列', '保存草稿', '分享方案', '调整手围', '去结算', '使用帮助', '清空设计'],
-      success: res => {
-        if (res.tapIndex === 0) this.undo();
-        if (res.tapIndex === 1) this.redo();
-        if (res.tapIndex === 2) this.saveDraft();
-        if (res.tapIndex === 3) this.prepareShareDesign();
-        if (res.tapIndex === 4) this.openWristSetting();
-        if (res.tapIndex === 5) this.checkoutCurrentDesign();
-        if (res.tapIndex === 6) this.showWorkspaceHelp();
-        if (res.tapIndex === 7) this.confirmClearDesign();
-      }
-    });
-  },
-
   showMaterialQueueToast(title) {
     const now = Date.now();
     if (now - (this.lastQueueToastAt || 0) < MATERIAL_QUEUE_TOAST_GUARD_MS) return;
     this.lastQueueToastAt = now;
     wx.showToast({ title, icon: 'none' });
+  },
+
+  buildMaterialDetail(material = {}) {
+    const physical = resolveMaterialGeometry(material);
+    const top = materialTop(material);
+    const category = safeMaterialDisplayText(material.category || '未分类');
+    const series = safeMaterialDisplayText(material.series || '');
+    const name = this.displayMaterialName(material);
+    const price = Number(material.price || 0);
+    const unit = top === 'accessory' ? '个' : '颗';
+    const effects = (Array.isArray(material.effects) ? material.effects : [material.effects])
+      .map(safeMaterialDisplayText)
+      .filter(Boolean);
+    const introduction = safeMaterialDisplayText(
+      material.description
+      || material.introduction
+      || `${name}，${physical.shape || '圆珠'}材质，适合用于日常 DIY 手串搭配。`
+    );
+    const story = safeMaterialDisplayText(material.story || '');
+    const galleryImages = this.materialOwnImageUrls(material);
+    const primaryImage = String(material.image_url || '').trim();
+    // 图库优先；图库尚未配置时，详情仍应展示材料卡已在使用的主图。
+    const images = galleryImages.length ? galleryImages : (primaryImage ? [primaryImage] : []);
+    const fields = [
+      { label: '分类', value: category },
+      ...(series && series !== category ? [{ label: '品种', value: series }] : []),
+      { label: '规格', value: physical.specText || material.card_spec_text || '--' },
+      { label: '计价单位', value: `每${unit}` }
+    ];
+    const fallbackColor = String(material.color || '#d6d0c5');
+    const fallbackShine = String(material.shine || 'rgba(255,255,255,.85)');
+    return {
+      id: String(material.id || ''),
+      cardIndex: Number((this.data.visibleMaterials || []).findIndex(item => String(item.id || '') === String(material.id || ''))),
+      name,
+      typeLabel: top === 'accessory' ? 'DIY 配饰' : 'DIY 珠材',
+      priceText: Number.isFinite(price) ? `¥${price.toFixed(2)} / ${unit}` : '--',
+      introduction,
+      story,
+      effects,
+      images,
+      fields,
+      fallbackStyle: `background:radial-gradient(circle at 32% 26%,${fallbackShine} 0 10%,${fallbackColor} 12% 58%,rgba(0,0,0,.22) 100%);`
+    };
+  },
+
+  openMaterialDetail(e) {
+    const id = String((e.currentTarget && e.currentTarget.dataset && e.currentTarget.dataset.id) || '').trim();
+    if (!id) return;
+    const material = this.findMaterialById(id);
+    if (!material) {
+      this.showMaterialQueueToast(this.data.materialsLoading ? '珠材加载中，请稍候' : '材料暂不可用');
+      return;
+    }
+    this.lastMaterialLongPress = { id, at: Date.now() };
+    // 原生 canvas 可能脱离普通 z-index 层级，打开详情前先暂停并隐藏盘面模型，
+    // 避免手串渲染层穿透材料详情页。
+    if (typeof this.hideWorkspaceCanvasForOverlay === 'function') {
+      this.hideWorkspaceCanvasForOverlay();
+    }
+    this.setData({
+      showMaterialDetail: true,
+      materialDetail: this.buildMaterialDetail(material)
+    });
+  },
+
+  closeMaterialDetail() {
+    this.setData({ showMaterialDetail: false, materialDetail: null });
+    if (typeof this.restoreWorkspaceCanvasAfterOverlay === 'function') {
+      this.restoreWorkspaceCanvasAfterOverlay();
+    }
+  },
+
+  addMaterialFromDetail() {
+    const detail = this.data.materialDetail || {};
+    const id = String(detail.id || '').trim();
+    if (!id) return;
+    this.closeMaterialDetail();
+    this.addMaterial({
+      currentTarget: {
+        dataset: {
+          id,
+          index: Number.isInteger(detail.cardIndex) && detail.cardIndex >= 0 ? detail.cardIndex : 0
+        }
+      },
+      ignoreLongPressGuard: true
+    });
   },
 
   getTapPoint(e = {}) {
@@ -7640,6 +8023,13 @@ Page({
 
   resolveMaterialFlightTarget(task = {}, material = {}, layout = this.getStageLayout()) {
     const beadSize = resolveMaterialGeometry(material).displaySizeRpx;
+    if (task.keepStringed && !this.data.isLooseMode) {
+      const insertion = this.buildStringedInsertion(task.id, task.placement);
+      const slot = insertion.visualSlots[insertion.selected.length - 1] || {};
+      if (Number.isFinite(Number(slot.x)) && Number.isFinite(Number(slot.y))) {
+        return { x: Number(slot.x), y: Number(slot.y), beadSize };
+      }
+    }
     const center = layout.center || 300;
     const rawX = Number(task.placement && task.placement.looseX);
     const rawY = Number(task.placement && task.placement.looseY);
@@ -7763,7 +8153,7 @@ Page({
     };
   },
 
-  async addMaterial(e) {
+  addMaterial(e) {
     if (this.data.canvasRenderError) {
       this.showMaterialQueueToast('请先重新加载工作台');
       return;
@@ -7776,6 +8166,10 @@ Page({
     const cardIndex = Number(e.currentTarget.dataset.index);
     if (!id) return;
     const now = Date.now();
+    const lastLongPress = this.lastMaterialLongPress || {};
+    if (!e.ignoreLongPressGuard
+      && String(lastLongPress.id || '') === String(id)
+      && now - Number(lastLongPress.at || 0) < MATERIAL_LONG_PRESS_TAP_SUPPRESS_MS) return;
     if (now - (this.lastMaterialTapAt || 0) < MATERIAL_TAP_GUARD_MS) return;
     this.lastMaterialTapAt = now;
     const material = this.findMaterialById(id);
@@ -7793,13 +8187,11 @@ Page({
       return;
     }
     this.ensureAudioPlayers();
-    let currentMaterial = material;
-    if (materialTop(material) === 'accessory') {
-      currentMaterial = await this.ensureMaterialImagePool(material);
-    } else if (this.canUseHydratedMaterialImagePool(material)) {
-      currentMaterial = await this.ensureMaterialImagePool(material);
-    } else {
-      this.warmMaterialImagePool(material);
+    const currentMaterial = material;
+    if (!this.materialOwnImageUrls(currentMaterial).length) {
+      this.warmMaterialImagePool(currentMaterial);
+      this.showMaterialQueueToast('图库准备中，请稍后再试');
+      return;
     }
     if (isBeadCap(currentMaterial)) {
       this.promptBeadCapPlacement(currentMaterial);
@@ -7816,26 +8208,28 @@ Page({
       return;
     }
     const queuedPlacements = this.flightQueue.map(task => task.placement);
+    const imageUrl = this.consumeNextMaterialImageUrl(currentMaterial);
     const placement = this.createLoosePlacement(
       pendingCount,
       id,
-      [...this.data.placements, ...queuedPlacements]
+      [...this.data.placements, ...queuedPlacements],
+      imageUrl
     );
-    const imageUrl = placement.image_url || this.pickMaterialImageUrl(currentMaterial) || '';
-    if (materialTop(currentMaterial) === 'accessory' && !imageUrl) {
+    if (materialTop(currentMaterial) === 'accessory' && !placement.image_url) {
       this.showMaterialQueueToast('该配饰暂无图库图片，暂不可加入');
       return;
     }
-    placement.image_url = imageUrl;
-    if (imageUrl && this.braceletCanvasState) {
-      this.getCanvasImage(imageUrl);
+    if (placement.image_url && this.braceletCanvasState) {
+      this.getCanvasImage(placement.image_url);
     }
     this.flightQueue.push({
       id,
       cardIndex,
       placement,
-      image_url: imageUrl,
-      tapPoint: this.getTapPoint(e)
+      image_url: placement.image_url,
+      tapPoint: this.getTapPoint(e),
+      // 成串状态下，新珠直接飞入圆环，而不是落进托盘后把整串打散。
+      keepStringed: !this.data.isLooseMode
     });
     this.processFlightQueue();
   },
@@ -7893,7 +8287,7 @@ Page({
     const placements = this.normalizePlacements(this.data.selected, this.data.placements);
     const placement = placements[hostIndex] || {};
     const slots = beadCapSlotsFromPlacement(placement);
-    const imageUrl = this.pickMaterialImageUrl(material) || '';
+    const imageUrl = this.consumeNextMaterialImageUrl(material) || '';
     if (!imageUrl) {
       this.showMaterialQueueToast('该配饰暂无图库图片，暂不可加入');
       return;
@@ -7946,77 +8340,70 @@ Page({
     this.canvasFlightReadyRetries = 0;
     this.flightActive = true;
     this.armFlightSafetyTimer();
-    const query = wx.createSelectorQuery().in(this);
-    query.select(`.material-card-${task.cardIndex} .material-sphere`).boundingClientRect();
-    query.select('.bracelet-circle').boundingClientRect();
-    query.select('.material-drawer').boundingClientRect();
-    query.exec(rects => {
-      const cardRect = rects && rects[0];
-      const circleRect = rects && rects[1];
-      const drawerRect = rects && rects[2];
-      const startRect = this.resolveFlightStartRect(cardRect, task.tapPoint, drawerRect, material);
-      if (!startRect || !circleRect) {
-        this.commitMaterial(task.id, task.placement, {}, () => this.finishCanvasFlight());
-        return;
-      }
-      const layout = this.getStageLayout();
-      const logicalSize = layout.center * 2;
-      const scale = circleRect.width / logicalSize;
-      const startX = startRect.left + startRect.width / 2;
-      const startY = startRect.top + startRect.height / 2;
-      const target = this.resolveMaterialFlightTarget(task, material, layout);
-      const launchPhysics = this.resolveMaterialLaunchPhysics({
-        startX,
-        startY,
-        circleRect,
-        target,
-        layout,
-        scale,
-        previousCount: this.data.selected.length
-      });
-      const beadSize = target.beadSize;
-      const launchPlacement = {
-        ...task.placement,
-        looseX: launchPhysics.x,
-        looseY: launchPhysics.y
-      };
-      const endX = circleRect.left + launchPhysics.x * scale;
-      const endY = circleRect.top + launchPhysics.y * scale;
-      const controlX = (startX + endX) / 2;
-      const controlY = (startY + endY) / 2;
-      const sourceSize = Math.max(36, Math.min(76, Math.min(startRect.width, startRect.height)));
-      const targetSize = beadSize * scale;
-      const flightDuration = this.getMaterialFlightDuration(startX, startY, endX, endY);
-      const flightStartDelay = 4;
-      const flightMaterial = {
-        ...material,
-        image_url: task.image_url || material.image_url || ''
-      };
-      this.physicsTargets = null;
-      this.pendingImpactTargets = null;
-      this.pendingFrozenImpact = false;
-      if (flightMaterial.image_url) this.getCanvasImage(flightMaterial.image_url);
-      this.canvasFlight = {
-        material: flightMaterial,
-        start: { x: startX, y: startY },
-        control: { x: controlX, y: controlY },
-        end: { x: endX, y: endY },
-        path: 'line',
-        easing: 'linear',
-        trail: false,
-        sourceSize,
-        targetSize,
-        rotation: Number(task.placement.rotation || 0),
-        rotationDelta: 0,
-        startedAt: Date.now() + flightStartDelay,
-        duration: flightDuration
-      };
-      this.setLaunchingMaterialState(task.id, { canvasFlightActive: true }, () => {
-        this.scheduleCanvasRender(true);
-        this.flightTimer = setTimeout(() => {
-          this.commitMaterial(task.id, launchPlacement, launchPhysics, () => this.finishCanvasFlight());
-        }, flightStartDelay + flightDuration + 4);
-      });
+    const circleRect = this.workspaceCircleRect;
+    const drawerRect = this.materialDrawerRect;
+    const startRect = this.resolveFlightStartRect(null, task.tapPoint, drawerRect, material);
+    if (!startRect || !circleRect) {
+      this.commitMaterial(task.id, task.placement, {}, () => this.finishCanvasFlight());
+      return;
+    }
+    const layout = this.getStageLayout();
+    const logicalSize = layout.center * 2;
+    const scale = circleRect.width / logicalSize;
+    const startX = startRect.left + startRect.width / 2;
+    const startY = startRect.top + startRect.height / 2;
+    const target = this.resolveMaterialFlightTarget(task, material, layout);
+    const launchPhysics = this.resolveMaterialLaunchPhysics({
+      startX,
+      startY,
+      circleRect,
+      target,
+      layout,
+      scale,
+      previousCount: this.data.selected.length
+    });
+    const beadSize = target.beadSize;
+    const launchPlacement = {
+      ...task.placement,
+      looseX: launchPhysics.x,
+      looseY: launchPhysics.y
+    };
+    const endX = circleRect.left + launchPhysics.x * scale;
+    const endY = circleRect.top + launchPhysics.y * scale;
+    const controlX = (startX + endX) / 2;
+    const controlY = (startY + endY) / 2;
+    const sourceSize = Math.max(36, Math.min(76, Math.min(startRect.width, startRect.height)));
+    const targetSize = beadSize * scale;
+    const flightDuration = this.getMaterialFlightDuration(startX, startY, endX, endY);
+    const flightStartDelay = 4;
+    const flightMaterial = {
+      ...material,
+      image_url: task.image_url || material.image_url || ''
+    };
+    this.physicsTargets = null;
+    this.pendingImpactTargets = null;
+    this.pendingFrozenImpact = false;
+    if (flightMaterial.image_url) this.getCanvasImage(flightMaterial.image_url);
+    this.canvasFlight = {
+      material: flightMaterial,
+      start: { x: startX, y: startY },
+      control: { x: controlX, y: controlY },
+      end: { x: endX, y: endY },
+      path: 'line',
+      easing: 'linear',
+      trail: false,
+      sourceSize,
+      targetSize,
+      rotation: Number(task.placement.rotation || 0),
+      rotationDelta: 0,
+      startedAt: Date.now() + flightStartDelay,
+      duration: flightDuration
+    };
+    this.setLaunchingMaterialState(task.id, { canvasFlightActive: true }, () => {
+      this.scheduleCanvasRender(true, { markDirty: false });
+      this.flightTimer = setTimeout(() => {
+        this.commitMaterial(task.id, launchPlacement, launchPhysics, () => this.finishCanvasFlight());
+      }, flightStartDelay + flightDuration + 4);
     });
   },
 
@@ -8034,9 +8421,55 @@ Page({
     });
   },
 
+  buildStringedInsertion(id, placement = {}) {
+    const context = this.getStringedRingContext();
+    const selected = [...context.selected, id];
+    const sourcePlacements = [...context.placements, placement];
+    const ringRotation = this.getRingRotationDelta(context.placements, context.geometry);
+    const placements = this.rebuildRingPlacementsForVisualSlots(selected, sourcePlacements, ringRotation);
+    const materials = this.getCachedSelectedMaterials(selected);
+    const items = selected.map((materialId, index) => {
+      const material = materials[index] || {};
+      const currentPlacement = placements[index] || {};
+      const size = Number(material.size || currentPlacement.size || currentPlacement.diameter || 8);
+      return {
+        ...currentPlacement,
+        ...material,
+        id: materialId,
+        size: Number.isFinite(size) && size > 0 ? size : 8
+      };
+    });
+    const geometry = this.getCachedBraceletGeometry(items);
+    return {
+      selected,
+      placements,
+      visualSlots: this.getRingVisualSlots(items, placements, geometry)
+    };
+  },
+
   commitMaterial(id, placement, physicsOptions = {}, onReady) {
     const wasLooseMode = this.data.isLooseMode;
     const previousCount = this.data.selected.length;
+    this.playMaterialLandingSound(physicsOptions);
+    if (!wasLooseMode) {
+      const insertion = this.buildStringedInsertion(id, placement || {});
+      this.pushHistory();
+      this.stopPhysics();
+      this.setData({
+        selected: insertion.selected,
+        placements: insertion.placements,
+        isLooseMode: false,
+        selectedBeadIndex: -1,
+        selectedBeadInfo: null,
+        draggingBeadIndex: -1,
+        dragDeleteArmed: false
+      }, () => {
+        this.recalculate({ persistDelay: 520 });
+        this.scheduleCanvasRender(true);
+        if (onReady) onReady();
+      });
+      return;
+    }
     const existingPlacements = wasLooseMode
       ? this.normalizePlacements(this.data.selected, this.data.placements)
       : this.buildLoosePlacementsFromStringedRing();
@@ -8068,9 +8501,14 @@ Page({
       dragDeleteArmed: false
     });
     this.recalculate({ persistDelay: 520 });
-    this.playMaterialLandingSound(physicsOptions);
-    wx.nextTick(() => {
-      if (previousCount === 0 || !this.physicsEngine || !wasLooseMode) {
+    this.scheduleCanvasRender();
+    this.cancelCanvasFrame(this.pendingPhysicsLaunchFrame);
+    this.pendingPhysicsLaunchFrame = this.requestCanvasFrame(() => {
+      this.pendingPhysicsLaunchFrame = null;
+      wx.nextTick(() => {
+      const existingBodiesReady = previousCount === 0
+        || (this.physicsBodies || []).length >= previousCount;
+      if (!this.physicsEngine || !wasLooseMode || !existingBodiesReady) {
         this.stopPhysics();
         this.createPhysicsEngine();
         this.data.selected.slice(0, previousCount).forEach((materialId, index) => {
@@ -8130,6 +8568,7 @@ Page({
           if (onReady) onReady();
         });
       });
+      });
     });
   },
 
@@ -8182,11 +8621,16 @@ Page({
       dragDeleteArmed: false
     });
     this.recalculate();
-    wx.nextTick(() => this.startStringingPhysics());
+    this.stringingStartQueued = true;
+    wx.nextTick(() => {
+      this.stringingStartQueued = false;
+      this.startStringingPhysics();
+    });
   },
 
   startStringingPhysics() {
     try {
+      this.stringingStartQueued = false;
       this.stopPhysics();
       this.dragState = null;
       this.ringDragState = null;
@@ -8260,6 +8704,7 @@ Page({
         }, () => {
           this.suppressStringingSounds = false;
           this.recalculate();
+          this.refreshWorkspaceCanvasAfterDesignTransition();
         });
       };
       clearTimeout(this.stringingGuardTimer);
@@ -8484,8 +8929,8 @@ Page({
 
   shouldStartRingSlide(hit) {
     if (this.data.isLooseMode || !hit || !hit.point || (this.data.selected || []).length < 3) return false;
+    if (hit.index >= 0) return false;
     const context = this.getStringedRingContext();
-    if (hit.index >= 0) return !!hit.isOuterEdge;
     return this.isPointInRingSlideBand(hit.point, context.geometry);
   },
 
@@ -8501,21 +8946,6 @@ Page({
       && distance <= geometry.radius + averageBeadSize * 0.72 + 18;
   },
 
-  isOuterEdgeTouchOnRingBead(point, index, geometry, placements) {
-    if (!point || !geometry || !Number.isInteger(index) || index < 0) return false;
-    const slot = this.getRingVisualSlots([], placements, geometry)[index] || {};
-    const beadX = Number.isFinite(slot.x) ? slot.x : geometry.center;
-    const beadY = Number.isFinite(slot.y) ? slot.y : geometry.center;
-    const dx = point.x - beadX;
-    const dy = point.y - beadY;
-    const beadDx = beadX - geometry.center;
-    const beadDy = beadY - geometry.center;
-    const beadDistance = Math.max(1, Math.sqrt(beadDx * beadDx + beadDy * beadDy));
-    const outwardProjection = dx * beadDx / beadDistance + dy * beadDy / beadDistance;
-    const beadSize = geometry.beadSizes[index] || 54;
-    return outwardProjection > Math.max(12, beadSize * RING_SLIDE_EDGE_RATIO);
-  },
-
   beginRingReorder(index, touch, rectOverride = null) {
     const setup = rect => {
       if (!rect) return;
@@ -8523,15 +8953,6 @@ Page({
       const { selected, items, geometry, placements } = context;
       const scale = rect.width / (geometry.center * 2);
       const point = this.touchToTrayPoint(touch, rect, scale);
-      const hit = {
-        index,
-        point,
-        isOuterEdge: this.isOuterEdgeTouchOnRingBead(point, index, geometry, placements)
-      };
-      if (this.shouldStartRingSlide(hit)) {
-        this.beginRingSlide(touch, rect, { originIndex: index });
-        return;
-      }
       const visualSlots = this.getRingVisualSlots(items, placements, geometry);
       this.ringDragState = {
         currentIndex: index,
@@ -8658,7 +9079,32 @@ Page({
     });
   },
 
-  rebuildRingPlacementsForVisualSlots(selected, sourcePlacements, visualSlots) {
+  getRingRotationDelta(placements = [], geometry = {}) {
+    const center = Number(geometry.center);
+    const radius = Number(geometry.radius);
+    const angles = geometry.angles || [];
+    if (!Number.isFinite(center) || !Number.isFinite(radius) || radius <= 0) return 0;
+    const deltas = placements.map((placement, index) => {
+      const angle = Number(angles[index]);
+      if (!Number.isFinite(angle)) return null;
+      const baseX = center + Math.cos(angle) * radius;
+      const baseY = center + Math.sin(angle) * radius;
+      const x = baseX + Number(placement && placement.dx || 0);
+      const y = baseY + Number(placement && placement.dy || 0);
+      if (Math.hypot(x - center, y - center) < radius * 0.25) return null;
+      return this.normalizeAngleDelta(Math.atan2(y - center, x - center) - angle);
+    }).filter(value => Number.isFinite(value));
+    if (!deltas.length) return 0;
+    const sin = deltas.reduce((sum, value) => sum + Math.sin(value), 0);
+    const cos = deltas.reduce((sum, value) => sum + Math.cos(value), 0);
+    const delta = Math.atan2(sin, cos);
+    // A previous bad reorder can leave item-specific offsets behind.  Only
+    // retain offsets when they describe one coherent whole-ring rotation.
+    const coherence = Math.hypot(sin, cos) / deltas.length;
+    return coherence >= 0.96 ? delta : 0;
+  },
+
+  rebuildRingPlacementsForVisualSlots(selected, sourcePlacements, ringRotation = 0) {
     const normalized = this.normalizePlacements(selected, sourcePlacements);
     const materials = this.getCachedSelectedMaterials(selected);
     const items = selected.map((id, index) => {
@@ -8673,13 +9119,13 @@ Page({
       };
     }).filter(Boolean);
     const geometry = this.getCachedBraceletGeometry(items);
+    const safeRingRotation = Number.isFinite(Number(ringRotation)) ? Number(ringRotation) : 0;
     return normalized.map((placement, index) => {
       const angle = geometry.angles[index] || 0;
       const baseX = geometry.center + Math.cos(angle) * geometry.radius;
       const baseY = geometry.center + Math.sin(angle) * geometry.radius;
-      const slot = visualSlots[index] || {};
-      const visualX = Number.isFinite(slot.x) ? slot.x : baseX;
-      const visualY = Number.isFinite(slot.y) ? slot.y : baseY;
+      const visualX = geometry.center + Math.cos(angle + safeRingRotation) * geometry.radius;
+      const visualY = geometry.center + Math.sin(angle + safeRingRotation) * geometry.radius;
       return {
         ...placement,
         dx: visualX - baseX,
@@ -8730,62 +9176,6 @@ Page({
     const query = wx.createSelectorQuery().in(this);
     query.select('.bracelet-circle').boundingClientRect();
     query.exec(rects => setup(rects && rects[0]));
-  },
-
-  getRingGestureIntent(state, point, geometry) {
-    if (!state || state.moved || !state.startPoint || !point || !geometry) return 'reorder';
-    const beadSize = Number(state.beadSize || (geometry.beadSizes || [])[state.currentIndex] || 54);
-    const minTravel = Math.max(
-      RING_GESTURE_INTENT_MIN_RPX,
-      Math.min(12, beadSize * 0.14)
-    );
-    const moveX = point.x - state.startPoint.x;
-    const moveY = point.y - state.startPoint.y;
-    const travel = Math.sqrt(moveX * moveX + moveY * moveY);
-    if (travel < minTravel) return 'pending';
-    const angle = Number.isFinite(state.startAngle)
-      ? state.startAngle
-      : Math.atan2(state.startPoint.y - geometry.center, state.startPoint.x - geometry.center);
-    const radialX = Math.cos(angle);
-    const radialY = Math.sin(angle);
-    const tangentialX = -radialY;
-    const tangentialY = radialX;
-    const radial = Math.abs(moveX * radialX + moveY * radialY);
-    const tangential = Math.abs(moveX * tangentialX + moveY * tangentialY);
-    if (radial > tangential * RING_REORDER_RADIAL_BIAS) return 'reorder';
-    if (tangential >= minTravel && tangential >= radial * RING_SLIDE_TANGENTIAL_BIAS) return 'slide';
-    return 'reorder';
-  },
-
-  convertRingReorderToSlide(state, point, geometry) {
-    if (!state || !point || !geometry) return false;
-    const startAngle = Number.isFinite(state.startAngle)
-      ? state.startAngle
-      : Math.atan2(point.y - geometry.center, point.x - geometry.center);
-    const angle = Math.atan2(point.y - geometry.center, point.x - geometry.center);
-    const totalDelta = this.normalizeAngleDelta(angle - startAngle);
-    const placements = this.buildRingSlidePlacements(state.placements, totalDelta, geometry);
-    this.ringDragState = null;
-    this.ringSlideState = {
-      rect: state.rect,
-      scale: state.scale,
-      basePlacements: state.placements,
-      items: state.items,
-      geometry,
-      originIndex: Number.isInteger(state.originalIndex) ? state.originalIndex : state.currentIndex,
-      lastAngle: angle,
-      totalDelta,
-      moved: Math.abs(totalDelta) > RING_SLIDE_MIN_MOVE_RAD
-    };
-    this.setLivePlacements(placements);
-    const updates = {
-      draggingBeadIndex: -1,
-      selectedBeadIndex: -1,
-      selectedBeadInfo: null,
-      dragDeleteArmed: false
-    };
-    this.setData(updates, () => this.scheduleCanvasRender(true));
-    return true;
   },
 
   onBeadTouchMove(e) {
@@ -8853,9 +9243,6 @@ Page({
     const currentItem = items[state.currentIndex];
     if (!currentItem) return;
     const point = this.touchToTrayPoint(touch, state.rect, state.scale);
-    const gestureIntent = this.getRingGestureIntent(state, point, geometry);
-    if (gestureIntent === 'pending') return;
-    if (gestureIntent === 'slide' && this.convertRingReorderToSlide(state, point, geometry)) return;
     const visualSlots = state.visualSlots || this.getRingVisualSlots(items, currentPlacements, geometry);
     const dx = point.x - geometry.center;
     const dy = point.y - geometry.center;
@@ -8896,6 +9283,7 @@ Page({
       }
     });
     if (targetIndex === state.currentIndex) return;
+    const ringRotation = this.getRingRotationDelta(currentPlacements, geometry);
     const selected = [...currentSelected];
     const itemPlacements = [...currentPlacements];
     const nextItems = [...items];
@@ -8905,7 +9293,7 @@ Page({
     selected.splice(targetIndex, 0, selectedItem);
     itemPlacements.splice(targetIndex, 0, placementItem);
     nextItems.splice(targetIndex, 0, item);
-    const placements = this.rebuildRingPlacementsForVisualSlots(selected, itemPlacements, visualSlots);
+    const placements = this.rebuildRingPlacementsForVisualSlots(selected, itemPlacements, ringRotation);
     const nextGeometry = this.getCachedBraceletGeometry(nextItems);
     const nextVisualSlots = this.getRingVisualSlots(nextItems, placements, nextGeometry);
     state.currentIndex = targetIndex;
@@ -9048,13 +9436,13 @@ Page({
       return;
     }
     const context = this.getStringedRingContext();
+    const ringRotation = this.data.isLooseMode
+      ? 0
+      : this.getRingRotationDelta(context.placements, context.geometry);
     const selected = [...this.data.selected];
     const placements = this.data.isLooseMode
       ? this.normalizePlacements(selected, this.data.placements)
       : [...context.placements];
-    const visualSlots = this.data.isLooseMode
-      ? []
-      : this.getRingVisualSlots(context.items, context.placements, context.geometry);
     const selectedItem = selected[index];
     const placementItem = placements[index];
     selected[index] = selected[nextIndex];
@@ -9063,7 +9451,7 @@ Page({
     placements[nextIndex] = placementItem;
     const nextPlacements = this.data.isLooseMode
       ? placements
-      : this.rebuildRingPlacementsForVisualSlots(selected, placements, visualSlots);
+      : this.rebuildRingPlacementsForVisualSlots(selected, placements, ringRotation);
     this.pushHistory();
     this.setData({
       selected,
@@ -9102,14 +9490,12 @@ Page({
     const stringStyle = this.buildStringStyle(braceletGeometry);
     _energySvgCache = '';
     var energyChartSvgUrl = '';
-    const scaleTicks = this.getCachedScaleTicks(braceletGeometry);
     const actionState = this.buildActionState(items.length);
     const updates = {
       summary,
       stringStyle,
       placements,
       attachedPendants,
-      scaleTicks,
       countOverClass: items.length > Number(summary.maxBeadCount || MAX_RECOMMENDED_RECIPE_BEADS) ? 'over' : '',
       lengthOverClass: items.length && summary.warning !== '合适' ? 'over-length' : '',
       braceletStringClass: items.length ? 'has-beads' : 'empty',
@@ -9118,6 +9504,7 @@ Page({
       selectedBeadIndex: safeSelectedBeadIndex,
       selectedBeadInfo: this.buildSelectedBeadInfo(safeSelectedBeadIndex, this.data.selected, placements),
       wristOptionItems: this.getCachedWristOptionItems(),
+      workspacePlanLabel: this.workspaceSourceLabel(this.data.sourceContext || this.sourceContext || {}),
       ...actionState,
       energyChartSvgUrl
     };
@@ -9359,6 +9746,8 @@ Page({
 
   workspaceSummaryCacheKey(items = [], attachments = []) {
     const wristSize = Number(this.data.wristSize || 16);
+    const sourceContext = this.data.sourceContext || this.sourceContext || {};
+    const recommendationValidation = sourceContext.recommendation_validation || {};
     const itemKey = (items || []).map(item => [
       item.id,
       item.skuId,
@@ -9388,6 +9777,9 @@ Page({
     return [
       this.materialCatalogDesignVersion || 0,
       wristSize,
+      sourceContext.source || '',
+      sourceContext.target_bead_count || '',
+      recommendationValidation.estimated_stringed_length_cm || '',
       itemKey,
       attachmentKey
     ].join('::');
@@ -9401,16 +9793,22 @@ Page({
     const price = [...items, ...attachments].reduce((sum, item) => sum + Number(item.price || 0), 0);
     const effectiveLengthMm = estimateStringedLengthMm(items);
     const length = effectiveLengthMm / 10;
+    const roundedLength = Number(length.toFixed(1));
     const weight = [...items, ...attachments].reduce((sum, item) => sum + Number(item.weight || 0), 0);
     const wristSize = Number(this.data.wristSize || 16);
     const targetLength = wristSize + 0.8;
-    const recommendedCount = recommendedStringedBeadCount(items, wristSize);
+    const sourceContext = this.data.sourceContext || this.sourceContext || {};
+    const recommendationValidation = sourceContext.recommendation_validation || {};
+    const recommendationTargetCount = Number(sourceContext.target_bead_count || 0);
+    const recommendedCount = this.isRecommendationWorkspaceSource() && recommendationTargetCount > 0
+      ? recommendationTargetCount
+      : recommendedStringedBeadCount(items, wristSize);
     const maxBeadCount = Math.min(MAX_WORKSPACE_BEADS, recommendedCount + 1);
     const warning = items.length === 0
       ? ''
-      : length > targetLength + 0.5
+      : roundedLength > targetLength + 0.5 + 1e-6
         ? '\u504f\u957f'
-        : length < targetLength - 0.5
+        : roundedLength < targetLength - 0.5 - 1e-6
           ? '\u504f\u77ed'
           : '\u5408\u9002';
     const counts = {};
@@ -9425,8 +9823,14 @@ Page({
       ...element,
       value: energyItemCount ? Math.round(((counts[element.key] || 0) / energyItemCount) * 100) : 0
     }));
+    const validatedLength = this.isRecommendationWorkspaceSource()
+      && recommendationValidation.is_valid === true
+      && items.length === recommendationTargetCount
+      ? Number(recommendationValidation.estimated_stringed_length_cm)
+      : NaN;
+    const displayedLength = Number.isFinite(validatedLength) ? validatedLength : roundedLength;
     const currentWrist = items.length
-      ? Math.max(0, length - 0.8)
+      ? Math.max(0, displayedLength - 0.8)
       : 0;
     const sizes = items.map(item => Number(item.size || 0)).filter(Boolean);
     const minSize = sizes.length ? Math.min(...sizes) : 0;
@@ -9489,6 +9893,7 @@ Page({
 
   buildActionState() {
     const isWorking = this.data.isShuffling || this.data.isStringingFinishing || this.data.isReleasingString;
+    const isRecommendationSource = this.isRecommendationWorkspaceSource();
     return {
       shuffleButtonClass: isWorking ? 'working' : '',
       randomIconText: isWorking ? '...' : '串',
@@ -9496,10 +9901,14 @@ Page({
         ? '正在散开'
         : this.data.isShuffling
           ? '正在成串'
-          : (this.data.isLooseMode ? '随机成串' : '解除成串'),
+          : (this.data.isLooseMode
+            ? (isRecommendationSource ? '成串预览' : '随机成串')
+            : (isRecommendationSource ? '散开编辑' : '解除成串')),
       randomSubtitle: this.data.isReleasingString
         ? '恢复自由编辑'
-        : (this.data.isLooseMode ? '随机排列珠面' : '恢复自由编辑')
+        : (this.data.isLooseMode
+          ? (isRecommendationSource ? '保留当前推荐顺序' : '随机排列珠面')
+          : '恢复自由编辑')
     };
   },
 

@@ -174,24 +174,79 @@ def test_binding_material_assets_preserves_profile_and_supports_append(tmp_path)
         )
 
 
-def test_primary_image_can_be_removed_from_gallery_without_being_deleted(tmp_path):
+def test_bead_series_are_always_exposed_as_round_while_accessory_shape_is_preserved(tmp_path):
+    service = AdminService(tmp_path / "bead-series-round.db")
+    bead_category = service.save_material_category({"top": "bead", "name": "水晶"})
+    service.save_material_series(
+        {
+            "category_id": bead_category["id"],
+            "name": "测试珠子",
+            "material_params": {"bead_shape": "cube"},
+        }
+    )
+    service.save_material(
+        {
+            "id": "test-round-bead-01",
+            "top": "bead",
+            "category": "水晶",
+            "series": "测试珠子",
+            "name": "测试珠子 8mm",
+            "price": 10,
+            "size": 8,
+            "stock": 1,
+            "enabled": True,
+        }
+    )
+    accessory_category = service.save_material_category({"top": "accessory", "name": "隔珠"})
+    service.save_material_series(
+        {
+            "category_id": accessory_category["id"],
+            "name": "测试隔珠",
+            "material_params": {"bead_shape": "nugget"},
+        }
+    )
+
+    bead = service.list_material_taxonomy(top="bead", include_disabled=True)[0]["series"][0]
+    accessory = service.list_material_taxonomy(top="accessory", include_disabled=True)[0]["series"][0]
+
+    assert bead["material_params"]["bead_shape"] == "round"
+    assert accessory["material_params"]["bead_shape"] == "nugget"
+    assert service.get_material("test-round-bead-01")["material_params"]["bead_shape"] == "round"
+
+
+def test_primary_and_gallery_images_are_stored_independently(tmp_path):
     service = AdminService(tmp_path / "material-gallery-primary.db")
     category = service.save_material_category({"top": "accessory", "name": "隔珠"})
+    with pytest.raises(ValueError, match="主图不能同时加入随机图库"):
+        service.save_material_series(
+            {
+                "category_id": category["id"],
+                "name": "测试隔珠",
+                "image_url": "https://cdn.example.com/main.webp",
+                "image_urls": [
+                    "https://cdn.example.com/main.webp",
+                    "https://cdn.example.com/side.webp",
+                ],
+            }
+        )
     series = service.save_material_series(
         {
             "category_id": category["id"],
             "name": "测试隔珠",
             "image_url": "https://cdn.example.com/main.webp",
             "image_urls": [
-                "https://cdn.example.com/main.webp",
                 "https://cdn.example.com/side.webp",
+                "https://cdn.example.com/angle.webp",
             ],
         }
     )
 
     initially_saved = service.list_material_taxonomy(top="accessory", include_disabled=True)[0]["series"][0]
     assert initially_saved["image_url"] == "https://cdn.example.com/main.webp"
-    assert initially_saved["image_urls"] == ["https://cdn.example.com/side.webp"]
+    assert initially_saved["image_urls"] == [
+        "https://cdn.example.com/side.webp",
+        "https://cdn.example.com/angle.webp",
+    ]
 
     saved = service.save_material_series(
         {
@@ -199,22 +254,217 @@ def test_primary_image_can_be_removed_from_gallery_without_being_deleted(tmp_pat
             "category_id": category["id"],
             "name": "测试隔珠",
             "image_url": "https://cdn.example.com/main.webp",
-            "image_urls": ["https://cdn.example.com/side.webp"],
+            "image_urls": [
+                "https://cdn.example.com/side.webp",
+                "https://cdn.example.com/angle.webp",
+            ],
         }
     )
 
     assert saved["image_url"] == "https://cdn.example.com/main.webp"
-    assert saved["image_urls"] == ["https://cdn.example.com/side.webp"]
+    assert saved["image_urls"] == [
+        "https://cdn.example.com/side.webp",
+        "https://cdn.example.com/angle.webp",
+    ]
     stored = service.list_material_taxonomy(top="accessory", include_disabled=True)[0]["series"][0]
     assert stored["image_url"] == "https://cdn.example.com/main.webp"
-    assert stored["image_urls"] == ["https://cdn.example.com/side.webp"]
+    assert stored["image_urls"] == [
+        "https://cdn.example.com/side.webp",
+        "https://cdn.example.com/angle.webp",
+    ]
     with service.connect() as connection:
         row = connection.execute(
             "SELECT image_url,image_urls_json FROM material_taxonomy WHERE item_id=?",
             (series["id"],),
         ).fetchone()
     assert row["image_url"] == "https://cdn.example.com/main.webp"
-    assert json.loads(row["image_urls_json"]) == ["https://cdn.example.com/side.webp"]
+    assert json.loads(row["image_urls_json"]) == [
+        "https://cdn.example.com/side.webp",
+        "https://cdn.example.com/angle.webp",
+    ]
+
+
+def test_gallery_publish_uses_version_and_idempotency_guards(tmp_path):
+    service = AdminService(tmp_path / "material-gallery-versions.db")
+    category = service.save_material_category({"top": "accessory", "name": "隔珠"})
+    series = service.save_material_series(
+        {
+            "category_id": category["id"],
+            "name": "版本隔珠",
+            "image_url": "https://cdn.example.com/main.webp",
+            "image_urls": ["https://cdn.example.com/old-side.webp"],
+        }
+    )
+    actor = {"admin_id": "operator-1", "role": "operator"}
+    first = service.bind_material_series_images(
+        series["id"],
+        ["https://cdn.example.com/new-side.webp", "https://cdn.example.com/new-angle.webp"],
+        mode="replace",
+        expected_version=1,
+        idempotency_key="gallery-publish-key-001",
+        actor=actor,
+    )
+    duplicate = service.bind_material_series_images(
+        series["id"],
+        ["https://cdn.example.com/ignored.webp"],
+        mode="replace",
+        expected_version=1,
+        idempotency_key="gallery-publish-key-001",
+        actor=actor,
+    )
+
+    assert first["asset_version"] == 2
+    assert duplicate == first
+    history = service.list_material_series_asset_versions(series["id"])
+    assert [item["asset_version"] for item in history] == [2, 1]
+    assert history[-1]["source"] == "series_profile"
+    with pytest.raises(ValueError, match="已被其他操作更新"):
+        service.bind_material_series_images(
+            series["id"],
+            ["https://cdn.example.com/another.webp"],
+            mode="replace",
+            expected_version=1,
+            idempotency_key="gallery-publish-key-002",
+            actor=actor,
+        )
+
+
+def test_series_primary_image_can_be_cleared_without_changing_gallery(tmp_path):
+    service = AdminService(tmp_path / "clear-material-primary.db")
+    category = service.save_material_category({"top": "accessory", "name": "隔珠"})
+    series = service.save_material_series(
+        {
+            "category_id": category["id"],
+            "name": "可清空主图隔珠",
+            "image_url": "https://cdn.example.com/main.webp",
+            "image_urls": ["https://cdn.example.com/gallery-a.webp", "https://cdn.example.com/gallery-b.webp"],
+        }
+    )
+
+    saved = service.save_material_series(
+        {
+            "id": series["id"],
+            "category_id": category["id"],
+            "name": "可清空主图隔珠",
+            "image_url": "",
+            "image_urls": ["https://cdn.example.com/gallery-a.webp", "https://cdn.example.com/gallery-b.webp"],
+        }
+    )
+
+    assert saved["image_url"] == ""
+    assert saved["image_urls"] == [
+        "https://cdn.example.com/gallery-a.webp",
+        "https://cdn.example.com/gallery-b.webp",
+    ]
+
+
+def test_material_spu_search_normalizes_invisible_characters_in_chinese_keywords(tmp_path):
+    service = AdminService(tmp_path / "material-search-keyword.db")
+    category = service.save_material_category({"top": "accessory", "name": "隔珠"})
+    service.save_material_series({"category_id": category["id"], "name": "八吉祥圆珠隔珠"})
+    service.save_material(
+        {
+            "id": "eight-auspicious-spacer",
+            "top": "accessory",
+            "category": "隔珠",
+            "series": "八吉祥圆珠隔珠",
+            "name": "八吉祥圆珠隔珠",
+            "price": 10,
+            "size": 8,
+            "weight": 1,
+            "stock": 1,
+            "enabled": True,
+        }
+    )
+
+    result = service.list_material_spus_paginated(keyword="八吉\u200b祥", page=1, page_size=20)
+
+    assert result["pagination"]["total"] == 1
+    assert result["items"][0]["sku"]["series"] == "八吉祥圆珠隔珠"
+
+
+def test_editing_sku_keeps_its_material_code_and_rejects_a_missing_target(tmp_path):
+    service = AdminService(tmp_path / "material-edit-identity.db")
+    category = service.save_material_category({"top": "bead", "name": "发晶"})
+    service.save_material_series(
+        {
+            "category_id": category["id"],
+            "name": "蓝发晶",
+            "material_code": "blue_rutilated_quartz",
+        }
+    )
+    legacy_code = "mat_legacy_blue_rutilated"
+    base = {
+        "id": "blue-rutilated-10",
+        "material_code": legacy_code,
+        "top": "bead",
+        "category": "发晶",
+        "series": "蓝发晶",
+        "name": "蓝发晶",
+        "effects": ["calm"],
+        "price": 10,
+        "size": 10,
+        "weight": 1,
+        "stock": 3,
+        "enabled": True,
+    }
+    service.save_material(base)
+    new_size = service.save_material(
+        {**base, "id": "blue-rutilated-12", "material_code": "", "size": 12}
+    )
+    assert new_size["sku"]["material_code"] == "blue_rutilated_quartz"
+    with service.connect() as connection:
+        service._ensure_material_columns(connection)
+        connection.execute(
+            "UPDATE managed_materials SET material_code=? WHERE id=?",
+            (legacy_code, base["id"]),
+        )
+
+    updated = service.save_material({**base, "price": 12}, material_id=base["id"])
+
+    assert updated["sku"]["material_code"] == legacy_code
+    with pytest.raises(ValueError, match="待更新的 SKU 不存在"):
+        service.save_material({**base, "id": "missing-blue-rutilated"}, material_id="missing-blue-rutilated")
+
+
+def test_batch_enable_requires_stock_for_every_selected_sku(tmp_path):
+    service = AdminService(tmp_path / "batch-enable-stock.db")
+    category = service.save_material_category({"top": "bead", "name": "测试分类"})
+    service.save_material_series({"category_id": category["id"], "name": "测试品种"})
+    empty = service.save_material(
+        {
+            "id": "batch-empty",
+            "top": "bead",
+            "category": "测试分类",
+            "series": "测试品种",
+            "name": "缺货 SKU",
+            "price": 10,
+            "size": 8,
+            "weight": 1,
+            "stock": 0,
+            "enabled": False,
+        }
+    )
+    ready = service.save_material(
+        {
+            "id": "batch-ready",
+            "top": "bead",
+            "category": "测试分类",
+            "series": "测试品种",
+            "name": "有货 SKU",
+            "price": 10,
+            "size": 10,
+            "weight": 1,
+            "stock": 3,
+            "enabled": False,
+        }
+    )
+
+    with pytest.raises(ValueError, match="库存为 0，请先补充库存后再批量启用：缺货 SKU"):
+        service.batch_update_materials([empty["sku"]["id"], ready["sku"]["id"]], "enable")
+
+    assert service.get_material(empty["sku"]["id"])["sku"]["enabled"] is False
+    assert service.get_material(ready["sku"]["id"])["sku"]["enabled"] is False
 
 
 def test_material_asset_upload_endpoint_validates_before_cos(monkeypatch):
@@ -268,12 +518,14 @@ def test_material_asset_bind_endpoint_uses_server_built_urls(monkeypatch):
         lambda key: f"https://cdn.example.com/{key}",
     )
 
-    def fake_bind(series_id, urls, *, mode, sync_sku_images, actor):
+    def fake_bind(series_id, urls, *, mode, expected_version, idempotency_key, sync_sku_images, actor):
         calls.append(
             {
                 "series_id": series_id,
                 "urls": urls,
                 "mode": mode,
+                "expected_version": expected_version,
+                "idempotency_key": idempotency_key,
                 "sync_sku_images": sync_sku_images,
                 "actor": actor,
             }
@@ -296,9 +548,11 @@ def test_material_asset_bind_endpoint_uses_server_built_urls(monkeypatch):
     assert calls == [
         {
             "series_id": "series-green-phantom",
-            "urls": ["https://cdn.example.com/materials/processed/operator-1/a.webp"],
-            "mode": "replace",
-            "sync_sku_images": True,
+                "urls": ["https://cdn.example.com/materials/processed/operator-1/a.webp"],
+                "mode": "replace",
+                "expected_version": None,
+                "idempotency_key": "",
+                "sync_sku_images": True,
             "actor": {"admin_id": "operator-1", "username": "operator", "role": "operator"},
         }
     ]

@@ -173,6 +173,42 @@ def test_report_detail_basis_poster_and_recommendation_share_one_version(monkeyp
     assert poster["balance"] == detail["report_projection"]["balance"]
 
 
+def test_report_plan_refinement_does_not_overwrite_the_base_recommendation_cache(monkeypatch):
+    monkeypatch.setenv("REPORT_VERSIONING_V2_ENABLED", "true")
+    user_id = f"p1b-refine-{uuid4().hex}"
+    report, auth_headers = generate(user_id, f"refine-{uuid4().hex}")
+    endpoint = f"/api/v1/reports/{report['report_id']}/diy-recommendation"
+    base_payload = {
+        "report_id": report["report_id"],
+        "expected_report_version": report["report_version"],
+        "wrist_size_cm": 16,
+        "bead_size_mm": 8,
+    }
+    original = client.post(endpoint, headers=auth_headers, json=base_payload).json()["data"]
+    rejected = original["bracelet_plans"][1]
+    locked = next(item for item in rejected["items"] if item.get("top") == "accessory")
+
+    refined_response = client.post(
+        endpoint,
+        headers=auth_headers,
+        json={
+            **base_payload,
+            "style_preference": "layered",
+            "accessory_preference": "more",
+            "locked_material_ids": [locked["material_id"]],
+            "rejected_plan_id": rejected["plan_id"],
+        },
+    )
+    refined = refined_response.json()["data"]
+    replay = client.post(endpoint, headers=auth_headers, json=base_payload).json()["data"]
+
+    assert refined_response.status_code == 200
+    assert refined["recommendation_cache_hit"] is False
+    assert rejected["plan_id"] not in {item["plan_id"] for item in refined["bracelet_plans"]}
+    assert replay["recommendation_cache_hit"] is True
+    assert replay["bracelet_plan"]["plan_id"] == original["bracelet_plan"]["plan_id"]
+
+
 def test_report_snapshot_is_immutable_and_get_does_not_recalculate(monkeypatch):
     monkeypatch.setenv("REPORT_VERSIONING_V2_ENABLED", "true")
     user_id = f"p1b-immutable-{uuid4().hex}"
@@ -239,22 +275,38 @@ def test_report_ownership_version_conflict_and_poster_privacy(monkeypatch):
         assert forbidden not in serialized
 
 
-def test_unknown_location_never_uses_default_120_and_known_location_is_applied(monkeypatch):
+def test_versioned_city_location_is_calibrated_and_unknown_location_never_uses_default_120(monkeypatch):
     monkeypatch.setenv("REPORT_VERSIONING_V2_ENABLED", "true")
-    unknown_user = f"p1b-location-{uuid4().hex}"
-    unknown, unknown_headers = generate(
-        unknown_user,
-        f"unknown-{uuid4().hex}",
+    covered_user = f"p1b-location-{uuid4().hex}"
+    covered, covered_headers = generate(
+        covered_user,
+        f"covered-{uuid4().hex}",
         birth_place="石家庄市",
     )
     basis = client.get(
+        f"/api/v1/reports/{covered['report_id']}/basis?report_version={covered['report_version']}",
+        headers=covered_headers,
+    ).json()["data"]
+    assert covered["calibration_status"] == "applied"
+    assert basis["calibration"]["status"] == "applied"
+    assert basis["calibration"]["details"]["longitude"] == 114.4786
+    assert basis["calibration"]["details"]["calibrated_time"]
+    assert basis["calibration"]["details"]["resolved_location_name"] == "河北省·石家庄市"
+
+    unknown_user = f"p1b-unsupported-location-{uuid4().hex}"
+    unknown, unknown_headers = generate(
+        unknown_user,
+        f"unsupported-{uuid4().hex}",
+        birth_place="火星市",
+    )
+    unknown_basis = client.get(
         f"/api/v1/reports/{unknown['report_id']}/basis?report_version={unknown['report_version']}",
         headers=unknown_headers,
     ).json()["data"]
     assert unknown["calibration_status"] == "unsupported"
-    assert basis["calibration"]["status"] == "unsupported"
-    assert basis["calibration"]["details"]["longitude"] is None
-    assert basis["calibration"]["details"]["calibrated_time"] is None
+    assert unknown_basis["calibration"]["status"] == "unsupported"
+    assert unknown_basis["calibration"]["details"]["longitude"] is None
+    assert unknown_basis["calibration"]["details"]["calibrated_time"] is None
 
     known_user = f"p1b-known-{uuid4().hex}"
     known, known_headers = generate(known_user, f"known-{uuid4().hex}")
@@ -263,7 +315,7 @@ def test_unknown_location_never_uses_default_120_and_known_location_is_applied(m
         headers=known_headers,
     ).json()["data"]
     assert known["calibration_status"] == "applied"
-    assert known_basis["calibration"]["details"]["longitude"] == 104.0665
+    assert known_basis["calibration"]["details"]["longitude"] == 104.0667
     assert known_basis["calibration"]["details"]["calibrated_time"]
 
 

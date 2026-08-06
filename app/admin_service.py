@@ -5,6 +5,7 @@ import json
 import os
 import re
 import secrets
+import unicodedata
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -18,7 +19,9 @@ from .daily_rules import (
 )
 from .materials import (
     MATERIAL_CATALOG,
+    clean_gallery_image_urls,
     clean_image_urls,
+    fetch_db_series_assets,
     invalidate_material_cache,
     material_image_identity,
     material_url_from_path,
@@ -55,6 +58,10 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z")
 
 
+class MaterialConflictError(ValueError):
+    """A SKU changed after the operator opened it; never overwrite it blindly."""
+
+
 def json_text(value: Any) -> str:
     return json.dumps(value if value is not None else [], ensure_ascii=False)
 
@@ -68,6 +75,13 @@ def json_value(value: Any, default: Any = None) -> Any:
         return json.loads(value)
     except (TypeError, json.JSONDecodeError):
         return [] if default is None else default
+
+
+def normalize_material_search_keyword(value: Any) -> str:
+    """Make pasted/IME Chinese material keywords safe for SQL matching."""
+    normalized = unicodedata.normalize("NFKC", str(value or ""))
+    normalized = re.sub(r"[\u200b\u200c\u200d\ufeff]", "", normalized)
+    return re.sub(r"\s+", " ", normalized).strip()
 
 
 ADMIN_USERNAME_RE = re.compile(r"^[A-Za-z0-9_.@-]{3,40}$")
@@ -262,6 +276,7 @@ class AdminService:
                     top TEXT NOT NULL,
                     category TEXT NOT NULL,
                     series TEXT NOT NULL DEFAULT '',
+                    series_id TEXT NOT NULL DEFAULT '',
                     material_code TEXT NOT NULL DEFAULT '',
                     grade TEXT NOT NULL DEFAULT '',
                     name TEXT NOT NULL,
@@ -284,6 +299,7 @@ class AdminService:
                     stock INTEGER NOT NULL DEFAULT 0,
                     enabled INTEGER NOT NULL DEFAULT 1,
                     sort_order INTEGER NOT NULL DEFAULT 0,
+                    revision INTEGER NOT NULL DEFAULT 1,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 )
@@ -544,6 +560,8 @@ class AdminService:
             columns = {row["Field"] for row in rows}
             if "series" not in columns:
                 connection.execute("ALTER TABLE managed_materials ADD COLUMN series VARCHAR(160) NOT NULL DEFAULT ''")
+            if "series_id" not in columns:
+                connection.execute("ALTER TABLE managed_materials ADD COLUMN series_id VARCHAR(120) NOT NULL DEFAULT ''")
             if "material_code" not in columns:
                 connection.execute("ALTER TABLE managed_materials ADD COLUMN material_code VARCHAR(160) NOT NULL DEFAULT ''")
             if "grade" not in columns:
@@ -560,11 +578,28 @@ class AdminService:
                 connection.execute("ALTER TABLE managed_materials ADD COLUMN supplier_name VARCHAR(255) NOT NULL DEFAULT ''")
             if "purchase_note" not in columns:
                 connection.execute("ALTER TABLE managed_materials ADD COLUMN purchase_note TEXT")
+            if "reserved_stock" not in columns:
+                connection.execute("ALTER TABLE managed_materials ADD COLUMN reserved_stock INT NOT NULL DEFAULT 0")
+            if "revision" not in columns:
+                connection.execute("ALTER TABLE managed_materials ADD COLUMN revision INT NOT NULL DEFAULT 1")
             connection.execute("UPDATE managed_materials SET series = name WHERE COALESCE(series, '') = ''")
+            database = str(os.getenv("MYSQL_DATABASE") or "").strip()
+            indexes = {
+                row["INDEX_NAME"]
+                for row in connection.execute(
+                    "SELECT DISTINCT INDEX_NAME FROM INFORMATION_SCHEMA.STATISTICS "
+                    "WHERE TABLE_SCHEMA=? AND TABLE_NAME='managed_materials'",
+                    (database,),
+                ).fetchall()
+            }
+            if "idx_managed_materials_series_id" not in indexes:
+                connection.execute("CREATE INDEX idx_managed_materials_series_id ON managed_materials (series_id)")
             return
         columns = {row["name"] for row in connection.execute("PRAGMA table_info(managed_materials)").fetchall()}
         if "series" not in columns:
             connection.execute("ALTER TABLE managed_materials ADD COLUMN series TEXT NOT NULL DEFAULT ''")
+        if "series_id" not in columns:
+            connection.execute("ALTER TABLE managed_materials ADD COLUMN series_id TEXT NOT NULL DEFAULT ''")
         if "material_code" not in columns:
             connection.execute("ALTER TABLE managed_materials ADD COLUMN material_code TEXT NOT NULL DEFAULT ''")
         if "grade" not in columns:
@@ -581,7 +616,12 @@ class AdminService:
             connection.execute("ALTER TABLE managed_materials ADD COLUMN supplier_name TEXT NOT NULL DEFAULT ''")
         if "purchase_note" not in columns:
             connection.execute("ALTER TABLE managed_materials ADD COLUMN purchase_note TEXT")
+        if "reserved_stock" not in columns:
+            connection.execute("ALTER TABLE managed_materials ADD COLUMN reserved_stock INTEGER NOT NULL DEFAULT 0")
+        if "revision" not in columns:
+            connection.execute("ALTER TABLE managed_materials ADD COLUMN revision INTEGER NOT NULL DEFAULT 1")
         connection.execute("UPDATE managed_materials SET series = name WHERE COALESCE(series, '') = ''")
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_managed_materials_series_id ON managed_materials (series_id)")
 
     def _ensure_material_knowledge_columns(self, connection) -> None:
         if not self.table_exists(connection, "material_knowledge"):
@@ -651,8 +691,29 @@ class AdminService:
             """
         )
 
+    def _ensure_material_type_deletion_schema(self, connection) -> None:
+        if use_mysql() and not self._force_sqlite:
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS material_type_deletions (
+                    type_code VARCHAR(40) PRIMARY KEY,
+                    deleted_at VARCHAR(40) NOT NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """
+            )
+            return
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS material_type_deletions (
+                type_code TEXT PRIMARY KEY,
+                deleted_at TEXT NOT NULL
+            )
+            """
+        )
+
     def _seed_material_types(self, connection) -> None:
         self._ensure_material_type_schema(connection)
+        self._ensure_material_type_deletion_schema(connection)
         defaults = {
             code: {"name": name, "description": description, "sort_order": sort_order}
             for code, name, description, sort_order in DEFAULT_MATERIAL_TYPES
@@ -667,6 +728,12 @@ class AdminService:
             codes.update(str(row["top"] or "").strip() for row in rows)
         timestamp = now_iso()
         for index, code in enumerate(sorted(code for code in codes if code)):
+            deleted = connection.execute(
+                "SELECT 1 FROM material_type_deletions WHERE type_code = ?",
+                (code,),
+            ).fetchone()
+            if deleted:
+                continue
             existing = connection.execute(
                 "SELECT type_code FROM material_types WHERE type_code = ?",
                 (code,),
@@ -750,6 +817,9 @@ class AdminService:
         timestamp = now_iso()
         with self.connect() as connection:
             self._ensure_material_type_schema(connection)
+            self._ensure_material_type_deletion_schema(connection)
+            self._ensure_material_taxonomy_schema(connection)
+            self._ensure_material_columns(connection)
             existing = connection.execute(
                 "SELECT * FROM material_types WHERE type_code = ?",
                 (requested_code,),
@@ -779,6 +849,12 @@ class AdminService:
                     """,
                     (requested_code, name, description, sort_order, enabled, timestamp, timestamp),
                 )
+            cascaded = {"disabled_taxonomy_count": 0, "disabled_sku_count": 0}
+            if not enabled:
+                cascaded = self._disable_material_hierarchy(
+                    connection, top=requested_code, timestamp=timestamp
+                )
+            connection.execute("DELETE FROM material_type_deletions WHERE type_code = ?", (requested_code,))
             after = {
                 "type_code": requested_code,
                 "name": name,
@@ -796,6 +872,8 @@ class AdminService:
                 actor=actor,
                 summary=("更新材料类型：" if before else "新增材料类型：") + name,
             )
+        if not enabled:
+            invalidate_material_cache()
         return {
             "id": requested_code,
             "code": requested_code,
@@ -803,6 +881,7 @@ class AdminService:
             "description": description,
             "sort_order": sort_order,
             "enabled": bool(enabled),
+            **cascaded,
         }
 
     def disable_material_type(self, type_code: str, actor: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -811,6 +890,8 @@ class AdminService:
             raise ValueError("请选择要停用的材料类型")
         with self.connect() as connection:
             self._ensure_material_type_schema(connection)
+            self._ensure_material_taxonomy_schema(connection)
+            self._ensure_material_columns(connection)
             row = connection.execute(
                 "SELECT * FROM material_types WHERE type_code = ?",
                 (code,),
@@ -823,6 +904,7 @@ class AdminService:
                 "UPDATE material_types SET enabled=0, updated_at=? WHERE type_code=?",
                 (timestamp, code),
             )
+            cascaded = self._disable_material_hierarchy(connection, top=code, timestamp=timestamp)
             self.record_material_audit(
                 connection,
                 action="type_disable",
@@ -833,7 +915,132 @@ class AdminService:
                 actor=actor,
                 summary=f"停用材料类型：{before.get('name') or code}",
             )
-        return {"disabled": code}
+        invalidate_material_cache()
+        return {"disabled": code, **cascaded}
+
+    def _disable_material_hierarchy(
+        self,
+        connection,
+        *,
+        timestamp: str,
+        top: str = "",
+        category: str = "",
+        series: str = "",
+        taxonomy_item_id: str = "",
+    ) -> dict[str, int]:
+        """Disable every descendant of a material directory node in one transaction.
+
+        Directory state and SKU state are intentionally kept in sync: a disabled
+        type/category/series must never leave a sellable child SKU behind.
+        """
+        taxonomy_where: list[str] = []
+        taxonomy_params: list[Any] = []
+        material_where: list[str] = []
+        material_params: list[Any] = []
+        if top:
+            taxonomy_where.append("top=?")
+            taxonomy_params.append(top)
+            material_where.append("top=?")
+            material_params.append(top)
+        if category:
+            material_where.append("category=?")
+            material_params.append(category)
+        if series:
+            material_where.append("COALESCE(NULLIF(series, ''), name, '')=?")
+            material_params.append(series)
+        if taxonomy_item_id:
+            taxonomy_where.append("(item_id=? OR parent_id=?)")
+            taxonomy_params.extend([taxonomy_item_id, taxonomy_item_id])
+
+        taxonomy_count = 0
+        if taxonomy_where:
+            cursor = connection.execute(
+                f"UPDATE material_taxonomy SET enabled=0, updated_at=? "
+                f"WHERE enabled<>0 AND {' AND '.join(taxonomy_where)}",
+                [timestamp, *taxonomy_params],
+            )
+            taxonomy_count = int(cursor.rowcount or 0)
+        sku_count = 0
+        if material_where:
+            cursor = connection.execute(
+                f"UPDATE managed_materials SET enabled=0, updated_at=? "
+                f"WHERE enabled<>0 AND {' AND '.join(material_where)}",
+                [timestamp, *material_params],
+            )
+            sku_count = int(cursor.rowcount or 0)
+        return {"disabled_taxonomy_count": taxonomy_count, "disabled_sku_count": sku_count}
+
+    def repair_material_hierarchy_enabled_state(
+        self,
+        actor: dict[str, Any] | None = None,
+    ) -> dict[str, int]:
+        """Repair historical rows whose parent is disabled but child remains enabled."""
+        timestamp = now_iso()
+        taxonomy_total = 0
+        sku_total = 0
+        with self.connect() as connection:
+            self._ensure_material_type_schema(connection)
+            self._ensure_material_taxonomy_schema(connection)
+            self._ensure_material_columns(connection)
+            disabled_types = connection.execute(
+                "SELECT type_code FROM material_types WHERE enabled=0"
+            ).fetchall()
+            for row in disabled_types:
+                result = self._disable_material_hierarchy(
+                    connection, top=str(row["type_code"] or ""), timestamp=timestamp
+                )
+                taxonomy_total += result["disabled_taxonomy_count"]
+                sku_total += result["disabled_sku_count"]
+            disabled_categories = connection.execute(
+                "SELECT item_id, top, name FROM material_taxonomy WHERE kind='category' AND enabled=0"
+            ).fetchall()
+            for row in disabled_categories:
+                result = self._disable_material_hierarchy(
+                    connection,
+                    top=str(row["top"] or ""),
+                    category=str(row["name"] or ""),
+                    taxonomy_item_id=str(row["item_id"] or ""),
+                    timestamp=timestamp,
+                )
+                taxonomy_total += result["disabled_taxonomy_count"]
+                sku_total += result["disabled_sku_count"]
+            parent_join = (
+                "BINARY c.item_id=BINARY s.parent_id"
+                if use_mysql() and not self._force_sqlite
+                else "c.item_id=s.parent_id"
+            )
+            disabled_series = connection.execute(
+                f"""
+                SELECT s.item_id, s.top, s.name, c.name AS category_name
+                FROM material_taxonomy s
+                LEFT JOIN material_taxonomy c ON {parent_join} AND c.kind='category'
+                WHERE s.kind='series' AND s.enabled=0
+                """
+            ).fetchall()
+            for row in disabled_series:
+                result = self._disable_material_hierarchy(
+                    connection,
+                    top=str(row["top"] or ""),
+                    category=str(row["category_name"] or ""),
+                    series=str(row["name"] or ""),
+                    taxonomy_item_id=str(row["item_id"] or ""),
+                    timestamp=timestamp,
+                )
+                taxonomy_total += result["disabled_taxonomy_count"]
+                sku_total += result["disabled_sku_count"]
+            if taxonomy_total or sku_total:
+                self.record_material_audit(
+                    connection,
+                    action="taxonomy_hierarchy_repair",
+                    target_type="material_taxonomy",
+                    target_id="hierarchy-enabled-state",
+                    after={"disabled_taxonomy_count": taxonomy_total, "disabled_sku_count": sku_total},
+                    actor=actor,
+                    summary="修复材料层级停用状态",
+                )
+        if taxonomy_total or sku_total:
+            invalidate_material_cache()
+        return {"disabled_taxonomy_count": taxonomy_total, "disabled_sku_count": sku_total}
 
     def _ensure_material_taxonomy_schema(self, connection) -> None:
         if use_mysql() and not self._force_sqlite:
@@ -851,6 +1058,7 @@ class AdminService:
                     image_path VARCHAR(1000),
                     image_url VARCHAR(2000),
                     image_urls_json LONGTEXT,
+                    asset_version INT NOT NULL DEFAULT 1,
                     sort_order INT NOT NULL DEFAULT 0,
                     enabled TINYINT NOT NULL DEFAULT 1,
                     created_at VARCHAR(40) NOT NULL,
@@ -867,10 +1075,13 @@ class AdminService:
                 "image_path": "ALTER TABLE material_taxonomy ADD COLUMN image_path VARCHAR(1000)",
                 "image_url": "ALTER TABLE material_taxonomy ADD COLUMN image_url VARCHAR(2000)",
                 "image_urls_json": "ALTER TABLE material_taxonomy ADD COLUMN image_urls_json LONGTEXT",
+                "asset_version": "ALTER TABLE material_taxonomy ADD COLUMN asset_version INT NOT NULL DEFAULT 1",
             }
             for column, sql in additions.items():
                 if column not in columns:
                     connection.execute(sql)
+            self._ensure_material_asset_version_schema(connection)
+            self._backfill_material_asset_versions(connection)
             return
         connection.execute(
             """
@@ -886,6 +1097,7 @@ class AdminService:
                 image_path TEXT,
                 image_url TEXT,
                 image_urls_json TEXT,
+                asset_version INTEGER NOT NULL DEFAULT 1,
                 sort_order INTEGER NOT NULL DEFAULT 0,
                 enabled INTEGER NOT NULL DEFAULT 1,
                 created_at TEXT NOT NULL,
@@ -901,10 +1113,143 @@ class AdminService:
             "image_path": "ALTER TABLE material_taxonomy ADD COLUMN image_path TEXT",
             "image_url": "ALTER TABLE material_taxonomy ADD COLUMN image_url TEXT",
             "image_urls_json": "ALTER TABLE material_taxonomy ADD COLUMN image_urls_json TEXT",
+            "asset_version": "ALTER TABLE material_taxonomy ADD COLUMN asset_version INTEGER NOT NULL DEFAULT 1",
         }
         for column, sql in additions.items():
             if column not in columns:
                 connection.execute(sql)
+        self._ensure_material_asset_version_schema(connection)
+        self._backfill_material_asset_versions(connection)
+
+    def _ensure_material_asset_version_schema(self, connection) -> None:
+        if use_mysql() and not self._force_sqlite:
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS material_asset_versions (
+                    version_id VARCHAR(80) PRIMARY KEY,
+                    series_id VARCHAR(120) NOT NULL,
+                    asset_version INT NOT NULL,
+                    image_url VARCHAR(2000) NOT NULL DEFAULT '',
+                    image_urls_json LONGTEXT NOT NULL,
+                    source VARCHAR(40) NOT NULL DEFAULT 'gallery_publish',
+                    actor_id VARCHAR(80) NOT NULL DEFAULT '',
+                    created_at VARCHAR(40) NOT NULL,
+                    UNIQUE KEY uq_material_asset_versions_series_version (series_id, asset_version),
+                    INDEX idx_material_asset_versions_series_created (series_id, created_at)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS material_asset_publish_requests (
+                    idempotency_key VARCHAR(120) PRIMARY KEY,
+                    series_id VARCHAR(120) NOT NULL,
+                    response_json LONGTEXT NOT NULL,
+                    created_at VARCHAR(40) NOT NULL,
+                    INDEX idx_material_asset_publish_requests_series (series_id)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """
+            )
+            return
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS material_asset_versions (
+                version_id TEXT PRIMARY KEY,
+                series_id TEXT NOT NULL,
+                asset_version INTEGER NOT NULL,
+                image_url TEXT NOT NULL DEFAULT '',
+                image_urls_json TEXT NOT NULL,
+                source TEXT NOT NULL DEFAULT 'gallery_publish',
+                actor_id TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                UNIQUE(series_id, asset_version)
+            )
+            """
+        )
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_material_asset_versions_series_created "
+            "ON material_asset_versions (series_id, created_at)"
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS material_asset_publish_requests (
+                idempotency_key TEXT PRIMARY KEY,
+                series_id TEXT NOT NULL,
+                response_json TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_material_asset_publish_requests_series "
+            "ON material_asset_publish_requests (series_id)"
+        )
+
+    def _backfill_material_asset_versions(self, connection) -> None:
+        """Capture a V1 audit snapshot for series that existed before asset history."""
+        # Old taxonomy databases were created with unicode_ci while the new
+        # audit table follows the MySQL 8 default 0900_ai_ci.  Explicitly
+        # normalize this legacy comparison; otherwise merely opening the
+        # admin service can fail before any material list query is served.
+        collation = " COLLATE utf8mb4_unicode_ci" if use_mysql() and not self._force_sqlite else ""
+        rows = connection.execute(
+            f"""
+            SELECT s.item_id, s.asset_version, s.image_url, s.image_urls_json, s.updated_at
+            FROM material_taxonomy s
+            WHERE s.kind='series'
+              AND NOT EXISTS (
+                SELECT 1 FROM material_asset_versions v
+                WHERE v.series_id{collation}=s.item_id{collation} AND v.asset_version=s.asset_version
+              )
+            """
+        ).fetchall()
+        for row in rows:
+            item = dict(row)
+            connection.execute(
+                """
+                INSERT INTO material_asset_versions
+                (version_id, series_id, asset_version, image_url, image_urls_json, source, actor_id, created_at)
+                VALUES (?, ?, ?, ?, ?, 'legacy_snapshot', '', ?)
+                """,
+                (
+                    f"matasset_{secrets.token_hex(12)}",
+                    item["item_id"],
+                    max(1, int(item.get("asset_version") or 1)),
+                    item.get("image_url") or "",
+                    item.get("image_urls_json") or "[]",
+                    item.get("updated_at") or now_iso(),
+                ),
+            )
+
+    def _record_material_asset_version(
+        self,
+        connection,
+        *,
+        series_id: str,
+        asset_version: int,
+        image_url: str,
+        image_urls: list[str],
+        source: str,
+        actor: dict[str, Any] | None,
+        created_at: str,
+    ) -> None:
+        connection.execute(
+            """
+            INSERT INTO material_asset_versions
+            (version_id, series_id, asset_version, image_url, image_urls_json, source, actor_id, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                f"matasset_{secrets.token_hex(12)}",
+                series_id,
+                asset_version,
+                image_url,
+                json_text(image_urls),
+                source,
+                str((actor or {}).get("admin_id") or ""),
+                created_at,
+            ),
+        )
 
     def _upsert_taxonomy_if_missing(
         self,
@@ -919,6 +1264,21 @@ class AdminService:
         clean_name = str(name or "").strip()
         if not clean_name:
             return ""
+        existing = connection.execute(
+            """
+            SELECT item_id
+            FROM material_taxonomy
+            WHERE kind=? AND top=? AND name=? AND COALESCE(parent_id, '')=?
+            ORDER BY
+                CASE WHEN COALESCE(material_code, '') <> '' THEN 0 ELSE 1 END,
+                created_at ASC,
+                item_id ASC
+            LIMIT 1
+            """,
+            (kind, top or "bead", clean_name, parent_id),
+        ).fetchone()
+        if existing:
+            return str(existing["item_id"])
         item_id = self.material_taxonomy_id(kind, top, clean_name, parent_id)
         existing = connection.execute("SELECT item_id FROM material_taxonomy WHERE item_id = ?", (item_id,)).fetchone()
         if not existing:
@@ -999,6 +1359,45 @@ class AdminService:
                     """,
                     (top, category, series),
                 )
+        self._backfill_material_series_ids(connection)
+
+    def _backfill_material_series_ids(self, connection) -> None:
+        """Link legacy SKU rows to their stable taxonomy series IDs.
+
+        Older data identified a variety by the editable (type, category, name)
+        tuple.  Once the link is present, a category or variety rename updates
+        exactly the existing SKUs instead of creating a new apparent variety.
+        """
+        if not self.table_exists(connection, "managed_materials"):
+            return
+        self._ensure_material_columns(connection)
+        collation = " COLLATE utf8mb4_unicode_ci" if use_mysql() and not self._force_sqlite else ""
+        connection.execute(
+            f"""
+            UPDATE managed_materials
+            SET series_id=(
+                SELECT s.item_id
+                FROM material_taxonomy s
+                JOIN material_taxonomy c ON c.item_id=s.parent_id
+                WHERE s.kind='series' AND c.kind='category'
+                  AND s.top{collation}=managed_materials.top{collation}
+                  AND c.name{collation}=managed_materials.category{collation}
+                  AND s.name{collation}=COALESCE(NULLIF(managed_materials.series, ''), managed_materials.name){collation}
+                ORDER BY s.created_at ASC, s.item_id ASC
+                LIMIT 1
+            )
+            WHERE COALESCE(series_id, '')=''
+              AND EXISTS(
+                SELECT 1
+                FROM material_taxonomy s
+                JOIN material_taxonomy c ON c.item_id=s.parent_id
+                WHERE s.kind='series' AND c.kind='category'
+                  AND s.top{collation}=managed_materials.top{collation}
+                  AND c.name{collation}=managed_materials.category{collation}
+                  AND s.name{collation}=COALESCE(NULLIF(managed_materials.series, ''), managed_materials.name){collation}
+              )
+            """
+        )
 
     def _legacy_sku_series_images(
         self,
@@ -1023,7 +1422,7 @@ class AdminService:
             row = dict(raw)
             row_path = str(row.get("image_path") or "").strip()
             row_url = normalize_material_image_url(row.get("image_url") or "")
-            urls = clean_image_urls(row.get("image_urls_json"), row_url, row_path)
+            urls = clean_gallery_image_urls(row.get("image_urls_json"), row_url)
             if not image_path and row_path:
                 image_path = row_path
             for url in urls:
@@ -1033,19 +1432,17 @@ class AdminService:
                     break
             if len(image_urls) >= 24:
                 break
-        image_url = image_urls[0] if image_urls else material_url_from_path(image_path)
+        image_url = normalize_material_image_url(rows[0]["image_url"] if rows else "") if rows else ""
+        image_url = image_url or material_url_from_path(image_path)
         return image_path, image_url, image_urls
 
     def _promote_payload_images_to_series(self, payload: dict[str, Any], connection, timestamp: str) -> None:
         image_path = str(payload.get("image_path") or "").strip()
         image_url = normalize_material_image_url(payload.get("thumbnail_url") or payload.get("image_url") or "")
-        image_urls = clean_image_urls(
+        image_urls = clean_gallery_image_urls(
             payload.get("image_urls") or payload.get("image_pool") or payload.get("image_urls_json"),
             image_url,
-            image_path,
         )
-        if not image_url and image_urls:
-            image_url = image_urls[0]
         if not image_path and not image_url and not image_urls:
             return
         series = self.get_series_taxonomy(
@@ -1069,7 +1466,10 @@ class AdminService:
     def public_taxonomy_visual(self, row: dict[str, Any]) -> dict[str, Any]:
         image_path = row.get("image_path") or ""
         image_url = normalize_material_image_url(row.get("image_url")) or material_url_from_path(image_path)
-        image_urls = clean_image_urls(row.get("image_urls_json") or row.get("image_urls"))
+        image_urls = clean_gallery_image_urls(
+            row.get("image_urls_json") or row.get("image_urls"),
+            image_url,
+        )
         return {
             "material_code": row.get("material_code") or "",
             "color": row.get("color") or "",
@@ -1078,6 +1478,7 @@ class AdminService:
             "image_url": image_url,
             "image_urls": image_urls,
             "image_pool": image_urls,
+            "asset_version": max(1, int(row.get("asset_version") or 1)),
         }
 
     def get_series_taxonomy(
@@ -1087,8 +1488,28 @@ class AdminService:
         top: str,
         category: str,
         series: str,
+        series_id: str = "",
         include_disabled: bool = False,
     ) -> dict[str, Any] | None:
+        if str(series_id or "").strip():
+            clauses = [
+                "s.kind='series'",
+                "c.kind='category'",
+                "s.parent_id=c.item_id",
+                "s.item_id=?",
+            ]
+            params: list[Any] = [str(series_id).strip()]
+            if not include_disabled:
+                clauses.extend(["s.enabled=1", "c.enabled=1"])
+            row = connection.execute(
+                f"""
+                SELECT s.*, c.name AS category_name
+                FROM material_taxonomy s, material_taxonomy c
+                WHERE {' AND '.join(clauses)}
+                """,
+                params,
+            ).fetchone()
+            return dict(row) if row else None
         clauses = [
             "s.kind='series'",
             "c.kind='category'",
@@ -1398,6 +1819,7 @@ class AdminService:
         clean["top"] = category["top"] or top
         clean["category"] = category["name"]
         clean["series"] = series["name"]
+        clean["series_id"] = series["item_id"]
         clean["material_code"] = material_code
         clean["material_params"] = {
             **(knowledge.get("material_params") or {}),
@@ -1461,6 +1883,11 @@ class AdminService:
                 parent_id = row.get("parent_id") or ""
                 visual = self.public_taxonomy_visual(row)
                 knowledge = knowledge_map.get(visual.get("material_code") or "") or {}
+                material_params = dict(knowledge.get("material_params") or {})
+                # 工作台的“珠子”材料统一按圆珠处理。配饰、吊坠等非珠子类型仍使用
+                # 各自保存的形制，避免把隔珠或挂件误改为圆珠。
+                if row["top"] == "bead":
+                    material_params["bead_shape"] = "round"
                 series_item = {
                     "id": row["item_id"],
                     "parent_id": parent_id,
@@ -1488,7 +1915,7 @@ class AdminService:
                         "match_rules": knowledge.get("match_rules") or [],
                         "care_tags": knowledge.get("care_tags") or [],
                     },
-                    "material_params": knowledge.get("material_params") or {},
+                    "material_params": material_params,
                     "asset": knowledge.get("asset") or {},
                 }
                 if parent_id in categories:
@@ -1574,6 +2001,15 @@ class AdminService:
                         """,
                         (top, name, timestamp, before_top, before_name),
                     )
+            cascaded = {"disabled_taxonomy_count": 0, "disabled_sku_count": 0}
+            if not enabled:
+                cascaded = self._disable_material_hierarchy(
+                    connection,
+                    top=top,
+                    category=name,
+                    taxonomy_item_id=item_id,
+                    timestamp=timestamp,
+                )
             after = {
                 "item_id": item_id,
                 "parent_id": "",
@@ -1593,7 +2029,16 @@ class AdminService:
                 actor=actor,
                 summary=("更新材料分类：" if before else "新增材料分类：") + name,
             )
-        return {"id": item_id, "top": top, "name": name, "sort_order": sort_order, "enabled": bool(enabled)}
+        if not enabled:
+            invalidate_material_cache()
+        return {
+            "id": item_id,
+            "top": top,
+            "name": name,
+            "sort_order": sort_order,
+            "enabled": bool(enabled),
+            **cascaded,
+        }
 
     def save_material_series(self, payload: dict[str, Any], actor: dict[str, Any] | None = None) -> dict[str, Any]:
         category_id = str(payload.get("category_id") or "").strip()
@@ -1616,7 +2061,9 @@ class AdminService:
             if enabled and not bool(category["enabled"]):
                 raise ValueError("所属分类已停用")
             top = category["top"] or str(payload.get("top") or "bead").strip()
-            item_id = str(payload.get("id") or self.material_taxonomy_id("series", top, name, category_id)).strip()
+            # `item_id` is the stable series ID.  All edits must retain it even
+            # when a user changes the type, category, or display name.
+            item_id = str(payload.get("id") or payload.get("series_id") or self.material_taxonomy_id("series", top, name, category_id)).strip()
             existing = connection.execute("SELECT * FROM material_taxonomy WHERE item_id = ?", (item_id,)).fetchone()
             before = dict(existing) if existing else None
             before_category = None
@@ -1653,19 +2100,33 @@ class AdminService:
                         (payload[key] for key in ("image_urls", "image_pool", "image_urls_json") if key in payload),
                         [],
                     )
-                    image_urls = clean_image_urls(gallery_value)
+                    primary_identity = material_image_identity(primary_image_url)
+                    if primary_identity and any(
+                        material_image_identity(url) == primary_identity
+                        for url in clean_image_urls(gallery_value)
+                    ):
+                        raise ValueError("主图不能同时加入随机图库，请移除重复图片后再保存")
+                    image_urls = clean_gallery_image_urls(gallery_value, primary_image_url, top=top)
                 else:
-                    image_urls = clean_image_urls((before or {}).get("image_urls_json"))
+                    image_urls = clean_gallery_image_urls((before or {}).get("image_urls_json"), primary_image_url, top=top)
             else:
                 image_path = str((before or {}).get("image_path") or "").strip()
                 primary_image_url = normalize_material_image_url((before or {}).get("image_url") or "")
-                image_urls = clean_image_urls((before or {}).get("image_urls_json"))
-            if top == "accessory" and primary_image_url:
-                primary_identity = material_image_identity(primary_image_url)
-                image_urls = [
-                    url for url in image_urls
-                    if material_image_identity(url) != primary_identity
-                ]
+                image_urls = clean_gallery_image_urls((before or {}).get("image_urls_json"), primary_image_url, top=top)
+            previous_asset_version = max(1, int((before or {}).get("asset_version") or 1))
+            visual_changed = not before or (
+                has_explicit_images
+                and (
+                    image_path != str((before or {}).get("image_path") or "").strip()
+                    or primary_image_url != normalize_material_image_url((before or {}).get("image_url") or "")
+                    or image_urls != clean_gallery_image_urls(
+                        (before or {}).get("image_urls_json"),
+                        normalize_material_image_url((before or {}).get("image_url") or ""),
+                        top=top,
+                    )
+                )
+            )
+            asset_version = previous_asset_version + 1 if before and visual_changed else previous_asset_version
             material_code = str(payload.get("material_code") or (before or {}).get("material_code") or "").strip()
             if not material_code:
                 material_code = material_code_from_payload(
@@ -1685,12 +2146,12 @@ class AdminService:
                     """
                     UPDATE material_taxonomy
                     SET parent_id=?, top=?, name=?, material_code=?, color=?, shine=?, image_path=?, image_url=?,
-                        image_urls_json=?, sort_order=?, enabled=?, updated_at=?
+                        image_urls_json=?, asset_version=?, sort_order=?, enabled=?, updated_at=?
                     WHERE item_id=?
                     """,
                     (
                         category_id, top, name, material_code, color, shine, image_path, primary_image_url,
-                        json_text(image_urls), sort_order, enabled, timestamp, item_id,
+                        json_text(image_urls), asset_version, sort_order, enabled, timestamp, item_id,
                     ),
                 )
             else:
@@ -1698,13 +2159,24 @@ class AdminService:
                     """
                     INSERT INTO material_taxonomy
                     (item_id, parent_id, kind, top, name, material_code, color, shine, image_path, image_url,
-                     image_urls_json, sort_order, enabled, created_at, updated_at)
-                    VALUES (?, ?, 'series', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     image_urls_json, asset_version, sort_order, enabled, created_at, updated_at)
+                    VALUES (?, ?, 'series', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         item_id, category_id, top, name, material_code, color, shine, image_path, primary_image_url,
-                        json_text(image_urls), sort_order, enabled, timestamp, timestamp,
+                        json_text(image_urls), asset_version, sort_order, enabled, timestamp, timestamp,
                     ),
+                )
+            if visual_changed:
+                self._record_material_asset_version(
+                    connection,
+                    series_id=item_id,
+                    asset_version=asset_version,
+                    image_url=primary_image_url,
+                    image_urls=image_urls,
+                    source="series_profile",
+                    actor=actor,
+                    created_at=timestamp,
                 )
             knowledge_payload = {
                 **payload,
@@ -1739,26 +2211,28 @@ class AdminService:
                     """
                     SELECT COUNT(*) AS total
                     FROM managed_materials
-                    WHERE top=? AND category=? AND COALESCE(NULLIF(series, ''), name, '')=?
+                    WHERE series_id=?
+                       OR (COALESCE(series_id, '')='' AND top=? AND category=? AND COALESCE(NULLIF(series, ''), name, '')=?)
                     """,
-                    (old_top, old_category, old_series),
+                    (item_id, old_top, old_category, old_series),
                 ).fetchone()["total"]
                 or 0
             )
             connection.execute(
                 """
                     UPDATE managed_materials
-                    SET top=?, category=?, series=?, material_code=?,
+                    SET top=?, category=?, series=?, series_id=?, material_code=?,
                         name=CASE WHEN COALESCE(name, '') = '' OR name = ? THEN ? ELSE name END,
                         element=CASE WHEN ? = 'pendant' THEN '' WHEN ? <> '' THEN ? ELSE element END,
                         effect=CASE WHEN ? <> '' THEN ? ELSE effect END,
                         color=CASE WHEN ? <> '' THEN ? ELSE color END,
                         shine=CASE WHEN ? <> '' THEN ? ELSE shine END,
                         image_path='', image_url='', image_urls_json='[]', updated_at=?
-                WHERE top=? AND category=? AND COALESCE(NULLIF(series, ''), name, '')=?
+                WHERE series_id=?
+                   OR (COALESCE(series_id, '')='' AND top=? AND category=? AND COALESCE(NULLIF(series, ''), name, '')=?)
                 """,
                 (
-                    top, category["name"], name, material_code,
+                    top, category["name"], name, item_id, material_code,
                     old_series, name,
                     top,
                     primary_element, primary_element,
@@ -1766,7 +2240,7 @@ class AdminService:
                     color, color,
                     shine, shine,
                     timestamp,
-                    old_top, old_category, old_series,
+                    item_id, old_top, old_category, old_series,
                 ),
             )
             remaining_sku_images = int(
@@ -1774,19 +2248,28 @@ class AdminService:
                     """
                     SELECT COUNT(*) AS total
                     FROM managed_materials
-                    WHERE top=? AND category=? AND COALESCE(NULLIF(series, ''), name, '')=?
-                      AND (
+                    WHERE series_id=? AND (
                         COALESCE(image_path, '') <> ''
                         OR COALESCE(image_url, '') <> ''
                         OR COALESCE(image_urls_json, '') NOT IN ('', '[]', '{}', 'null')
                       )
                     """,
-                    (top, category["name"], name),
+                    (item_id,),
                 ).fetchone()["total"]
                 or 0
             )
             if remaining_sku_images:
                 raise ValueError("SKU 图片清理失败，品种图片未能保持唯一数据源")
+            cascaded = {"disabled_taxonomy_count": 0, "disabled_sku_count": 0}
+            if not enabled:
+                cascaded = self._disable_material_hierarchy(
+                    connection,
+                    top=top,
+                    category=str(category["name"] or ""),
+                    series=name,
+                    taxonomy_item_id=item_id,
+                    timestamp=timestamp,
+                )
             after = {
                 "item_id": item_id,
                 "parent_id": category_id,
@@ -1799,6 +2282,7 @@ class AdminService:
                 "image_path": image_path,
                 "image_url": primary_image_url,
                 "image_urls_json": json_text(image_urls),
+                "asset_version": asset_version,
                 "sort_order": sort_order,
                 "enabled": enabled,
             }
@@ -1823,12 +2307,34 @@ class AdminService:
             "shine": shine,
             "image_url": primary_image_url,
             "image_urls": image_urls,
+            "asset_version": asset_version,
             "synced_sku_count": matching_sku_count,
             "cleared_sku_image_count": matching_sku_count,
             "image_source": "series",
             "sort_order": sort_order,
             "enabled": bool(enabled),
+            **cascaded,
         }
+
+    def update_material_series(
+        self,
+        series_id: str,
+        payload: dict[str, Any],
+        actor: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Update an existing variety by immutable ID, never by its name."""
+        clean_id = str(series_id or "").strip()
+        if not clean_id:
+            raise ValueError("品种 ID 不能为空")
+        with self.connect() as connection:
+            self._ensure_material_taxonomy_schema(connection)
+            existing = connection.execute(
+                "SELECT item_id FROM material_taxonomy WHERE item_id=? AND kind='series'",
+                (clean_id,),
+            ).fetchone()
+        if not existing:
+            raise ValueError("品种不存在，无法更新")
+        return self.save_material_series({**payload, "id": clean_id, "series_id": clean_id}, actor=actor)
 
     def bind_material_series_images(
         self,
@@ -1836,6 +2342,8 @@ class AdminService:
         image_urls: list[str],
         *,
         mode: str = "replace",
+        expected_version: int | None = None,
+        idempotency_key: str = "",
         sync_sku_images: bool = True,
         actor: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
@@ -1857,6 +2365,16 @@ class AdminService:
 
         with self.connect() as connection:
             self._ensure_material_taxonomy_schema(connection)
+            request_key = str(idempotency_key or "").strip()
+            if request_key:
+                prior = connection.execute(
+                    "SELECT series_id, response_json FROM material_asset_publish_requests WHERE idempotency_key=?",
+                    (request_key,),
+                ).fetchone()
+                if prior:
+                    if str(prior["series_id"] or "") != clean_id:
+                        raise ValueError("幂等键已用于其他材料品种")
+                    return json_value(prior["response_json"], {})
             row = connection.execute(
                 """
                 SELECT s.*, c.name AS category_name
@@ -1869,21 +2387,35 @@ class AdminService:
             if not row:
                 raise ValueError("材料品种不存在")
             item = dict(row)
-            current = clean_image_urls(item.get("image_urls_json"))
-            final_urls = list(dict.fromkeys([*current, *incoming])) if mode == "append" else incoming
-            if item.get("top") == "accessory":
-                primary_identity = material_image_identity(item.get("image_url") or "")
-                final_urls = [
-                    url for url in final_urls
-                    if material_image_identity(url) != primary_identity
-                ]
+            current_version = max(1, int(item.get("asset_version") or 1))
+            if expected_version is not None and int(expected_version) != current_version:
+                raise ValueError("图库已被其他操作更新，请刷新后再发布")
+            primary_url = normalize_material_image_url(item.get("image_url") or "")
+            primary_identity = material_image_identity(primary_url)
+            if primary_identity and any(
+                material_image_identity(url) == primary_identity for url in incoming
+            ):
+                raise ValueError("主图不能加入随机图库，请移除重复图片后再发布")
+            current = clean_gallery_image_urls(item.get("image_urls_json"), primary_url, top=item.get("top") or "")
+            final_urls = clean_gallery_image_urls(
+                [*current, *incoming] if mode == "append" else incoming,
+                primary_url,
+                top=item.get("top") or "",
+            )
             if len(final_urls) > 24:
                 raise ValueError("品种图库最多保留 24 张图片")
             timestamp = now_iso()
-            connection.execute(
-                "UPDATE material_taxonomy SET image_urls_json=?, updated_at=? WHERE item_id=?",
-                (json_text(final_urls), timestamp, item["item_id"]),
+            next_version = current_version + 1
+            cursor = connection.execute(
+                """
+                UPDATE material_taxonomy
+                SET image_urls_json=?, asset_version=?, updated_at=?
+                WHERE item_id=? AND asset_version=?
+                """,
+                (json_text(final_urls), next_version, timestamp, item["item_id"], current_version),
             )
+            if cursor.rowcount != 1:
+                raise ValueError("图库已被其他操作更新，请刷新后再发布")
             self.record_material_audit(
                 connection,
                 action="series_gallery_update",
@@ -1894,21 +2426,76 @@ class AdminService:
                 actor=actor,
                 summary=f"更新材料品种图库：{item['name']}",
             )
-        # This is deliberately outside the transaction: the public material
-        # endpoint must not retain a pre-update gallery in its process cache.
+            result = {
+                "id": item["item_id"],
+                "category_id": item["parent_id"],
+                "top": item.get("top") or "",
+                "name": item["name"],
+                "image_url": primary_url,
+                "image_urls": final_urls,
+                "mode": mode,
+                "bound_count": len(final_urls),
+                "image_source": "series",
+                "synced_sku_count": 0,
+                "asset_version": next_version,
+            }
+            connection.execute(
+                """
+                INSERT INTO material_asset_versions
+                (version_id, series_id, asset_version, image_url, image_urls_json, source, actor_id, created_at)
+                VALUES (?, ?, ?, ?, ?, 'gallery_publish', ?, ?)
+                """,
+                (
+                    f"matasset_{secrets.token_hex(12)}",
+                    item["item_id"],
+                    next_version,
+                    primary_url,
+                    json_text(final_urls),
+                    str((actor or {}).get("admin_id") or ""),
+                    timestamp,
+                ),
+            )
+            if request_key:
+                connection.execute(
+                    """
+                    INSERT INTO material_asset_publish_requests
+                    (idempotency_key, series_id, response_json, created_at)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (request_key, item["item_id"], json_text(result), timestamp),
+                )
+        # The public material endpoint must not retain a pre-update gallery in
+        # its process cache after this transaction commits.
         invalidate_material_cache()
-        return {
-            "id": item["item_id"],
-            "category_id": item["parent_id"],
-            "top": item.get("top") or "",
-            "name": item["name"],
-            "image_url": normalize_material_image_url(item.get("image_url") or ""),
-            "image_urls": final_urls,
-            "mode": mode,
-            "bound_count": len(final_urls),
-            "image_source": "series",
-            "synced_sku_count": 0,
-        }
+        return result
+
+    def list_material_series_asset_versions(self, series_id: str, limit: int = 30) -> list[dict[str, Any]]:
+        clean_id = str(series_id or "").strip()
+        if not clean_id:
+            raise ValueError("请选择材料品种")
+        with self.connect() as connection:
+            self._ensure_material_taxonomy_schema(connection)
+            rows = connection.execute(
+                """
+                SELECT asset_version, image_url, image_urls_json, source, actor_id, created_at
+                FROM material_asset_versions
+                WHERE series_id=?
+                ORDER BY asset_version DESC, created_at DESC
+                LIMIT ?
+                """,
+                (clean_id, max(1, min(int(limit or 30), 100))),
+            ).fetchall()
+        return [
+            {
+                "asset_version": int(row["asset_version"] or 0),
+                "image_url": row["image_url"] or "",
+                "image_urls": clean_gallery_image_urls(row["image_urls_json"], row["image_url"] or ""),
+                "source": row["source"] or "",
+                "actor_id": row["actor_id"] or "",
+                "created_at": row["created_at"] or "",
+            }
+            for row in rows
+        ]
 
     def disable_material_taxonomy_item(self, item_id: str, actor: dict[str, Any] | None = None) -> dict[str, Any]:
         clean_id = str(item_id or "").strip()
@@ -1917,13 +2504,18 @@ class AdminService:
         timestamp = now_iso()
         with self.connect() as connection:
             self._ensure_material_taxonomy_schema(connection)
+            self._ensure_material_columns(connection)
             row = connection.execute("SELECT * FROM material_taxonomy WHERE item_id = ?", (clean_id,)).fetchone()
             if not row:
                 raise ValueError("分类或品种不存在")
             before = dict(row)
-            connection.execute(
-                "UPDATE material_taxonomy SET enabled=0, updated_at=? WHERE item_id=? OR parent_id=?",
-                (timestamp, clean_id, clean_id),
+            cascaded = self._disable_material_hierarchy(
+                connection,
+                top=str(before.get("top") or ""),
+                category=str(before.get("name") or "") if before.get("kind") == "category" else "",
+                series=str(before.get("name") or "") if before.get("kind") == "series" else "",
+                taxonomy_item_id=clean_id,
+                timestamp=timestamp,
             )
             after = {**before, "enabled": 0, "updated_at": timestamp}
             self.record_material_audit(
@@ -1936,7 +2528,229 @@ class AdminService:
                 actor=actor,
                 summary=f"停用材料{'分类' if before.get('kind') == 'category' else '品种'}：{before.get('name') or clean_id}",
             )
-        return {"disabled": clean_id}
+        invalidate_material_cache()
+        return {"disabled": clean_id, **cascaded}
+
+    def delete_empty_material_categories(
+        self,
+        ids: list[str],
+        actor: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        if (actor or {}).get("role") == "viewer":
+            raise PermissionError("只读账号不能删除材料分类")
+        clean_ids = list(dict.fromkeys(str(item or "").strip() for item in ids if str(item or "").strip()))
+        if not clean_ids:
+            raise ValueError("请选择要删除的材料分类")
+        placeholders = ", ".join(["?"] * len(clean_ids))
+        with self.connect() as connection:
+            self._ensure_material_taxonomy_schema(connection)
+            rows = [
+                dict(row)
+                for row in connection.execute(
+                    f"SELECT * FROM material_taxonomy WHERE item_id IN ({placeholders})",
+                    clean_ids,
+                ).fetchall()
+            ]
+            rows_by_id = {row["item_id"]: row for row in rows}
+            missing = [item_id for item_id in clean_ids if item_id not in rows_by_id]
+            if missing:
+                raise ValueError("材料分类不存在或已被删除")
+
+            blocked: list[str] = []
+            for row in rows:
+                if row.get("kind") != "category":
+                    blocked.append(f"{row.get('name') or row['item_id']}（不是一级分类）")
+                    continue
+                series_count = int(
+                    connection.execute(
+                        "SELECT COUNT(*) AS total FROM material_taxonomy WHERE parent_id=?",
+                        (row["item_id"],),
+                    ).fetchone()["total"]
+                    or 0
+                )
+                sku_count = int(
+                    connection.execute(
+                        "SELECT COUNT(*) AS total FROM managed_materials WHERE top=? AND category=?",
+                        (row.get("top") or "", row.get("name") or ""),
+                    ).fetchone()["total"]
+                    or 0
+                )
+                if series_count or sku_count:
+                    details = []
+                    if series_count:
+                        details.append(f"{series_count} 个品种")
+                    if sku_count:
+                        details.append(f"{sku_count} 个 SKU")
+                    blocked.append(f"{row.get('name') or row['item_id']}（含{'、'.join(details)}）")
+            if blocked:
+                raise ValueError("以下分类不是空分类，不能删除：" + "；".join(blocked))
+
+            cursor = connection.execute(
+                f"DELETE FROM material_taxonomy WHERE item_id IN ({placeholders}) AND kind='category'",
+                clean_ids,
+            )
+            if cursor.rowcount != len(rows):
+                raise ValueError("分类状态已变化，请刷新后重试")
+            for row in rows:
+                self.record_material_audit(
+                    connection,
+                    action="taxonomy_delete_empty_category",
+                    target_type="material_taxonomy",
+                    target_id=row["item_id"],
+                    before=row,
+                    actor=actor,
+                    summary=f"删除空材料分类：{row.get('name') or row['item_id']}",
+                )
+        invalidate_material_cache()
+        return {"deleted": clean_ids, "count": len(clean_ids)}
+
+    def delete_empty_material_series(
+        self,
+        ids: list[str],
+        actor: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        if (actor or {}).get("role") == "viewer":
+            raise PermissionError("只读账号不能删除材料品种")
+        clean_ids = list(dict.fromkeys(str(item or "").strip() for item in ids if str(item or "").strip()))
+        if not clean_ids:
+            raise ValueError("请选择要删除的材料品种")
+        placeholders = ", ".join(["?"] * len(clean_ids))
+        with self.connect() as connection:
+            self._ensure_material_taxonomy_schema(connection)
+            rows = [
+                dict(row)
+                for row in connection.execute(
+                    f"""
+                    SELECT s.*, c.name AS category_name
+                    FROM material_taxonomy s
+                    LEFT JOIN material_taxonomy c ON c.item_id=s.parent_id AND c.kind='category'
+                    WHERE s.item_id IN ({placeholders})
+                    """,
+                    clean_ids,
+                ).fetchall()
+            ]
+            rows_by_id = {row["item_id"]: row for row in rows}
+            if any(item_id not in rows_by_id for item_id in clean_ids):
+                raise ValueError("材料品种不存在或已被删除")
+            blocked: list[str] = []
+            for row in rows:
+                if row.get("kind") != "series":
+                    blocked.append(f"{row.get('name') or row['item_id']}（不是品种 / 款式）")
+                    continue
+                sku_count = int(
+                    connection.execute(
+                        """
+                        SELECT COUNT(*) AS total FROM managed_materials
+                        WHERE top=? AND category=? AND COALESCE(NULLIF(series, ''), name)=?
+                        """,
+                        (row.get("top") or "", row.get("category_name") or "", row.get("name") or ""),
+                    ).fetchone()["total"]
+                    or 0
+                )
+                if sku_count:
+                    blocked.append(f"{row.get('name') or row['item_id']}（含 {sku_count} 个 SKU）")
+            if blocked:
+                raise ValueError("以下品种 / 款式仍有 SKU，不能删除：" + "；".join(blocked))
+            cursor = connection.execute(
+                f"DELETE FROM material_taxonomy WHERE item_id IN ({placeholders}) AND kind='series'",
+                clean_ids,
+            )
+            if cursor.rowcount != len(rows):
+                raise ValueError("品种状态已变化，请刷新后重试")
+            if self.table_exists(connection, "material_knowledge"):
+                for row in rows:
+                    material_code = str(row.get("material_code") or "").strip()
+                    if material_code:
+                        connection.execute("DELETE FROM material_knowledge WHERE code=?", (material_code,))
+            for row in rows:
+                self.record_material_audit(
+                    connection,
+                    action="taxonomy_delete_empty_series",
+                    target_type="material_taxonomy",
+                    target_id=row["item_id"],
+                    before=row,
+                    actor=actor,
+                    summary=f"删除空材料品种：{row.get('name') or row['item_id']}",
+                )
+        invalidate_material_cache()
+        return {"deleted": clean_ids, "count": len(clean_ids)}
+
+    def delete_empty_material_types(
+        self,
+        codes: list[str],
+        actor: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        if (actor or {}).get("role") == "viewer":
+            raise PermissionError("只读账号不能删除材料类型")
+        clean_codes = list(dict.fromkeys(str(code or "").strip().lower() for code in codes if str(code or "").strip()))
+        if not clean_codes:
+            raise ValueError("请选择要删除的材料类型")
+        placeholders = ", ".join(["?"] * len(clean_codes))
+        with self.connect() as connection:
+            self._ensure_material_type_schema(connection)
+            self._ensure_material_type_deletion_schema(connection)
+            rows = [
+                dict(row)
+                for row in connection.execute(
+                    f"SELECT * FROM material_types WHERE type_code IN ({placeholders})",
+                    clean_codes,
+                ).fetchall()
+            ]
+            rows_by_code = {row["type_code"]: row for row in rows}
+            if any(code not in rows_by_code for code in clean_codes):
+                raise ValueError("材料类型不存在或已被删除")
+            blocked: list[str] = []
+            for row in rows:
+                code = row["type_code"]
+                taxonomy_count = int(
+                    connection.execute("SELECT COUNT(*) AS total FROM material_taxonomy WHERE top=?", (code,)).fetchone()["total"]
+                    or 0
+                )
+                sku_count = int(
+                    connection.execute("SELECT COUNT(*) AS total FROM managed_materials WHERE top=?", (code,)).fetchone()["total"]
+                    or 0
+                )
+                if taxonomy_count or sku_count:
+                    details = []
+                    if taxonomy_count:
+                        details.append(f"{taxonomy_count} 个目录项")
+                    if sku_count:
+                        details.append(f"{sku_count} 个 SKU")
+                    blocked.append(f"{row.get('name') or code}（含{'、'.join(details)}）")
+            if blocked:
+                raise ValueError("以下材料类型不是空类型，不能删除：" + "；".join(blocked))
+            cursor = connection.execute(
+                f"DELETE FROM material_types WHERE type_code IN ({placeholders})",
+                clean_codes,
+            )
+            if cursor.rowcount != len(rows):
+                raise ValueError("材料类型状态已变化，请刷新后重试")
+            for code in clean_codes:
+                if use_mysql() and not self._force_sqlite:
+                    connection.execute(
+                        """
+                        INSERT INTO material_type_deletions (type_code, deleted_at) VALUES (?, ?)
+                        ON DUPLICATE KEY UPDATE deleted_at=VALUES(deleted_at)
+                        """,
+                        (code, now_iso()),
+                    )
+                else:
+                    connection.execute(
+                        "INSERT OR REPLACE INTO material_type_deletions (type_code, deleted_at) VALUES (?, ?)",
+                        (code, now_iso()),
+                    )
+            for row in rows:
+                self.record_material_audit(
+                    connection,
+                    action="material_type_delete_empty",
+                    target_type="material_type",
+                    target_id=row["type_code"],
+                    before=row,
+                    actor=actor,
+                    summary=f"删除空材料类型：{row.get('name') or row['type_code']}",
+                )
+        invalidate_material_cache()
+        return {"deleted": clean_codes, "count": len(clean_codes)}
 
     def _ensure_material_option_schema(self, connection) -> None:
         if use_mysql() and not self._force_sqlite:
@@ -4005,7 +4819,8 @@ class AdminService:
         clauses = []
         params: list[Any] = []
         if keyword.strip():
-            value = f"%{keyword.strip()}%"
+            keyword = keyword.strip()
+            value = f"%{keyword}%"
             clauses.append("(u.user_id LIKE ? OR COALESCE(u.nickname, '') LIKE ? OR COALESCE(u.phone_number, '') LIKE ?)")
             params.extend([value, value, value])
         if profile_status == "complete":
@@ -4464,6 +5279,7 @@ class AdminService:
                 top=row.get("top") or "bead",
                 category=row.get("category") or "",
                 series=row.get("series") or row.get("name") or "",
+                series_id=row.get("series_id") or "",
             )
         series_visual = self.public_taxonomy_visual(series_row or {}) if series_row else {}
         image_path = series_visual.get("image_path") or ""
@@ -4486,6 +5302,7 @@ class AdminService:
             "material_code": material_code,
             "enabled": bool(row.get("enabled", 1)),
             "series": row.get("series") or row.get("name") or "",
+            "series_id": row.get("series_id") or (series_row or {}).get("item_id") or "",
             "grade": row.get("grade") or "",
             "color": series_visual.get("color") or row.get("color") or "",
             "shine": series_visual.get("shine") or row.get("shine") or "",
@@ -4517,7 +5334,11 @@ class AdminService:
         cost_price = float(row.get("cost_price") or 0)
         price = float((result.get("sku") or {}).get("price_per_bead") or display_price)
         ops = {
+            "revision": max(1, int(row.get("revision") or 1)),
             "cost_price": cost_price,
+            "stock": stock,
+            "reserved_stock": int(float(row.get("reserved_stock") or 0)),
+            "available_stock": max(0, stock - int(float(row.get("reserved_stock") or 0))),
             "safety_stock": safety_stock,
             "supplier_name": row.get("supplier_name") or "",
             "purchase_note": row.get("purchase_note") or "",
@@ -4530,6 +5351,95 @@ class AdminService:
         result["ops"] = ops
         result["quality"] = self.material_quality(result)
         return result
+
+    def public_materials(self, rows: list[dict[str, Any]], connection) -> list[dict[str, Any]]:
+        """Build catalog rows in batches; list endpoints must never query per SKU.
+
+        A material list can contain more than one thousand SKUs.  Calling
+        ``public_material`` in a loop used to perform taxonomy, knowledge and
+        size lookups for every row.  The management list therefore spent most
+        of its time waiting on thousands of small MySQL queries.  Keep the
+        exact public payload, but resolve every shared dimension once.
+        """
+        if not rows:
+            return []
+        raw_rows = [dict(row) for row in rows]
+        series_assets = fetch_db_series_assets(connection, raw_rows)
+        materials: list[dict[str, Any]] = []
+        for row in raw_rows:
+            series = row.get("series") or row.get("name") or ""
+            series_id = str(row.get("series_id") or "").strip()
+            series_asset = (
+                series_assets.get(("series_id", series_id, ""))
+                if series_id
+                else series_assets.get((row.get("top") or "bead", row.get("category") or "", series))
+            ) or {}
+            image_urls = list(series_asset.get("image_urls") or [])
+            image_url = str(series_asset.get("image_url") or "").strip() or (image_urls[0] if image_urls else "")
+            material_code = row.get("material_code") or series_asset.get("material_code") or material_code_from_payload(row)
+            try:
+                price_cents = stored_cents(row.get("price_cents"), field_name="材料价格")
+                display_price = float(cents_to_text(price_cents))
+            except ValueError:
+                display_price = float(row.get("price") or 0)
+            materials.append(
+                {
+                    **row,
+                    "price": display_price,
+                    "material_code": material_code,
+                    "enabled": bool(row.get("enabled", 1)),
+                    "series": series,
+                    "series_id": series_id or str(series_asset.get("series_id") or ""),
+                    "grade": row.get("grade") or "",
+                    "color": series_asset.get("color") or row.get("color") or "",
+                    "shine": series_asset.get("shine") or row.get("shine") or "",
+                    "image_path": series_asset.get("image_path") or "",
+                    "image_url": image_url,
+                    "image_urls": image_urls,
+                    "image_urls_json": json_text(image_urls),
+                    "image_pool": image_urls,
+                }
+            )
+
+        enriched = enrich_materials_with_knowledge(materials, connection)
+        public_rows: list[dict[str, Any]] = []
+        for source, result in zip(raw_rows, enriched):
+            sku_physical_specs = normalize_sku_physical_specs(json_value(source.get("physical_specs_json"), {}))
+            merged_material_params = normalize_material_params(
+                {**((result.get("visual") or {}).get("material_params") or {}), **sku_physical_specs}
+            )
+            result["material_params"] = merged_material_params
+            result["physical_specs"] = sku_physical_specs
+            result["visual"] = {
+                **(result.get("visual") or {}),
+                "material_params": merged_material_params,
+                "image_source": "series",
+                "sku_image_url": "",
+                "sku_image_urls": [],
+            }
+            stock = int(float(source.get("stock") or 0))
+            safety_stock = int(float(source.get("safety_stock") or 0))
+            stock_status = "out" if stock <= 0 else "low" if safety_stock > 0 and stock <= safety_stock else "normal"
+            cost_price = float(source.get("cost_price") or 0)
+            price = float((result.get("sku") or {}).get("price_per_bead") or result.get("price") or 0)
+            ops = {
+                "revision": max(1, int(source.get("revision") or 1)),
+                "cost_price": cost_price,
+                "stock": stock,
+                "reserved_stock": int(float(source.get("reserved_stock") or 0)),
+                "available_stock": max(0, stock - int(float(source.get("reserved_stock") or 0))),
+                "safety_stock": safety_stock,
+                "supplier_name": source.get("supplier_name") or "",
+                "purchase_note": source.get("purchase_note") or "",
+                "stock_status": stock_status,
+                **self.material_margin(price, cost_price),
+                **self.material_inventory_value(price, cost_price, stock),
+            }
+            result["sku"] = {**(result.get("sku") or {}), **ops}
+            result["ops"] = ops
+            result["quality"] = self.material_quality(result)
+            public_rows.append(result)
+        return public_rows
 
     def material_quality(self, material: dict[str, Any]) -> dict[str, Any]:
         sku = material.get("sku") or {}
@@ -4664,7 +5574,14 @@ class AdminService:
             return status in {"loss", "low"}
         return True
 
-    def list_orders(self, keyword: str = "", status: str = "", limit: int = 100) -> list[dict[str, Any]]:
+    def list_orders(
+        self,
+        keyword: str = "",
+        status: str = "",
+        limit: int = 100,
+        offset: int = 0,
+        include_meta: bool = False,
+    ) -> list[dict[str, Any]] | dict[str, Any]:
         clauses = []
         params: list[Any] = []
         if status:
@@ -4674,16 +5591,29 @@ class AdminService:
             clauses.append(
                 "(order_id LIKE ? OR user_id LIKE ? OR receiver_json LIKE ? OR logistics_json LIKE ?)"
             )
-            value = f"%{keyword.strip()}%"
+            value = f"%{keyword}%"
             params.extend([value, value, value, value])
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
-        params.append(limit)
+        params.extend([limit, offset])
         with self.connect() as connection:
             rows = connection.execute(
-                f"SELECT * FROM orders {where} ORDER BY created_at DESC LIMIT ?",
+                f"SELECT * FROM orders {where} ORDER BY created_at DESC LIMIT ? OFFSET ?",
                 params,
             ).fetchall()
-        return [self.public_order(dict(row)) for row in rows]
+            total = connection.execute(
+                f"SELECT COUNT(*) AS count FROM orders {where}",
+                params[:-2],
+            ).fetchone()["count"]
+        items = [self.public_order(dict(row)) for row in rows]
+        if not include_meta:
+            return items
+        return {
+            "items": items,
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+            "has_more": offset + len(items) < total,
+        }
 
     def get_order(self, order_id: str) -> dict[str, Any]:
         with self.connect() as connection:
@@ -4714,10 +5644,10 @@ class AdminService:
         snapshot_sequence = []
         for index, sequence_item in enumerate(order["sequence"]):
             item = dict(sequence_item)
-            image_urls = clean_image_urls(
+            image_urls = clean_gallery_image_urls(
                 item.get("image_urls") or item.get("image_pool"),
                 item.get("image_url") or "",
-                item.get("image_path") or "",
+                top=item.get("top") or "",
             )
             snapshot_sequence.append(
                 {
@@ -4876,7 +5806,7 @@ class AdminService:
                 f"SELECT * FROM managed_materials {where} ORDER BY {order_by} {direction}, updated_at DESC",
                 params,
             ).fetchall()
-            materials = [self.public_material(dict(row), connection) for row in rows]
+            materials = self.public_materials([dict(row) for row in rows], connection)
         if quality:
             materials = [item for item in materials if self.material_matches_quality(item, quality)]
         if stock_state:
@@ -4933,7 +5863,7 @@ class AdminService:
                 f"SELECT * FROM managed_materials {where} ORDER BY {order_by} {direction}, updated_at DESC LIMIT ? OFFSET ?",
                 [*params, page_size, offset],
             ).fetchall()
-            materials = [self.public_material(dict(row), connection) for row in rows]
+            materials = self.public_materials([dict(row) for row in rows], connection)
         return self.paginated_payload(materials, int(total or 0), page, page_size)
 
     @staticmethod
@@ -5012,12 +5942,13 @@ class AdminService:
             clauses.append("enabled = 1")
         elif status == "disabled":
             clauses.append("enabled = 0")
-        if keyword.strip():
+        keyword = normalize_material_search_keyword(keyword)
+        if keyword:
             clauses.append(
-                "(name LIKE ? OR category LIKE ? OR series LIKE ? OR grade LIKE ? OR effect LIKE ? OR element LIKE ? OR material_code LIKE ?)"
+                "(id LIKE ? OR skuId LIKE ? OR name LIKE ? OR category LIKE ? OR series LIKE ? OR grade LIKE ? OR effect LIKE ? OR element LIKE ? OR material_code LIKE ?)"
             )
-            value = f"%{keyword.strip()}%"
-            params.extend([value, value, value, value, value, value, value])
+            value = f"%{keyword}%"
+            params.extend([value, value, value, value, value, value, value, value, value])
         return clauses, params
 
     def list_material_refs(self, keyword: str = "", limit: int = 1000) -> list[dict[str, Any]]:
@@ -5101,9 +6032,12 @@ class AdminService:
             if image:
                 break
         material_code = first_sku.get("material_code") or first.get("material_code") or ""
+        series_id = first_sku.get("series_id") or first.get("series_id") or ""
         top = first_sku.get("top") or first.get("top") or ""
         category = first_sku.get("category") or first.get("category") or ""
         series = first_sku.get("series") or first.get("series") or first_sku.get("name") or first.get("name") or ""
+        # Preserve the legacy display key for existing clients; `id` and
+        # `series_id` are the rename-safe identifiers introduced by P0.
         spu_key = f"{top}::{category}::{series}::{material_code}"
         numeric_sizes = sorted(
             {
@@ -5128,12 +6062,39 @@ class AdminService:
             if required_sizes
             else 1
         )
+        gallery_urls = list((first_visual.get("image_urls") or first.get("image_urls") or []))
+        primary_image_url = str(first_visual.get("image_url") or first.get("image_url") or "").strip()
+        if not primary_image_url:
+            asset_state = "missing_primary"
+        elif not gallery_urls:
+            asset_state = "missing_gallery"
+        elif len(gallery_urls) == 1:
+            asset_state = "single_gallery"
+        else:
+            asset_state = "ready"
+        profile_issue_keys: list[str] = []
+        if not material_code:
+            profile_issue_keys.append("material_code_missing")
+        if not first_energy.get("primary_element") and top != "pendant":
+            profile_issue_keys.append("primary_element_missing")
+        if not first_energy.get("effects"):
+            profile_issue_keys.append("effects_missing")
+        if not (first.get("rules") or {}).get("match_rules"):
+            profile_issue_keys.append("match_rules_missing")
+        if any(float((item.get("sku") or {}).get("price_per_bead") or 0) <= 0.01 for item in sorted_items):
+            profile_issue_keys.append("price_invalid")
+        if any(float((item.get("sku") or {}).get("size_mm") or 0) <= 0 for item in sorted_items):
+            profile_issue_keys.append("size_invalid")
+        profile_state = "complete" if not profile_issue_keys else "incomplete"
         return {
             "key": spu_key,
+            "id": series_id or spu_key,
+            "series_id": series_id,
             "legacy_key": material_code,
             "group_key": spu_key,
             "spu": {
                 "material_code": material_code,
+                "series_id": series_id,
                 "top": top,
                 "category": category,
                 "series": series,
@@ -5165,6 +6126,11 @@ class AdminService:
                 "spec_status": spec_status,
                 "spec_coverage": spec_coverage,
                 "image": image,
+                "primary_image_url": primary_image_url,
+                "gallery_count": len(gallery_urls),
+                "asset_state": asset_state,
+                "profile_state": profile_state,
+                "profile_issue_keys": profile_issue_keys,
             },
             "sku": first_sku,
             "energy": first_energy,
@@ -5196,6 +6162,11 @@ class AdminService:
             "specCoverage": spec_coverage,
             "sizes": " / ".join(dict.fromkeys(sizes)),
             "image": image,
+            "primaryImageUrl": primary_image_url,
+            "galleryCount": len(gallery_urls),
+            "assetState": asset_state,
+            "profileState": profile_state,
+            "profileIssueKeys": profile_issue_keys,
         }
 
     @staticmethod
@@ -5221,13 +6192,16 @@ class AdminService:
         stock_state: str = "",
         margin: str = "",
         spec_state: str = "",
+        asset_state: str = "",
+        profile_state: str = "",
+        include_facets: bool = False,
         sort_by: str = "sort_order",
         sort_order: str = "asc",
         page: int | None = None,
         page_size: int | None = None,
     ) -> list[dict[str, Any]] | dict[str, Any]:
         paginated = page is not None or page_size is not None
-        if paginated and not (quality or stock_state or margin or spec_state):
+        if paginated and not (quality or stock_state or margin or spec_state or asset_state or profile_state or include_facets):
             return self.list_material_spus_paginated(
                 keyword=keyword,
                 top=top,
@@ -5255,8 +6229,11 @@ class AdminService:
         groups: dict[str, list[dict[str, Any]]] = {}
         for item in materials:
             sku = item.get("sku") or {}
-            key = (
-                f"{sku.get('top') or item.get('top') or ''}::"
+            # A display name/material code can be duplicated by historical data.
+            # The taxonomy ID is immutable and is the only safe primary grouping key.
+            series_id = str(sku.get("series_id") or item.get("series_id") or "").strip()
+            key = series_id or (
+                f"legacy::{sku.get('top') or item.get('top') or ''}::"
                 f"{sku.get('category') or item.get('category') or ''}::"
                 f"{sku.get('series') or item.get('series') or item.get('name') or ''}::"
                 f"{sku.get('material_code') or item.get('material_code') or ''}"
@@ -5265,11 +6242,52 @@ class AdminService:
         result = [self.material_spu_group(items) for items in groups.values()]
         if spec_state:
             result = [group for group in result if self.material_spu_matches_spec_state(group, spec_state)]
+        if asset_state:
+            requested_states = {item.strip().lower() for item in str(asset_state).split(",") if item.strip()}
+            result = [
+                group for group in result
+                if str(group.get("assetState") or (group.get("spu") or {}).get("asset_state") or "").lower() in requested_states
+            ]
+        if profile_state:
+            requested_states = {item.strip().lower() for item in str(profile_state).split(",") if item.strip()}
+            result = [
+                group for group in result
+                if str(group.get("profileState") or (group.get("spu") or {}).get("profile_state") or "").lower() in requested_states
+            ]
         if paginated:
             page, page_size, offset = self.normalize_pagination(page or 1, page_size or 20)
             total = len(result)
-            return self.paginated_payload(result[offset : offset + page_size], total, page, page_size)
+            payload = self.paginated_payload(result[offset : offset + page_size], total, page, page_size)
+            if include_facets:
+                payload["facets"] = self.material_spu_facets(result)
+            return payload
+        if include_facets:
+            return {"items": result, "facets": self.material_spu_facets(result)}
         return result
+
+    @staticmethod
+    def material_spu_facets(groups: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+        """Facet counts deliberately exclude warehouse and supplier dimensions."""
+        definitions = {
+            "top": lambda group: str((group.get("spu") or {}).get("top") or ""),
+            "category": lambda group: str((group.get("spu") or {}).get("category") or ""),
+            "element": lambda group: str((group.get("energy") or {}).get("primary_element") or ""),
+            "asset_state": lambda group: str(group.get("assetState") or ""),
+            "profile_state": lambda group: str(group.get("profileState") or ""),
+            "spec_state": lambda group: str(group.get("specStatus") or ""),
+        }
+        facets: dict[str, list[dict[str, Any]]] = {}
+        for name, resolver in definitions.items():
+            counts: dict[str, int] = {}
+            for group in groups:
+                value = resolver(group)
+                if value:
+                    counts[value] = counts.get(value, 0) + 1
+            facets[name] = [
+                {"value": value, "count": count}
+                for value, count in sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+            ]
+        return facets
 
     def list_material_spus_paginated(
         self,
@@ -5292,15 +6310,19 @@ class AdminService:
             status=status,
         )
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        # Stable taxonomy IDs take precedence.  The remaining fields are only
+        # a legacy fallback for rows that have not been linked to a series yet.
+        has_series_id = "COALESCE(NULLIF(series_id, ''), '') <> ''"
         group_exprs = [
-            "COALESCE(top, '')",
-            "COALESCE(category, '')",
-            "COALESCE(NULLIF(series, ''), name, '')",
-            "COALESCE(material_code, '')",
+            "COALESCE(NULLIF(series_id, ''), '')",
+            f"CASE WHEN {has_series_id} THEN '' ELSE COALESCE(top, '') END",
+            f"CASE WHEN {has_series_id} THEN '' ELSE COALESCE(category, '') END",
+            f"CASE WHEN {has_series_id} THEN '' ELSE COALESCE(NULLIF(series, ''), name, '') END",
+            f"CASE WHEN {has_series_id} THEN '' ELSE COALESCE(material_code, '') END",
         ]
         group_select = ", ".join(
             f"{expr} AS {alias}"
-            for expr, alias in zip(group_exprs, ("group_top", "group_category", "group_series", "group_material_code"))
+            for expr, alias in zip(group_exprs, ("group_series_id", "group_top", "group_category", "group_series", "group_material_code"))
         )
         group_by = ", ".join(group_exprs)
         order_by, direction = self.material_spu_sort_sql(sort_by, sort_order)
@@ -5332,19 +6354,24 @@ class AdminService:
 
             row_clauses = []
             row_params: list[Any] = []
-            group_order: dict[tuple[str, str, str, str], int] = {}
+            group_order: dict[tuple[str, str, str, str, str], int] = {}
             for index, row in enumerate(group_rows):
                 key = (
+                    row["group_series_id"] or "",
                     row["group_top"] or "",
                     row["group_category"] or "",
                     row["group_series"] or "",
                     row["group_material_code"] or "",
                 )
                 group_order[key] = index
-                row_clauses.append(
-                    "(COALESCE(top, '') = ? AND COALESCE(category, '') = ? AND COALESCE(NULLIF(series, ''), name, '') = ? AND COALESCE(material_code, '') = ?)"
-                )
-                row_params.extend(key)
+                if key[0]:
+                    row_clauses.append("COALESCE(NULLIF(series_id, ''), '') = ?")
+                    row_params.append(key[0])
+                else:
+                    row_clauses.append(
+                        "(COALESCE(NULLIF(series_id, ''), '') = '' AND COALESCE(top, '') = ? AND COALESCE(category, '') = ? AND COALESCE(NULLIF(series, ''), name, '') = ? AND COALESCE(material_code, '') = ?)"
+                    )
+                    row_params.extend(key[1:])
 
             sku_where = [f"({' OR '.join(row_clauses)})"]
             if clauses:
@@ -5357,12 +6384,14 @@ class AdminService:
                 """,
                 [*row_params, *params],
             ).fetchall()
-            materials = [self.public_material(dict(row), connection) for row in sku_rows]
+            materials = self.public_materials([dict(row) for row in sku_rows], connection)
 
-        groups: dict[tuple[str, str, str, str], list[dict[str, Any]]] = {}
+        groups: dict[tuple[str, str, str, str, str], list[dict[str, Any]]] = {}
         for item in materials:
             sku = item.get("sku") or {}
-            key = (
+            series_id = str(sku.get("series_id") or item.get("series_id") or "").strip()
+            key = (series_id, "", "", "", "") if series_id else (
+                "",
                 sku.get("top") or item.get("top") or "",
                 sku.get("category") or item.get("category") or "",
                 sku.get("series") or item.get("series") or item.get("name") or "",
@@ -5380,17 +6409,29 @@ class AdminService:
         payload: dict[str, Any],
         material_id: str | None = None,
         actor: dict[str, Any] | None = None,
+        expected_revision: int | None = None,
     ) -> dict[str, Any]:
         timestamp = now_iso()
         item_id = material_id or payload.get("id") or self.generate_material_id(payload)
         with self.connect() as connection:
+            self._ensure_material_columns(connection)
             self._ensure_material_taxonomy_schema(connection)
             existing = connection.execute("SELECT * FROM managed_materials WHERE id = ?", (item_id,)).fetchone()
+            if material_id and not existing:
+                raise ValueError("待更新的 SKU 不存在，请刷新列表后重试")
             before = dict(existing) if existing else None
-            payload = self.canonicalize_material_payload_taxonomy({**payload, "id": item_id}, connection)
+            taxonomy_changed = bool(before) and any(
+                str(payload.get(field) or "").strip() != str(before.get(field) or "").strip()
+                for field in ("top", "category", "series")
+            )
+            canonical_payload = {**payload, "id": item_id}
+            # 编辑 SKU 改选品种时，表单带回的旧编码不能继续覆盖新选品种的编码。
+            if taxonomy_changed:
+                canonical_payload["material_code"] = ""
+            payload = self.canonicalize_material_payload_taxonomy(canonical_payload, connection)
             same_taxonomy = bool(before) and all(
                 str(payload.get(field) or "").strip() == str(before.get(field) or "").strip()
-                for field in ("top", "category", "series", "material_code")
+                for field in ("top", "category", "series")
             )
             if same_taxonomy:
                 existing_element = str(before.get("element") or "").strip()
@@ -5406,30 +6447,41 @@ class AdminService:
                 require_primary_element=False,
             )
             item = self.normalize_material(payload)
+            # 新增规格必须继承品种编码；名称推断只能用于目录尚未建立的历史数据。
+            # 同目录编辑则保留旧编码，避免历史 SKU 被拆到另一个 SPU。
+            if before and same_taxonomy:
+                item["material_code"] = str(before.get("material_code") or item["material_code"]).strip()
+            else:
+                item["material_code"] = str(payload.get("material_code") or item["material_code"]).strip()
             item["skuId"] = self.unique_material_sku(connection, item["skuId"], item_id)
             if existing:
                 reserved_stock = int(dict(existing).get("reserved_stock") or 0)
                 if int(item["stock"]) < reserved_stock:
                     raise ValueError(f"库存不能低于已预占数量 {reserved_stock}")
+                revision_condition = " AND revision=?" if expected_revision is not None else ""
+                update_params: list[Any] = [
+                    item["skuId"], item["top"], item["category"], item["series"], item["series_id"], item["material_code"], item["grade"],
+                    item["name"], item["effect"], item["element"],
+                    item["price"], item["price_cents"], item["size"], item["weight"], item["cost_price"], item["safety_stock"],
+                    item["supplier_name"], item["purchase_note"], item["color"], item["shine"],
+                    item.get("image_path", ""), item.get("image_url", ""), item["image_urls_json"], item["physical_specs_json"], item["stock"], item["enabled"],
+                    item["sort_order"], timestamp, item_id, item["stock"],
+                ]
+                if expected_revision is not None:
+                    update_params.append(expected_revision)
                 cursor = connection.execute(
                     """
                     UPDATE managed_materials SET
-                    skuId=?, top=?, category=?, series=?, material_code=?, grade=?, name=?, effect=?, element=?, price=?, price_cents=?, size=?, weight=?,
+                    skuId=?, top=?, category=?, series=?, series_id=?, material_code=?, grade=?, name=?, effect=?, element=?, price=?, price_cents=?, size=?, weight=?,
                     cost_price=?, safety_stock=?, supplier_name=?, purchase_note=?,
-                    color=?, shine=?, image_path=?, image_url=?, image_urls_json=?, physical_specs_json=?, stock=?, enabled=?, sort_order=?, updated_at=?
-                    WHERE id=? AND reserved_stock <= ?
-                    """,
-                    (
-                        item["skuId"], item["top"], item["category"], item["series"], item["material_code"], item["grade"],
-                        item["name"], item["effect"], item["element"],
-                        item["price"], item["price_cents"], item["size"], item["weight"], item["cost_price"], item["safety_stock"],
-                        item["supplier_name"], item["purchase_note"], item["color"], item["shine"],
-                        item.get("image_path", ""), item.get("image_url", ""), item["image_urls_json"], item["physical_specs_json"], item["stock"], item["enabled"],
-                        item["sort_order"], timestamp, item_id, item["stock"],
-                    ),
+                    color=?, shine=?, image_path=?, image_url=?, image_urls_json=?, physical_specs_json=?, stock=?, enabled=?, sort_order=?, updated_at=?, revision=revision+1
+                    WHERE id=? AND reserved_stock <= ?""" + revision_condition,
+                    update_params,
                 )
+                if expected_revision is not None and cursor.rowcount != 1:
+                    raise MaterialConflictError("该 SKU 已被其他操作更新，请刷新后再保存")
                 current = connection.execute(
-                    "SELECT stock, reserved_stock FROM managed_materials WHERE id = ?",
+                    "SELECT stock, reserved_stock, revision FROM managed_materials WHERE id = ?",
                     (item_id,),
                 ).fetchone()
                 if (
@@ -5442,13 +6494,13 @@ class AdminService:
                 connection.execute(
                     """
                     INSERT INTO managed_materials
-                    (id, skuId, top, category, series, material_code, grade, name, effect, element, price, price_cents, size, weight, color, shine,
+                    (id, skuId, top, category, series, series_id, material_code, grade, name, effect, element, price, price_cents, size, weight, color, shine,
                      cost_price, safety_stock, supplier_name, purchase_note, image_path, image_url, image_urls_json, physical_specs_json, stock, enabled,
                      sort_order, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
-                        item["id"], item["skuId"], item["top"], item["category"], item["series"], item["material_code"], item["grade"],
+                        item["id"], item["skuId"], item["top"], item["category"], item["series"], item["series_id"], item["material_code"], item["grade"],
                         item["name"], item["effect"],
                         item["element"], item["price"], item["price_cents"], item["size"], item["weight"], item["color"], item["shine"],
                         item["cost_price"], item["safety_stock"], item["supplier_name"], item["purchase_note"],
@@ -5479,6 +6531,59 @@ class AdminService:
             )
         invalidate_material_cache()
         return self.get_material(item_id)
+
+    def patch_material_sku(
+        self,
+        material_id: str,
+        patch: dict[str, Any],
+        actor: dict[str, Any] | None = None,
+        expected_revision: int | None = None,
+    ) -> dict[str, Any]:
+        """Patch SKU-only data without allowing a variety record to be recreated."""
+        clean_id = str(material_id or "").strip()
+        allowed = {
+            "skuId", "name", "grade", "price", "price_per_bead", "size", "size_mm",
+            "weight", "weight_g", "cost_price", "safety_stock", "stock", "enabled",
+            "sort_order", "physical_specs",
+        }
+        changes = {key: value for key, value in (patch or {}).items() if key in allowed and value is not None}
+        if not changes:
+            raise ValueError("请至少填写一个要更新的 SKU 字段")
+        with self.connect() as connection:
+            self._ensure_material_columns(connection)
+            row = connection.execute("SELECT * FROM managed_materials WHERE id=?", (clean_id,)).fetchone()
+            if not row:
+                raise ValueError("SKU 不存在，无法更新")
+            current = dict(row)
+        payload = {
+            "id": clean_id,
+            "skuId": current.get("skuId") or "",
+            "top": current.get("top") or "",
+            "category": current.get("category") or "",
+            "series": current.get("series") or current.get("name") or "",
+            "series_id": current.get("series_id") or "",
+            "material_code": current.get("material_code") or "",
+            "grade": current.get("grade") or "",
+            "name": current.get("name") or "",
+            "effect": current.get("effect") or "",
+            "element": current.get("element") or "",
+            "price": current.get("price") or 0,
+            "size": current.get("size") or 0,
+            "weight": current.get("weight") or 0,
+            "cost_price": current.get("cost_price") or 0,
+            "safety_stock": current.get("safety_stock") or 0,
+            "stock": current.get("stock") or 0,
+            "enabled": bool(current.get("enabled")),
+            "sort_order": current.get("sort_order") or 0,
+            "physical_specs": json_value(current.get("physical_specs_json"), {}),
+        }
+        payload.update(changes)
+        return self.save_material(
+            payload,
+            material_id=clean_id,
+            actor=actor,
+            expected_revision=expected_revision,
+        )
 
     def material_token(self, value: Any, fallback: str = "mat") -> str:
         text = str(value or "").strip().lower()
@@ -5567,12 +6672,15 @@ class AdminService:
         if raw_price in (None, ""):
             raw_price = payload.get("price")
         price_cents = money_to_cents(raw_price, field_name="单颗售价")
+        if enabled and price_cents <= 1:
+            raise ValueError("0.01 元及以下仅可作为测试价保存，不能直接启用销售")
         return {
             "id": str(payload["id"]).strip(),
             "skuId": sku_id,
             "top": top,
             "category": str(payload["category"]).strip(),
             "series": str(payload.get("series") or payload.get("name") or "").strip(),
+            "series_id": str(payload.get("series_id") or "").strip(),
             "material_code": material_code_from_payload(payload),
             "grade": str(payload.get("grade") or "").strip(),
             "name": str(payload["name"]).strip(),
@@ -5611,17 +6719,39 @@ class AdminService:
         if not row:
             raise ValueError("材料不存在")
 
-    def delete_material(self, material_id: str, actor: dict[str, Any] | None = None) -> None:
+    def delete_material(
+        self,
+        material_id: str,
+        actor: dict[str, Any] | None = None,
+        expected_revision: int | None = None,
+    ) -> None:
         with self.connect() as connection:
+            self._ensure_material_columns(connection)
+            if use_mysql() and not self._force_sqlite:
+                material_columns = {row["Field"] for row in connection.execute("SHOW COLUMNS FROM managed_materials").fetchall()}
+            else:
+                material_columns = {row["name"] for row in connection.execute("PRAGMA table_info(managed_materials)").fetchall()}
+            has_reserved_stock = "reserved_stock" in material_columns
             row = connection.execute("SELECT * FROM managed_materials WHERE id = ?", (material_id,)).fetchone()
             before = dict(row) if row else None
+            if expected_revision is not None and before and int(before.get("revision") or 1) != expected_revision:
+                raise MaterialConflictError("该 SKU 已被其他操作更新，请刷新后再删除")
             if before and int(before.get("reserved_stock") or 0) > 0:
                 raise ValueError("SKU 存在未完成库存预占，不能删除")
-            cursor = connection.execute(
-                "DELETE FROM managed_materials WHERE id = ? AND reserved_stock = 0",
-                (material_id,),
-            )
+            revision_condition = " AND revision = ?" if expected_revision is not None else ""
+            params: list[Any] = [material_id]
+            if expected_revision is not None:
+                params.append(expected_revision)
+            if has_reserved_stock:
+                cursor = connection.execute(
+                    "DELETE FROM managed_materials WHERE id = ? AND reserved_stock = 0" + revision_condition,
+                    params,
+                )
+            else:
+                cursor = connection.execute("DELETE FROM managed_materials WHERE id = ?" + revision_condition, params)
             if before and cursor.rowcount != 1:
+                if expected_revision is not None:
+                    raise MaterialConflictError("该 SKU 已被其他操作更新，请刷新后再删除")
                 raise ValueError("SKU 存在未完成库存预占，不能删除")
             if before:
                 self.record_material_audit(connection, action="delete", before=before, actor=actor)
@@ -5633,13 +6763,20 @@ class AdminService:
         action: str,
         value: Any = None,
         actor: dict[str, Any] | None = None,
+        expected_revisions: dict[str, int] | None = None,
     ) -> dict[str, Any]:
-        clean_ids = [str(item).strip() for item in ids if str(item).strip()]
+        clean_ids = list(dict.fromkeys(str(item).strip() for item in ids if str(item).strip()))
         if not clean_ids:
             raise ValueError("请选择要操作的珠材")
         placeholders = ", ".join(["?"] * len(clean_ids))
         timestamp = now_iso()
         with self.connect() as connection:
+            self._ensure_material_columns(connection)
+            if use_mysql() and not self._force_sqlite:
+                material_columns = {row["Field"] for row in connection.execute("SHOW COLUMNS FROM managed_materials").fetchall()}
+            else:
+                material_columns = {row["name"] for row in connection.execute("PRAGMA table_info(managed_materials)").fetchall()}
+            has_reserved_stock = "reserved_stock" in material_columns
             before_rows = [
                 dict(row)
                 for row in connection.execute(
@@ -5647,22 +6784,58 @@ class AdminService:
                     clean_ids,
                 ).fetchall()
             ]
+            if len(before_rows) != len(clean_ids):
+                raise ValueError("部分 SKU 已不存在，请刷新列表后重试")
+            revision_guard = ""
+            revision_params: list[Any] = []
+            if expected_revisions is not None:
+                missing = [item_id for item_id in clean_ids if item_id not in expected_revisions]
+                if missing:
+                    raise ValueError("批量操作缺少 SKU 版本号，请刷新列表后重试")
+                stale = [
+                    row["id"] for row in before_rows
+                    if int(row.get("revision") or 1) != int(expected_revisions.get(row["id"]) or 0)
+                ]
+                if stale:
+                    raise MaterialConflictError("部分 SKU 已被其他操作更新，请刷新后重新选择")
+                revision_guard = " AND (" + " OR ".join("(id=? AND revision=?)" for _ in clean_ids) + ")"
+                for item_id in clean_ids:
+                    revision_params.extend([item_id, int(expected_revisions[item_id])])
             if action == "enable":
+                out_of_stock = [row for row in before_rows if int(row.get("stock") or 0) <= 0]
+                if out_of_stock:
+                    labels = [
+                        str(row.get("name") or row.get("skuId") or row.get("id") or "")
+                        for row in out_of_stock
+                    ]
+                    preview = "、".join(labels[:5])
+                    suffix = f" 等 {len(labels)} 个 SKU" if len(labels) > 5 else ""
+                    raise ValueError(
+                        f"以下材料库存为 0，请先补充库存后再批量启用：{preview}{suffix}"
+                    )
+                test_price_rows = [
+                    row for row in before_rows
+                    if int(row.get("price_cents") or 0) <= 1
+                ]
+                if test_price_rows:
+                    raise ValueError("0.01 元及以下为测试价，不能批量启用销售")
                 cursor = connection.execute(
-                    f"UPDATE managed_materials SET enabled=CASE WHEN stock > 0 THEN 1 ELSE 0 END, updated_at=? WHERE id IN ({placeholders})",
-                    [timestamp, *clean_ids],
+                    f"UPDATE managed_materials SET enabled=1, updated_at=?, revision=revision+1 WHERE id IN ({placeholders}){revision_guard}",
+                    [timestamp, *clean_ids, *revision_params],
                 )
             elif action == "disable":
                 cursor = connection.execute(
-                    f"UPDATE managed_materials SET enabled=0, updated_at=? WHERE id IN ({placeholders})",
-                    [timestamp, *clean_ids],
+                    f"UPDATE managed_materials SET enabled=0, updated_at=?, revision=revision+1 WHERE id IN ({placeholders}){revision_guard}",
+                    [timestamp, *clean_ids, *revision_params],
                 )
             elif action == "price":
                 price_cents = money_to_cents(value, field_name="价格")
                 price = cents_to_text(price_cents)
+                if price_cents <= 1 and any(bool(row.get("enabled")) for row in before_rows):
+                    raise ValueError("0.01 元及以下为测试价，请先停用 SKU 后再修改价格")
                 cursor = connection.execute(
-                    f"UPDATE managed_materials SET price=?, price_cents=?, updated_at=? WHERE id IN ({placeholders})",
-                    [price, price_cents, timestamp, *clean_ids],
+                    f"UPDATE managed_materials SET price=?, price_cents=?, updated_at=?, revision=revision+1 WHERE id IN ({placeholders}){revision_guard}",
+                    [price, price_cents, timestamp, *clean_ids, *revision_params],
                 )
             elif action == "stock":
                 stock = max(0, int(float(value)))
@@ -5673,10 +6846,12 @@ class AdminService:
                 if blocked:
                     raise ValueError("库存不能低于已预占数量")
                 cursor = connection.execute(
-                    f"UPDATE managed_materials SET stock=?, enabled=CASE WHEN ? > 0 THEN enabled ELSE 0 END, updated_at=? "
-                    f"WHERE id IN ({placeholders}) AND reserved_stock <= ?",
-                    [stock, stock, timestamp, *clean_ids, stock],
+                    f"UPDATE managed_materials SET stock=?, enabled=CASE WHEN ? > 0 THEN enabled ELSE 0 END, updated_at=?, revision=revision+1 "
+                    f"WHERE id IN ({placeholders}) AND reserved_stock <= ?{revision_guard}",
+                    [stock, stock, timestamp, *clean_ids, stock, *revision_params],
                 )
+                if expected_revisions is not None and cursor.rowcount != len(clean_ids):
+                    raise MaterialConflictError("部分 SKU 已被其他操作更新，请刷新列表后重新选择")
                 current_rows = connection.execute(
                     f"SELECT id, stock, reserved_stock FROM managed_materials WHERE id IN ({placeholders})",
                     clean_ids,
@@ -5692,20 +6867,23 @@ class AdminService:
             elif action == "safety_stock":
                 safety_stock = max(0, int(float(value)))
                 cursor = connection.execute(
-                    f"UPDATE managed_materials SET safety_stock=?, updated_at=? WHERE id IN ({placeholders})",
-                    [safety_stock, timestamp, *clean_ids],
+                    f"UPDATE managed_materials SET safety_stock=?, updated_at=?, revision=revision+1 WHERE id IN ({placeholders}){revision_guard}",
+                    [safety_stock, timestamp, *clean_ids, *revision_params],
                 )
             elif action == "delete":
-                if any(int(row.get("reserved_stock") or 0) > 0 for row in before_rows):
+                if has_reserved_stock and any(int(row.get("reserved_stock") or 0) > 0 for row in before_rows):
                     raise ValueError("SKU 存在未完成库存预占，不能删除")
+                delete_condition = " AND reserved_stock = 0" if has_reserved_stock else ""
                 cursor = connection.execute(
-                    f"DELETE FROM managed_materials WHERE id IN ({placeholders}) AND reserved_stock = 0",
-                    clean_ids,
+                    f"DELETE FROM managed_materials WHERE id IN ({placeholders}){delete_condition}{revision_guard}",
+                    [*clean_ids, *revision_params],
                 )
                 if cursor.rowcount != len(before_rows):
                     raise ValueError("SKU 存在未完成库存预占，不能删除")
             else:
                 raise ValueError("不支持的批量操作")
+            if expected_revisions is not None and cursor.rowcount != len(clean_ids):
+                raise MaterialConflictError("部分 SKU 已被其他操作更新，请刷新列表后重新选择")
             affected = cursor.rowcount if cursor.rowcount is not None else len(clean_ids)
             after_by_id = {}
             if action != "delete" and before_rows:

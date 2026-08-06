@@ -3,10 +3,12 @@ from __future__ import annotations
 from typing import Any, Literal
 
 from fastapi import APIRouter, File, Form, Header, HTTPException, Query, Request, UploadFile
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
-from .admin_service import AdminService
+from .admin_service import AdminService, MaterialConflictError
 from .avatar_storage import AvatarStorage
+from .design_candidates import build_design_candidates
+from .custom_design_service import CustomDesignService
 from .material_asset_upload import (
     MATERIAL_ASSET_PREFIX,
     MAX_MATERIAL_ASSET_BYTES,
@@ -19,6 +21,7 @@ from .order_service import OrderConflictError, OrderService
 admin_router = APIRouter(prefix="/api/v1/admin", tags=["后台管理"])
 admin_service = AdminService()
 order_service = OrderService()
+custom_design_service = CustomDesignService()
 media_storage = AvatarStorage()
 
 
@@ -35,6 +38,144 @@ class AdminAccountPayload(BaseModel):
     status: str = Field(default="active", max_length=20)
 
 
+class CustomDesignWorkbenchPayload(BaseModel):
+    wrist_size_cm: float = Field(ge=10, le=25)
+    bead_size_mm: float = Field(ge=6, le=16)
+    layout: list[dict[str, Any]] = Field(min_length=1, max_length=40)
+    notes: str = Field(default="", max_length=1000)
+
+    @field_validator("layout")
+    @classmethod
+    def validate_layout(cls, values: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        cleaned: list[dict[str, Any]] = []
+        for index, value in enumerate(values):
+            if not isinstance(value, dict):
+                raise ValueError(f"第 {index + 1} 个材料格式无效")
+            material_id = str(
+                value.get("material_id")
+                or value.get("sku_id")
+                or value.get("id")
+                or ""
+            ).strip()
+            if not material_id or len(material_id) > 120:
+                raise ValueError(f"第 {index + 1} 个材料缺少有效 ID")
+            image_url = str(
+                value.get("selected_image_url")
+                or value.get("image_url")
+                or ""
+            ).strip()
+            if image_url and (
+                not image_url.startswith(("https://", "http://"))
+                or len(image_url) > 2000
+            ):
+                raise ValueError(f"第 {index + 1} 个材料图片地址无效")
+            cleaned.append(
+                {
+                    **value,
+                    "id": material_id,
+                    "material_id": material_id,
+                    "quantity": 1,
+                    "selected_image_url": image_url,
+                }
+            )
+        return cleaned
+
+
+class CustomDesignDraftPayload(CustomDesignWorkbenchPayload):
+    pass
+
+
+class CustomDesignProposalPayload(BaseModel):
+    title: str = Field(min_length=1, max_length=160)
+    description: str = Field(default="", max_length=2000)
+    image_urls: list[str] = Field(default_factory=list, max_length=6)
+    workbench: CustomDesignWorkbenchPayload
+
+    @field_validator("image_urls")
+    @classmethod
+    def validate_image_urls(cls, values: list[str]) -> list[str]:
+        cleaned: list[str] = []
+        for value in values:
+            url = str(value or "").strip()
+            if not url.startswith(("https://", "http://")) or len(url) > 2000:
+                raise ValueError("方案图片必须是有效的图片地址")
+            if url not in cleaned:
+                cleaned.append(url)
+        return cleaned
+
+
+class CustomDesignCandidatePayload(BaseModel):
+    """Current workbench materials, used only to surface compatibility cautions."""
+
+    selected_material_ids: list[str] = Field(default_factory=list, max_length=40)
+    wrist_size_cm: float | None = Field(default=None, ge=10, le=25)
+    bead_size_mm: float | None = Field(default=None, ge=6, le=16)
+
+    @field_validator("selected_material_ids")
+    @classmethod
+    def validate_selected_material_ids(cls, values: list[str]) -> list[str]:
+        cleaned: list[str] = []
+        for value in values:
+            material_id = str(value or "").strip()
+            if not material_id or len(material_id) > 120:
+                raise ValueError("材料 ID 无效")
+            if material_id not in cleaned:
+                cleaned.append(material_id)
+        return cleaned
+
+
+def validated_custom_design_workbench(
+    payload: CustomDesignWorkbenchPayload,
+) -> dict[str, Any]:
+    raw = payload.model_dump(mode="json")
+    requested_layout = raw["layout"]
+    snapshots = order_service.validate_and_refresh_material_prices(requested_layout)
+    layout: list[dict[str, Any]] = []
+    for requested, snapshot in zip(requested_layout, snapshots, strict=True):
+        selected_image_url = str(requested.get("selected_image_url") or "").strip()
+        gallery_images = [
+            str(url).strip()
+            for url in snapshot.get("gallery_image_urls") or []
+            if str(url).strip()
+        ]
+        allowed_images = set(gallery_images)
+        if selected_image_url and selected_image_url not in allowed_images:
+            raise ValueError(f"{snapshot.get('name') or '材料'}的图库图片已更新，请重新选择")
+        if not allowed_images:
+            raise ValueError(f"{snapshot.get('name') or '材料'}暂无图库图片，不能用于实物搭配")
+        exact_image_url = selected_image_url or gallery_images[0]
+        layout.append(
+            {
+                **snapshot,
+                "id": snapshot["id"],
+                "material_id": snapshot["id"],
+                "quantity": 1,
+                "selected_image_url": exact_image_url,
+                "image_url": exact_image_url,
+            }
+        )
+    total_fee = sum(int(item.get("subtotal_cents") or 0) for item in layout)
+    return {
+        "schema_version": 1,
+        "wrist_size_cm": raw["wrist_size_cm"],
+        "bead_size_mm": raw["bead_size_mm"],
+        "layout": layout,
+        "selected": [item["id"] for item in layout],
+        "notes": raw.get("notes") or "",
+        "summary": {
+            "count": len(layout),
+            "total_fee": total_fee,
+            "price": order_service.cents_text(total_fee),
+        },
+    }
+
+
+class CustomDesignSettingsPayload(BaseModel):
+    daily_capacity: int = Field(ge=0, le=200)
+    sla_hours: int = Field(ge=1, le=168)
+    deposit_amount_fee: int = Field(ge=100, le=100000)
+
+
 class AdminAccountUpdatePayload(BaseModel):
     display_name: str | None = Field(default="", max_length=120)
     role: str | None = Field(default=None, max_length=40)
@@ -45,6 +186,7 @@ class AdminAccountUpdatePayload(BaseModel):
 class MaterialPayload(BaseModel):
     id: str | None = None
     skuId: str | None = ""
+    series_id: str | None = ""
     material_code: str | None = ""
     top: str
     category: str
@@ -97,18 +239,59 @@ class MaterialPayload(BaseModel):
     stock: int = 0
     enabled: bool = True
     sort_order: int = 0
+    # Required only for PUT.  Creation receives a new server-side revision.
+    expected_revision: int | None = Field(default=None, ge=1)
+
+
+class MaterialSkuPatchPayload(BaseModel):
+    """Commercial and physical SKU fields; variety data is edited separately."""
+
+    skuId: str | None = None
+    name: str | None = Field(default=None, max_length=160)
+    grade: str | None = Field(default=None, max_length=40)
+    price: float | None = Field(default=None, ge=0, le=100000)
+    price_per_bead: float | None = Field(default=None, ge=0, le=100000)
+    size: float | None = Field(default=None, gt=0, le=1000)
+    size_mm: float | None = Field(default=None, gt=0, le=1000)
+    weight: float | None = Field(default=None, gt=0, le=100000)
+    weight_g: float | None = Field(default=None, gt=0, le=100000)
+    cost_price: float | None = Field(default=None, ge=0, le=100000)
+    safety_stock: int | None = Field(default=None, ge=0, le=1000000)
+    stock: int | None = Field(default=None, ge=0, le=1000000)
+    enabled: bool | None = None
+    sort_order: int | None = Field(default=None, ge=0, le=1000000)
+    physical_specs: dict | None = None
+    expected_revision: int = Field(ge=1)
 
 
 class MaterialBatchPayload(BaseModel):
-    ids: list[str]
-    action: str
+    ids: list[str] = Field(min_length=1, max_length=100)
+    action: Literal["enable", "disable", "price", "stock", "safety_stock", "delete"]
     value: float | int | str | None = None
+    expected_revisions: dict[str, int]
+
+    @field_validator("ids")
+    @classmethod
+    def validate_ids(cls, values: list[str]) -> list[str]:
+        cleaned = list(dict.fromkeys(str(value or "").strip() for value in values if str(value or "").strip()))
+        if not cleaned or any(len(value) > 160 for value in cleaned):
+            raise ValueError("SKU ID 无效")
+        return cleaned
+
+    @field_validator("expected_revisions")
+    @classmethod
+    def validate_expected_revisions(cls, values: dict[str, int]) -> dict[str, int]:
+        if len(values) > 100 or any(not str(key).strip() or int(value) < 1 for key, value in values.items()):
+            raise ValueError("SKU 版本号无效")
+        return {str(key).strip(): int(value) for key, value in values.items()}
 
 
 class MaterialAssetBindPayload(BaseModel):
     series_id: str = Field(min_length=1, max_length=120)
     asset_keys: list[str] = Field(min_length=1, max_length=MAX_MATERIAL_ASSET_COUNT)
     mode: Literal["replace", "append"] = "replace"
+    expected_version: int | None = Field(default=None, ge=1)
+    idempotency_key: str | None = Field(default=None, min_length=8, max_length=120)
     # Kept for older admin clients; series assets are now always authoritative.
     sync_sku_images: bool = True
 
@@ -130,8 +313,17 @@ class MaterialCategoryPayload(BaseModel):
     enabled: bool = True
 
 
+class MaterialCategoryBatchDeletePayload(BaseModel):
+    ids: list[str] = Field(min_length=1, max_length=100)
+
+
+class MaterialDirectoryBatchDeletePayload(BaseModel):
+    ids: list[str] = Field(min_length=1, max_length=100)
+
+
 class MaterialSeriesPayload(BaseModel):
     id: str | None = None
+    series_id: str | None = None
     category_id: str
     name: str
     material_code: str | None = ""
@@ -382,6 +574,13 @@ def require_admin(authorization: str | None) -> dict:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
 
 
+def require_design_operator(authorization: str | None) -> dict:
+    actor = require_admin(authorization)
+    if actor.get("role") == "viewer":
+        raise HTTPException(status_code=403, detail="只读账号不能处理人工搭配工单")
+    return actor
+
+
 def request_context(request: Request) -> dict[str, str]:
     return {
         "ip": request.client.host if request.client else "",
@@ -556,6 +755,8 @@ def bind_material_assets(
                 payload.series_id,
                 urls,
                 mode=payload.mode,
+                expected_version=payload.expected_version,
+                idempotency_key=payload.idempotency_key or "",
                 sync_sku_images=True,
                 actor=actor,
             ),
@@ -563,6 +764,19 @@ def bind_material_assets(
         )
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@admin_router.get("/material-taxonomy/series/{series_id}/asset-versions", summary="材料图库发布版本")
+def material_asset_versions(
+    series_id: str,
+    limit: int = Query(default=30, ge=1, le=100),
+    authorization: str | None = Header(default=None),
+):
+    require_admin(authorization)
+    try:
+        return success(admin_service.list_material_series_asset_versions(series_id, limit=limit))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -665,15 +879,201 @@ def checkins(
     return success(admin_service.list_checkins(keyword=keyword, limit=limit))
 
 
+@admin_router.get("/custom-design-requests", summary="人工搭配工单列表")
+def custom_design_requests(
+    status: str = Query(default="", max_length=40),
+    limit: int = Query(default=100, ge=1, le=300),
+    offset: int = Query(default=0, ge=0, le=100000),
+    include_meta: bool = Query(default=False),
+    authorization: str | None = Header(default=None),
+):
+    require_admin(authorization)
+    return success(
+        custom_design_service.list_for_admin(
+            status=status,
+            limit=limit,
+            offset=offset,
+            include_meta=include_meta,
+        )
+    )
+
+
+@admin_router.get("/custom-design-requests/settings", summary="人工搭配服务设置")
+def custom_design_settings(authorization: str | None = Header(default=None)):
+    require_admin(authorization)
+    return success(custom_design_service.get_settings())
+
+
+@admin_router.put("/custom-design-requests/settings", summary="更新人工搭配服务设置")
+def update_custom_design_settings(
+    payload: CustomDesignSettingsPayload,
+    authorization: str | None = Header(default=None),
+):
+    require_design_operator(authorization)
+    return success(custom_design_service.save_settings(payload.model_dump()), "人工搭配服务设置已保存")
+
+
+@admin_router.get("/custom-design-requests/{request_id}", summary="人工搭配工单详情")
+def custom_design_request_detail(request_id: str, authorization: str | None = Header(default=None)):
+    require_admin(authorization)
+    try:
+        return success(custom_design_service.get_for_admin(request_id))
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@admin_router.get("/custom-design-requests/{request_id}/overview", summary="人工搭配工单首屏摘要")
+def custom_design_request_overview(request_id: str, authorization: str | None = Header(default=None)):
+    """Small V2 detail payload; the report evidence and proposal workbench load separately."""
+    require_admin(authorization)
+    try:
+        return success(custom_design_service.get_admin_overview(request_id))
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@admin_router.get("/custom-design-requests/{request_id}/workbench", summary="人工搭配设计师工作台")
+def custom_design_workbench(request_id: str, authorization: str | None = Header(default=None)):
+    require_design_operator(authorization)
+    try:
+        return success(custom_design_service.get_admin_workbench(request_id))
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@admin_router.get("/custom-design-requests/{request_id}/assessment-evidence", summary="人工搭配测算依据")
+def custom_design_assessment_evidence(request_id: str, authorization: str | None = Header(default=None)):
+    require_admin(authorization)
+    try:
+        return success(custom_design_service.get_admin_assessment_evidence(request_id))
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@admin_router.get("/custom-design-requests/{request_id}/proposals", summary="人工搭配方案记录")
+def custom_design_proposals(request_id: str, authorization: str | None = Header(default=None)):
+    require_admin(authorization)
+    try:
+        return success(custom_design_service.list_admin_proposals(request_id))
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@admin_router.get(
+    "/custom-design-requests/{request_id}/proposals/{proposal_id}/composition",
+    summary="人工搭配方案材料组成",
+)
+def custom_design_proposal_composition(
+    request_id: str,
+    proposal_id: str,
+    authorization: str | None = Header(default=None),
+):
+    require_admin(authorization)
+    try:
+        return success(custom_design_service.get_admin_proposal_composition(request_id, proposal_id))
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@admin_router.get("/custom-design-requests/{request_id}/events", summary="人工搭配服务记录")
+def custom_design_events(request_id: str, authorization: str | None = Header(default=None)):
+    require_admin(authorization)
+    try:
+        return success(custom_design_service.list_admin_events(request_id))
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@admin_router.post("/custom-design-requests/{request_id}/material-candidates", summary="人工搭配材料候选")
+def custom_design_material_candidates(
+    request_id: str,
+    payload: CustomDesignCandidatePayload,
+    authorization: str | None = Header(default=None),
+):
+    """Return advisory candidates only; this endpoint never mutates a service order."""
+    require_design_operator(authorization)
+    try:
+        design_request = custom_design_service.get_admin_overview(request_id)
+        materials = admin_service.list_materials(
+            status="enabled",
+            sort_by="sort_order",
+            sort_order="asc",
+        )
+        return success(
+            build_design_candidates(
+                design_request.get("design_brief"),
+                materials,
+                selected_material_ids=payload.selected_material_ids,
+                wrist_size_cm=payload.wrist_size_cm,
+                bead_size_mm=payload.bead_size_mm,
+            )
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@admin_router.put("/custom-design-requests/{request_id}/draft", summary="保存设计师结构化草稿")
+def save_custom_design_draft(
+    request_id: str,
+    payload: CustomDesignDraftPayload,
+    authorization: str | None = Header(default=None),
+):
+    actor = require_design_operator(authorization)
+    try:
+        workbench = validated_custom_design_workbench(payload)
+        return success(
+            custom_design_service.save_draft(
+                request_id,
+                str(actor.get("admin_id") or actor.get("username") or "operator"),
+                workbench,
+            ),
+            "设计草稿已保存",
+        )
+    except (OrderConflictError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@admin_router.post("/custom-design-requests/{request_id}/proposal", summary="发布结构化人工搭配方案")
+def publish_custom_design_proposal(
+    request_id: str,
+    payload: CustomDesignProposalPayload,
+    authorization: str | None = Header(default=None),
+):
+    actor = require_design_operator(authorization)
+    try:
+        proposal_payload = payload.model_dump(mode="json")
+        proposal_payload["workbench"] = validated_custom_design_workbench(payload.workbench)
+        return success(
+            custom_design_service.publish_proposal(
+                request_id,
+                str(actor.get("admin_id") or actor.get("username") or "operator"),
+                proposal_payload,
+            ),
+            "方案已提交给用户",
+        )
+    except (OrderConflictError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @admin_router.get("/orders", summary="后台订单列表")
 def orders(
     keyword: str = Query(default="", max_length=80),
     status: str = Query(default="", max_length=40),
     limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0, le=1_000_000),
+    include_meta: bool = Query(default=False),
     authorization: str | None = Header(default=None),
 ):
     require_admin(authorization)
-    return success(admin_service.list_orders(keyword=keyword, status=status, limit=limit))
+    return success(
+        admin_service.list_orders(
+            keyword=keyword,
+            status=status,
+            limit=limit,
+            offset=offset,
+            include_meta=include_meta,
+        )
+    )
 
 
 @admin_router.get("/after-sales", summary="后台售后工单列表")
@@ -682,6 +1082,8 @@ def after_sale_cases(
     status: str = Query(default="", max_length=40),
     case_type: str = Query(default="", max_length=40),
     limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0, le=1_000_000),
+    include_meta: bool = Query(default=False),
     authorization: str | None = Header(default=None),
 ):
     require_admin(authorization)
@@ -692,6 +1094,8 @@ def after_sale_cases(
                 status=status,
                 case_type=case_type,
                 limit=limit,
+                offset=offset,
+                include_meta=include_meta,
             )
         )
     except ValueError as exc:
@@ -1198,6 +1602,9 @@ def material_spus(
     stock_state: str = Query(default="", max_length=20),
     margin: str = Query(default="", max_length=20),
     spec_state: str = Query(default="", max_length=20),
+    asset_state: str = Query(default="", max_length=40),
+    profile_state: str = Query(default="", max_length=40),
+    include_facets: bool = Query(default=False),
     sort_by: str = Query(default="sort_order", max_length=40),
     sort_order: str = Query(default="asc", max_length=10),
     page: int | None = Query(default=None, ge=1),
@@ -1216,6 +1623,9 @@ def material_spus(
             stock_state=stock_state,
             margin=margin,
             spec_state=spec_state,
+            asset_state=asset_state,
+            profile_state=profile_state,
+            include_facets=include_facets,
             sort_by=sort_by,
             sort_order=sort_order,
             page=page,
@@ -1286,11 +1696,72 @@ def save_material_category(payload: MaterialCategoryPayload, authorization: str 
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@admin_router.post("/material-taxonomy/categories/batch-delete", summary="批量删除空材料分类")
+def delete_empty_material_categories(
+    payload: MaterialCategoryBatchDeletePayload,
+    authorization: str | None = Header(default=None),
+):
+    actor = require_admin(authorization)
+    try:
+        return success(
+            admin_service.delete_empty_material_categories(payload.ids, actor=actor),
+            "空材料分类已删除",
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@admin_router.post("/material-types/batch-delete", summary="批量删除空材料类型")
+def delete_empty_material_types(
+    payload: MaterialDirectoryBatchDeletePayload,
+    authorization: str | None = Header(default=None),
+):
+    actor = require_admin(authorization)
+    try:
+        return success(admin_service.delete_empty_material_types(payload.ids, actor=actor), "空材料类型已删除")
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @admin_router.post("/material-taxonomy/series", summary="新增或更新材料品种")
 def save_material_series(payload: MaterialSeriesPayload, authorization: str | None = Header(default=None)):
     actor = require_admin(authorization)
     try:
         return success(admin_service.save_material_series(payload.model_dump(exclude_unset=True), actor=actor), "品种已保存")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@admin_router.patch("/material-taxonomy/series/{series_id}", summary="按稳定 ID 更新材料品种")
+def update_material_series(
+    series_id: str,
+    payload: MaterialSeriesPayload,
+    authorization: str | None = Header(default=None),
+):
+    actor = require_admin(authorization)
+    try:
+        return success(
+            admin_service.update_material_series(series_id, payload.model_dump(exclude_unset=True), actor=actor),
+            "品种已更新",
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@admin_router.post("/material-taxonomy/series/batch-delete", summary="批量删除空材料品种")
+def delete_empty_material_series(
+    payload: MaterialDirectoryBatchDeletePayload,
+    authorization: str | None = Header(default=None),
+):
+    actor = require_admin(authorization)
+    try:
+        return success(admin_service.delete_empty_material_series(payload.ids, actor=actor), "空材料品种已删除")
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -1302,6 +1773,12 @@ def disable_material_taxonomy(item_id: str, authorization: str | None = Header(d
         return success(admin_service.disable_material_taxonomy_item(item_id, actor=actor), "分类或品种已停用")
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@admin_router.post("/material-taxonomy/repair-enabled-state", summary="修复材料层级停用脏数据")
+def repair_material_taxonomy_enabled_state(authorization: str | None = Header(default=None)):
+    actor = require_admin(authorization)
+    return success(admin_service.repair_material_hierarchy_enabled_state(actor=actor), "材料层级停用状态已修复")
 
 
 @admin_router.get("/material-option-items", summary="后台材料字段字典")
@@ -1341,31 +1818,6 @@ def create_material(payload: MaterialPayload, authorization: str | None = Header
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@admin_router.put("/materials/{material_id}", summary="更新材料")
-def update_material(material_id: str, payload: MaterialPayload, authorization: str | None = Header(default=None)):
-    actor = require_admin(authorization)
-    try:
-        return success(admin_service.save_material(payload.model_dump(), material_id=material_id, actor=actor), "材料已更新")
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-
-@admin_router.delete("/materials/{material_id}", summary="删除材料")
-def delete_material(material_id: str, authorization: str | None = Header(default=None)):
-    actor = require_admin(authorization)
-    admin_service.delete_material(material_id, actor=actor)
-    return success({"deleted": material_id}, "材料已删除")
-
-
-@admin_router.post("/materials/batch", summary="批量操作珠材")
-def batch_materials(payload: MaterialBatchPayload, authorization: str | None = Header(default=None)):
-    actor = require_admin(authorization)
-    try:
-        return success(admin_service.batch_update_materials(payload.ids, payload.action, payload.value, actor=actor), "批量操作已完成")
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-
 @admin_router.get("/materials/audit-logs", summary="材料资料变更记录")
 def material_audit_logs(
     material_id: str = Query(default="", max_length=120),
@@ -1375,6 +1827,95 @@ def material_audit_logs(
 ):
     require_admin(authorization)
     return success(admin_service.list_material_audit_logs(material_id=material_id, target_type=target_type, limit=limit))
+
+
+@admin_router.get("/materials/{material_id}", summary="后台材料详情")
+def material_detail(material_id: str, authorization: str | None = Header(default=None)):
+    require_admin(authorization)
+    try:
+        return success(admin_service.get_material(material_id))
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@admin_router.put("/materials/{material_id}", summary="更新材料")
+def update_material(material_id: str, payload: MaterialPayload, authorization: str | None = Header(default=None)):
+    actor = require_admin(authorization)
+    if payload.expected_revision is None:
+        raise HTTPException(status_code=422, detail="更新 SKU 必须携带 expected_revision")
+    try:
+        return success(
+            admin_service.save_material(
+                payload.model_dump(exclude={"expected_revision"}),
+                material_id=material_id,
+                actor=actor,
+                expected_revision=payload.expected_revision,
+            ),
+            "材料已更新",
+        )
+    except MaterialConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@admin_router.patch("/materials/{material_id}", summary="更新材料 SKU 规格与价格")
+def patch_material_sku(
+    material_id: str,
+    payload: MaterialSkuPatchPayload,
+    authorization: str | None = Header(default=None),
+):
+    actor = require_admin(authorization)
+    try:
+        return success(
+            admin_service.patch_material_sku(
+                material_id,
+                payload.model_dump(exclude={"expected_revision"}, exclude_unset=True),
+                actor=actor,
+                expected_revision=payload.expected_revision,
+            ),
+            "SKU 已更新",
+        )
+    except MaterialConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@admin_router.delete("/materials/{material_id}", summary="删除材料")
+def delete_material(
+    material_id: str,
+    expected_revision: int = Query(ge=1),
+    authorization: str | None = Header(default=None),
+):
+    actor = require_admin(authorization)
+    try:
+        admin_service.delete_material(material_id, actor=actor, expected_revision=expected_revision)
+        return success({"deleted": material_id}, "材料已删除")
+    except MaterialConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@admin_router.post("/materials/batch", summary="批量操作珠材")
+def batch_materials(payload: MaterialBatchPayload, authorization: str | None = Header(default=None)):
+    actor = require_admin(authorization)
+    try:
+        return success(
+            admin_service.batch_update_materials(
+                payload.ids,
+                payload.action,
+                payload.value,
+                actor=actor,
+                expected_revisions=payload.expected_revisions,
+            ),
+            "批量操作已完成",
+        )
+    except MaterialConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @admin_router.get("/home-banners", summary="home banners")

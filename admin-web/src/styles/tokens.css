@@ -1,0 +1,27 @@
+:root {
+  color-scheme: light;
+  --studio-canvas: #f4f2ec;
+  --studio-surface: #fbfaf6;
+  --studio-paper: #ffffff;
+  --studio-ink: #181a18;
+  --studio-muted: #747872;
+  --studio-faint: #a5a8a1;
+  --studio-line: #dedfd9;
+  --studio-line-strong: #c8cbc3;
+  --studio-accent: #7e9077;
+  --studio-accent-soft: #e8ede4;
+  --studio-danger: #a85f52;
+  --studio-sidebar: #1d201d;
+  --studio-sidebar-muted: #979e96;
+  --studio-radius-sm: 10px;
+  --studio-radius-md: 18px;
+  --studio-radius-lg: 28px;
+  --studio-shadow: 0 22px 70px rgba(37, 42, 35, 0.08);
+  --studio-sidebar-width: 264px;
+  --studio-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  font-family:
+    Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei",
+    sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}

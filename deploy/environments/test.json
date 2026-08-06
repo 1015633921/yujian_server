@@ -1,6 +1,6 @@
 {
   "environment": "test",
-  "publicHealthUrl": "https://api.yustream.cn/test-api/health/ready",
+  "publicHealthUrl": "https://operation-test.yustream.cn/health/ready",
   "runtimeEnvFile": "/opt/yujian/config/test.env",
   "releaseEnvDir": "/opt/yujian/runtime/test",
   "certsDir": "/opt/yujian_server/certs",

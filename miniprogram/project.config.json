@@ -16,6 +16,10 @@
         "value": "images/workspace-icons"
       },
       {
+        "type": "folder",
+        "value": "package-ar"
+      },
+      {
         "type": "file",
         "value": "pages/test.html"
       }

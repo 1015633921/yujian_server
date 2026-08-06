@@ -69,8 +69,6 @@ button::after {
   --workspace-tool-gap: 42rpx;
   --workspace-stage-tool-gap: 36rpx;
   --workspace-safe-bottom: 0rpx;
-  --workspace-silver-filter: brightness(1.24) contrast(0.84) saturate(0.42)
-    drop-shadow(0 5rpx 10rpx rgba(91, 101, 108, 0.16));
 }
 
 .workspace-boot-mask {
@@ -244,48 +242,6 @@ button::after {
 .back-btn-press::after {
   background: rgba(245, 243, 238, 0.96);
   transform: scale(0.94);
-}
-
-.more-btn {
-  position: absolute;
-  top: 18rpx;
-  right: -8rpx;
-  z-index: 120;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 96rpx;
-  height: 96rpx;
-  border-radius: 50%;
-}
-
-.more-btn::before {
-  content: "";
-  position: absolute;
-  left: 18rpx;
-  top: 18rpx;
-  width: 60rpx;
-  height: 60rpx;
-  border: 1rpx solid rgba(24, 24, 24, 0.06);
-  border-radius: 18rpx;
-  background: rgba(255, 255, 255, 0.92);
-  box-shadow: 0 12rpx 30rpx rgba(39, 34, 24, 0.10);
-  transition: transform 120ms ease, background 120ms ease;
-}
-
-.more-btn-press::before {
-  background: rgba(245, 243, 238, 0.96);
-  transform: scale(0.94);
-}
-
-.more-dot {
-  position: relative;
-  z-index: 1;
-  width: 6rpx;
-  height: 6rpx;
-  margin: 0 3rpx;
-  border-radius: 50%;
-  background: #181818;
 }
 
 .canvas-area {
@@ -468,6 +424,12 @@ button::after {
   height: var(--workspace-stage-size);
   transform: translateX(-50%);
   z-index: 20;
+}
+
+/* 材料详情打开时，盘面模型由原生 canvas 和 CSS 绳线组成，整体隐藏避免穿透弹窗。 */
+.studio-page.material-detail-open .bracelet-stage {
+  visibility: hidden;
+  pointer-events: none;
 }
 
 .bracelet-circle {
@@ -797,6 +759,32 @@ button::after {
 
 .bracelet-touch-layer {
   z-index: 14;
+}
+
+.workspace-canvas-suppressed {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.drag-delete-hint {
+  position: absolute;
+  left: 50%;
+  top: calc(var(--workspace-stage-top) + var(--workspace-stage-size) - 76rpx);
+  z-index: 78;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 230rpx;
+  height: 64rpx;
+  padding: 0 22rpx;
+  box-sizing: border-box;
+  border-radius: 999rpx;
+  background: rgba(180, 73, 64, 0.94);
+  box-shadow: 0 12rpx 28rpx rgba(128, 54, 48, 0.20);
+  color: #fff;
+  font-size: 22rpx;
+  font-weight: 720;
+  transform: translateX(-50%);
 }
 
 .canvas-error-state {
@@ -1207,15 +1195,17 @@ button::after {
 }
 
 .bead-info-panel {
+  top: 50%;
+  bottom: auto;
   left: 50%;
   right: auto;
-  width: 410rpx;
-  max-width: calc(100% - 120rpx);
+  width: 360rpx;
+  max-width: calc(100% - 150rpx);
   gap: 0;
   padding: 13rpx 40rpx 13rpx 16rpx;
   border-radius: 18rpx;
   box-shadow: 0 14rpx 34rpx rgba(43, 37, 28, 0.11);
-  transform: translateX(-50%);
+  transform: translate(-50%, -50%);
 }
 
 .bead-info-close {
@@ -1820,10 +1810,6 @@ button::after {
   box-shadow: none;
 }
 
-.material-image.material-tone-silver {
-  filter: var(--workspace-silver-filter);
-}
-
 .material-name {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1831,15 +1817,6 @@ button::after {
   font-size: 24rpx;
   font-weight: 660;
   color: #1f1f1d;
-}
-
-.material-effect {
-  margin-top: 7rpx;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 19rpx;
-  color: rgba(26, 26, 26, 0.44);
 }
 
 .material-meta {
@@ -1955,13 +1932,14 @@ button::after {
 .wrist-picker-mask,
 .energy-modal-mask,
 .wrist-guide-mask,
-.share-sheet-mask {
+.share-sheet-mask,
+.material-detail-mask {
   position: fixed;
   left: 0;
   right: 0;
   top: 0;
   bottom: 0;
-  z-index: 150;
+  z-index: 240;
   display: flex;
   align-items: flex-end;
   background: rgba(0, 0, 0, 0.38);
@@ -1970,7 +1948,8 @@ button::after {
 .wrist-picker,
 .energy-modal,
 .wrist-guide-sheet,
-.share-sheet {
+.share-sheet,
+.material-detail-sheet {
   position: relative;
   z-index: 1;
   width: 100%;
@@ -1993,6 +1972,23 @@ button::after {
   justify-content: space-between;
 }
 
+.wrist-guide-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 14rpx;
+}
+
+.wrist-guide-replay {
+  padding: 11rpx 16rpx;
+  border: 1rpx solid rgba(121, 93, 48, 0.20);
+  border-radius: 999rpx;
+  background: #fffaf1;
+  color: #73572d;
+  font-size: 20rpx;
+  font-weight: 760;
+  line-height: 1;
+}
+
 .wrist-picker-title,
 .wrist-guide-title,
 .share-sheet-title {
@@ -2011,7 +2007,8 @@ button::after {
 .wrist-picker-close,
 .energy-modal-close,
 .wrist-guide-close,
-.share-sheet-close {
+.share-sheet-close,
+.material-detail-close {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2021,6 +2018,167 @@ button::after {
   background: #f3f1ec;
   font-size: 36rpx;
   color: rgba(28, 28, 28, 0.58);
+}
+
+.material-detail-sheet {
+  max-height: calc(100vh - 88rpx);
+  padding: 30rpx 32rpx calc(28rpx + env(safe-area-inset-bottom));
+}
+
+.material-detail-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.material-detail-eyebrow {
+  font-size: 20rpx;
+  font-weight: 760;
+  letter-spacing: .08em;
+  color: #9a7138;
+}
+
+.material-detail-title {
+  margin-top: 6rpx;
+  font-size: 34rpx;
+  font-weight: 900;
+  color: #191816;
+}
+
+.material-detail-body {
+  max-height: calc(100vh - 330rpx);
+  margin-top: 20rpx;
+}
+
+.material-detail-gallery,
+.material-detail-image {
+  width: 100%;
+  height: 390rpx;
+  border-radius: 22rpx;
+  background: #f5f3ee;
+}
+
+.material-detail-image {
+  display: block;
+}
+
+.material-detail-image-placeholder {
+  box-shadow: inset 0 0 0 1rpx rgba(28, 28, 28, 0.06);
+}
+
+.material-detail-summary {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 20rpx;
+  margin-top: 22rpx;
+}
+
+.material-detail-name {
+  min-width: 0;
+  font-size: 31rpx;
+  font-weight: 860;
+  line-height: 1.25;
+  color: #1b1916;
+}
+
+.material-detail-price {
+  flex: 0 0 auto;
+  font-size: 25rpx;
+  font-weight: 780;
+  color: #171917;
+}
+
+.material-detail-section {
+  margin-top: 22rpx;
+  padding: 18rpx 18rpx 20rpx;
+  border-radius: 18rpx;
+  background: #faf9f6;
+  border: 1rpx solid rgba(26, 26, 26, 0.07);
+}
+
+.material-detail-section-title {
+  font-size: 22rpx;
+  font-weight: 820;
+  color: #292824;
+}
+
+.material-detail-introduction,
+.material-detail-empty {
+  margin-top: 9rpx;
+  font-size: 23rpx;
+  line-height: 1.65;
+  color: rgba(28, 28, 28, 0.68);
+}
+
+.material-detail-effects {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10rpx;
+  margin-top: 12rpx;
+}
+
+.material-detail-effect {
+  display: inline-flex;
+  align-items: center;
+  min-height: 38rpx;
+  padding: 4rpx 14rpx;
+  border-radius: 999rpx;
+  background: #f0eadb;
+  color: #75572d;
+  font-size: 21rpx;
+  line-height: 1.35;
+}
+
+.material-detail-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14rpx;
+  margin-top: 20rpx;
+}
+
+.material-detail-field {
+  min-width: 0;
+  padding: 16rpx;
+  border: 1rpx solid rgba(26, 26, 26, 0.07);
+  border-radius: 16rpx;
+  background: #faf9f6;
+}
+
+.material-detail-field-label,
+.material-detail-field-value {
+  display: block;
+}
+
+.material-detail-field-label {
+  font-size: 19rpx;
+  color: rgba(28, 28, 28, 0.46);
+}
+
+.material-detail-field-value {
+  margin-top: 6rpx;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 23rpx;
+  font-weight: 710;
+  color: #292824;
+}
+
+.material-detail-add {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 84rpx;
+  margin-top: 22rpx;
+  border: 0;
+  border-radius: 999rpx;
+  background: #171917;
+  color: #fff;
+  font-size: 27rpx;
+  font-weight: 800;
+  line-height: 1;
+  box-shadow: 0 14rpx 30rpx rgba(20, 22, 20, 0.16);
 }
 
 .wrist-ruler-value {
@@ -2229,6 +2387,119 @@ button::after {
 .wrist-guide-sheet {
   max-height: 88vh;
   padding: 30rpx 32rpx calc(26rpx + env(safe-area-inset-bottom));
+}
+
+.workspace-onboarding-mask {
+  position: fixed;
+  z-index: 220;
+  inset: 0;
+  pointer-events: none;
+}
+
+.workspace-onboarding-focus {
+  position: fixed;
+  z-index: 1;
+  box-sizing: border-box;
+  border: 3rpx solid #f4d494;
+  border-radius: 24rpx;
+  box-shadow: 0 0 0 8rpx rgba(244, 212, 148, 0.20), 0 10rpx 26rpx rgba(76, 55, 23, 0.14);
+  animation: workspace-guide-pulse 1.6s ease-in-out infinite;
+  pointer-events: none;
+}
+
+@keyframes workspace-guide-pulse {
+  0%, 100% { box-shadow: 0 0 0 9999rpx rgba(18, 18, 17, 0.62), 0 0 0 8rpx rgba(244, 212, 148, 0.16), 0 10rpx 26rpx rgba(76, 55, 23, 0.12); }
+  50% { box-shadow: 0 0 0 9999rpx rgba(18, 18, 17, 0.62), 0 0 0 13rpx rgba(244, 212, 148, 0.30), 0 12rpx 30rpx rgba(76, 55, 23, 0.18); }
+}
+
+.workspace-onboarding-card {
+  position: fixed;
+  right: 24rpx;
+  bottom: calc(28rpx + env(safe-area-inset-bottom));
+  left: 24rpx;
+  z-index: 2;
+  pointer-events: auto;
+  padding: 28rpx;
+  border-radius: 28rpx;
+  border: 1rpx solid rgba(118, 87, 40, 0.12);
+  background: rgba(255, 253, 249, 0.98);
+  box-shadow: 0 14rpx 34rpx rgba(48, 37, 20, 0.16);
+}
+
+/* 选材时卡片上移，材料抽屉和被高亮的首张材料卡不被遮挡。 */
+.workspace-onboarding-card.guide-card-materials {
+  top: calc(env(safe-area-inset-top) + 112rpx);
+  bottom: auto;
+}
+
+.workspace-onboarding-progress {
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+  color: rgba(38, 31, 22, 0.45);
+  font-size: 20rpx;
+  font-weight: 720;
+}
+
+.workspace-onboarding-dot {
+  width: 12rpx;
+  height: 12rpx;
+  border-radius: 50%;
+  background: rgba(68, 52, 30, 0.16);
+}
+
+.workspace-onboarding-dot.active { background: #b78c4d; }
+
+.workspace-onboarding-progress text { margin-left: auto; }
+
+.workspace-onboarding-eyebrow {
+  margin-top: 22rpx;
+  color: #a2783d;
+  font-size: 20rpx;
+  font-weight: 820;
+  letter-spacing: 1.6rpx;
+}
+
+.workspace-onboarding-title {
+  margin-top: 10rpx;
+  color: #1d1a16;
+  font-size: 32rpx;
+  font-weight: 900;
+  line-height: 1.25;
+}
+
+.workspace-onboarding-desc {
+  margin-top: 10rpx;
+  color: rgba(35, 29, 21, 0.58);
+  font-size: 23rpx;
+  line-height: 1.55;
+}
+
+.workspace-onboarding-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20rpx;
+  margin-top: 26rpx;
+}
+
+.workspace-onboarding-skip {
+  padding: 16rpx 4rpx;
+  color: rgba(35, 29, 21, 0.48);
+  font-size: 22rpx;
+}
+
+.workspace-onboarding-next {
+  width: 214rpx;
+  height: 64rpx;
+  min-height: 64rpx;
+  margin: 0;
+  border-radius: 999rpx;
+  background: #1d1e1b;
+  color: #fff;
+  font-size: 23rpx;
+  font-weight: 800;
+  line-height: 64rpx;
 }
 
 .wrist-guide-tabs {

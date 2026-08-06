@@ -2,10 +2,6 @@
   <view class="detail-nav">
     <view class="nav-back yu-pressable" bindtap="goBack">‹</view>
     <view class="nav-title">灵感详情</view>
-    <view class="nav-capsule">
-      <view class="nav-dot">•••</view>
-      <view class="nav-circle"></view>
-    </view>
   </view>
 
   <view class="title-panel">

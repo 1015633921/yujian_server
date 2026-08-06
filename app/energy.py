@@ -2,13 +2,21 @@ from __future__ import annotations
 
 import math
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from .fortune.bazi import calculate_bazi
 from .fortune.chakra import calculate_chakra_profile
 from .fortune.common import ELEMENTS, empty_profile, normalized_profile
 from .fortune.mood_palette import calculate_mood_profile
 from .fortune.name_elements import analyze_name
-from .locations import CALIBRATION_VERSION, DEFAULT_TIMEZONE, LOCATION_DATA_VERSION, LOCATION_RECORDS, resolve_location
+from .locations import (
+    CALIBRATION_VERSION,
+    DEFAULT_TIMEZONE,
+    LOCATION_DATA_VERSION,
+    LOCATION_RECORDS,
+    picker_location_code,
+    resolve_location,
+)
 from .schemas import AssessmentRequest
 
 ENERGY_WEIGHTS = {
@@ -68,9 +76,8 @@ WISH_MAPPING = {
 }
 
 PLACE_COORDINATES = {
-    alias: (record.longitude, record.latitude)
+    record.display_name: (record.longitude, record.latitude)
     for record in LOCATION_RECORDS
-    for alias in record.aliases
 }
 
 class EnergyCalculator:
@@ -119,7 +126,11 @@ class EnergyCalculator:
                 "total_correction_minutes": None,
                 "location_source": resolution["source"],
                 "resolved_location_code": resolution.get("location_code"),
-                "timezone": DEFAULT_TIMEZONE,
+                "resolved_location_name": resolution.get("location_name"),
+                "resolved_location_precision": resolution.get("location_precision"),
+                "timezone": resolution.get("timezone") or DEFAULT_TIMEZONE,
+                "utc_offset_minutes": None,
+                "standard_meridian_longitude": None,
                 "calibration_status": resolution["status"],
                 "calibration_source": resolution["source"],
                 "calibration_version": CALIBRATION_VERSION,
@@ -129,7 +140,13 @@ class EnergyCalculator:
             }
         longitude = float(resolution["longitude"])
         latitude = float(resolution["latitude"])
-        longitude_correction = (longitude - 120.0) * 4.0
+        timezone_name = resolution["timezone"]
+        utc_offset = local_datetime.replace(tzinfo=ZoneInfo(timezone_name)).utcoffset()
+        if utc_offset is None:  # pragma: no cover - ZoneInfo always supplies an offset for a real date.
+            raise RuntimeError(f"Unable to determine UTC offset for {timezone_name}")
+        utc_offset_minutes = int(utc_offset.total_seconds() // 60)
+        standard_meridian = utc_offset_minutes / 4.0
+        longitude_correction = (longitude - standard_meridian) * 4.0
         day_of_year = request.birthday.timetuple().tm_yday
         b = math.radians((360 / 365) * (day_of_year - 81))
         equation_of_time = 9.87 * math.sin(2 * b) - 7.53 * math.cos(b) - 1.5 * math.sin(b)
@@ -145,7 +162,11 @@ class EnergyCalculator:
             "total_correction_minutes": round(total_correction, 2),
             "location_source": resolution["source"],
             "resolved_location_code": resolution["location_code"],
-            "timezone": DEFAULT_TIMEZONE,
+            "resolved_location_name": resolution["location_name"],
+            "resolved_location_precision": resolution["location_precision"],
+            "timezone": timezone_name,
+            "utc_offset_minutes": utc_offset_minutes,
+            "standard_meridian_longitude": standard_meridian,
             "calibration_status": "applied",
             "calibration_source": resolution["source"],
             "calibration_version": CALIBRATION_VERSION,
@@ -157,35 +178,92 @@ class EnergyCalculator:
 
     @staticmethod
     def resolve_coordinates(request: AssessmentRequest) -> dict:
+        display_path = request.birth_place_path or request.birth_place
+        # A new client always submits the full province/city picker path.  It is
+        # the disambiguating input; the compact client key is not a coordinate
+        # source and deliberately need not be a public dataset code.
+        path_record = resolve_location(None, request.birth_place_path) if request.birth_place_path else None
+        record = path_record or resolve_location(request.location_code, display_path)
         if request.birth_time_unknown:
             return {
                 "status": "not_required",
                 "source": "user_declared_unknown_time",
                 "reason_code": "birth_time_unknown",
-                "location_code": None,
+                "location_code": record.code if record else None,
+                "location_name": record.resolved_name if record else None,
+                "location_precision": record.precision if record else None,
+                "timezone": record.timezone if record else DEFAULT_TIMEZONE,
             }
-        record = resolve_location(request.location_code, request.birth_place)
         if not record:
             return {
-                "status": "unsupported" if request.birth_place else "unavailable",
-                "source": "project_location_dataset",
+                "status": "unsupported" if display_path else "unavailable",
+                "source": "versioned_city_center_dataset",
                 "reason_code": "location_not_in_versioned_dataset",
                 "location_code": request.location_code,
+                "location_name": None,
+                "location_precision": None,
+                "timezone": DEFAULT_TIMEZONE,
             }
+        if request.birth_place_path:
+            if path_record is None or path_record.code != record.code:
+                return {
+                    "status": "invalid_location",
+                    "source": "versioned_city_center_dataset",
+                    "reason_code": "location_code_does_not_match_picker_path",
+                    "location_code": record.code,
+                    "location_name": record.resolved_name,
+                    "location_precision": record.precision,
+                    "timezone": record.timezone,
+                }
+            submitted_code = str(request.location_code or "").strip().lower()
+            if submitted_code:
+                expected_picker_code = picker_location_code(path_record.province, path_record.city)
+                code_record = resolve_location(submitted_code, None)
+                code_matches_path = (
+                    submitted_code == expected_picker_code
+                    or (code_record is not None and code_record.code == path_record.code)
+                )
+                if not code_matches_path:
+                    return {
+                        "status": "invalid_location",
+                        "source": "versioned_city_center_dataset",
+                        "reason_code": "location_code_does_not_match_picker_path",
+                        "location_code": path_record.code,
+                        "location_name": path_record.resolved_name,
+                        "location_precision": path_record.precision,
+                        "timezone": path_record.timezone,
+                    }
+            city_record = resolve_location(None, request.birth_place)
+            if city_record is None or city_record.code != path_record.code:
+                return {
+                    "status": "invalid_location",
+                    "source": "versioned_city_center_dataset",
+                    "reason_code": "birth_place_does_not_match_picker_path",
+                    "location_code": path_record.code,
+                    "location_name": path_record.resolved_name,
+                    "location_precision": path_record.precision,
+                    "timezone": path_record.timezone,
+                }
         if request.lng is not None:
             matches = abs(request.lng - record.longitude) <= 0.01 and abs(request.lat - record.latitude) <= 0.01
             if not matches:
                 return {
                     "status": "invalid_location",
-                    "source": "project_location_dataset",
+                    "source": "versioned_city_center_dataset",
                     "reason_code": "client_coordinates_do_not_match_location",
                     "location_code": record.code,
+                    "location_name": record.resolved_name,
+                    "location_precision": record.precision,
+                    "timezone": record.timezone,
                 }
         return {
             "status": "applied",
-            "source": "built_in_place_lookup",
+            "source": "versioned_city_center_dataset",
             "reason_code": "location_resolved",
             "location_code": record.code,
+            "location_name": record.resolved_name,
+            "location_precision": record.precision,
+            "timezone": record.timezone,
             "longitude": record.longitude,
             "latitude": record.latitude,
         }

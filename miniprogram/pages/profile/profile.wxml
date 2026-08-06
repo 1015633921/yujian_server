@@ -85,6 +85,19 @@
       <view class="menu-right">{{shoppingCartCount}} 个 ></view>
     </view>
     <view class="menu-divider"></view>
+    <view class="menu-row" bindtap="viewCustomDesignRequests">
+      <view class="menu-left">
+        <view class="menu-icon cart">
+          <image class="menu-icon-image" src="{{profileMenuIcons.plans}}" mode="aspectFit" />
+        </view>
+        <view>
+          <view class="menu-title">人工搭配</view>
+          <view class="menu-desc">查看设计师方案、确认或申请调整</view>
+        </view>
+      </view>
+      <view class="menu-arrow">></view>
+    </view>
+    <view class="menu-divider"></view>
     <view class="menu-row" bindtap="viewAddress">
       <view class="menu-left">
         <view class="menu-icon address">

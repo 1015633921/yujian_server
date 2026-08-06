@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from .auth_service import WechatAuthService
+from . import order_service as order_service_module
 from .avatar_storage import AvatarStorage
 from .daily_service import DailyEnergyService
 from .feature_flags import (
@@ -22,6 +23,7 @@ from .feature_flags import (
     report_versioning_v2_enabled,
 )
 from .admin_service import AdminService
+from .custom_design_service import CustomDesignService
 from .materials import MaterialCatalogUnavailable, list_materials
 from .order_service import (
     KUAIDI100_CALLBACK_MAX_BYTES,
@@ -42,6 +44,8 @@ from .schemas import (
     CartItemCreateRequest,
     CartItemUpdateRequest,
     CommunityFavoriteSaveRequest,
+    CustomDesignRequestCreate,
+    CustomDesignResponseRequest,
     DailyCheckInRequest,
     DIYDesignSaveRequest,
     DIYRecommendationRequest,
@@ -73,6 +77,7 @@ auth_service = WechatAuthService()
 avatar_storage = AvatarStorage()
 admin_content_service = AdminService()
 order_service = OrderService()
+custom_design_service = CustomDesignService(order_service=order_service)
 BEIJING_TZ = ZoneInfo("Asia/Shanghai")
 LOGGER = logging.getLogger("yujian.business")
 
@@ -413,6 +418,114 @@ def save_diy_design(payload: DIYDesignSaveRequest, principal: UserPrincipal = De
     try:
         safe_payload = owned_payload(payload, principal)
         return success(order_service.save_design(safe_payload.model_dump(mode="json")), "DIY 方案已保存")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/custom-design-requests", summary="申请人工水晶搭配服务")
+def create_custom_design_request(
+    payload: CustomDesignRequestCreate,
+    principal: UserPrincipal = Depends(require_current_user),
+):
+    safe_payload = owned_payload(payload, principal)
+    # Only a source reference is retained; assessment inputs are never copied into this service.
+    if safe_payload.assessment_id:
+        require_assessment_owner(safe_payload.assessment_id, principal)
+    else:
+        require_report_owner(safe_payload.report_id, principal, safe_payload.report_version)
+    try:
+        return success(custom_design_service.create(principal.user_id, safe_payload.model_dump(mode="json")), "申请已提交")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/custom-design-requests", summary="获取我的人工搭配申请")
+def list_custom_design_requests(principal: UserPrincipal = Depends(require_current_user)):
+    return success(custom_design_service.list_for_user(principal.user_id))
+
+
+@router.post("/custom-design-requests/{request_id}/deposit/pay", summary="发起人工搭配设计保证金支付")
+def pay_custom_design_deposit(
+    request_id: str,
+    payload: CustomDesignResponseRequest,
+    principal: UserPrincipal = Depends(require_current_user),
+):
+    require_feature(payment_enabled(), "微信支付当前未开放")
+    safe_payload = owned_payload(payload, principal)
+    try:
+        return success(
+            custom_design_service.request_deposit_payment(request_id, principal.user_id),
+            "设计保证金支付参数已生成",
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/custom-design-requests/{request_id}/deposit/mock-pay", summary="本地调试：模拟设计保证金支付成功")
+def mock_pay_custom_design_deposit(
+    request_id: str,
+    payload: CustomDesignResponseRequest,
+    principal: UserPrincipal = Depends(require_current_user),
+):
+    require_mock_trade_tools()
+    owned_payload(payload, principal)
+    try:
+        return success(custom_design_service.mark_deposit_paid_for_dev(request_id, principal.user_id), "设计保证金已模拟支付成功")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/custom-design-requests/{request_id}", summary="获取人工搭配申请详情")
+def get_custom_design_request(request_id: str, principal: UserPrincipal = Depends(require_current_user)):
+    try:
+        return success(custom_design_service.get_for_user(request_id, principal.user_id))
+    except ValueError as exc:
+        raise private_not_found() from exc
+
+
+@router.post("/custom-design-requests/{request_id}/confirm", summary="确认人工搭配方案")
+def confirm_custom_design_request(
+    request_id: str,
+    payload: CustomDesignResponseRequest,
+    principal: UserPrincipal = Depends(require_current_user),
+):
+    safe_payload = owned_payload(payload, principal)
+    try:
+        return success(custom_design_service.user_response(request_id, principal.user_id, "confirm", safe_payload.note), "设计已确认，商品订单已生成，请补充收货地址后支付")
+    except (OrderPriceChangedError, OrderConflictError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except OrderPricingError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/custom-design-requests/{request_id}/order", summary="根据已确认人工搭配方案生成商品订单")
+def create_order_from_custom_design_request(
+    request_id: str,
+    payload: CustomDesignResponseRequest,
+    principal: UserPrincipal = Depends(require_current_user),
+):
+    safe_payload = owned_payload(payload, principal)
+    try:
+        return success(custom_design_service.create_order_from_proposal(request_id, principal.user_id), "待支付商品订单已生成")
+    except (OrderPriceChangedError, OrderConflictError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except OrderPricingError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/custom-design-requests/{request_id}/revision", summary="申请调整人工搭配方案")
+def revise_custom_design_request(
+    request_id: str,
+    payload: CustomDesignResponseRequest,
+    principal: UserPrincipal = Depends(require_current_user),
+):
+    safe_payload = owned_payload(payload, principal)
+    try:
+        return success(custom_design_service.user_response(request_id, principal.user_id, "revision", safe_payload.note), "已提交调整说明")
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -993,7 +1106,15 @@ async def wechat_pay_notify(request: Request):
     body_text = (await request.body()).decode("utf-8")
     headers = {key.lower(): value for key, value in request.headers.items()}
     try:
-        order_service.handle_wechat_notify(headers, body_text)
+        config = order_service_module.WechatPayConfig()
+        payload = order_service.decode_verified_webhook(headers, body_text, config, "微信支付回调")
+        transaction = order_service.decrypt_wechat_resource(payload.get("resource") or {}, config.api_v3_key)
+        if not isinstance(transaction, dict):
+            raise ValueError("微信支付回调资源格式错误")
+        if custom_design_service.is_deposit_trade(str(transaction.get("out_trade_no") or "")):
+            custom_design_service.handle_wechat_payment_transaction(transaction, config)
+        else:
+            order_service.handle_wechat_notify(headers, body_text)
     except (ValueError, json.JSONDecodeError) as exc:
         metrics.increment("payment_callback_total", callback_type="payment", result="failed")
         metrics.increment("payment_callback_failed_total", callback_type="payment", error_type=type(exc).__name__)
@@ -1012,7 +1133,15 @@ async def wechat_pay_refund_notify(request: Request):
     body_text = (await request.body()).decode("utf-8")
     headers = {key.lower(): value for key, value in request.headers.items()}
     try:
-        order_service.handle_wechat_refund_notify(headers, body_text)
+        config = order_service_module.WechatPayConfig()
+        payload = order_service.decode_verified_webhook(headers, body_text, config, "微信退款回调")
+        refund_result = order_service.decrypt_wechat_resource(payload.get("resource") or {}, config.api_v3_key)
+        if not isinstance(refund_result, dict):
+            raise ValueError("微信退款回调资源格式错误")
+        if custom_design_service.is_deposit_trade(str(refund_result.get("out_trade_no") or "")):
+            custom_design_service.handle_wechat_refund_result(refund_result, config)
+        else:
+            order_service.handle_wechat_refund_notify(headers, body_text)
     except (ValueError, json.JSONDecodeError) as exc:
         metrics.increment("payment_callback_total", callback_type="refund", result="failed")
         metrics.increment("payment_callback_failed_total", callback_type="refund", error_type=type(exc).__name__)

@@ -34,7 +34,9 @@ def material_cdn_base_url() -> str:
 CDN_BASE_URL = material_cdn_base_url()
 MATERIAL_CACHE_TTL_SECONDS = 60
 _MATERIAL_PAYLOAD_CACHE: dict[tuple, dict] = {}
-MATERIAL_SORT_POLICY_VERSION = "featured-v1"
+# The material grid is paginated on the server.  Keep the version in the
+# catalog cache key so a change to its ordering reaches clients immediately.
+MATERIAL_SORT_POLICY_VERSION = "style-size-v1"
 
 INTERNAL_MATERIAL_FIELDS = {
     "cost_price",
@@ -105,12 +107,24 @@ def featured_material_rank(item: dict) -> int:
 
 
 def material_customer_sort_key(item: dict) -> tuple:
-    rank = featured_material_rank(item)
+    """Keep SKU variants next to one another, ordered by their diameter.
+
+    ``series`` is the operator-maintained variety/style.  Some legacy rows do
+    not have one, in which case the display name is the best available group
+    key.  When a style has multiple material codes, diameter still takes
+    priority: every 8 mm option is shown before every 10 mm option.
+    """
+    top = str(item.get("top") or (item.get("sku") or {}).get("top") or "")
+    category = str(item.get("category") or (item.get("sku") or {}).get("category") or "")
+    series = str(item.get("series") or (item.get("sku") or {}).get("series") or item.get("name") or "")
+    material_code = str(item.get("material_code") or item.get("materialCode") or item.get("skuId") or "")
     sort_order = int(float(item.get("sort_order") or item.get("sortOrder") or 0))
-    size = float(item.get("size") or 0)
-    name = str(item.get("series") or item.get("name") or item.get("category") or "")
+    try:
+        size = float(item.get("size") or (item.get("sku") or {}).get("size_mm") or 0)
+    except (TypeError, ValueError):
+        size = 0
     item_id = str(item.get("id") or item.get("skuId") or "")
-    return (rank, sort_order, name, size, item_id)
+    return (top, category, series, size, material_code, sort_order, item_id)
 
 
 def sort_materials_for_customer(materials: list[dict]) -> list[dict]:
@@ -285,14 +299,20 @@ def material_image_identity(url: str | None) -> str:
 
 
 def clean_gallery_image_urls(value, primary_url: str = "", *, top: str = "") -> list[str]:
-    """Keep accessory cover images separate from their random-placement gallery."""
-    image_urls = clean_image_urls(value)
-    if str(top or "").strip() != "accessory":
-        return image_urls
+    """Normalize only gallery entries; the primary image is a separate field."""
+    # 主图仅用于目录和材料详情展示，不能参与工作台的随机抽图。用去掉
+    # query string 的 identity 比较，避免同一 COS 文件因版本参数不同而绕过
+    # 校验；图库本身也以相同规则去重，保证每张图的随机概率一致。
     primary_identity = material_image_identity(primary_url)
-    if not primary_identity:
-        return image_urls
-    return [url for url in image_urls if material_image_identity(url) != primary_identity]
+    result: list[str] = []
+    seen: set[str] = set()
+    for url in clean_image_urls(value):
+        identity = material_image_identity(url)
+        if not identity or identity == primary_identity or identity in seen:
+            continue
+        seen.add(identity)
+        result.append(url)
+    return result
 
 
 def with_cdn_url(item: dict) -> dict:
@@ -386,7 +406,10 @@ def slim_material(item: dict) -> dict:
         "effect": " / ".join(str(value) for value in effects if value) or item.get("effect") or "",
         "color": visual.get("color_hex") or item.get("color") or "",
         "shine": visual.get("shine_hex") or item.get("shine") or "",
-        "image_url": image_url,
+        # Legacy varieties can have only gallery data.  Use its first image as
+        # a display fallback, but keep it in the gallery: it was never a real
+        # primary image and must remain eligible for workspace randomization.
+        "image_url": image_url or (image_urls[0] if image_urls else ""),
         "image_urls": image_urls,
         "thumbnail_url": image_url,
         "material_params": material_params,
@@ -551,7 +574,18 @@ def build_material_payload(materials: list[dict], version: dict | None = None) -
     for tab in TOP_TABS:
         pool = db_facets if db_facets is not None else MATERIAL_CATALOG
         pool = [item for item in pool if item.get("top") == tab["key"]]
-        categories_by_top[tab["key"]] = [ALL_OPTION_LABEL, *sorted({item["category"] for item in pool if item.get("category")})]
+        category_sort_orders: dict[str, int] = {}
+        for item in pool:
+            category = str(item.get("category") or "").strip()
+            if not category:
+                continue
+            try:
+                sort_order = int(item.get("category_sort_order") or 0)
+            except (TypeError, ValueError):
+                sort_order = 0
+            category_sort_orders[category] = min(category_sort_orders.get(category, sort_order), sort_order)
+        ordered_categories = sorted(category_sort_orders, key=lambda name: (category_sort_orders[name], name))
+        categories_by_top[tab["key"]] = [ALL_OPTION_LABEL, *ordered_categories]
         for item in pool:
             category_key = f"{tab['key']}::{item.get('category', '')}"
             series = item.get("series") or item.get("name") or ""
@@ -623,13 +657,27 @@ def list_db_material_facets() -> list[dict] | None:
         return None
     try:
         with connect_database() as connection:
-            rows = connection.execute(
-                """
-                SELECT top, category, series, name
-                FROM managed_materials
-                WHERE enabled = 1
-                """
-            ).fetchall()
+            try:
+                rows = connection.execute(
+                    """
+                    SELECT m.top, m.category, m.series, m.name,
+                           COALESCE(c.sort_order, 0) AS category_sort_order
+                    FROM managed_materials m
+                    LEFT JOIN material_taxonomy c
+                      ON c.kind='category' AND c.top=m.top AND c.name=m.category
+                    WHERE m.enabled = 1
+                    """
+                ).fetchall()
+            except Exception:
+                # Keep older deployments usable until their taxonomy table is
+                # initialized; their legacy category order remains unchanged.
+                rows = connection.execute(
+                    """
+                    SELECT top, category, series, name, 0 AS category_sort_order
+                    FROM managed_materials
+                    WHERE enabled = 1
+                    """
+                ).fetchall()
     except Exception:
         return None
     return [dict(row) for row in rows]
@@ -695,7 +743,14 @@ def list_db_materials_page(
                 SELECT *
                 FROM managed_materials
                 WHERE {where}
-                ORDER BY sort_order ASC, updated_at DESC, id ASC
+                ORDER BY
+                    COALESCE(top, '') ASC,
+                    COALESCE(category, '') ASC,
+                    COALESCE(NULLIF(series, ''), name, '') ASC,
+                    size ASC,
+                    COALESCE(material_code, '') ASC,
+                    sort_order ASC,
+                    id ASC
                 LIMIT ? OFFSET ?
                 """,
                 [*params, size, offset],
@@ -746,6 +801,9 @@ def list_db_materials(
 
 
 def series_asset_key(row: dict) -> tuple[str, str, str]:
+    series_id = str(row.get("series_id") or "").strip()
+    if series_id:
+        return ("series_id", series_id, "")
     return (
         str(row.get("top") or "bead"),
         str(row.get("category") or ""),
@@ -756,7 +814,11 @@ def series_asset_key(row: dict) -> tuple[str, str, str]:
 def fetch_db_series_assets(connection, rows: list[dict]) -> dict[tuple[str, str, str], dict]:
     if not rows:
         return {}
-    tops = sorted({series_asset_key(row)[0] for row in rows if series_asset_key(row)[0]})
+    # `series_asset_key` starts with the literal ``series_id`` once a SKU has
+    # been migrated.  The taxonomy query must still be constrained by the
+    # material type, not by that key marker; otherwise every linked SKU misses
+    # its shared images and recommendation/workspace previews turn blank.
+    tops = sorted({str(row.get("top") or "").strip() for row in rows if str(row.get("top") or "").strip()})
     if not tops:
         return {}
     placeholders = ", ".join(["?"] * len(tops))
@@ -786,7 +848,19 @@ def fetch_db_series_assets(connection, rows: list[dict]) -> dict[tuple[str, str,
             image_url,
             top=row.get("top") or "bead",
         )
+        result[("series_id", row.get("item_id") or "", "")] = {
+            "series_id": row.get("item_id") or "",
+            "material_code": row.get("material_code") or "",
+            "color": row.get("color") or "",
+            "shine": row.get("shine") or "",
+            "image_path": image_path,
+            "image_url": image_url,
+            "image_urls": image_urls,
+        }
+        # The editable name/category key remains a compatibility fallback for
+        # legacy SKU rows that have not yet been linked by the migration.
         result[(row.get("top") or "bead", row.get("category_name") or "", row.get("name") or "")] = {
+            "series_id": row.get("item_id") or "",
             "material_code": row.get("material_code") or "",
             "color": row.get("color") or "",
             "shine": row.get("shine") or "",
@@ -833,7 +907,10 @@ def normalize_db_material(row: dict, series_assets: dict[tuple[str, str, str], d
         "color": series_asset.get("color") or row.get("color") or "",
         "shine": series_asset.get("shine") or row.get("shine") or "",
         "image_path": image_path,
-        "image_url": image_url,
+        # Keep old gallery-only records usable for display until an operator
+        # sets a real primary image.  `image_urls` intentionally stays intact
+        # so the fallback image is not silently removed from the random pool.
+        "image_url": image_url or (image_urls[0] if image_urls else ""),
         "image_urls": image_urls,
         "image_pool": image_urls,
         "physical_specs": physical_specs,

@@ -33,6 +33,11 @@ class AssessmentRequest(BaseModel):
     birth_time: time
     birth_time_unknown: bool = False
     birth_place: NonEmptyString
+    # New clients submit the selected province/city path as well as the
+    # backwards-compatible city display name.  The server uses the full path
+    # to disambiguate the versioned city-centre dataset; it never accepts a
+    # client-supplied coordinate as the authoritative location.
+    birth_place_path: str | None = Field(default=None, max_length=160)
     location_code: str | None = Field(default=None, max_length=80)
     lng: float | None = Field(default=None, ge=-180, le=180, description="出生地经度")
     lat: float | None = Field(default=None, ge=-90, le=90, description="出生地纬度")
@@ -83,6 +88,56 @@ class DIYRecommendationRequest(BaseModel):
     bead_size_mm: int = Field(default=8, ge=4, le=20, description="偏好珠径，单位毫米")
     report_id: str | None = Field(default=None, max_length=100)
     expected_report_version: int | None = Field(default=None, ge=1)
+    style_preference: str | None = Field(
+        default=None,
+        pattern="^(minimal|balanced|layered)$",
+        description="方案调整方向",
+    )
+    accessory_preference: str | None = Field(
+        default=None,
+        pattern="^(less|balanced|more)$",
+        description="配饰用量偏好",
+    )
+    locked_material_ids: list[str] = Field(
+        default_factory=list,
+        max_length=3,
+        description="重新生成时需要保留的材料 ID",
+    )
+    rejected_plan_id: str | None = Field(
+        default=None,
+        max_length=100,
+        description="用户明确不喜欢的方案 ID",
+    )
+
+    @field_validator("locked_material_ids")
+    @classmethod
+    def validate_locked_material_ids(cls, values: list[str]) -> list[str]:
+        normalized: list[str] = []
+        for value in values:
+            material_id = str(value or "").strip()
+            if not material_id or len(material_id) > 100:
+                raise ValueError("保留材料 ID 不合法")
+            if material_id not in normalized:
+                normalized.append(material_id)
+        return normalized
+
+    @property
+    def has_refinement(self) -> bool:
+        return bool(
+            self.style_preference
+            or self.accessory_preference
+            or self.locked_material_ids
+            or self.rejected_plan_id
+        )
+
+    @property
+    def refinement(self) -> dict:
+        return {
+            "style_preference": self.style_preference,
+            "accessory_preference": self.accessory_preference,
+            "locked_material_ids": self.locked_material_ids,
+            "rejected_plan_id": self.rejected_plan_id,
+        }
 
 
 class DailyCheckInRequest(BaseModel):
@@ -136,6 +191,39 @@ class DIYDesignSaveRequest(BaseModel):
     design: dict = Field(default_factory=dict)
     sequence: list[dict] = Field(default_factory=list, max_length=120)
     status: str = Field(default="saved", max_length=30)
+
+
+class CustomDesignRequestCreate(BaseModel):
+    """A service request, intentionally separate from merchandise orders."""
+
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+
+    user_id: NonEmptyString
+    report_id: str = Field(min_length=1, max_length=80)
+    report_version: int = Field(ge=1, le=10000)
+    assessment_id: str | None = Field(default=None, max_length=80)
+    wrist_size_cm: float = Field(ge=10, le=25)
+    # The designer workbench and customer selector both support 6–16 mm.
+    # Keep the service-order contract aligned so a request cannot become
+    # impossible to fulfil in the workbench.
+    bead_size_mm: int = Field(ge=6, le=16)
+    budget: str = Field(default="", max_length=80)
+    style_preference: str = Field(default="", max_length=80)
+    color_preference: str = Field(default="", max_length=120)
+    accessory_preference: str = Field(default="", max_length=80)
+    wear_scene: str = Field(default="", max_length=80)
+    # New clients set this only after the customer explicitly chooses the
+    # service preferences.  Old records remain readable and are marked for a
+    # designer confirmation instead of being silently treated as user intent.
+    preference_confirmed: bool = False
+    note: str = Field(default="", max_length=500)
+
+
+class CustomDesignResponseRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+
+    user_id: NonEmptyString
+    note: str = Field(default="", max_length=500)
 
 
 class CartItemCreateRequest(BaseModel):
@@ -262,7 +350,11 @@ class SolarTimeInfo(BaseModel):
     total_correction_minutes: float | None = None
     location_source: str
     resolved_location_code: str | None = None
+    resolved_location_name: str | None = None
+    resolved_location_precision: str | None = None
     timezone: str = "Asia/Shanghai"
+    utc_offset_minutes: int | None = None
+    standard_meridian_longitude: float | None = None
     calibration_status: str = "legacy_unknown"
     calibration_source: str = "legacy_unknown"
     calibration_version: str = "legacy_unknown"
@@ -273,7 +365,10 @@ class SolarTimeInfo(BaseModel):
 class CrystalItem(BaseModel):
     code: str
     name: str
+    top: str = "bead"
+    kind: str = "bead"
     role: str
+    role_key: str = ""
     element: str
     secondary_elements: list[str] = Field(default_factory=list)
     color: str
@@ -282,6 +377,12 @@ class CrystalItem(BaseModel):
     quantity: int
     bead_size_mm: int
     image_url: str = ""
+    material_id: str = ""
+    material_code: str = ""
+    actual_material_size_mm: float | None = None
+    string_axis_width_mm: float | None = None
+    unit_price: float | None = None
+    stock: int | None = None
 
 
 class BraceletLayoutItem(BaseModel):
@@ -289,16 +390,38 @@ class BraceletLayoutItem(BaseModel):
     crystal_code: str
     crystal_name: str
     role: str
+    role_key: str = ""
+    top: str = "bead"
+    kind: str = "bead"
     color: str
+    material_id: str = ""
+    material_code: str = ""
+    bead_size_mm: int | None = None
+    actual_material_size_mm: float | None = None
+    string_axis_width_mm: float | None = None
+    material_params: dict = Field(default_factory=dict)
+    physical_specs: dict = Field(default_factory=dict)
+    placement_mode: str = ""
 
 
 class BraceletPlan(BaseModel):
+    plan_id: str = ""
+    style: str = ""
+    title: str = ""
+    subtitle: str = ""
     wrist_size_cm: float
     bead_size_mm: int
     estimated_bead_count: int
     pattern: str
     items: list[CrystalItem]
     layout: list[BraceletLayoutItem]
+    estimated_price: float = 0
+    material_variety: int = 0
+    has_accessories: bool = False
+    accessory_names: list[str] = Field(default_factory=list)
+    match_reasons: list[str] = Field(default_factory=list)
+    validation: dict = Field(default_factory=dict)
+    is_recommended: bool = False
 
 
 class AssessmentResult(BaseModel):
@@ -315,6 +438,7 @@ class AssessmentResult(BaseModel):
     primary_crystal: CrystalItem
     supporting_crystals: list[CrystalItem]
     bracelet_plan: BraceletPlan
+    bracelet_plans: list[BraceletPlan] = Field(default_factory=list)
     recommendation_copy: str
     care_tips: list[str]
     disclaimer: str

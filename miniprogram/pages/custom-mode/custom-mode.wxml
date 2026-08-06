@@ -2,7 +2,6 @@
   <view class="mode-nav">
     <view class="nav-back yu-pressable" bindtap="goBack">‹</view>
     <view class="nav-title">选择定制方式</view>
-    <view class="nav-capsule"><text>•••</text><text class="capsule-dot">◎</text></view>
   </view>
 
   <view class="mode-heading">

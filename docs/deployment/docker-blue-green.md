@@ -2,8 +2,11 @@
 
 ## 使用范围
 
-当前测试和正式环境统一使用 Docker 蓝绿发布。操作者只选择 `test` 或 `prod`，其余步骤、
-镜像格式、健康检查和回滚逻辑完全相同。
+当前测试和正式环境统一使用 Docker 蓝绿切流、健康检查和回滚。为了避免测试服务器
+跨境拉取 GHCR 镜像造成数分钟等待，两种环境采用不同的镜像交付方式：
+
+- 测试环境上传最小后端源码上下文，在服务器按内容哈希构建并复用本地镜像；
+- 正式环境继续构建、推送并部署不可变的 `repository@sha256:<digest>` 镜像。
 
 | 环境 | 公网入口 | 数据库约束 | 蓝/绿端口 |
 | --- | --- | --- | --- |
@@ -30,10 +33,14 @@
 代码推送到 `master` 后会自动运行 `deploy-docker-blue-green` 发布测试环境；正式环境仍由
 GitHub Actions 手动选择 `prod`。工作流会：
 
-1. 构建并推送唯一的 `repository@sha256:<digest>` 镜像。
-2. 上传最小部署控制包，不上传源码或环境配置。
-3. 使用临时 Docker 登录目录在服务器拉取镜像，任务结束立即删除登录文件。
-4. 执行 `python3 scripts/deploy.py <env>`，以候选服务 readiness 作为切流条件。
+1. 计算最小后端构建上下文的 SHA-256；小程序、素材原图和无关文档不进入服务镜像。
+2. 测试发布上传约数 MB 的构建上下文；服务器已有相同哈希镜像时直接复用，没有时使用
+   本地 BuildKit 缓存构建，不经过 GHCR。首次缺失依赖层时使用腾讯云 PyPI 镜像，
+   `requirements.lock` 的强制哈希校验保持不变。
+3. 正式发布构建并推送唯一的 `repository@sha256:<digest>` 镜像，服务器使用临时
+   Docker 登录目录拉取，任务结束立即删除登录文件。
+4. 上传最小部署控制包并执行 `python3 scripts/deploy.py <env>`，以候选服务 readiness
+   作为切流条件。
 
 完整 CI 继续异步运行并提供反馈，但不作为部署前置条件，方便测试环境快速迭代。
 
@@ -54,18 +61,22 @@ python3 scripts/deploy.py test
 
 ## 固定发布顺序
 
-1. 校验环境配置、不可变镜像摘要、release 格式、Docker 网络和证书目录。
+1. 校验环境配置、内容哈希/不可变镜像摘要、release 格式、Docker 网络和证书目录。
 2. 初始化环境级发布锁和当前 legacy 状态，不改变流量。
-3. 使用现有 MySQL 容器执行单库一致性备份并生成 SHA-256 和元数据。
+3. 用候选镜像只读检查待执行 migration；没有待执行项时跳过备份与 migration。
+   有待执行项时，先使用现有 MySQL 容器执行单库一致性备份并生成 SHA-256 和元数据。
 4. 从中央 env 生成不含部署专用凭据的 release env 快照。
-5. 使用候选镜像执行版本化、幂等的 MySQL migration。
-6. 在非活动 blue/green 槽位拉起候选，只绑定 `127.0.0.1`。
-7. 候选 `/health/ready` 必须返回本次 `release_version`。
-8. 原子改写该环境 Nginx upstream，执行 `nginx -t` 和 reload。
-9. 记录 current/previous，再验证公网 readiness 与 release。
-10. 公网验证失败时自动切回 previous；数据库默认不自动 downgrade。
+5. 以 Nginx 当前 upstream 为准校准发布状态，避免历史手工发布造成状态漂移。
+6. 只清理非活动候选槽位的同名历史容器；其他容器占用候选端口时停止发布并报错。
+7. 仅在存在待执行项时，使用候选镜像执行版本化、幂等的 MySQL migration。
+8. 在非活动 blue/green 槽位拉起候选，只绑定 `127.0.0.1`。
+9. 候选 `/health/ready` 必须返回本次 `release_version`。
+10. 原子改写该环境 Nginx upstream，执行 `nginx -t` 和 reload。
+11. 记录 current/previous，再验证公网 readiness 与 release。
+12. 公网验证失败时自动切回 previous；数据库默认不自动 downgrade。
 
-成功后上一版本继续运行，作为快速回滚目标。下一次发布复用非活动槽位，不在服务器现场构建镜像。
+成功后上一版本继续运行，作为快速回滚目标。测试环境保留当前/上一镜像及少量近期缓存，
+自动清理更旧的本地测试镜像。
 
 ## 回滚
 
@@ -88,6 +99,16 @@ python3 scripts/deploy.py prod rollback
 
 正式 Environment 应开启人工审批。工作流使用仓库 `GITHUB_TOKEN` 临时拉取同仓库 GHCR 镜像，
 不会把 Token 写入发布目录、命令参数或应用日志。
+
+正式镜像迁移到腾讯云 TCR 时，在 `prod` Environment 增加：
+
+- Variable `DEPLOY_IMAGE_REPOSITORY`：不带 tag/digest 的完整 TCR 仓库；
+- Variable `DEPLOY_REGISTRY_HOST`：TCR 登录域名；
+- Secret `DEPLOY_REGISTRY_USER`；
+- Secret `DEPLOY_REGISTRY_TOKEN`。
+
+未配置时自动使用 GHCR。部署器通过 `YUJIAN_IMAGE_REPOSITORY` 校验实际仓库，正式环境仍只接受
+摘要镜像。TCR 启用前应完成一次构建、推送、服务器拉取和回滚演练；测试环境不依赖这项配置。
 
 ## Kubernetes 预留
 

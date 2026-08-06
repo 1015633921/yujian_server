@@ -18,7 +18,17 @@ from app.migrations.versions import v20260713_08_after_sale_cases
 from app.migrations.versions import v20260714_09_after_sale_return_flow
 from app.migrations.versions import v20260714_10_material_physical_specs
 from app.migrations.versions import v20260715_11_material_types
+from app.migrations.versions import v20260723_12_ai_material_annotations
 from app.migrations.versions import v20260724_13_web_login_pairing
+from app.migrations.versions import v20260727_14_custom_design_service
+from app.migrations.versions import v20260727_15_report_codes
+from app.migrations.versions import v20260727_16_custom_design_workbench
+from app.migrations.versions import v20260806_17_custom_design_deposits
+from app.migrations.versions import v20260806_18_custom_design_queue_indexes
+from app.migrations.versions import v20260806_19_material_series_identity
+from app.migrations.versions import v20260806_20_material_asset_versions
+from app.migrations.versions import v20260806_21_material_sku_revisions
+from app.migrations.versions import v20260806_22_material_catalog_indexes
 
 MIGRATIONS = [
     v20260712_01_p0a_security,
@@ -32,7 +42,17 @@ MIGRATIONS = [
     v20260714_09_after_sale_return_flow,
     v20260714_10_material_physical_specs,
     v20260715_11_material_types,
+    v20260723_12_ai_material_annotations,
     v20260724_13_web_login_pairing,
+    v20260727_14_custom_design_service,
+    v20260727_15_report_codes,
+    v20260727_16_custom_design_workbench,
+    v20260806_17_custom_design_deposits,
+    v20260806_18_custom_design_queue_indexes,
+    v20260806_19_material_series_identity,
+    v20260806_20_material_asset_versions,
+    v20260806_21_material_sku_revisions,
+    v20260806_22_material_catalog_indexes,
 ]
 
 
@@ -101,6 +121,20 @@ def _record_history(connection, version: str, action: str, operator: str, releas
 
 def _applied_versions(connection) -> set[str]:
     return {row["version"] for row in connection.execute("SELECT version FROM schema_migrations").fetchall()}
+
+
+def pending(backend: str | None = None, sqlite_path: Path | None = None) -> list[str]:
+    target = (backend or os.getenv("DATABASE_BACKEND", "sqlite")).lower()
+    connection = _connect(target, sqlite_path)
+    try:
+        _ensure_version_table(connection, target)
+        existing = _applied_versions(connection)
+        return [migration.VERSION for migration in MIGRATIONS if migration.VERSION not in existing]
+    finally:
+        if target == "mysql":
+            connection.raw.close()
+        else:
+            connection.close()
 
 
 def upgrade(backend: str | None = None, sqlite_path: Path | None = None) -> list[str]:
@@ -182,16 +216,17 @@ def downgrade(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run explicit Yujian database migrations")
-    parser.add_argument("direction", choices=("upgrade", "downgrade"))
+    parser.add_argument("direction", choices=("pending", "upgrade", "downgrade"))
     parser.add_argument("--backend", choices=("sqlite", "mysql"), default=None)
     parser.add_argument("--sqlite-path", type=Path, default=None)
     parser.add_argument("--steps", type=int, default=None, help="downgrade only the latest N migrations")
     args = parser.parse_args()
-    versions = (
-        upgrade(args.backend, args.sqlite_path)
-        if args.direction == "upgrade"
-        else downgrade(args.backend, args.sqlite_path, args.steps)
-    )
+    if args.direction == "pending":
+        versions = pending(args.backend, args.sqlite_path)
+    elif args.direction == "upgrade":
+        versions = upgrade(args.backend, args.sqlite_path)
+    else:
+        versions = downgrade(args.backend, args.sqlite_path, args.steps)
     print(f"{args.direction}: {', '.join(versions) if versions else 'no changes'}")
 
 

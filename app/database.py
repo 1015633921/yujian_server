@@ -186,6 +186,7 @@ MYSQL_SCHEMA = [
       color VARCHAR(40) NOT NULL, shine VARCHAR(40) NOT NULL, image_path VARCHAR(1000),
       image_url VARCHAR(2000), image_urls_json LONGTEXT, physical_specs_json LONGTEXT,
       stock INT NOT NULL DEFAULT 0, enabled TINYINT NOT NULL DEFAULT 1, sort_order INT NOT NULL DEFAULT 0,
+      revision INT NOT NULL DEFAULT 1,
       created_at VARCHAR(40) NOT NULL, updated_at VARCHAR(40) NOT NULL
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     """,
@@ -319,6 +320,27 @@ MYSQL_SCHEMA = [
       material_params_json LONGTEXT NOT NULL, asset_json LONGTEXT NOT NULL,
       enabled TINYINT NOT NULL DEFAULT 1, created_at VARCHAR(40) NOT NULL, updated_at VARCHAR(40) NOT NULL,
       INDEX idx_material_knowledge_enabled (enabled, updated_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS ai_material_annotations (
+      annotation_id VARCHAR(80) PRIMARY KEY,
+      target_id VARCHAR(80) NOT NULL, material_code VARCHAR(160) NOT NULL,
+      top VARCHAR(40) NOT NULL DEFAULT '', category VARCHAR(100) NOT NULL DEFAULT '',
+      series VARCHAR(160) NOT NULL DEFAULT '', model_id VARCHAR(100) NOT NULL,
+      prompt_version VARCHAR(100) NOT NULL, schema_version VARCHAR(100) NOT NULL,
+      input_fingerprint CHAR(64) NOT NULL, image_urls_json LONGTEXT NOT NULL,
+      known_facts_json LONGTEXT NOT NULL, raw_response_json LONGTEXT NOT NULL,
+      parsed_response_json LONGTEXT NOT NULL, reviewer_final_json LONGTEXT NOT NULL,
+      status VARCHAR(30) NOT NULL, request_id VARCHAR(160) NOT NULL DEFAULT '',
+      usage_json LONGTEXT NOT NULL, error_code VARCHAR(80) NOT NULL DEFAULT '',
+      error_message VARCHAR(500) NOT NULL DEFAULT '', review_notes VARCHAR(1000) NOT NULL DEFAULT '',
+      reviewer_id VARCHAR(80) NOT NULL DEFAULT '', reviewer_name VARCHAR(120) NOT NULL DEFAULT '',
+      reviewed_at VARCHAR(40), source_updated_at VARCHAR(40) NOT NULL DEFAULT '',
+      created_at VARCHAR(40) NOT NULL, updated_at VARCHAR(40) NOT NULL,
+      INDEX idx_ai_material_status_created (status, created_at),
+      INDEX idx_ai_material_target_created (target_id, created_at),
+      INDEX idx_ai_material_fingerprint (input_fingerprint)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     """,
     """

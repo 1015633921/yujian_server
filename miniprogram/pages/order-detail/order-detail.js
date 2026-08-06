@@ -66,12 +66,18 @@ Page({
     logisticsDetail: null,
     loading: false,
     paymentConfirming: false,
+    paymentEntry: false,
     showAllMaterials: false,
     showLogisticsModal: false
   },
 
   onLoad(options = {}) {
-    this.setData({ id: decodeURIComponent(options.id || options.order_id || '') });
+    const paymentEntry = String(options.payment_entry || '') === '1';
+    this.setData({
+      id: decodeURIComponent(options.id || options.order_id || ''),
+      paymentEntry
+    });
+    if (paymentEntry) wx.setNavigationBarTitle({ title: '确认并支付' });
   },
 
   onShow() {
@@ -100,6 +106,10 @@ Page({
         order,
         logisticsDetail: order.logisticsCard
       });
+      if (this.data.paymentEntry && !this.paymentEntryHandled && order.canPay) {
+        this.paymentEntryHandled = true;
+        wx.nextTick(() => this.enterPaymentFlow(order, activeUserId));
+      }
       if (this.shouldAutoLoadLogistics(order)) {
         await this.loadLogistics(order.id, activeUserId, { silent: true });
       }
@@ -121,6 +131,15 @@ Page({
     } finally {
       this.setData({ loading: false });
     }
+  },
+
+  enterPaymentFlow(order, userId) {
+    const receiver = (order || {}).receiver || {};
+    if (!receiver.name || !receiver.phone || !receiver.address) {
+      this.editAddress({ autoContinue: true });
+      return;
+    }
+    this.continuePay(order.id, userId);
   },
 
   normalizeOrder(item = {}) {
@@ -728,6 +747,18 @@ Page({
   },
 
   async continuePay(orderId, userId) {
+    const receiver = (this.data.order || {}).receiver || {};
+    if (!receiver.name || !receiver.phone || !receiver.address) {
+      wx.showModal({
+        title: '请先填写收货信息',
+        content: '设计师方案订单已经生成，补齐地址后即可继续支付。',
+        confirmText: '填写地址',
+        success: result => {
+          if (result.confirm) this.editAddress();
+        }
+      });
+      return;
+    }
     if (this._paymentActionRunning) return;
     this._paymentActionRunning = true;
     this.setData({ paymentConfirming: false });
@@ -876,7 +907,7 @@ Page({
     });
   },
 
-  editAddress() {
+  editAddress(options = {}) {
     const order = this.data.order;
     const user = auth.getStoredUser();
     if (!order || !order.canEditAddress) {
@@ -909,6 +940,9 @@ Page({
           });
           wx.hideLoading();
           wx.showToast({ title: '地址已更新', icon: 'success' });
+          if (options.autoContinue && nextOrder.canPay) {
+            setTimeout(() => this.continuePay(nextOrder.id, user.user_id), 250);
+          }
         } catch (error) {
           wx.hideLoading();
           wx.showToast({ title: error.message || '地址更新失败', icon: 'none' });

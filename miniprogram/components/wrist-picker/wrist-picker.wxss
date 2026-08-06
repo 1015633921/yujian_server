@@ -1,0 +1,24 @@
+.wrist-picker-mask{position:fixed;inset:0;z-index:160;display:flex;align-items:flex-end;background:rgba(0,0,0,.38)}
+.wrist-picker{position:relative;z-index:1;box-sizing:border-box;width:100%;padding:30rpx 32rpx calc(34rpx + env(safe-area-inset-bottom));border-radius:34rpx 34rpx 0 0;background:#fff;box-shadow:0 -20rpx 60rpx rgba(0,0,0,.18)}
+.wrist-picker-head{display:flex;align-items:flex-start;justify-content:space-between}
+.wrist-picker-title{font-size:34rpx;font-weight:900;color:#191816}
+.wrist-picker-subtitle{margin-top:8rpx;color:rgba(26,26,26,.50);font-size:23rpx}
+.wrist-picker-close{display:flex;align-items:center;justify-content:center;width:54rpx;height:54rpx;border-radius:50%;color:rgba(28,28,28,.58);background:#f3f1ec;font-size:36rpx}
+.wrist-ruler-value{margin-top:32rpx;text-align:center}
+.wrist-ruler-number{color:#141414;font-size:72rpx;font-weight:900}
+.wrist-ruler-unit{margin-left:8rpx;font-size:28rpx;font-weight:800}
+.wrist-ruler-caption,.wrist-ruler-range{text-align:center;color:rgba(24,24,24,.42);font-size:22rpx}
+.wrist-ruler-caption{margin-top:6rpx}
+.wrist-ruler-wrap{position:relative;height:138rpx;margin:32rpx 0 12rpx;overflow:hidden}
+.wrist-ruler-pointer{position:absolute;left:50%;top:0;z-index:3;width:3rpx;height:104rpx;border-radius:999rpx;background:#c79b54;transform:translateX(-50%)}
+.wrist-ruler-scroll{height:100%}
+.wrist-ruler-track{display:flex;align-items:flex-start;box-sizing:border-box;height:100%;padding-top:26rpx}
+.wrist-ruler-tick{position:relative;flex:0 0 auto;height:88rpx}
+.tick-line{width:2rpx;height:28rpx;margin:0 auto;border-radius:999rpx;background:rgba(20,20,20,.18)}
+.wrist-ruler-tick.middle .tick-line{height:42rpx}
+.wrist-ruler-tick.major .tick-line{width:3rpx;height:56rpx;background:rgba(20,20,20,.44)}
+.tick-label{position:absolute;left:50%;top:66rpx;transform:translateX(-50%);color:rgba(20,20,20,.48);font-size:20rpx;font-weight:700}
+.wrist-ruler-fade{position:absolute;top:0;bottom:0;z-index:2;width:90rpx;pointer-events:none}
+.wrist-ruler-fade.left{left:0;background:linear-gradient(90deg,#fff 0%,rgba(255,255,255,0) 100%)}
+.wrist-ruler-fade.right{right:0;background:linear-gradient(270deg,#fff 0%,rgba(255,255,255,0) 100%)}
+.wrist-ruler-confirm{display:flex;align-items:center;justify-content:center;height:82rpx;margin:26rpx 0 0;border:0;border-radius:999rpx;color:#fff;background:#171917;box-shadow:0 14rpx 30rpx rgba(20,22,20,.16);font-size:25rpx;font-weight:800;line-height:1}

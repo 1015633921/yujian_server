@@ -2,7 +2,6 @@
   <view class="guide-nav">
     <view class="guide-back yu-pressable" bindtap="goBack">‹</view>
     <view class="guide-nav-title">测算说明</view>
-    <view class="guide-nav-mark">LAB</view>
   </view>
 
   <view class="guide-hero guide-reveal reveal-hero">

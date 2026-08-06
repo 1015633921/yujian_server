@@ -57,7 +57,17 @@ P1C_MYSQL_TEST_DATABASE=yujian_test \
 P1C_MYSQL_TEST_USER=<test-user> \
 P1C_MYSQL_TEST_PASSWORD=<test-password> \
 .venv_codex/bin/python -m pytest -q tests/test_p1c_mysql_runtime.py -m mysql_integration
+
+RUN_MATERIAL_MYSQL_INTEGRATION=1 \
+MATERIAL_MYSQL_TEST_HOST=127.0.0.1 \
+MATERIAL_MYSQL_TEST_PORT=3307 \
+MATERIAL_MYSQL_TEST_DATABASE=yujian_test \
+MATERIAL_MYSQL_TEST_USER=<test-user> \
+MATERIAL_MYSQL_TEST_PASSWORD=<test-password> \
+.venv_codex/bin/python -m pytest -q tests/test_material_mysql_concurrency.py -m mysql_integration
 ```
+
+这条珠材门禁会并发提交同一 SKU 的同一修订号，并验证仅一条成功；随后用过期修订号执行批量库存操作，验证整批拒绝且库存不变化。
 
 `ALLOW_SHARED_MYSQL_TEST_DATABASE` 和 `MYSQL_TEST_BACKUP_ID` 缺少任意一个时，测试必须拒绝使用 `yujian_test`。库名 `yujian` 永远不允许。
 

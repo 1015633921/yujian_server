@@ -34,12 +34,31 @@ def test_p0b_migration_is_additive_idempotent_and_independently_reversible(tmp_p
         "20260714_09_after_sale_return_flow",
         "20260714_10_material_physical_specs",
         "20260715_11_material_types",
+        "20260723_12_ai_material_annotations",
+        "20260724_13_web_login_pairing",
+        "20260727_14_custom_design_service",
+        "20260727_15_report_codes",
+        "20260727_16_custom_design_workbench",
+
+        "20260806_17_custom_design_deposits",
+        "20260806_18_custom_design_queue_indexes",
+        "20260806_19_material_series_identity",
+        "20260806_20_material_asset_versions",
     ]
     assert upgrade("sqlite", db_path) == []
     assert {"idempotency_key", "request_hash", "reservation_expires_at"}.issubset(columns(db_path, "orders"))
     assert "reserved_stock" in columns(db_path, "managed_materials")
     assert {"order_requests", "inventory_reservations", "user_sessions"}.issubset(tables(db_path))
 
+    assert downgrade("sqlite", db_path, steps=1) == ["20260806_20_material_asset_versions"]
+    assert downgrade("sqlite", db_path, steps=1) == ["20260806_19_material_series_identity"]
+    assert downgrade("sqlite", db_path, steps=1) == ["20260806_18_custom_design_queue_indexes"]
+    assert downgrade("sqlite", db_path, steps=1) == ["20260806_17_custom_design_deposits"]
+    assert downgrade("sqlite", db_path, steps=1) == ["20260727_16_custom_design_workbench"]
+    assert downgrade("sqlite", db_path, steps=1) == ["20260727_15_report_codes"]
+    assert downgrade("sqlite", db_path, steps=1) == ["20260727_14_custom_design_service"]
+    assert downgrade("sqlite", db_path, steps=1) == ["20260724_13_web_login_pairing"]
+    assert downgrade("sqlite", db_path, steps=1) == ["20260723_12_ai_material_annotations"]
     assert downgrade("sqlite", db_path, steps=1) == ["20260715_11_material_types"]
     assert downgrade("sqlite", db_path, steps=1) == ["20260714_10_material_physical_specs"]
     assert "physical_specs_json" not in columns(db_path, "managed_materials")
@@ -73,4 +92,13 @@ def test_p0b_migration_is_additive_idempotent_and_independently_reversible(tmp_p
         "20260714_09_after_sale_return_flow",
         "20260714_10_material_physical_specs",
         "20260715_11_material_types",
+        "20260723_12_ai_material_annotations",
+        "20260724_13_web_login_pairing",
+        "20260727_14_custom_design_service",
+        "20260727_15_report_codes",
+        "20260727_16_custom_design_workbench",
+        "20260806_17_custom_design_deposits",
+        "20260806_18_custom_design_queue_indexes",
+        "20260806_19_material_series_identity",
+        "20260806_20_material_asset_versions",
     ]

@@ -263,6 +263,15 @@ def test_material_physical_specs_migration_round_trip(tmp_path):
     upgrade("sqlite", db_path)
 
     assert "physical_specs_json" in table_columns(db_path, "managed_materials")
+    assert downgrade("sqlite", db_path, steps=1) == ["20260806_20_material_asset_versions"]
+    assert downgrade("sqlite", db_path, steps=1) == ["20260806_19_material_series_identity"]
+    assert downgrade("sqlite", db_path, steps=1) == ["20260806_18_custom_design_queue_indexes"]
+    assert downgrade("sqlite", db_path, steps=1) == ["20260806_17_custom_design_deposits"]
+    assert downgrade("sqlite", db_path, steps=1) == ["20260727_16_custom_design_workbench"]
+    assert downgrade("sqlite", db_path, steps=1) == ["20260727_15_report_codes"]
+    assert downgrade("sqlite", db_path, steps=1) == ["20260727_14_custom_design_service"]
+    assert downgrade("sqlite", db_path, steps=1) == ["20260724_13_web_login_pairing"]
+    assert downgrade("sqlite", db_path, steps=1) == ["20260723_12_ai_material_annotations"]
     assert downgrade("sqlite", db_path, steps=1) == ["20260715_11_material_types"]
     assert "physical_specs_json" in table_columns(db_path, "managed_materials")
     assert downgrade("sqlite", db_path, steps=1) == ["20260714_10_material_physical_specs"]
@@ -270,6 +279,15 @@ def test_material_physical_specs_migration_round_trip(tmp_path):
     assert upgrade("sqlite", db_path) == [
         "20260714_10_material_physical_specs",
         "20260715_11_material_types",
+        "20260723_12_ai_material_annotations",
+        "20260724_13_web_login_pairing",
+        "20260727_14_custom_design_service",
+        "20260727_15_report_codes",
+        "20260727_16_custom_design_workbench",
+        "20260806_17_custom_design_deposits",
+        "20260806_18_custom_design_queue_indexes",
+        "20260806_19_material_series_identity",
+        "20260806_20_material_asset_versions",
     ]
     assert "physical_specs_json" in table_columns(db_path, "managed_materials")
 

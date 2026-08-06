@@ -64,7 +64,16 @@ def test_price_cents_migration_backfills_only_exact_positive_legacy_prices(tmp_p
     AdminService(db_path)
     OrderService(db_path)
     upgrade("sqlite", db_path)
-    assert downgrade("sqlite", db_path, steps=6) == [
+    assert downgrade("sqlite", db_path, steps=15) == [
+        "20260806_20_material_asset_versions",
+        "20260806_19_material_series_identity",
+        "20260806_18_custom_design_queue_indexes",
+        "20260806_17_custom_design_deposits",
+        "20260727_16_custom_design_workbench",
+        "20260727_15_report_codes",
+        "20260727_14_custom_design_service",
+        "20260724_13_web_login_pairing",
+        "20260723_12_ai_material_annotations",
         "20260715_11_material_types",
         "20260714_10_material_physical_specs",
         "20260714_09_after_sale_return_flow",
@@ -87,6 +96,16 @@ def test_price_cents_migration_backfills_only_exact_positive_legacy_prices(tmp_p
         "20260714_09_after_sale_return_flow",
         "20260714_10_material_physical_specs",
         "20260715_11_material_types",
+        "20260723_12_ai_material_annotations",
+        "20260724_13_web_login_pairing",
+        "20260727_14_custom_design_service",
+        "20260727_15_report_codes",
+        "20260727_16_custom_design_workbench",
+
+        "20260806_17_custom_design_deposits",
+        "20260806_18_custom_design_queue_indexes",
+        "20260806_19_material_series_identity",
+        "20260806_20_material_asset_versions",
     ]
     assert upgrade("sqlite", db_path) == []
     with sqlite3.connect(db_path) as connection:
@@ -100,7 +119,16 @@ def test_price_cents_migration_backfills_only_exact_positive_legacy_prices(tmp_p
     assert values[ids[1]] is None
     assert values[ids[2]] is None
 
-    assert downgrade("sqlite", db_path, steps=6) == [
+    assert downgrade("sqlite", db_path, steps=15) == [
+        "20260806_20_material_asset_versions",
+        "20260806_19_material_series_identity",
+        "20260806_18_custom_design_queue_indexes",
+        "20260806_17_custom_design_deposits",
+        "20260727_16_custom_design_workbench",
+        "20260727_15_report_codes",
+        "20260727_14_custom_design_service",
+        "20260724_13_web_login_pairing",
+        "20260723_12_ai_material_annotations",
         "20260715_11_material_types",
         "20260714_10_material_physical_specs",
         "20260714_09_after_sale_return_flow",

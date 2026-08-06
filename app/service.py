@@ -22,7 +22,7 @@ from .observability import log_event, safe_exception_frames
 from .schemas import AssessmentRequest, DIYRecommendationRequest
 
 CHINA_TZ = ZoneInfo("Asia/Shanghai")
-DIY_RECOMMENDATION_CACHE_VERSION = "2026-07-12-mbti-v2"
+DIY_RECOMMENDATION_CACHE_VERSION = "2026-08-06-bracelet-fit-v3"
 LOGGER = logging.getLogger(__name__)
 
 ELEMENT_ZEN_WORDS = {
@@ -126,6 +126,7 @@ class AssessmentService:
             "primary_crystal": recommendation["primary"],
             "supporting_crystals": recommendation["supporting"],
             "bracelet_plan": recommendation["bracelet_plan"],
+            "bracelet_plans": recommendation["bracelet_plans"],
             "recommendation_copy": recommendation["copy"],
             "care_tips": [
                 "首次佩戴前用柔软干布轻拭，保持珠体洁净。",
@@ -234,28 +235,30 @@ class AssessmentService:
         assessment_id: str,
         payload: DIYRecommendationRequest,
     ) -> dict | None:
-        cached = self.repository.get_cached_recommendation(
-            assessment_id,
-            payload.wrist_size_cm,
-            payload.bead_size_mm,
-            DIY_RECOMMENDATION_CACHE_VERSION,
-        )
-        if cached:
-            self.repository.update(cached)
-            return {**self.with_energy_extras(cached), "recommendation_cache_hit": True}
+        if not payload.has_refinement:
+            cached = self.repository.get_cached_recommendation(
+                assessment_id,
+                payload.wrist_size_cm,
+                payload.bead_size_mm,
+                DIY_RECOMMENDATION_CACHE_VERSION,
+            )
+            if cached:
+                self.repository.update(cached)
+                return {**self.with_energy_extras(cached), "recommendation_cache_hit": True}
 
         result = self._build_diy_recommendation(assessment_id, payload)
         if not result:
             return None
         timestamp = datetime.now(CHINA_TZ).isoformat()
-        self.repository.save_cached_recommendation(
-            assessment_id,
-            payload.wrist_size_cm,
-            payload.bead_size_mm,
-            DIY_RECOMMENDATION_CACHE_VERSION,
-            result,
-            timestamp,
-        )
+        if not payload.has_refinement:
+            self.repository.save_cached_recommendation(
+                assessment_id,
+                payload.wrist_size_cm,
+                payload.bead_size_mm,
+                DIY_RECOMMENDATION_CACHE_VERSION,
+                result,
+                timestamp,
+            )
         self.repository.update(result)
         return {**self.with_energy_extras(result), "recommendation_cache_hit": False}
 
@@ -268,16 +271,17 @@ class AssessmentService:
         snapshot = self.report_repository.owned(report_id, user_id, payload.expected_report_version)
         if not snapshot:
             return None
-        cached = self.repository.get_cached_recommendation(
-            snapshot["assessment_id"],
-            payload.wrist_size_cm,
-            payload.bead_size_mm,
-            DIY_RECOMMENDATION_CACHE_VERSION,
-            report_id=report_id,
-            report_version=int(snapshot["report_version"]),
-        )
-        if cached:
-            return {**cached, "recommendation_cache_hit": True}
+        if not payload.has_refinement:
+            cached = self.repository.get_cached_recommendation(
+                snapshot["assessment_id"],
+                payload.wrist_size_cm,
+                payload.bead_size_mm,
+                DIY_RECOMMENDATION_CACHE_VERSION,
+                report_id=report_id,
+                report_version=int(snapshot["report_version"]),
+            )
+            if cached:
+                return {**cached, "recommendation_cache_hit": True}
 
         input_snapshot = snapshot["input_snapshot"]
         output_snapshot = snapshot["output_snapshot"]
@@ -301,7 +305,7 @@ class AssessmentService:
             "strongest": output_snapshot["strongest_element"],
             "weakest": output_snapshot["weakest_element"],
         }
-        recommendation = self.recommendation_engine.recommend(request, energy)
+        recommendation = self.recommendation_engine.recommend(request, energy, payload.refinement)
         workbench_payload = {
             "source": "report_snapshot",
             "assessment_id": snapshot["assessment_id"],
@@ -315,6 +319,7 @@ class AssessmentService:
             "primary_crystal": recommendation["primary"],
             "supporting_crystals": recommendation["supporting"],
             "bracelet_plan": recommendation["bracelet_plan"],
+            "bracelet_plans": recommendation["bracelet_plans"],
             "recommendation_copy": recommendation["copy"],
             "editable": True,
             "save_api": "/api/diy-plans/save/",
@@ -328,20 +333,22 @@ class AssessmentService:
             "primary_crystal": recommendation["primary"],
             "supporting_crystals": recommendation["supporting"],
             "bracelet_plan": recommendation["bracelet_plan"],
+            "bracelet_plans": recommendation["bracelet_plans"],
             "recommendation_copy": recommendation["copy"],
             "workbench_payload": workbench_payload,
         }
         timestamp = datetime.now(CHINA_TZ).isoformat()
-        self.repository.save_cached_recommendation(
-            snapshot["assessment_id"],
-            payload.wrist_size_cm,
-            payload.bead_size_mm,
-            DIY_RECOMMENDATION_CACHE_VERSION,
-            result,
-            timestamp,
-            report_id=report_id,
-            report_version=int(snapshot["report_version"]),
-        )
+        if not payload.has_refinement:
+            self.repository.save_cached_recommendation(
+                snapshot["assessment_id"],
+                payload.wrist_size_cm,
+                payload.bead_size_mm,
+                DIY_RECOMMENDATION_CACHE_VERSION,
+                result,
+                timestamp,
+                report_id=report_id,
+                report_version=int(snapshot["report_version"]),
+            )
         return {**result, "recommendation_cache_hit": False}
 
     def pre_generate_diy_recommendation(
@@ -431,7 +438,7 @@ class AssessmentService:
             "strongest": assessment["strongest_element"],
             "weakest": assessment["weakest_element"],
         }
-        recommendation = self.recommendation_engine.recommend(request, energy)
+        recommendation = self.recommendation_engine.recommend(request, energy, payload.refinement)
         workbench_payload = {
             "source": "energy_assessment",
             "assessment_id": assessment_id,
@@ -443,6 +450,7 @@ class AssessmentService:
             "primary_crystal": recommendation["primary"],
             "supporting_crystals": recommendation["supporting"],
             "bracelet_plan": recommendation["bracelet_plan"],
+            "bracelet_plans": recommendation["bracelet_plans"],
             "recommendation_copy": recommendation["copy"],
             "editable": True,
             "save_api": "/api/diy-plans/save/",
@@ -453,6 +461,7 @@ class AssessmentService:
                 "primary_crystal": recommendation["primary"],
                 "supporting_crystals": recommendation["supporting"],
                 "bracelet_plan": recommendation["bracelet_plan"],
+                "bracelet_plans": recommendation["bracelet_plans"],
                 "recommendation_copy": recommendation["copy"],
                 "workbench_payload": workbench_payload,
                 "next_step": {
@@ -473,7 +482,17 @@ class AssessmentService:
     def natal_fingerprint(request: AssessmentRequest) -> str:
         payload = request.model_dump(
             mode="json",
-            include={"name", "birthday", "birth_time", "birth_place", "lng", "lat"},
+            include={
+                "name",
+                "birthday",
+                "birth_time",
+                "birth_time_unknown",
+                "birth_place",
+                "birth_place_path",
+                "location_code",
+                "lng",
+                "lat",
+            },
         )
         raw = f"natal:{json.dumps(payload, ensure_ascii=False, sort_keys=True)}".encode("utf-8")
         return hashlib.sha256(raw).hexdigest()
@@ -506,6 +525,7 @@ class AssessmentService:
             "birth_time": request.birth_time.strftime("%H:%M"),
             "birth_time_unknown": request.birth_time_unknown,
             "birth_place": request.birth_place,
+            "birth_place_path": request.birth_place_path,
             "location_code": request.location_code,
             "lng": request.lng,
             "lat": request.lat,

@@ -6,6 +6,8 @@ import pytest
 
 from app.admin_service import AdminService
 from app.migrations.versions import v20260715_11_material_types
+from app.migrations.versions import v20260806_19_material_series_identity
+from app.migrations.versions import v20260806_20_material_asset_versions
 
 
 def test_material_directory_is_managed_separately_from_skus(tmp_path):
@@ -25,6 +27,88 @@ def test_material_directory_is_managed_separately_from_skus(tmp_path):
     taxonomy = service.list_material_taxonomy(top="thread", include_disabled=True)
     assert taxonomy[0]["name"] == "弹力线"
     assert taxonomy[0]["series"][0]["id"] == variety["id"]
+
+
+def test_only_empty_material_categories_can_be_deleted_in_a_batch(tmp_path):
+    service = AdminService(tmp_path / "empty-category-delete.db")
+    empty = service.save_material_category({"top": "bead", "name": "待删除空分类"})
+    in_use = service.save_material_category({"top": "bead", "name": "仍在使用分类"})
+    service.save_material_series({"category_id": in_use["id"], "name": "仍在使用品种"})
+
+    with pytest.raises(ValueError, match="仍在使用分类（含1 个品种）"):
+        service.delete_empty_material_categories([empty["id"], in_use["id"]])
+
+    taxonomy_ids = {item["id"] for item in service.list_material_taxonomy(top="bead", include_disabled=True)}
+    assert empty["id"] in taxonomy_ids
+    assert in_use["id"] in taxonomy_ids
+
+    deleted = service.delete_empty_material_categories([empty["id"]])
+
+    assert deleted["count"] == 1
+    taxonomy_ids = {item["id"] for item in service.list_material_taxonomy(top="bead", include_disabled=True)}
+    assert empty["id"] not in taxonomy_ids
+
+
+def test_empty_material_types_and_series_can_be_deleted(tmp_path):
+    service = AdminService(tmp_path / "empty-directory-delete.db")
+    empty_type = service.save_material_type({"code": "empty_type", "name": "空类型"})
+    used_type = service.save_material_type({"code": "used_type", "name": "使用中类型"})
+    category = service.save_material_category({"top": used_type["code"], "name": "使用中分类"})
+    empty_series = service.save_material_series({"category_id": category["id"], "name": "空品种"})
+
+    with pytest.raises(ValueError, match="使用中类型（含2 个目录项）"):
+        service.delete_empty_material_types([empty_type["code"], used_type["code"]])
+    assert service.delete_empty_material_series([empty_series["id"]])["count"] == 1
+    assert service.delete_empty_material_types([empty_type["code"]])["count"] == 1
+
+
+def test_deleted_empty_default_material_type_is_not_seeded_again(tmp_path):
+    service = AdminService(tmp_path / "deleted-default-material-type.db")
+
+    assert "incense" in {item["code"] for item in service.list_material_types(include_disabled=True)}
+    assert service.delete_empty_material_types(["incense"])["count"] == 1
+    assert "incense" not in {item["code"] for item in service.list_material_types(include_disabled=True)}
+
+    service.save_material_type({"code": "incense", "name": "合香珠", "enabled": True})
+    assert "incense" in {item["code"] for item in service.list_material_types(include_disabled=True)}
+
+
+def test_only_disabled_skus_can_be_deleted(tmp_path):
+    service = AdminService(tmp_path / "disabled-sku-delete.db")
+    category = service.save_material_category({"top": "bead", "name": "删除 SKU 分类"})
+    service.save_material_series({"category_id": category["id"], "name": "删除 SKU 品种"})
+    active = service.save_material(
+        {
+            "id": "active-delete-guard",
+            "top": "bead",
+            "category": "删除 SKU 分类",
+            "series": "删除 SKU 品种",
+            "name": "启用 SKU",
+            "price": 10,
+            "size": 8,
+            "weight": 1,
+            "stock": 1,
+            "enabled": True,
+        }
+    )
+    disabled = service.save_material(
+        {
+            "id": "disabled-delete-allowed",
+            "top": "bead",
+            "category": "删除 SKU 分类",
+            "series": "删除 SKU 品种",
+            "name": "停用 SKU",
+            "price": 10,
+            "size": 10,
+            "weight": 1,
+            "stock": 1,
+            "enabled": False,
+        }
+    )
+
+    service.delete_material(disabled["sku"]["id"])
+    with pytest.raises(ValueError, match="材料不存在"):
+        service.get_material(disabled["sku"]["id"])
 
 
 def test_disabled_material_type_fails_closed_for_category_and_sku_creation(tmp_path):
@@ -60,6 +144,118 @@ def test_disabled_material_type_fails_closed_for_category_and_sku_creation(tmp_p
         )
 
 
+def test_disabling_parent_recursively_disables_descendant_taxonomy_and_skus(tmp_path):
+    service = AdminService(tmp_path / "recursive-disable.db")
+    type_entry = service.save_material_type({"code": "findings", "name": "配件测试类型"})
+    category = service.save_material_category({"top": type_entry["code"], "name": "隔珠"})
+    series = service.save_material_series({"category_id": category["id"], "name": "银色隔珠"})
+    saved = service.save_material(
+        {
+            "id": "recursive-disable-sku",
+            "top": type_entry["code"],
+            "category": "隔珠",
+            "series": "银色隔珠",
+            "name": "银色隔珠 8mm",
+            "price": 10,
+            "size": 8,
+            "weight": 1,
+            "stock": 5,
+            "enabled": True,
+        }
+    )
+
+    category_result = service.disable_material_taxonomy_item(category["id"])
+    assert category_result["disabled_sku_count"] == 1
+    taxonomy = service.list_material_taxonomy(top="findings", include_disabled=True)
+    assert taxonomy[0]["enabled"] is False
+    assert taxonomy[0]["series"][0]["enabled"] is False
+    assert service.get_material(saved["sku"]["id"])["sku"]["enabled"] is False
+
+    # Saving a disabled top-level type must apply the same cascade even if a
+    # legacy child was re-enabled directly in the database.
+    with service.connect() as connection:
+        connection.execute("UPDATE managed_materials SET enabled=1 WHERE id=?", (saved["sku"]["id"],))
+        connection.execute("UPDATE material_taxonomy SET enabled=1 WHERE item_id=?", (series["id"],))
+    result = service.save_material_type({"code": "findings", "name": "配件测试类型", "enabled": False})
+    assert result["disabled_sku_count"] == 1
+    assert service.get_material(saved["sku"]["id"])["sku"]["enabled"] is False
+
+
+def test_repair_material_hierarchy_enabled_state_disables_legacy_children(tmp_path):
+    service = AdminService(tmp_path / "hierarchy-repair.db")
+    category = service.save_material_category({"top": "bead", "name": "脏数据分类"})
+    series = service.save_material_series({"category_id": category["id"], "name": "脏数据品种"})
+    saved = service.save_material(
+        {
+            "id": "hierarchy-repair-sku",
+            "top": "bead",
+            "category": "脏数据分类",
+            "series": "脏数据品种",
+            "name": "脏数据珠 8mm",
+            "price": 10,
+            "size": 8,
+            "weight": 1,
+            "stock": 5,
+            "enabled": True,
+        }
+    )
+    with service.connect() as connection:
+        connection.execute("UPDATE material_taxonomy SET enabled=0 WHERE item_id=?", (category["id"],))
+    repaired = service.repair_material_hierarchy_enabled_state()
+    assert repaired["disabled_taxonomy_count"] >= 1
+    assert repaired["disabled_sku_count"] == 1
+    assert service.get_material(saved["sku"]["id"])["sku"]["enabled"] is False
+
+
+def test_saving_renamed_parent_as_disabled_disables_existing_sku(tmp_path):
+    service = AdminService(tmp_path / "rename-disable.db")
+    category = service.save_material_category({"top": "bead", "name": "旧分类"})
+    series = service.save_material_series({"category_id": category["id"], "name": "旧品种"})
+    saved = service.save_material(
+        {
+            "id": "rename-disable-sku",
+            "top": "bead",
+            "category": "旧分类",
+            "series": "旧品种",
+            "name": "旧品种 8mm",
+            "price": 10,
+            "size": 8,
+            "weight": 1,
+            "stock": 5,
+            "enabled": True,
+        }
+    )
+    category_result = service.save_material_category(
+        {"id": category["id"], "top": "bead", "name": "新分类", "enabled": False}
+    )
+    assert category_result["disabled_sku_count"] == 1
+    assert service.get_material(saved["sku"]["id"])["sku"]["enabled"] is False
+
+    # This covers the series-edit path as well: SKU taxonomy is renamed first,
+    # then the disabled parent state is cascaded.
+    category = service.save_material_category({"top": "accessory", "name": "配饰分类"})
+    series = service.save_material_series({"category_id": category["id"], "name": "旧款式"})
+    saved = service.save_material(
+        {
+            "id": "rename-disable-series-sku",
+            "top": "accessory",
+            "category": "配饰分类",
+            "series": "旧款式",
+            "name": "旧款式",
+            "price": 10,
+            "size": 8,
+            "weight": 1,
+            "stock": 5,
+            "enabled": True,
+        }
+    )
+    series_result = service.save_material_series(
+        {"id": series["id"], "category_id": category["id"], "name": "新款式", "enabled": False}
+    )
+    assert series_result["disabled_sku_count"] == 1
+    assert service.get_material(saved["sku"]["id"])["sku"]["enabled"] is False
+
+
 def test_basic_variety_edit_preserves_optional_profile(tmp_path):
     service = AdminService(tmp_path / "variety-profile.db")
     category = service.save_material_category({"top": "accessory", "name": "幽灵随形"})
@@ -92,6 +288,187 @@ def test_basic_variety_edit_preserves_optional_profile(tmp_path):
     assert saved["material_params"]["bead_shape"] == "nugget"
 
 
+def test_series_move_and_rename_does_not_duplicate_during_sku_sync(tmp_path):
+    service = AdminService(tmp_path / "series-move-rename.db")
+    old_category = service.save_material_category({"top": "accessory", "name": "隔珠"})
+    series = service.save_material_series(
+        {
+            "category_id": old_category["id"],
+            "name": "繁花圆片隔珠",
+            "material_code": "accessory_metal_test_03",
+            "image_url": "https://cdn-test.yustream.cn/materials/accessories/flower.webp",
+            "image_urls": ["https://cdn-test.yustream.cn/materials/accessories/flower-gallery.webp"],
+        }
+    )
+    service.save_material(
+        {
+            "id": "flower-spacer-default",
+            "skuId": "flower-spacer-default",
+            "top": "accessory",
+            "category": "隔珠",
+            "series": "繁花圆片隔珠",
+            "material_code": "accessory_metal_test_03",
+            "name": "繁花圆片隔珠",
+            "price_per_bead": 10,
+            "size_mm": 8,
+            "weight_g": 1,
+            "stock": 10,
+        }
+    )
+    new_category = service.save_material_category({"top": "accessory", "name": "隔片"})
+
+    service.save_material_series(
+        {
+            "id": series["id"],
+            "category_id": new_category["id"],
+            "name": "繁花圆片隔片",
+            "sort_order": 20,
+            "enabled": True,
+        }
+    )
+    payload = service.material_options_payload()
+
+    matches = [
+        item
+        for category in payload["taxonomy"]
+        for item in category.get("series", [])
+        if item["name"] == "繁花圆片隔片"
+    ]
+    assert len(matches) == 1
+    assert matches[0]["id"] == series["id"]
+    assert matches[0]["material_code"] == "accessory_metal_test_03"
+    assert matches[0]["image_url"] == "https://cdn-test.yustream.cn/materials/accessories/flower.webp"
+    with service.connect() as connection:
+        duplicate_count = connection.execute(
+            """
+            SELECT COUNT(*) AS total
+            FROM material_taxonomy
+            WHERE kind='series' AND parent_id=? AND name=?
+            """,
+            (new_category["id"], "繁花圆片隔片"),
+        ).fetchone()["total"]
+        sku = connection.execute(
+            "SELECT category, series FROM managed_materials WHERE id=?",
+            ("flower-spacer-default",),
+        ).fetchone()
+    assert duplicate_count == 1
+    assert sku["category"] == "隔片"
+    assert sku["series"] == "繁花圆片隔片"
+
+
+def test_stable_series_id_keeps_sku_links_when_variety_is_renamed(tmp_path):
+    service = AdminService(tmp_path / "stable-series-id.db")
+    source = service.save_material_category({"top": "bead", "name": "旧分类"})
+    target = service.save_material_category({"top": "bead", "name": "新分类"})
+    series = service.save_material_series({"category_id": source["id"], "name": "旧品种"})
+    service.save_material(
+        {
+            "id": "stable-series-id-8",
+            "top": "bead",
+            "category": "旧分类",
+            "series": "旧品种",
+            "name": "旧品种 8mm",
+            "price": 10,
+            "size": 8,
+            "weight": 1,
+            "stock": 1,
+            "enabled": True,
+        }
+    )
+
+    updated = service.update_material_series(
+        series["id"],
+        {"category_id": target["id"], "name": "新品种"},
+    )
+
+    assert updated["id"] == series["id"]
+    with service.connect() as connection:
+        sku = connection.execute(
+            "SELECT category, series, series_id FROM managed_materials WHERE id=?",
+            ("stable-series-id-8",),
+        ).fetchone()
+        taxonomy_rows = connection.execute(
+            "SELECT item_id FROM material_taxonomy WHERE kind='series' AND item_id=?",
+            (series["id"],),
+        ).fetchall()
+    assert sku["category"] == "新分类"
+    assert sku["series"] == "新品种"
+    assert sku["series_id"] == series["id"]
+    assert len(taxonomy_rows) == 1
+    group = service.list_material_spus(keyword="新品种")[0]
+    assert group["id"] == series["id"]
+    assert group["series_id"] == series["id"]
+
+
+def test_sku_patch_cannot_change_its_series_identity(tmp_path):
+    service = AdminService(tmp_path / "sku-patch-identity.db")
+    category = service.save_material_category({"top": "bead", "name": "水晶"})
+    series = service.save_material_series({"category_id": category["id"], "name": "月光石"})
+    service.save_material(
+        {
+            "id": "moonstone-8",
+            "top": "bead",
+            "category": "水晶",
+            "series": "月光石",
+            "name": "月光石 8mm",
+            "primary_element": "water",
+            "effects": ["focus"],
+            "price": 20,
+            "size": 8,
+            "weight": 1,
+            "stock": 2,
+            "enabled": True,
+        }
+    )
+
+    patched = service.patch_material_sku("moonstone-8", {"price": 28, "stock": 5, "enabled": True})
+
+    assert patched["sku"]["price_per_bead"] == 28
+    with service.connect() as connection:
+        row = connection.execute(
+            "SELECT category, series, series_id, stock FROM managed_materials WHERE id=?",
+            ("moonstone-8",),
+        ).fetchone()
+    assert dict(row) == {"category": "水晶", "series": "月光石", "series_id": series["id"], "stock": 5}
+
+
+def test_series_identity_migration_backfills_legacy_skus_and_rolls_back_index(tmp_path):
+    service = AdminService(tmp_path / "series-identity-migration.db")
+    category = service.save_material_category({"top": "bead", "name": "迁移分类"})
+    series = service.save_material_series({"category_id": category["id"], "name": "迁移品种"})
+    service.save_material(
+        {
+            "id": "legacy-series-link-8",
+            "top": "bead",
+            "category": "迁移分类",
+            "series": "迁移品种",
+            "name": "迁移品种 8mm",
+            "price": 10,
+            "size": 8,
+            "weight": 1,
+            "stock": 1,
+            "enabled": True,
+        }
+    )
+    with service.connect() as connection:
+        connection.execute("UPDATE managed_materials SET series_id='' WHERE id='legacy-series-link-8'")
+        connection.execute("DROP INDEX IF EXISTS idx_managed_materials_series_id")
+        v20260806_19_material_series_identity.upgrade(connection, "sqlite")
+        linked = connection.execute(
+            "SELECT series_id FROM managed_materials WHERE id='legacy-series-link-8'"
+        ).fetchone()["series_id"]
+        indexes = {row[1] for row in connection.execute("PRAGMA index_list(managed_materials)").fetchall()}
+        assert linked == series["id"]
+        assert "idx_managed_materials_series_id" in indexes
+        v20260806_19_material_series_identity.downgrade(connection, "sqlite")
+        retained = connection.execute(
+            "SELECT series_id FROM managed_materials WHERE id='legacy-series-link-8'"
+        ).fetchone()["series_id"]
+        indexes = {row[1] for row in connection.execute("PRAGMA index_list(managed_materials)").fetchall()}
+    assert retained == series["id"]
+    assert "idx_managed_materials_series_id" not in indexes
+
+
 def test_material_type_code_is_immutable(tmp_path):
     service = AdminService(tmp_path / "immutable-material-type.db")
     with pytest.raises(ValueError, match="编码创建后不可修改"):
@@ -118,4 +495,38 @@ def test_material_type_migration_seeds_defaults_and_existing_top(tmp_path):
     assert not connection.execute(
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name='material_types'"
     ).fetchone()
+    connection.close()
+
+
+def test_asset_version_migration_creates_an_idempotent_v1_snapshot(tmp_path):
+    connection = sqlite3.connect(tmp_path / "asset-version-migration.db")
+    connection.row_factory = sqlite3.Row
+    connection.execute(
+        """
+        CREATE TABLE material_taxonomy (
+            item_id TEXT PRIMARY KEY, kind TEXT NOT NULL, asset_version INTEGER NOT NULL DEFAULT 1,
+            image_url TEXT, image_urls_json TEXT, updated_at TEXT NOT NULL
+        )
+        """
+    )
+    connection.execute(
+        """
+        INSERT INTO material_taxonomy(item_id, kind, asset_version, image_url, image_urls_json, updated_at)
+        VALUES ('series-legacy', 'series', 1, 'https://cdn.example.com/cover.webp', '[\"https://cdn.example.com/side.webp\"]', '2026-08-06T00:00:00+00:00')
+        """
+    )
+
+    v20260806_20_material_asset_versions.upgrade(connection, "sqlite")
+    v20260806_20_material_asset_versions.upgrade(connection, "sqlite")
+
+    rows = connection.execute(
+        "SELECT series_id, asset_version, image_url, image_urls_json, source FROM material_asset_versions"
+    ).fetchall()
+    assert [dict(row) for row in rows] == [{
+        "series_id": "series-legacy",
+        "asset_version": 1,
+        "image_url": "https://cdn.example.com/cover.webp",
+        "image_urls_json": '["https://cdn.example.com/side.webp"]',
+        "source": "migration_snapshot",
+    }]
     connection.close()

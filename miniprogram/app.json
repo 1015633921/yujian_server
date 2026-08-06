@@ -19,11 +19,20 @@
     "pages/assessment-guide/assessment-guide",
     "pages/report/report",
     "pages/report-basis/report-basis",
+    "pages/design-service/design-service",
     "pages/checkout/checkout",
     "pages/order-success/order-success",
     "pages/order-list/order-list",
     "pages/order-detail/order-detail",
     "pages/after-sale-apply/after-sale-apply"
+  ],
+  "subPackages": [
+    {
+      "root": "subpackages/design",
+      "pages": [
+        "pages/design-service-list/design-service-list"
+      ]
+    }
   ],
   "window": {
     "navigationBarTextStyle": "black",

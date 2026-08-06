@@ -45,18 +45,8 @@ test('workspace gives the material drawer more room without collapsing the tray'
   assert.ok(tallStyle['--workspace-drawer-height'] > shortStyle['--workspace-drawer-height']);
   assert.ok(shortLayout.stageLayout.size >= 580);
   assert.ok(tallLayout.stageLayout.size >= 670);
-  const shortOverlap =
-    shortStyle['--workspace-top-chrome']
-      + shortStyle['--workspace-canvas-height']
-      + shortStyle['--workspace-drawer-height']
-      - shortViewport;
-  const tallOverlap =
-    tallStyle['--workspace-top-chrome']
-      + tallStyle['--workspace-canvas-height']
-      + tallStyle['--workspace-drawer-height']
-      - tallViewport;
-  assert.equal(shortOverlap, 0);
-  assert.equal(tallOverlap, 0);
+  assert.equal(shortStyle['--workspace-canvas-height'], undefined);
+  assert.equal(tallStyle['--workspace-canvas-height'], undefined);
 });
 
 test('profile exposes manual phone input and keeps WeChat phone shortcut visible', () => {
@@ -152,6 +142,133 @@ test('backend recommendation replaces stale placement prices with current sellab
   assert.equal(summary.priceText, '160.00');
 });
 
+test('backend recommendation waits for a missing metal accessory instead of replacing it with a bead', () => {
+  const page = loadPage('miniprogram/pages/workspace/workspace.js');
+  const bead = {
+    id: 'bead-8',
+    skuId: 'bead-sku-8',
+    material_code: 'clear_quartz',
+    top: 'bead',
+    category: '白水晶',
+    series: '白水晶',
+    name: '白水晶',
+    size: 8,
+    price: 10,
+    stock: 99,
+    enabled: true,
+    image_url: 'https://cdn.example.com/bead.webp'
+  };
+  const payload = {
+    bracelet_plan: {
+      validation: { is_valid: true },
+      items: [
+        { code: 'clear_quartz', material_id: 'bead-8' },
+        { code: 'silver_spacer', material_id: 'metal-spacer-8', top: 'accessory' }
+      ],
+      layout: [
+        { crystal_code: 'clear_quartz', material_id: 'bead-8', top: 'bead' },
+        {
+          crystal_code: 'silver_spacer',
+          material_id: 'metal-spacer-8',
+          material_code: 'silver_spacer',
+          top: 'accessory'
+        }
+      ]
+    }
+  };
+  const instance = Object.assign({}, page, {
+    data: { ...page.data, selected: [], placements: [] },
+    materialCatalog: [bead],
+    materialPayloadReady: true,
+    pendingBackendRecommendation: true
+  });
+  instance.rebuildMaterialLookup(instance.materialCatalog);
+  global.wx = {
+    getStorageSync(key) {
+      return key === 'diyWorkbenchPayload' ? payload : '';
+    },
+    showToast() {}
+  };
+
+  const selected = instance.buildBackendRecommendationSelected(payload);
+  const applied = instance.applyBackendRecommendation({ silent: true, keepPendingOnEmpty: true });
+
+  assert.deepEqual(selected, ['bead-8']);
+  assert.equal(applied, false);
+  assert.equal(instance.pendingBackendRecommendation, true);
+  assert.deepEqual(instance.pendingMaterialIds().sort(), ['bead-8', 'metal-spacer-8'].sort());
+});
+
+test('backend recommendation fetches its missing metal accessory before applying the complete layout', async () => {
+  const page = loadPage('miniprogram/pages/workspace/workspace.js');
+  const bead = {
+    id: 'bead-8',
+    skuId: 'bead-sku-8',
+    material_code: 'clear_quartz',
+    top: 'bead',
+    size: 8,
+    price: 10,
+    stock: 99,
+    enabled: true,
+    image_url: 'https://cdn.example.com/bead.webp'
+  };
+  const metal = {
+    id: 'metal-spacer-8',
+    skuId: 'metal-sku-8',
+    material_code: 'silver_spacer',
+    top: 'accessory',
+    size: 3,
+    price: 6,
+    stock: 99,
+    enabled: true,
+    image_url: 'https://cdn.example.com/metal.webp'
+  };
+  const payload = {
+    bracelet_plan: {
+      items: [
+        { code: 'clear_quartz', material_id: bead.id },
+        { code: 'silver_spacer', material_id: metal.id, top: 'accessory' }
+      ],
+      layout: [
+        { crystal_code: 'clear_quartz', material_id: bead.id, top: 'bead' },
+        { crystal_code: 'silver_spacer', material_id: metal.id, top: 'accessory' }
+      ]
+    }
+  };
+  let requestedIds = [];
+  let appliedAfterFetch = false;
+  const instance = Object.assign({}, page, {
+    data: { ...page.data, selected: [], placements: [] },
+    materialCatalog: [bead],
+    materialPayloadReady: true,
+    pendingBackendRecommendation: true,
+    async fetchMaterialsByIds(ids) {
+      requestedIds = ids;
+      this.mergeMaterialCatalog([metal]);
+      return true;
+    },
+    applyBackendRecommendation() {
+      appliedAfterFetch = this.hasMaterial(metal.id);
+      return appliedAfterFetch;
+    }
+  });
+  instance.rebuildMaterialLookup(instance.materialCatalog);
+  global.wx = {
+    getStorageSync(key) {
+      return key === 'diyWorkbenchPayload' ? payload : '';
+    }
+  };
+
+  const applied = await instance.ensurePendingMaterialDetails({
+    silent: true,
+    keepPendingOnEmpty: true
+  });
+
+  assert.deepEqual(requestedIds, [metal.id]);
+  assert.equal(appliedAfterFetch, true);
+  assert.equal(applied, true);
+});
+
 test('workspace keeps large-screen tray controls above the material drawer', () => {
   const page = loadPage('miniprogram/pages/workspace/workspace.js');
   const viewportRpx = Math.round(932 * 750 / 430);
@@ -161,18 +278,15 @@ test('workspace keeps large-screen tray controls above the material drawer', () 
     viewportRpx,
     bottomInsetRpx: 65
   }).style);
-  const drawerTop = viewportRpx - style['--workspace-drawer-height'];
+  const workbenchHeight = style['--workspace-workbench-height'];
   const randomButtonBottom = style['--workspace-top-chrome']
     + style['--workspace-random-top']
     + style['--workspace-random-height'];
+  const workbenchBottom = style['--workspace-top-chrome'] + workbenchHeight;
 
-  assert.equal(
-    style['--workspace-top-chrome']
-      + style['--workspace-canvas-height']
-      + style['--workspace-drawer-height'],
-    viewportRpx
-  );
-  assert.ok(drawerTop - randomButtonBottom >= 10);
+  assert.equal(style['--workspace-canvas-height'], undefined);
+  assert.ok(workbenchBottom - randomButtonBottom >= 10);
+  assert.ok(workbenchBottom - randomButtonBottom <= 24);
 });
 
 test('workspace reserves the device bottom inset without lifting the drawer over the workbench', () => {
@@ -197,14 +311,8 @@ test('workspace reserves the device bottom inset without lifting the drawer over
     0
   );
   assert.equal(withInset['--workspace-stage-size'], withoutInset['--workspace-stage-size']);
-  assert.equal(
-    withInset['--workspace-top-chrome']
-      + withInset['--workspace-canvas-height']
-      + withInset['--workspace-drawer-height'],
-    withoutInset['--workspace-top-chrome']
-      + withoutInset['--workspace-canvas-height']
-      + withoutInset['--workspace-drawer-height']
-  );
+  assert.equal(withInset['--workspace-canvas-height'], undefined);
+  assert.equal(withoutInset['--workspace-canvas-height'], undefined);
 });
 
 test('workspace keeps all physics collisions silent and only shakes on tray-wall impact', () => {
@@ -257,6 +365,61 @@ test('workspace keeps all physics collisions silent and only shakes on tray-wall
   assert.equal(feedback.length, 1);
 });
 
+test('workspace adaptively lowers physics frequency only for stable multi-bead scenes', () => {
+  const page = loadPage('miniprogram/pages/workspace/workspace.js');
+  const makeBodies = (count, speed = 0) => Array.from({ length: count }, (_, index) => ({
+    label: `bead-${index}`,
+    plugin: {},
+    velocity: { x: speed, y: 0 }
+  }));
+  const instance = Object.assign({}, page, {
+    data: {
+      ...page.data,
+      isShuffling: false,
+      isStringingFinishing: false,
+      isReleasingString: false
+    },
+    isRealDevice: true,
+    isLowPerformanceDevice: false,
+    physicsTimerInterval: 20,
+    physicsBodies: makeBodies(18)
+  });
+
+  assert.equal(instance.getAdaptivePhysicsInterval(1000), 20);
+  instance.physicsBodies = makeBodies(24);
+  assert.equal(instance.getAdaptivePhysicsInterval(1000), 28);
+  instance.physicsBodies = makeBodies(32);
+  assert.equal(instance.getAdaptivePhysicsInterval(1000), 34);
+
+  instance.physicsBodies = makeBodies(32, 13);
+  assert.equal(instance.getAdaptivePhysicsInterval(1000), 20);
+  instance.physicsBodies = makeBodies(32);
+  instance.physicsBodies[0].plugin.launchAssistUntil = 1200;
+  assert.equal(instance.getAdaptivePhysicsInterval(1000), 20);
+  instance.physicsBodies[0].plugin.launchAssistUntil = 0;
+  instance.data.isShuffling = true;
+  assert.equal(instance.getAdaptivePhysicsInterval(1000), 20);
+
+  instance.data.isShuffling = false;
+  instance.isLowPerformanceDevice = true;
+  instance.physicsTimerInterval = 34;
+  assert.equal(instance.getAdaptivePhysicsInterval(1000), 42);
+});
+
+test('workspace physics loop applies the adaptive interval to engine steps', () => {
+  const source = fs.readFileSync(
+    path.resolve(__dirname, '../..', 'miniprogram/pages/workspace/workspace.js'),
+    'utf8'
+  );
+  const runStart = source.indexOf('  runPhysics() {');
+  const runEnd = source.indexOf('\n  resolveBeadOverlaps(', runStart);
+  const runSource = source.slice(runStart, runEnd);
+
+  assert.match(runSource, /const adaptiveInterval = this\.getAdaptivePhysicsInterval\(now\)/);
+  assert.match(runSource, /physicsAccumulatorMs/);
+  assert.match(runSource, /const substepMs = adaptiveInterval \/ substepCount/);
+});
+
 test('workspace plays one soft sound when an accepted material lands in the tray', () => {
   const page = loadPage('miniprogram/pages/workspace/workspace.js');
   const played = [];
@@ -273,6 +436,18 @@ test('workspace plays one soft sound when an accepted material lands in the tray
   assert.equal(played[0].throttleMs, 0);
   assert.ok(played[0].options.volume >= 0.15);
   assert.ok(played[0].options.volume <= 0.20);
+});
+
+test('workspace uses an idle landing-sound player during rapid material selection', () => {
+  const page = loadPage('miniprogram/pages/workspace/workspace.js');
+  const busy = { __playing: true };
+  const idle = { __playing: false };
+  const instance = Object.assign({}, page, {
+    audioPlayers: { collisionSoft: [busy, idle] },
+    audioPlayerCursors: {}
+  });
+
+  assert.equal(instance.pickAudioPlayer('collisionSoft'), idle);
 });
 
 test('workspace never plays an impact sound when a launched bead hits another bead', () => {
@@ -294,7 +469,8 @@ test('workspace never plays an impact sound when a launched bead hits another be
   assert.match(workspaceJs, /if \(materialIsPendant\(material\)\)[\s\S]*?this\.ensureAudioPlayers\(\);/);
   assert.doesNotMatch(workspaceJs, /collision: assetUrl/);
   assert.doesNotMatch(workspaceJs, /collisionBright: assetUrl/);
-  assert.match(workspaceJs, /collisionSoft: 1/);
+  assert.match(workspaceJs, /collisionSoft: 4/);
+  assert.match(workspaceJs, /const idlePlayer = pool\.find\(audio => audio && !audio\.__playing\)/);
 });
 
 test('order and favorites content do not repeat the native page title', () => {
@@ -365,6 +541,8 @@ test('backend recommendation recalculates only after selected beads reach page d
   };
   let pendingSetData = null;
   let countSeenByRecalculate = -1;
+  let canvasInitCount = 0;
+  let canvasStopCount = 0;
   const instance = Object.assign({}, page, {
     data: { ...page.data, selected: [], placements: [], wristSize: 16 },
     materialPayloadReady: true,
@@ -379,6 +557,12 @@ test('backend recommendation recalculates only after selected beads reach page d
     },
     recalculate() {
       countSeenByRecalculate = this.data.selected.length;
+    },
+    initWorkspaceCanvases() {
+      canvasInitCount += 1;
+    },
+    stopCanvasRenderLoop() {
+      canvasStopCount += 1;
     }
   });
   global.wx = {
@@ -387,7 +571,10 @@ test('backend recommendation recalculates only after selected beads reach page d
       return '';
     },
     setStorageSync() {},
-    showToast() {}
+    showToast() {},
+    nextTick(callback) {
+      callback();
+    }
   };
 
   const applied = instance.applyBackendRecommendation({ silent: true });
@@ -399,6 +586,49 @@ test('backend recommendation recalculates only after selected beads reach page d
   pendingSetData.callback();
   assert.ok(instance.data.selected.length > 0);
   assert.equal(countSeenByRecalculate, instance.data.selected.length);
+  assert.equal(canvasStopCount, 1);
+  assert.equal(canvasInitCount, 1);
+  assert.equal(instance.braceletCanvasDirty, true);
+});
+
+test('workspace keeps a validated recommendation on the backend bead-count and wrist contract', () => {
+  const page = loadPage('miniprogram/pages/workspace/workspace.js');
+  const items = Array.from({ length: 24 }, (_, index) => ({
+    id: `bead-${index}`,
+    size: 8,
+    price: 10,
+    weight: 1,
+    top: 'bead'
+  }));
+  const instance = Object.assign({}, page, {
+    data: {
+      ...page.data,
+      wristSize: 16,
+      sourceContext: {
+        source: 'backend_recommendation',
+        source_label: '推荐方案',
+        target_bead_count: 24,
+        recommendation_validation: {
+          is_valid: true,
+          estimated_stringed_length_cm: 16.7,
+          target_stringed_length_cm: 16.8,
+          length_tolerance_cm: 0.5
+        }
+      }
+    },
+    materialCatalogDesignVersion: 1,
+    workspaceSummaryCache: null,
+    materialElementKey() {
+      return '';
+    }
+  });
+
+  const { summary } = instance.getCachedWorkspaceSummary(items, []);
+
+  assert.equal(summary.recommendedCount, 24);
+  assert.equal(summary.count, 24);
+  assert.equal(summary.warning, '合适');
+  assert.equal(summary.currentWrist, '15.9');
 });
 
 test('workspace retries the canvas renderer when drawing fails', () => {
@@ -433,6 +663,130 @@ test('workspace retries the canvas renderer when drawing fails', () => {
 
   assert.equal(restoreCount, 1);
   assert.equal(failureReason, 'bracelet canvas render failed');
+});
+
+test('workspace overlays unmount canvases and reinitialize them after closing', () => {
+  const page = loadPage('miniprogram/pages/workspace/workspace.js');
+  let stopped = 0;
+  let cleared = 0;
+  let reinitialized = 0;
+  let rendered = 0;
+  const instance = Object.assign({}, page, {
+    data: {
+      ...page.data,
+      workspaceCanvasVisible: true,
+      workspaceCanvasSuppressed: false
+    },
+    braceletCanvasState: { ctx: {} },
+    stopCanvasRenderLoop() {
+      stopped += 1;
+    },
+    clearWorkspaceFlightCanvas() {
+      cleared += 1;
+    },
+    initWorkspaceCanvases() {
+      reinitialized += 1;
+    },
+    scheduleCanvasRender() {
+      rendered += 1;
+    },
+    setData(patch, callback) {
+      Object.assign(this.data, patch);
+      if (callback) callback();
+    }
+  });
+  global.wx = { nextTick: callback => callback() };
+
+  instance.hideWorkspaceCanvasForOverlay();
+  assert.equal(instance.data.workspaceCanvasVisible, false);
+  assert.equal(instance.data.workspaceCanvasSuppressed, true);
+  assert.equal(stopped, 1);
+  assert.equal(cleared, 1);
+
+  instance.restoreWorkspaceCanvasAfterOverlay();
+  assert.equal(instance.data.workspaceCanvasVisible, true);
+  assert.equal(instance.data.workspaceCanvasSuppressed, false);
+  assert.equal(reinitialized, 1);
+  assert.equal(rendered, 0);
+
+  const workspaceWxml = fs.readFileSync(
+    path.resolve(__dirname, '../../miniprogram/pages/workspace/workspace.wxml'),
+    'utf8'
+  );
+  assert.match(workspaceWxml, /wx:if="\{\{workspaceCanvasVisible\}\}"/);
+});
+
+test('workspace restores a suppressed canvas after returning from checkout', () => {
+  const page = loadPage('miniprogram/pages/workspace/workspace.js');
+  let restored = 0;
+  const instance = Object.assign({}, page, {
+    data: {
+      ...page.data,
+      workspaceCanvasVisible: true,
+      workspaceCanvasSuppressed: true,
+      isLooseMode: false
+    },
+    workspaceHasShown: true,
+    deferFirstShowProfileEnergy: false,
+    refreshMaterialCatalogInBackground() {},
+    restoreWorkspaceCanvasAfterOverlay() {
+      restored += 1;
+    },
+    loadProfileEnergy() {},
+    scheduleCanvasRender() {}
+  });
+  global.wx = {
+    hideTabBar() {},
+    getStorageSync() {
+      return '';
+    }
+  };
+
+  instance.onShow();
+
+  assert.equal(restored, 1);
+});
+
+test('workspace warms interaction runtimes before the first material tap', async () => {
+  const page = loadPage('miniprogram/pages/workspace/workspace.js');
+  const calls = { physicsRuntime: 0, physicsEngine: 0, audio: 0 };
+  const instance = Object.assign({}, page, {
+    data: {
+      ...page.data,
+      isLooseMode: true,
+      selected: []
+    },
+    isLowPerformanceDevice: false,
+    interactionRuntimeWarmed: false,
+    physicsEngine: null,
+    ensurePhysicsRuntime() {
+      calls.physicsRuntime += 1;
+    },
+    createPhysicsEngine() {
+      calls.physicsEngine += 1;
+      this.physicsEngine = {};
+    },
+    ensureAudioPlayers() {
+      calls.audio += 1;
+    }
+  });
+
+  instance.warmWorkspaceInteractionRuntime();
+  await new Promise(resolve => setTimeout(resolve, 60));
+
+  assert.deepEqual(calls, { physicsRuntime: 1, physicsEngine: 1, audio: 1 });
+  assert.equal(instance.interactionRuntimeWarmed, true);
+  instance.warmWorkspaceInteractionRuntime();
+  assert.deepEqual(calls, { physicsRuntime: 1, physicsEngine: 1, audio: 1 });
+
+  const workspaceSource = fs.readFileSync(
+    path.resolve(__dirname, '../../miniprogram/pages/workspace/workspace.js'),
+    'utf8'
+  );
+  assert.match(workspaceSource, /this\.scheduleWorkspaceInteractionWarmup\(\);/);
+  assert.match(workspaceSource, /const existingBodiesReady = previousCount === 0/);
+  assert.match(workspaceSource, /!this\.physicsEngine \|\| !wasLooseMode \|\| !existingBodiesReady/);
+  assert.doesNotMatch(workspaceSource, /previousCount === 0 \|\| !this\.physicsEngine \|\| !wasLooseMode/);
 });
 
 test('workspace uses canvas only and exposes an explicit retry state', () => {
@@ -495,66 +849,101 @@ test('workspace canvas keeps the ground shadow outside bead rotation', () => {
   assert.deepEqual(events, ['shadow', 'rotate', 'bead']);
 });
 
-test('workspace applies a top studio light to silver metal without recoloring gold accessories', () => {
-  const page = loadPage('miniprogram/pages/workspace/workspace.js');
-  const instance = Object.assign({}, page);
+test('workspace renders adjusted metal assets without synthetic highlights or filters', () => {
+  const workspaceJs = fs.readFileSync(
+    path.resolve(__dirname, '../../miniprogram/pages/workspace/workspace.js'),
+    'utf8'
+  );
+  const workspaceWxml = fs.readFileSync(
+    path.resolve(__dirname, '../../miniprogram/pages/workspace/workspace.wxml'),
+    'utf8'
+  );
+  const workspaceWxss = fs.readFileSync(
+    path.resolve(__dirname, '../../miniprogram/pages/workspace/workspace.wxss'),
+    'utf8'
+  );
 
-  assert.equal(instance.isSilverToneMetalMaterial({
-    top: 'accessory',
-    category: '合金配件',
-    name: '镜面隔珠'
-  }), true);
-  assert.equal(instance.isSilverToneMetalMaterial({
-    top: 'accessory',
-    category: '合金配件',
-    name: '镜面金色隔珠'
-  }), false);
-  assert.equal(instance.isSilverToneMetalMaterial({
-    top: 'accessory',
-    material_code: 'silver_spacer',
-    name: '925 银隔片'
-  }), true);
-  assert.equal(instance.isSilverToneMetalMaterial({
-    top: 'accessory',
-    material_code: 'accessory_metal_20260720_01',
-    category: '隔珠',
-    name: '四叶花纹橄榄隔珠'
-  }), true);
-  assert.equal(instance.isSilverToneMetalMaterial({
-    top: 'accessory',
-    material_code: 'accessory_metal_20260720_17',
-    category: '隔珠',
-    name: '古金素面圆珠'
-  }), false);
-
-  instance.braceletCanvasState = { width: 600, height: 600 };
-  const topLight = instance.getStudioMetalLightIntensity({ x: 300, y: 80 });
-  const bottomLight = instance.getStudioMetalLightIntensity({ x: 300, y: 520 });
-  const edgeLight = instance.getStudioMetalLightIntensity({ x: 30, y: 80 });
-  assert.ok(topLight > bottomLight);
-  assert.ok(topLight > edgeLight);
-  assert.ok(bottomLight >= 0.68);
-
-  const events = [];
-  const gradient = { addColorStop() {} };
-  const ctx = {
-    createLinearGradient(startX, startY, endX, endY) {
-      events.push(['linear', startX, startY, endX, endY]);
-      return gradient;
-    },
-    createRadialGradient(centerX, centerY) {
-      events.push(['radial', centerX, centerY]);
-      return gradient;
-    },
-    fillRect() { events.push(['fill']); }
-  };
-  instance.drawStudioMetalLightMask(ctx, 48, 48, 90, false);
-
-  assert.equal(events.filter(event => event[0] === 'fill').length, 2);
-  assert.notEqual(events[0][1], events[0][3]);
+  assert.doesNotMatch(workspaceJs, /StudioMetalLight|MetalLightTexture|isSilverToneMetalMaterial/);
+  assert.doesNotMatch(workspaceWxml, /materialToneClass|material-tone-silver/);
+  assert.doesNotMatch(workspaceWxss, /workspace-silver-filter|material-tone-silver/);
 });
 
-test('workspace accessory random image pool excludes the primary image and uses gallery images only', () => {
+test('workspace bead taps keep the drawer stable without rendering an info card', () => {
+  const workspaceJs = fs.readFileSync(
+    path.resolve(__dirname, '../../miniprogram/pages/workspace/workspace.js'),
+    'utf8'
+  );
+  const workspaceWxml = fs.readFileSync(
+    path.resolve(__dirname, '../../miniprogram/pages/workspace/workspace.wxml'),
+    'utf8'
+  );
+  const workspaceWxss = fs.readFileSync(
+    path.resolve(__dirname, '../../miniprogram/pages/workspace/workspace.wxss'),
+    'utf8'
+  );
+  assert.doesNotMatch(workspaceWxml, /bead-info-panel|selectedBeadInfo/);
+  assert.doesNotMatch(workspaceWxss, /\.bead-info-/);
+  assert.match(workspaceJs, /selectWorkspaceBead\(index\)/);
+  assert.doesNotMatch(workspaceJs, /selectedBeadInfo:\s*this\.buildSelectedBeadInfo/);
+  assert.doesNotMatch(workspaceWxml, /beadInfoCanvasSnapshot|bracelet-canvas-snapshot/);
+  assert.doesNotMatch(workspaceJs, /captureBeadInfoCanvasSnapshot|beadInfoCanvasSnapshot/);
+});
+
+test('workspace bead selection keeps interaction state without opening a card', () => {
+  const page = loadPage('miniprogram/pages/workspace/workspace.js');
+  let rendered = 0;
+  const instance = Object.assign({}, page, {
+    data: {
+      ...page.data,
+      workspaceCanvasVisible: true,
+      workspaceCanvasSuppressed: false,
+      selectedItems: []
+    },
+    setData(updates, callback) {
+      Object.assign(this.data, updates);
+      if (callback) callback();
+    },
+    scheduleCanvasRender() {
+      rendered += 1;
+    }
+  });
+
+  instance.selectWorkspaceBead(0);
+
+  assert.equal(instance.data.workspaceCanvasVisible, true);
+  assert.equal(instance.data.workspaceCanvasSuppressed, false);
+  assert.equal(instance.data.selectedBeadIndex, 0);
+  assert.equal(instance.data.selectedBeadInfo, null);
+  assert.equal(rendered, 1);
+});
+
+test('workspace canvas avoids redundant touch handlers and physics-frame snapshot work', () => {
+  const workspaceJs = fs.readFileSync(
+    path.resolve(__dirname, '../../miniprogram/pages/workspace/workspace.js'),
+    'utf8'
+  );
+  const workspaceWxml = fs.readFileSync(
+    path.resolve(__dirname, '../../miniprogram/pages/workspace/workspace.wxml'),
+    'utf8'
+  );
+  const canvas = workspaceWxml.match(/<canvas[\s\S]*?id="braceletCanvas"[\s\S]*?<\/canvas>/);
+  const touchLayer = workspaceWxml.match(/<view[\s\S]*?class="bracelet-touch-layer[\s\S]*?<\/view>/);
+  const motionMethod = workspaceJs.slice(
+    workspaceJs.indexOf('  hasActiveBraceletCanvasMotion()'),
+    workspaceJs.indexOf('  hasActiveCanvasMotion()')
+  );
+
+  assert.ok(canvas);
+  assert.doesNotMatch(canvas[0], /catchtouch/);
+  assert.ok(touchLayer);
+  assert.match(touchLayer[0], /catchtouchstart="onBraceletCanvasTouchStart"/);
+  assert.match(motionMethod, /this\.physicsTimer/);
+  assert.match(workspaceJs, /const physicsLoopActive = !!this\.physicsTimer/);
+  assert.match(workspaceJs, /&& !physicsLoopActive\s+&& \(hasBraceletMotion/);
+  assert.match(workspaceJs, /const maxCanvasDpr = this\.isLowPerformanceDevice \? 1\.75/);
+});
+
+test('workspace material selection uses only unique gallery entries, never the primary image', () => {
   const page = loadPage('miniprogram/pages/workspace/workspace.js');
   const instance = Object.assign({}, page);
   const material = {
@@ -565,6 +954,7 @@ test('workspace accessory random image pool excludes the primary image and uses 
     image_urls: [
       'https://cdn.example.com/gallery-1.webp',
       'https://cdn.example.com/primary.webp?v=2',
+      'https://cdn.example.com/gallery-1.webp',
       'https://cdn.example.com/gallery-2.webp'
     ]
   };
@@ -578,8 +968,9 @@ test('workspace accessory random image pool excludes the primary image and uses 
   const originalRandom = Math.random;
   Math.random = () => 0;
   try {
-    instance.lastPickedMaterialImages = {};
     assert.equal(instance.pickMaterialImageUrl(material), material.image_urls[0]);
+    Math.random = () => 0.9;
+    assert.equal(instance.pickMaterialImageUrl(material), material.image_urls[3]);
   } finally {
     Math.random = originalRandom;
   }
@@ -588,6 +979,198 @@ test('workspace accessory random image pool excludes the primary image and uses 
     ...material,
     image_urls: ['https://cdn.example.com/primary.webp?v=2']
   }), []);
+});
+
+test('workspace preloads the exact gallery image reserved for the next selection', () => {
+  const page = loadPage('miniprogram/pages/workspace/workspace.js');
+  const instance = Object.assign({}, page, {
+    data: { ...page.data, visibleMaterials: [] },
+    isLowPerformanceDevice: false,
+    materialNextImageUrlByGroup: Object.create(null),
+    canvasImageCache: {},
+    materialImagePreloadSet: {}
+  });
+  const material = {
+    id: 'summer-spacer-10',
+    top: 'accessory',
+    category: '隔珠',
+    variety_id: 'summer-spacer',
+    image_url: 'https://cdn.example.com/display-only.webp',
+    image_urls: [
+      'https://cdn.example.com/gallery-front.webp',
+      'https://cdn.example.com/gallery-side.webp'
+    ]
+  };
+  const originalRandom = Math.random;
+  Math.random = () => 0.75;
+  try {
+    const reservedUrl = instance.peekNextMaterialImageUrl(material);
+    const queue = instance.buildMaterialPreloadQueue([material]);
+    const selectedUrl = instance.consumeNextMaterialImageUrl(material);
+
+    assert.equal(reservedUrl, material.image_urls[1]);
+    assert.equal(queue[0].url, reservedUrl);
+    assert.equal(selectedUrl, reservedUrl);
+    assert.notEqual(selectedUrl, material.image_url);
+  } finally {
+    Math.random = originalRandom;
+  }
+});
+
+test('workspace preserves saved tray images while the material catalog is loading', () => {
+  const page = loadPage('miniprogram/pages/workspace/workspace.js');
+  const savedImageUrl = 'https://cdn.example.com/gallery-saved.webp?version=old';
+  const previousPlacement = {
+    id: 'stable-bead-10',
+    image_url: savedImageUrl,
+    looseX: 240,
+    looseY: 260,
+    beadSize: 54,
+    rotation: 18
+  };
+  const instance = Object.assign({}, page, {
+    data: { ...page.data },
+    materialCatalog: []
+  });
+  instance.rebuildMaterialLookup([], { resetDesignCaches: false });
+
+  const beforeCatalog = instance.normalizePlacements(
+    ['stable-bead-10'],
+    [previousPlacement]
+  );
+  assert.equal(beforeCatalog[0].image_url, savedImageUrl);
+
+  instance.materialCatalog = [{
+    id: 'stable-bead-10',
+    top: 'bead',
+    name: '稳定珠图',
+    size: 10,
+    price: 8,
+    image_url: 'https://cdn.example.com/display-only.webp',
+    image_urls: [
+      'https://cdn.example.com/gallery-saved.webp?version=new',
+      'https://cdn.example.com/gallery-other.webp'
+    ]
+  }];
+  instance.rebuildMaterialLookup(instance.materialCatalog, { resetDesignCaches: false });
+  const afterCatalog = instance.normalizePlacements(
+    ['stable-bead-10'],
+    beforeCatalog
+  );
+  assert.equal(afterCatalog[0].image_url, instance.materialCatalog[0].image_urls[0]);
+});
+
+test('workspace material taps never wait for a gallery detail request', () => {
+  const workspaceSource = fs.readFileSync(
+    path.resolve(__dirname, '../../miniprogram/pages/workspace/workspace.js'),
+    'utf8'
+  );
+  const addMaterialStart = workspaceSource.indexOf('  addMaterial(e) {');
+  const addMaterialEnd = workspaceSource.indexOf('  compatibleBeadCapHostIndices(', addMaterialStart);
+  const addMaterialSource = workspaceSource.slice(addMaterialStart, addMaterialEnd);
+
+  assert.ok(addMaterialStart >= 0 && addMaterialEnd > addMaterialStart);
+  assert.doesNotMatch(addMaterialSource, /await\s+this\.ensureMaterialImagePool/);
+  assert.doesNotMatch(addMaterialSource, /async\s+addMaterial/);
+  assert.match(addMaterialSource, /if \(!this\.materialOwnImageUrls\(currentMaterial\)\.length\)/);
+  assert.match(addMaterialSource, /this\.warmMaterialImagePool\(currentMaterial\)/);
+  assert.match(addMaterialSource, /图库准备中，请稍后再试/);
+});
+
+test('workspace coalesces rapid history changes into one storage write', async () => {
+  const page = loadPage('miniprogram/pages/workspace/workspace.js');
+  const writes = [];
+  global.wx = {
+    setStorage(payload) {
+      writes.push(payload);
+    }
+  };
+  const instance = Object.assign({}, page, {
+    data: {
+      ...page.data,
+      selected: [],
+      placements: [],
+      wristSize: 16,
+      isLooseMode: true
+    },
+    historyStack: [],
+    redoStack: [],
+    historyPersistDelayMs: 10,
+    setData(patch) {
+      Object.assign(this.data, patch);
+    }
+  });
+
+  instance.pushHistory();
+  instance.data.selected = ['bead-1'];
+  instance.data.placements = [{ id: 'bead-1' }];
+  instance.pushHistory();
+  assert.equal(writes.length, 0);
+
+  await new Promise(resolve => setTimeout(resolve, 30));
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0].key, 'workspaceHistory');
+  assert.equal(writes[0].data.length, 2);
+  assert.equal(instance.data.canUndo, true);
+  assert.equal(instance.data.canRedo, false);
+});
+
+test('workspace reuses stable tray bounds during each material flight', () => {
+  const workspaceSource = fs.readFileSync(
+    path.resolve(__dirname, '../../miniprogram/pages/workspace/workspace.js'),
+    'utf8'
+  );
+  const processStart = workspaceSource.indexOf('  processCanvasFlightQueue() {');
+  const processEnd = workspaceSource.indexOf('  finishCanvasFlight() {', processStart);
+  const processSource = workspaceSource.slice(processStart, processEnd);
+
+  assert.match(workspaceSource, /this\.workspaceCircleRect = circleRect/);
+  assert.match(workspaceSource, /this\.materialDrawerRect = drawerRect/);
+  assert.match(processSource, /const circleRect = this\.workspaceCircleRect/);
+  assert.match(processSource, /const drawerRect = this\.materialDrawerRect/);
+  assert.match(processSource, /resolveFlightStartRect\(null, task\.tapPoint, drawerRect, material\)/);
+  assert.doesNotMatch(processSource, /select\('\.bracelet-circle'\)/);
+  assert.doesNotMatch(processSource, /select\('\.material-drawer'\)/);
+  assert.doesNotMatch(processSource, /createSelectorQuery/);
+  assert.equal((processSource.match(/\.boundingClientRect\(\)/g) || []).length, 0);
+  assert.match(processSource, /scheduleCanvasRender\(true, \{ markDirty: false \}\)/);
+});
+
+test('workspace prewarms flight textures and defers landing physics until after paint', () => {
+  const workspaceSource = fs.readFileSync(
+    path.resolve(__dirname, '../../miniprogram/pages/workspace/workspace.js'),
+    'utf8'
+  );
+  const drawStart = workspaceSource.indexOf('  drawCanvasBead(ctx, sprite) {');
+  const drawEnd = workspaceSource.indexOf('\n  getPhysicsBodyByDesignIndex(', drawStart);
+  const drawSource = workspaceSource.slice(drawStart, drawEnd);
+  const commitStart = workspaceSource.indexOf('  commitMaterial(id, placement, physicsOptions = {}, onReady) {');
+  const commitEnd = workspaceSource.indexOf('\n  finishFlight() {', commitStart);
+  const commitSource = workspaceSource.slice(commitStart, commitEnd);
+
+  assert.match(workspaceSource, /warmCanvasMaterialTextures\(task\.material \|\| \{\}, task\.url\)/);
+  assert.match(drawSource, /allowCreate: !sprite\.screenSpace/);
+  assert.match(commitSource, /this\.scheduleCanvasRender\(\)/);
+  assert.match(commitSource, /this\.pendingPhysicsLaunchFrame = this\.requestCanvasFrame/);
+});
+
+test('workspace recalculate does not send unused scale ticks through setData', () => {
+  const workspaceSource = fs.readFileSync(
+    path.resolve(__dirname, '../../miniprogram/pages/workspace/workspace.js'),
+    'utf8'
+  );
+  const workspaceWxml = fs.readFileSync(
+    path.resolve(__dirname, '../../miniprogram/pages/workspace/workspace.wxml'),
+    'utf8'
+  );
+  const recalculateStart = workspaceSource.indexOf('  recalculate(options = {}) {');
+  const recalculateEnd = workspaceSource.indexOf('  formatBeadDiameter(', recalculateStart);
+  const recalculateSource = workspaceSource.slice(recalculateStart, recalculateEnd);
+
+  assert.doesNotMatch(workspaceWxml, /scaleTicks/);
+  assert.doesNotMatch(recalculateSource, /getCachedScaleTicks/);
+  assert.doesNotMatch(recalculateSource, /scaleTicks,/);
+  assert.doesNotMatch(workspaceSource.slice(0, workspaceSource.indexOf('  onLoad(')), /scaleTicks:\s*\[\]/);
 });
 
 test('assessment prefetches the last confirmed size and report reads the cached plan', () => {
@@ -651,7 +1234,8 @@ test('report leads with a plain-language answer and keeps technical evidence sec
   assert.doesNotMatch(reportWxml, /class="energy-score"/);
   assert.match(reportWxml, /class="state-prompt[^>]+aria-role="button"/);
   assert.doesNotMatch(reportWxml, /class="recommend-band/);
-  assert.equal((reportWxml.match(/查看专属手串方案/g) || []).length, 1);
+  assert.equal((reportWxml.match(/申请人工搭配/g) || []).length, 1);
+  assert.match(reportJs, /openCustomDesignService/);
   assert.doesNotMatch(reportWxml, /MBTI 偏好如何参与/);
   assert.match(reportWxml, />为什么这样推荐<\/view>/);
   assert.match(appJson, /pages\/report-basis\/report-basis/);
@@ -801,8 +1385,32 @@ test('report turns element ratios and poetic tags into actionable styling guidan
     solar_time: { true_solar_time: '2000-01-01 12:00' }
   });
   assert.equal(unsupported.hasTrueSolarTime, false);
-  assert.equal(unsupported.trueSolarTime, '');
-  assert.equal(unsupported.trueSolarTimeLabel, '未完成地点校准');
+  assert.equal(unsupported.trueSolarTime, '—');
+  assert.equal(unsupported.trueSolarTimeLabel, '出生地点未匹配');
+  assert.match(unsupported.trueSolarTimeDescription, /重新选择省市/);
+
+  const unknownTime = instance.buildViewReport({
+    final_energy_profile: { 木: 20, 火: 20, 土: 20, 金: 20, 水: 20 },
+    interpretation: { balance_index: 100 },
+    input_summary: {},
+    calibration_status: 'not_required'
+  });
+  const invalidLocation = instance.buildViewReport({
+    final_energy_profile: { 木: 20, 火: 20, 土: 20, 金: 20, 水: 20 },
+    interpretation: { balance_index: 100 },
+    input_summary: {},
+    calibration_status: 'invalid_location'
+  });
+  const legacy = instance.buildViewReport({
+    final_energy_profile: { 木: 20, 火: 20, 土: 20, 金: 20, 水: 20 },
+    interpretation: { balance_index: 100 },
+    input_summary: {},
+    calibration_status: 'legacy_unknown'
+  });
+  assert.equal(unknownTime.trueSolarTimeLabel, '待补充出生时刻');
+  assert.match(unknownTime.trueSolarTimeDescription, /12:00/);
+  assert.equal(invalidLocation.trueSolarTimeLabel, '地点信息异常');
+  assert.equal(legacy.trueSolarTimeLabel, '旧报告未校准');
 });
 
 test('report derives stable key elements for tied and incomplete profiles', () => {
@@ -1072,7 +1680,40 @@ test('report basis page reads the prepared view and summarizes participating inp
   assert.equal(instance.data.generationLogicText, '元素结构影响调节方向，佩戴目标影响使用场景，性格偏好影响材质与排列，当下状态影响本次氛围建议。');
   assert.equal(instance.data.generatedAtText, '2026-07-12 16:40');
   instance.showSolarTimeInfo();
-  assert.match(global.wx.lastModal.content, /经度、时区与日期/);
+  assert.match(global.wx.lastModal.content, /城市中心坐标、时区与出生日期/);
+});
+
+test('report basis keeps calibration states truthful and distinct', () => {
+  const page = loadPage('miniprogram/pages/report-basis/report-basis.js');
+  const applied = page.buildVersionedView({
+    input_snapshot: { birth_place: '北京市' },
+    calibration: {
+      status: 'applied',
+      details: {
+        calibrated_time: '1994-05-18 11:48',
+        resolved_location_name: '北京市'
+      }
+    }
+  });
+  const unknownTime = page.buildVersionedView({
+    calibration: { status: 'not_required', details: {} }
+  });
+  const unsupported = page.buildVersionedView({
+    calibration: { status: 'unsupported', details: {} }
+  });
+  const invalid = page.buildVersionedView({
+    calibration: { status: 'invalid_location', details: {} }
+  });
+  const legacy = page.buildVersionedView({
+    calibration: { status: 'legacy_unknown', details: {} }
+  });
+
+  assert.equal(applied.trueSolarTime, '1994-05-18 11:48');
+  assert.match(applied.trueSolarTimeDescription, /北京市的城市中心坐标/);
+  assert.equal(unknownTime.trueSolarTimeLabel, '待补充出生时刻');
+  assert.equal(unsupported.trueSolarTimeLabel, '出生地点未匹配');
+  assert.equal(invalid.trueSolarTimeLabel, '地点信息异常');
+  assert.equal(legacy.trueSolarTimeLabel, '旧报告未校准');
 });
 
 test('report basis rejects an outdated snapshot after the report changes', () => {
@@ -1368,4 +2009,32 @@ test('assessment restores required fields from an older report before opening th
   assert.deepEqual(instance.data.form.wishes, ['事业专注']);
   assert.deepEqual(instance.data.form.chakraAnswers, ['表达感']);
   assert.equal(instance.data.form.moodPaletteId, 'mist_blue');
+});
+
+test('assessment requires an explicit birth city and sends a stable city calibration identity', () => {
+  const page = loadPage('miniprogram/pages/assessment/assessment.js');
+  const instance = Object.assign({}, page, {
+    data: { ...page.data, form: { ...page.data.form } }
+  });
+  const completedBasicForm = {
+    ...instance.data.form,
+    name: '小宇',
+    birthDate: '1994-05-18',
+    birthPlace: ''
+  };
+  const selected = instance.regionFromPickerIndex([0, 0]);
+  const source = fs.readFileSync(
+    path.resolve(__dirname, '../../miniprogram/pages/assessment/assessment.js'),
+    'utf8'
+  );
+
+  assert.equal(instance.data.form.birthPlace, '');
+  assert.deepEqual(instance.data.form.birthRegion, []);
+  assert.equal(instance.canProceed('basic', completedBasicForm), false);
+  assert.equal(selected.birthPlace, '北京市');
+  assert.equal(selected.birthPlacePath, '北京市/北京市');
+  assert.match(selected.locationCode, /^cn:city:v1:[a-z0-9]+$/);
+  assert.equal(selected.locationCode, instance.regionFromPickerIndex([0, 0]).locationCode);
+  assert.match(source, /birth_place_path:\s*form\.birthPlacePath/);
+  assert.match(source, /location_code:\s*form\.locationCode/);
 });

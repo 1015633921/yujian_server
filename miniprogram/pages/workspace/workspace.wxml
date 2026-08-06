@@ -1,23 +1,18 @@
-<view class="studio-page {{deviceClass}}" style="{{workspaceLayoutStyle}}">
+<view class="studio-page {{deviceClass}} {{showMaterialDetail ? 'material-detail-open' : ''}}" style="{{workspaceLayoutStyle}}">
   <view class="studio-top">
     <view class="title-row">
       <view class="back-btn" catchtap="goBack" hover-class="back-btn-press" aria-role="button" aria-label="返回"></view>
-      <view class="more-btn" catchtap="openToolbox" hover-class="more-btn-press" aria-role="button" aria-label="更多操作">
-        <view class="more-dot"></view>
-        <view class="more-dot"></view>
-        <view class="more-dot"></view>
-      </view>
     </view>
   </view>
 
   <view class="canvas-area">
     <view class="studio-metrics {{countOverClass}}" bindtap="openWristSetting">
       <view class="studio-metric">
-        <view class="studio-metric-label">手串颗数</view>
+        <view class="studio-metric-label">方案珠数</view>
         <view class="studio-metric-value">{{summary.count}}<text class="studio-metric-sub">/{{summary.recommendedCount}} 颗</text></view>
       </view>
       <view class="studio-metric">
-        <view class="studio-metric-label">有效腕围</view>
+        <view class="studio-metric-label">预计腕围 · 目标{{wristSize}}cm</view>
         <view class="studio-metric-value {{lengthOverClass}}">{{summary.currentWrist}}<text class="studio-metric-sub"> cm</text></view>
       </view>
     </view>
@@ -34,7 +29,7 @@
     </view>
 
     <view class="bracelet-stage">
-      <view class="bracelet-circle tray-theme-{{trayTheme}} {{trayImageFailed ? 'tray-image-failed' : ''}} {{isShuffling ? 'shuffling' : ''}}">
+      <view class="bracelet-circle workspace-guide-anchor-tray tray-theme-{{trayTheme}} {{trayImageFailed ? 'tray-image-failed' : ''}} {{isShuffling ? 'shuffling' : ''}}">
         <image
           class="bracelet-tray-image"
           src="{{trayImageUrl}}"
@@ -45,7 +40,7 @@
         <canvas
           wx:if="{{workspaceCanvasVisible}}"
           id="braceletCanvas"
-          class="bracelet-canvas"
+          class="bracelet-canvas {{workspaceCanvasSuppressed ? 'workspace-canvas-suppressed' : ''}}"
           type="2d"
           canvas-id="braceletCanvas"
           catchtouchstart="onBraceletCanvasTouchStart"
@@ -55,7 +50,7 @@
         ></canvas>
         <view
           wx:if="{{workspaceCanvasVisible && !canvasRenderError}}"
-          class="bracelet-touch-layer"
+          class="bracelet-touch-layer {{workspaceCanvasSuppressed ? 'workspace-canvas-suppressed' : ''}}"
           catchtouchstart="onBraceletCanvasTouchStart"
           catchtouchmove="onBraceletCanvasTouchMove"
           catchtouchend="onBraceletCanvasTouchEnd"
@@ -66,17 +61,46 @@
           <view class="canvas-error-subtitle">请重新加载后继续设计</view>
           <button class="canvas-error-retry" bindtap="retryCanvasRenderer">重新加载</button>
         </view>
-        <view class="completion-watermark {{completionWatermarkClass}}">
+        <view wx:if="{{selectedBeadInfo}}" class="order-panel bead-info-panel" catchtap="stopPropagation">
+          <view class="bead-info-close" catchtap="closeSelectedBeadInfo" aria-role="button" aria-label="关闭">×</view>
+          <view class="bead-info-copy">
+            <view class="order-title">第 {{selectedBeadInfo.position}} 颗</view>
+            <view class="bead-info-name">{{selectedBeadInfo.name}}</view>
+            <view class="bead-info-details">
+              <view class="bead-info-row">
+                <text class="bead-info-label">珠径</text>
+                <text class="bead-info-value">{{selectedBeadInfo.diameterText}}</text>
+              </view>
+              <view class="bead-info-row">
+                <text class="bead-info-label">价格</text>
+                <text class="bead-info-value">{{selectedBeadInfo.priceText}}</text>
+              </view>
+            </view>
+            <view wx:if="{{selectedBeadInfo.capItems.length}}" class="bead-cap-list">
+              <view wx:for="{{selectedBeadInfo.capItems}}" wx:key="side" class="bead-cap-item">
+                <view class="bead-cap-copy">
+                  <text class="bead-cap-side">{{item.sideLabel}}</text>
+                  <text class="bead-cap-name">{{item.name}}</text>
+                  <text class="bead-cap-price">{{item.priceText}}</text>
+                </view>
+                <view class="bead-cap-remove" data-side="{{item.side}}" catchtap="removeSelectedBeadCap">移除</view>
+              </view>
+            </view>
+          </view>
+        </view>
+        <view wx:if="{{isLooseMode}}" class="completion-watermark {{completionWatermarkClass}}">
           <view class="studio-compass">✦</view>
           <view class="completion-sub"></view>
         </view>
       </view>
     </view>
 
+    <view wx:if="{{dragDeleteArmed}}" class="drag-delete-hint">松手移除这颗珠子</view>
+
     <view class="plate-tool plate-tool-left-one {{canUndo ? '' : 'disabled'}}" catchtap="undo" hover-class="plate-tool-press" aria-role="button" aria-label="撤回">
       <image class="plate-tool-icon-image plate-tool-icon-image-undo" src="{{workspaceIcons.undo}}" mode="aspectFit"></image>
     </view>
-    <view class="plate-tool plate-tool-left-two" catchtap="openWristSetting" hover-class="plate-tool-press" aria-role="button" aria-label="调整腕围">
+    <view class="plate-tool plate-tool-left-two workspace-guide-anchor-wrist" catchtap="openWristSetting" hover-class="plate-tool-press" aria-role="button" aria-label="调整腕围">
       <image class="plate-tool-icon-image plate-tool-icon-image-wrist" src="{{workspaceIcons.wrist}}" mode="aspectFit"></image>
       <view class="plate-tool-label">腕围{{wristSize}}cm</view>
     </view>
@@ -94,44 +118,16 @@
       <image class="plate-tool-icon plate-tool-icon-image plate-tool-icon-image-clear" src="{{workspaceIcons.clear}}" mode="aspectFit"></image>
     </view>
 
-    <view class="plate-random-btn {{shuffleButtonClass}}" catchtap="toggleStringMode" hover-class="plate-random-press" aria-role="button" aria-label="随机成串">
+    <view class="plate-random-btn workspace-guide-anchor-string {{shuffleButtonClass}}" catchtap="toggleStringMode" hover-class="plate-random-press" aria-role="button" aria-label="{{randomTitle}}">
       <image class="plate-random-icon-image" src="{{workspaceIcons.string}}" mode="aspectFit"></image>
       <view class="plate-random-text">{{randomTitle}}</view>
-    </view>
-
-    <view wx:if="{{selectedBeadInfo}}" class="order-panel bead-info-panel">
-      <view class="bead-info-close" catchtap="closeSelectedBeadInfo" aria-role="button" aria-label="关闭">×</view>
-      <view class="bead-info-copy">
-        <view class="order-title">第 {{selectedBeadInfo.position}} 颗</view>
-        <view class="bead-info-name">{{selectedBeadInfo.name}}</view>
-        <view class="bead-info-details">
-          <view class="bead-info-row">
-            <text class="bead-info-label">珠径</text>
-            <text class="bead-info-value">{{selectedBeadInfo.diameterText}}</text>
-          </view>
-          <view class="bead-info-row">
-            <text class="bead-info-label">价格</text>
-            <text class="bead-info-value">{{selectedBeadInfo.priceText}}</text>
-          </view>
-        </view>
-        <view wx:if="{{selectedBeadInfo.capItems.length}}" class="bead-cap-list">
-          <view wx:for="{{selectedBeadInfo.capItems}}" wx:key="side" class="bead-cap-item">
-            <view class="bead-cap-copy">
-              <text class="bead-cap-side">{{item.sideLabel}}</text>
-              <text class="bead-cap-name">{{item.name}}</text>
-              <text class="bead-cap-price">{{item.priceText}}</text>
-            </view>
-            <view class="bead-cap-remove" data-side="{{item.side}}" catchtap="removeSelectedBeadCap">移除</view>
-          </view>
-        </view>
-      </view>
     </view>
   </view>
 
   <canvas
     wx:if="{{workspaceCanvasVisible}}"
     id="workspaceFlightCanvas"
-    class="workspace-flight-canvas {{canvasFlightActive ? 'active' : ''}}"
+    class="workspace-flight-canvas {{canvasFlightActive ? 'active' : ''}} {{workspaceCanvasSuppressed ? 'workspace-canvas-suppressed' : ''}}"
     type="2d"
     canvas-id="workspaceFlightCanvas"
   ></canvas>
@@ -156,7 +152,7 @@
       <view wx:for="{{topTabs}}" wx:for-index="tabIndex" wx:key="key" class="top-tab {{item.className}} {{tabIndex === topTabs.length - 1 ? 'last' : ''}}" data-top="{{item.value}}" bindtap="selectTop">{{item.label}}</view>
       <view class="drawer-checkout">
         <view class="drawer-price-block">
-          <text>当前方案</text>
+          <text>{{workspacePlanLabel}}</text>
           <view>¥{{summary.priceText}}</view>
         </view>
       </view>
@@ -183,7 +179,7 @@
             <view wx:if="{{materialSearchKeyword}}" class="material-search-clear" catchtap="clearMaterialSearch">×</view>
           </view>
           <view
-            class="material-search-cart {{isAddingToCart ? 'is-loading' : ''}}"
+            class="material-search-cart workspace-guide-anchor-checkout {{isAddingToCart ? 'is-loading' : ''}}"
             catchtap="checkoutCurrentDesign"
             aria-role="button"
             aria-disabled="{{isAddingToCart}}"
@@ -191,28 +187,6 @@
           >
             <view wx:if="{{isAddingToCart}}" class="material-search-cart-spinner"></view>
             <text>{{cartActionText}}</text>
-          </view>
-        </view>
-        <view wx:if="{{showWorkspaceGuide}}" class="workspace-guide-card">
-          <view class="workspace-guide-head">
-            <view>
-              <view class="workspace-guide-kicker">FIRST DIY</view>
-              <view class="workspace-guide-title">三步开始排一串</view>
-            </view>
-            <view class="workspace-guide-close" catchtap="dismissWorkspaceGuide" data-forever="true">×</view>
-          </view>
-          <view class="workspace-guide-list">
-            <view wx:for="{{workspaceGuideItems}}" wx:key="index" class="workspace-guide-item">
-              <view class="workspace-guide-index">{{item.index}}</view>
-              <view>
-                <view class="workspace-guide-item-title">{{item.title}}</view>
-                <view class="workspace-guide-desc">{{item.desc}}</view>
-              </view>
-            </view>
-          </view>
-          <view class="workspace-guide-actions">
-            <button class="workspace-guide-primary" catchtap="dismissWorkspaceGuide" data-forever="true">开始试试</button>
-            <view class="workspace-guide-secondary" catchtap="dismissWorkspaceGuide" data-forever="true">不再提示</view>
           </view>
         </view>
         <scroll-view wx:if="{{seriesOptions.length > 1}}" class="series-scroll" scroll-x enhanced="{{true}}" bounces="{{true}}" show-scrollbar="{{false}}" scroll-into-view="{{activeSeriesAnchor}}" scroll-with-animation="{{true}}">
@@ -229,15 +203,15 @@
               wx:for="{{visibleMaterials}}"
               wx:for-index="index"
               wx:key="id"
-              class="material-card {{item.cardClass}} {{item.physical_spec_complete ? '' : 'material-card-spec-incomplete'}}"
+              class="material-card {{index === 0 ? 'workspace-guide-anchor-materials' : ''}} {{item.cardClass}} {{item.physical_spec_complete ? '' : 'material-card-spec-incomplete'}}"
               data-id="{{item.id}}"
               data-index="{{index}}"
               bindtap="addMaterial"
+              bindlongpress="openMaterialDetail"
             >
-              <image wx:if="{{item.image_url}}" class="material-sphere material-image {{item.material_shape_class}} {{item.materialToneClass}}" src="{{item.image_url}}" mode="aspectFit" lazy-load="{{true}}" webp="{{true}}" fade-in="{{false}}" data-id="{{item.id}}" binderror="onMaterialImageError"></image>
+              <image wx:if="{{item.image_url}}" class="material-sphere material-image {{item.material_shape_class}}" src="{{item.image_url}}" mode="aspectFit" lazy-load="{{true}}" webp="{{true}}" fade-in="{{false}}" data-id="{{item.id}}" binderror="onMaterialImageError"></image>
               <view wx:else class="material-sphere" style="background: radial-gradient(circle at 32% 26%, {{item.shine}} 0 10%, {{item.color}} 12% 58%, rgba(0,0,0,.22) 100%);"></view>
               <view class="material-name">{{item.name}}</view>
-              <view class="material-effect">{{item.effectText}}</view>
               <view class="material-meta">
                 <view class="material-price">¥{{item.price}}</view>
                 <view class="size-pill {{item.physical_spec_complete ? '' : 'size-pill-warning'}}">{{item.card_spec_text}}</view>
@@ -268,53 +242,58 @@
 
   </view>
 
-  <view wx:if="{{showWristPicker}}" class="wrist-picker-mask" bindtap="closeWristSetting">
-    <view class="wrist-picker" catchtap="stopPropagation">
-      <view class="wrist-picker-head">
+  <view wx:if="{{showMaterialDetail}}" class="material-detail-mask" bindtap="closeMaterialDetail">
+    <view class="material-detail-sheet" catchtap="stopPropagation">
+      <view class="material-detail-head">
         <view>
-          <view class="wrist-picker-title">选择手围</view>
-          <view class="wrist-picker-subtitle">设置腕围，系统会同步更新当前方案适配参考。</view>
+          <view class="material-detail-eyebrow">{{materialDetail.typeLabel}}</view>
+          <view class="material-detail-title">材料详情</view>
         </view>
-        <view class="wrist-picker-close" bindtap="closeWristSetting">×</view>
+        <view class="material-detail-close" catchtap="closeMaterialDetail" aria-role="button" aria-label="关闭">×</view>
       </view>
-      <view class="wrist-ruler-value">
-        <text class="wrist-ruler-number">{{wristRulerValue}}</text>
-        <text class="wrist-ruler-unit">cm</text>
-      </view>
-      <view class="wrist-ruler-caption">左右滑动软尺，松手后自动吸附到 0.1cm</view>
-      <view class="wrist-ruler-wrap">
-        <view class="wrist-ruler-pointer"></view>
-        <view class="wrist-ruler-fade left"></view>
-        <view class="wrist-ruler-fade right"></view>
-        <scroll-view
-          class="wrist-ruler-scroll"
-          scroll-x
-          enhanced="{{true}}"
-          bounces="{{true}}"
-          show-scrollbar="{{false}}"
-          scroll-left="{{wristRulerScrollLeft}}"
-          bindtouchstart="onWristRulerTouchStart"
-          bindtouchend="onWristRulerTouchEnd"
-          bindtouchcancel="onWristRulerTouchEnd"
-          bindscroll="onWristRulerScroll"
-        >
-          <view class="wrist-ruler-track" style="padding-left:{{wristRulerSidePadding}}px;padding-right:{{wristRulerSidePadding}}px;">
-            <view
-              wx:for="{{wristRulerTicks}}"
-              wx:key="index"
-              class="wrist-ruler-tick {{item.className}}"
-              style="width:{{wristRulerTickWidth}}px;"
-            >
-              <view class="tick-line"></view>
-              <view wx:if="{{item.label}}" class="tick-label">{{item.label}}</view>
-            </view>
+      <scroll-view class="material-detail-body" scroll-y enhanced="{{true}}" show-scrollbar="{{false}}">
+        <swiper wx:if="{{materialDetail.images.length}}" class="material-detail-gallery" circular indicator-dots indicator-color="rgba(23,23,23,.18)" indicator-active-color="#171917">
+          <swiper-item wx:for="{{materialDetail.images}}" wx:key="index">
+            <image class="material-detail-image" src="{{item}}" mode="aspectFit"></image>
+          </swiper-item>
+        </swiper>
+        <view wx:else class="material-detail-image material-detail-image-placeholder" style="{{materialDetail.fallbackStyle}}"></view>
+        <view class="material-detail-summary">
+          <view class="material-detail-name">{{materialDetail.name}}</view>
+          <view class="material-detail-price">{{materialDetail.priceText}}</view>
+        </view>
+        <view class="material-detail-section">
+          <view class="material-detail-section-title">简单介绍</view>
+          <view class="material-detail-introduction">{{materialDetail.introduction}}</view>
+        </view>
+        <view wx:if="{{materialDetail.story}}" class="material-detail-section">
+          <view class="material-detail-section-title">材质故事</view>
+          <view class="material-detail-introduction">{{materialDetail.story}}</view>
+        </view>
+        <view class="material-detail-section">
+          <view class="material-detail-section-title">核心功效</view>
+          <view wx:if="{{materialDetail.effects.length}}" class="material-detail-effects">
+            <text wx:for="{{materialDetail.effects}}" wx:key="*this" class="material-detail-effect">{{item}}</text>
           </view>
-        </scroll-view>
-      </view>
-      <view class="wrist-ruler-range">{{wristRulerRangeText}}</view>
-      <button class="wrist-ruler-confirm" catchtap="confirmWristRuler">确认手围</button>
+          <view wx:else class="material-detail-empty">暂无核心功效介绍</view>
+        </view>
+        <view class="material-detail-fields">
+          <view wx:for="{{materialDetail.fields}}" wx:key="label" class="material-detail-field">
+            <text class="material-detail-field-label">{{item.label}}</text>
+            <text class="material-detail-field-value">{{item.value}}</text>
+          </view>
+        </view>
+      </scroll-view>
+      <button class="material-detail-add" catchtap="addMaterialFromDetail">加入工作台</button>
     </view>
   </view>
+
+  <wrist-picker
+    visible="{{showWristPicker}}"
+    value="{{wristSize}}"
+    bindclose="closeWristSetting"
+    bindconfirm="confirmWristPickerComponent"
+  />
 
   <view wx:if="{{showWristGuideModal}}" class="wrist-guide-mask" bindtap="closeWristGuideModal">
     <view class="wrist-guide-sheet" catchtap="stopPropagation">
@@ -323,7 +302,10 @@
           <view class="wrist-guide-title">手围与工作台指南</view>
           <view class="wrist-guide-subtitle">先熟悉工作台按钮，再按需要查看手围测量。</view>
         </view>
-        <view class="wrist-guide-close" bindtap="closeWristGuideModal">×</view>
+        <view class="wrist-guide-head-actions">
+          <view wx:if="{{activeWristGuideTab === 'workspace'}}" class="wrist-guide-replay" catchtap="restartWorkspaceGuide">播放引导</view>
+          <view class="wrist-guide-close" bindtap="closeWristGuideModal">×</view>
+        </view>
       </view>
       <view class="wrist-guide-tabs">
         <view
@@ -407,6 +389,24 @@
         <text>分享给好友</text>
       </button>
       <button class="share-sheet-secondary" bindtap="closeShareSheet">继续编辑</button>
+    </view>
+  </view>
+
+  <view wx:if="{{showWorkspaceGuide}}" class="workspace-onboarding-mask">
+    <view class="workspace-onboarding-focus" style="{{workspaceGuideFocusStyle}}"></view>
+    <view class="workspace-onboarding-card guide-card-{{activeWorkspaceGuide.target}}" catchtap="stopPropagation">
+      <view class="workspace-onboarding-progress">
+        <view wx:for="{{workspaceGuideSteps}}" wx:key="target" class="workspace-onboarding-dot {{index === workspaceGuideStep ? 'active' : ''}}"></view>
+        <text>{{workspaceGuideStep + 1}} / {{workspaceGuideSteps.length}}</text>
+      </view>
+      <view class="workspace-onboarding-eyebrow">{{activeWorkspaceGuide.eyebrow}}</view>
+      <view class="workspace-onboarding-title">{{activeWorkspaceGuide.title}}</view>
+      <view class="workspace-onboarding-desc">{{activeWorkspaceGuide.desc}}</view>
+      <view class="workspace-onboarding-actions">
+        <view class="workspace-onboarding-skip" catchtap="dismissWorkspaceGuide" data-forever="true">跳过教程</view>
+        <button wx:if="{{activeWorkspaceGuide.target === 'wrist'}}" class="workspace-onboarding-next" catchtap="openWristSetting">设置腕围</button>
+        <button wx:else class="workspace-onboarding-next" catchtap="advanceWorkspaceGuide">{{workspaceGuideStep === workspaceGuideSteps.length - 1 ? '开始设计' : '下一步'}}</button>
+      </view>
     </view>
   </view>
 </view>

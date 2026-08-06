@@ -527,6 +527,9 @@ def enrich_materials_with_knowledge(
         }
         sizes = size_map.get(code) or unique_list([item.get("size")])
         top = str(item.get("top") or "")
+        # 珠子统一作为圆珠进入工作台；非珠子材料继续使用各自的形制参数。
+        if top == "bead":
+            material_params["bead_shape"] = "round"
         has_energy = top != "pendant"
         energy = {
             "primary_element": "" if not has_energy else normalize_element_key(
@@ -567,6 +570,7 @@ def enrich_materials_with_knowledge(
             "top": item.get("top") or "",
             "category": item.get("category") or "",
             "series": item.get("series") or item.get("name") or "",
+            "series_id": item.get("series_id") or "",
             "grade": item.get("grade") or "",
             "name": item.get("name") or knowledge.get("name") or "",
             "price_per_bead": float(item.get("price") or item.get("price_per_bead") or 0),

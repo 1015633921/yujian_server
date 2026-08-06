@@ -14,6 +14,8 @@ AFTER_SALE_MIGRATION_VERSION = "20260713_08_after_sale_cases"
 AFTER_SALE_RETURN_MIGRATION_VERSION = "20260714_09_after_sale_return_flow"
 MATERIAL_PHYSICAL_SPECS_MIGRATION_VERSION = "20260714_10_material_physical_specs"
 MATERIAL_TYPES_MIGRATION_VERSION = "20260715_11_material_types"
+AI_MATERIAL_MIGRATION_VERSION = "20260723_12_ai_material_annotations"
+WEB_LOGIN_MIGRATION_VERSION = "20260724_13_web_login_pairing"
 
 
 def columns(path, table: str) -> set[str]:
@@ -32,7 +34,16 @@ def test_receipt_completion_migration_backfills_signed_order_and_round_trips(tmp
     OrderService(db_path)
     AssessmentRepository(db_path)
     upgrade("sqlite", db_path)
-    assert downgrade("sqlite", db_path, steps=5) == [
+    assert downgrade("sqlite", db_path, steps=14) == [
+        "20260806_20_material_asset_versions",
+        "20260806_19_material_series_identity",
+        "20260806_18_custom_design_queue_indexes",
+        "20260806_17_custom_design_deposits",
+        "20260727_16_custom_design_workbench",
+        "20260727_15_report_codes",
+        "20260727_14_custom_design_service",
+        WEB_LOGIN_MIGRATION_VERSION,
+        AI_MATERIAL_MIGRATION_VERSION,
         MATERIAL_TYPES_MIGRATION_VERSION,
         MATERIAL_PHYSICAL_SPECS_MIGRATION_VERSION,
         AFTER_SALE_RETURN_MIGRATION_VERSION,
@@ -71,6 +82,14 @@ def test_receipt_completion_migration_backfills_signed_order_and_round_trips(tmp
         AFTER_SALE_RETURN_MIGRATION_VERSION,
         MATERIAL_PHYSICAL_SPECS_MIGRATION_VERSION,
         MATERIAL_TYPES_MIGRATION_VERSION,
+        AI_MATERIAL_MIGRATION_VERSION,
+        WEB_LOGIN_MIGRATION_VERSION,
+        "20260727_14_custom_design_service",
+        "20260727_15_report_codes",
+        "20260727_16_custom_design_workbench",
+
+        "20260806_17_custom_design_deposits",
+        "20260806_18_custom_design_queue_indexes",
     ]
     assert {"logistics_signed_at", "auto_complete_at"} <= columns(db_path, "orders")
     assert "idx_orders_auto_complete" in indexes(db_path, "orders")
@@ -89,7 +108,14 @@ def test_receipt_completion_migration_backfills_signed_order_and_round_trips(tmp
     assert migrated["auto_complete_at"] == row["auto_complete_at"]
     assert upgrade("sqlite", db_path) == []
 
-    assert downgrade("sqlite", db_path, steps=5) == [
+    assert downgrade("sqlite", db_path, steps=12) == [
+        "20260806_18_custom_design_queue_indexes",
+        "20260806_17_custom_design_deposits",
+        "20260727_16_custom_design_workbench",
+        "20260727_15_report_codes",
+        "20260727_14_custom_design_service",
+        WEB_LOGIN_MIGRATION_VERSION,
+        AI_MATERIAL_MIGRATION_VERSION,
         MATERIAL_TYPES_MIGRATION_VERSION,
         MATERIAL_PHYSICAL_SPECS_MIGRATION_VERSION,
         AFTER_SALE_RETURN_MIGRATION_VERSION,

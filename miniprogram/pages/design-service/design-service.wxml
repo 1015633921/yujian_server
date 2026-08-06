@@ -1,0 +1,98 @@
+<view class="page yu-page">
+  <view class="hero">
+    <view class="eyebrow">YU JIAN DESIGN SERVICE</view>
+    <view class="title">把测算方向，交给真实设计</view>
+    <view class="desc">设计师会结合你的佩戴偏好逐颗完成实际搭配，你可以原样载入工作台预览后再确认。</view>
+  </view>
+
+  <view wx:if="{{loading}}" class="state-card">正在读取你的服务进度…</view>
+
+  <block wx:elif="{{request}}">
+    <view class="status-card">
+      <view><view class="status-label">当前进度</view><view class="status-title">{{request.status_text}}</view></view>
+      <view class="status-id">{{request.request_id}}</view>
+    </view>
+    <view class="due-card" wx:if="{{request.first_draft_due_at}}">预计首稿：{{request.first_draft_due_at}}</view>
+
+    <view wx:if="{{request.proposals.length}}" class="section">
+      <view class="section-title">设计师方案</view>
+      <view wx:for="{{request.proposals}}" wx:key="proposal_id" class="proposal-card">
+        <view class="proposal-head"><view><view class="proposal-title">{{item.title}}</view><view class="proposal-version">第 {{item.proposal_version}} 版</view></view><view class="proposal-date">{{item.created_at}}</view></view>
+        <view class="proposal-desc">{{item.description}}</view>
+        <view wx:if="{{item.bead_count}}" class="proposal-structure">
+          <view class="structure-meta"><text>{{item.bead_count}} 颗</text><text>¥{{item.price_text}}</text></view>
+          <view class="structure-ring">
+            <image wx:for="{{item.preview_layout}}" wx:for-item="bead" wx:key="preview_key" class="structure-bead" src="{{bead.preview_image_url}}" mode="aspectFit" style="{{bead.preview_style}}"></image>
+          </view>
+        </view>
+        <scroll-view wx:if="{{item.image_urls.length}}" class="proposal-images" scroll-x enhanced show-scrollbar="{{false}}">
+          <image wx:for="{{item.image_urls}}" wx:key="*this" class="proposal-image" src="{{item}}" mode="aspectFill" data-url="{{item}}" bindtap="previewImage"></image>
+        </scroll-view>
+      </view>
+      <button wx:if="{{request.has_structured_proposal}}" class="workspace-action" bindtap="openProposalInWorkspace">在工作台查看设计师搭配</button>
+      <view wx:if="{{request.status === 'proposed'}}" class="proposal-actions">
+        <button class="secondary" bindtap="openRevision">想调整</button>
+        <button class="primary" bindtap="confirmProposal">确认并生成订单</button>
+      </view>
+    </view>
+    <view wx:else class="state-card">设计师正在逐颗完成真实材料搭配，完成后会在这里展示结构化方案。</view>
+  </block>
+
+  <view wx:elif="{{requestId}}" class="state-card">这条人工搭配记录不存在或已失效。<button class="empty-action" bindtap="goRequestList">返回搭配列表</button></view>
+
+  <view wx:elif="{{!reportId}}" class="state-card">你还没有人工搭配申请。完成测算后，可从报告页提交设计偏好。<button class="empty-action" bindtap="goAssessment">去测算</button></view>
+
+  <view wx:else class="form-card">
+    <view class="section-title">告诉设计师你的佩戴偏好</view>
+    <view class="form-hint">报告中的搭配方向会保留在你的账户里；此处只收集你希望怎么佩戴。</view>
+    <view class="field"><text>手围</text><view class="select-picker" bindtap="openWristPicker"><view class="select-value">{{form.wrist_size_cm}} cm<text class="select-arrow">⌄</text></view></view><view class="field-tip">与 DIY 工作台使用同一手围软尺</view></view>
+    <view class="field"><text>珠径</text><picker class="select-picker" mode="selector" range="{{beadSizeOptions}}" value="{{beadSizeIndex}}" bindchange="onBeadSizeChange"><view class="select-value">{{form.bead_size_mm}} mm<text class="select-arrow">⌄</text></view></picker><view class="field-tip">可选 6–16mm</view></view>
+    <view class="field"><text>预算</text><picker class="select-picker" mode="selector" range="{{budgetOptions}}" value="{{budgetIndex}}" bindchange="onBudgetChange"><view class="select-value">{{form.budget}}<text class="select-arrow">⌄</text></view></picker></view>
+    <view class="field"><text>风格</text><view class="chips"><view wx:for="{{['清透自然','高级极简','温柔治愈','东方禅意']}}" wx:key="*this" class="chip {{form.style_preference === item ? 'active' : ''}}" data-field="style_preference" data-value="{{item}}" bindtap="chooseOption">{{item}}</view></view></view>
+    <view class="field"><text>色彩偏好（可选）</text><input placeholder="例如：蓝白、低饱和、不要深色" value="{{form.color_preference}}" data-field="color_preference" bindinput="onFieldInput" /></view>
+    <view class="field"><text>备注（可选）</text><textarea placeholder="例如：想要少量银饰，平时通勤佩戴" value="{{form.note}}" data-field="note" bindinput="onFieldInput" maxlength="500" /></view>
+    <button class="primary submit" loading="{{submitting}}" disabled="{{submitting}}" bindtap="submitRequest">提交人工搭配申请</button>
+    <view class="service-note">提交后预计 24 小时内出首稿；确认方案时系统会再次核对价格和库存，并生成待支付订单。</view>
+  </view>
+
+  <view wx:if="{{revisionOpen}}" class="mask" bindtap="closeRevision">
+    <view class="revision-card" catchtap="noop">
+      <view class="section-title">想调整哪里？</view>
+      <form bindsubmit="submitRevision"><textarea name="revision" placeholder="例如：颜色太深、想减少金属配饰、希望更日常" maxlength="500" auto-focus="{{true}}"></textarea><view class="proposal-actions"><button class="secondary" bindtap="closeRevision">取消</button><button class="primary" form-type="submit">提交调整</button></view></form>
+    </view>
+  </view>
+
+  <view wx:if="{{confirmationOpen}}" class="mask confirm-mask" bindtap="closeConfirmation">
+    <view class="confirm-card" catchtap="noop">
+      <view class="confirm-head">
+        <view><view class="confirm-eyebrow">FINAL CHECK</view><view class="section-title">确认设计师实物搭配</view></view>
+        <view class="confirm-close" bindtap="closeConfirmation">×</view>
+      </view>
+      <view class="confirm-hint">以下均为本方案选中的真实图库素材。确认后会按当前价格锁定库存并生成待支付订单。</view>
+      <view class="confirm-ring">
+        <image wx:for="{{request.confirmation_proposal.preview_layout}}" wx:for-item="bead" wx:key="preview_key" class="confirm-bead" src="{{bead.preview_image_url}}" mode="aspectFit" style="{{bead.preview_style}}"></image>
+      </view>
+      <view class="confirm-summary">
+        <text>{{request.confirmation_proposal.bead_count}} 颗 · 手围 {{request.confirmation_proposal.workbench.wrist_size_cm}} cm</text>
+        <text class="confirm-price">¥{{request.confirmation_proposal.price_text}}</text>
+      </view>
+      <scroll-view class="confirm-materials" scroll-x enhanced show-scrollbar="{{false}}">
+        <view wx:for="{{request.confirmation_proposal.preview_layout}}" wx:for-item="bead" wx:key="preview_key" class="confirm-material">
+          <image src="{{bead.preview_image_url}}" mode="aspectFit"></image>
+          <text>{{bead.name || bead.series || '搭配材料'}}</text>
+        </view>
+      </scroll-view>
+      <view class="proposal-actions confirm-actions">
+        <button class="secondary" disabled="{{confirming}}" bindtap="closeConfirmation">再看看</button>
+        <button class="primary" loading="{{confirming}}" disabled="{{confirming}}" bindtap="submitProposalConfirmation">确认并去支付</button>
+      </view>
+    </view>
+  </view>
+
+  <wrist-picker
+    visible="{{wristPickerOpen}}"
+    value="{{form.wrist_size_cm}}"
+    bindclose="closeWristPicker"
+    bindconfirm="confirmWristPicker"
+  />
+</view>

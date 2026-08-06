@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 RELEASE_VERSION="${RELEASE_VERSION:?set RELEASE_VERSION, for example v20260712-001}"
 IMAGE_REPOSITORY="${IMAGE_REPOSITORY:?set IMAGE_REPOSITORY without a tag}"
-VCS_REF="${VCS_REF:-$(git -C "${ROOT}" rev-parse HEAD)}"
+BUILD_CONTEXT_HASH="${BUILD_CONTEXT_HASH:?set BUILD_CONTEXT_HASH to the backend build-context sha256}"
 MODE="${1:---load}"
 
 if [[ ! "${RELEASE_VERSION}" =~ ^v[0-9]{8}-[0-9]{3}(-[a-z0-9.-]+)?$ ]]; then
@@ -24,18 +24,26 @@ IMAGE_TAG="${IMAGE_REPOSITORY}:${RELEASE_VERSION}"
 METADATA_FILE="$(mktemp)"
 trap 'rm -f "${METADATA_FILE}"' EXIT
 
-docker buildx build "${ROOT}" \
-  --file "${ROOT}/Dockerfile" \
-  --platform "${TARGET_PLATFORM:-linux/amd64}" \
-  --tag "${IMAGE_TAG}" \
-  --build-arg "RELEASE_VERSION=${RELEASE_VERSION}" \
-  --build-arg "VCS_REF=${VCS_REF}" \
-  --provenance=false \
-  --sbom=false \
-  --metadata-file "${METADATA_FILE}" \
-  "${MODE}"
+build_args=(
+  --file "${ROOT}/Dockerfile"
+  --platform "${TARGET_PLATFORM:-linux/amd64}"
+  --tag "${IMAGE_TAG}"
+  --build-arg "BUILD_CONTEXT_HASH=${BUILD_CONTEXT_HASH}"
+  --provenance=false
+  --sbom=false
+  --metadata-file "${METADATA_FILE}"
+)
+if [[ -n "${BUILD_CACHE_FROM:-}" ]]; then
+  build_args+=(--cache-from "${BUILD_CACHE_FROM}")
+fi
+if [[ -n "${BUILD_CACHE_TO:-}" ]]; then
+  build_args+=(--cache-to "${BUILD_CACHE_TO}")
+fi
+build_args+=("${MODE}" "${ROOT}")
 
-echo "built ${IMAGE_TAG} from ${VCS_REF}"
+docker buildx build "${build_args[@]}"
+
+echo "built ${IMAGE_TAG} from backend context ${BUILD_CONTEXT_HASH}"
 if [[ "${MODE}" == "--push" ]]; then
   immutable_image="$(python3 - "${METADATA_FILE}" "${IMAGE_REPOSITORY}" <<'PY'
 import json

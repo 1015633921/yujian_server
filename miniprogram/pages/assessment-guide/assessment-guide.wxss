@@ -91,8 +91,7 @@ page {
   min-height: 72rpx;
 }
 
-.guide-back,
-.guide-nav-mark {
+.guide-back {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -115,14 +114,6 @@ page {
   text-align: center;
   font-size: 28rpx;
   font-weight: 700;
-}
-
-.guide-nav-mark {
-  justify-self: end;
-  color: var(--yu-color-green);
-  font-size: 18rpx;
-  font-weight: 800;
-  letter-spacing: 1rpx;
 }
 
 .guide-hero {

@@ -39,27 +39,6 @@ page {
   font-weight: 800;
 }
 
-.nav-capsule {
-  justify-self: end;
-  display: flex;
-  align-items: center;
-  gap: 16rpx;
-  height: 54rpx;
-  padding: 0 18rpx;
-  border: var(--yu-line-hair);
-  border-radius: 999rpx;
-  color: #171917;
-  background: rgba(255,255,255,.78);
-  box-shadow: var(--yu-shadow-press);
-  font-size: 25rpx;
-  font-weight: 900;
-}
-
-.capsule-dot {
-  padding-left: 14rpx;
-  border-left: var(--yu-line-hair);
-}
-
 .mode-heading {
   margin-top: 34rpx;
   text-align: center;

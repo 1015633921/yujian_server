@@ -2,10 +2,6 @@
   <view class="community-nav">
     <view class="nav-back yu-pressable" bindtap="goBack">‹</view>
     <view class="nav-title">灵感库</view>
-    <view class="nav-tools">
-      <view class="nav-dot">•••</view>
-      <view class="nav-circle"></view>
-    </view>
   </view>
 
   <view class="search-card yu-card">

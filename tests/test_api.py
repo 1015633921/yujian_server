@@ -81,6 +81,24 @@ def ensure_material_taxonomy(service, category: str, series: str, top: str = "be
     service.save_material_series({"category_id": saved_category["id"], "name": series})
 
 
+def test_public_material_payload_honors_category_sort_order(monkeypatch):
+    from app import materials as materials_module
+
+    monkeypatch.setattr(
+        materials_module,
+        "list_db_material_facets",
+        lambda: [
+            {"top": "accessory", "category": "后置分类", "series": "A", "name": "A", "category_sort_order": 30},
+            {"top": "accessory", "category": "前置分类", "series": "B", "name": "B", "category_sort_order": 10},
+            {"top": "accessory", "category": "中间分类", "series": "C", "name": "C", "category_sort_order": 20},
+        ],
+    )
+
+    payload = materials_module.build_material_payload([], {"version": "test", "updated_at": ""})
+
+    assert payload["categories_by_top"]["accessory"] == ["全部", "前置分类", "中间分类", "后置分类"]
+
+
 def test_options_support_form_rendering():
     response = client.get("/api/v1/assessment/options")
     assert response.status_code == 200
@@ -137,6 +155,22 @@ def test_workspace_material_catalog_supports_paged_slim_payload():
                 assert item["id"] in [material["id"] for material in alias_data["materials"]]
 
 
+def test_workspace_material_sort_groups_same_style_and_orders_by_size():
+    from app.materials import sort_materials_for_customer
+
+    materials = [
+        {"id": "rose-12", "top": "accessory", "category": "隔珠", "series": "玫瑰花纹", "material_code": "rose", "size": 12},
+        {"id": "cross-8", "top": "accessory", "category": "隔珠", "series": "十字花纹", "material_code": "cross", "size": 8},
+        {"id": "rose-8", "top": "accessory", "category": "隔珠", "series": "玫瑰花纹", "material_code": "rose", "size": 8},
+        {"id": "rose-plated-9", "top": "accessory", "category": "隔珠", "series": "玫瑰花纹", "material_code": "rose-plated", "size": 9},
+        {"id": "rose-10", "top": "accessory", "category": "隔珠", "series": "玫瑰花纹", "material_code": "rose", "size": 10},
+    ]
+
+    sorted_ids = [item["id"] for item in sort_materials_for_customer(materials)]
+
+    assert sorted_ids == ["cross-8", "rose-8", "rose-plated-9", "rose-10", "rose-12"]
+
+
 def test_production_material_catalog_does_not_fall_back_to_demo_inventory(monkeypatch):
     from app import materials as materials_module
 
@@ -185,7 +219,7 @@ def test_slim_material_preserves_image_url_pool_for_workspace_randomization():
     })
 
     assert material["image_url"] == image_urls[0]
-    assert material["image_urls"] == image_urls
+    assert material["image_urls"] == [image_urls[1]]
 
 
 def test_admin_material_options_expose_field_governance_specs(tmp_path):
@@ -318,7 +352,7 @@ def test_pendant_material_allows_blank_primary_element(tmp_path):
             "series": "银色花托",
             "name": "银色花托",
             "effects": ["focus"],
-            "price_per_bead": 0.01,
+            "price_per_bead": 1,
             "size_mm": 8,
             "weight_g": 1,
             "stock": 5,
@@ -524,6 +558,42 @@ def test_admin_material_spu_search_has_stable_tie_breakers(tmp_path):
     assert [item["sku"]["series"] for item in first["items"]] == ["Alpha Phantom", "Middle Phantom"]
     assert [item["sku"]["series"] for item in second["items"]] == ["Zulu Phantom"]
     assert [item["key"] for item in repeated["items"]] == [item["key"] for item in first["items"]]
+
+
+def test_admin_material_spu_list_uses_batched_hydration_not_single_sku_queries(tmp_path, monkeypatch):
+    """A paged list must not regress to taxonomy/knowledge queries per SKU."""
+    from app.admin_service import AdminService
+
+    service = AdminService(tmp_path / "material-spu-batch-hydration.db")
+    ensure_material_taxonomy(service, "batch-gem", "Batch Gem")
+    for size in (8, 10, 12):
+        service.save_material(
+            {
+                "id": f"batch_gem_{size}",
+                "skuId": f"batch_gem_{size}",
+                "material_code": "batch_gem",
+                "top": "bead",
+                "category": "batch-gem",
+                "series": "Batch Gem",
+                "name": "Batch Gem",
+                "primary_element": "water",
+                "effects": ["focus"],
+                "price_per_bead": 10,
+                "size_mm": size,
+                "weight_g": 1,
+                "stock": 10,
+            }
+        )
+
+    def fail_if_single_row_hydration_is_used(*_args, **_kwargs):
+        raise AssertionError("list endpoint must use public_materials() batch hydration")
+
+    monkeypatch.setattr(service, "public_material", fail_if_single_row_hydration_is_used)
+    page = service.list_material_spus(keyword="Batch Gem", include_facets=True, page=1, page_size=20)
+
+    assert page["pagination"]["total"] == 1
+    assert page["items"][0]["spu"]["sku_count"] == 3
+    assert page["facets"]["category"] == [{"value": "batch-gem", "count": 1}]
 
 
 def test_admin_material_saves_structured_knowledge_without_legacy_required_fields(tmp_path):
@@ -826,8 +896,63 @@ def test_admin_material_accepts_multiple_image_urls(tmp_path):
     assert saved["image_urls"] == [
         "https://cdn-test.yustream.cn/materials/beads/b.png",
         "https://cdn-test.yustream.cn/materials/beads/c.png",
-        "https://cdn-test.yustream.cn/materials/beads/a.png",
     ]
+
+
+def test_material_spu_supports_sku_search_asset_profile_facets_and_test_price_guard(tmp_path):
+    from app.admin_service import AdminService
+
+    service = AdminService(tmp_path / "material-spu-facets.db")
+    ensure_material_taxonomy(service, "筛选晶石", "筛选珠")
+    with pytest.raises(ValueError, match="不能直接启用销售"):
+        service.save_material(
+            {
+                "id": "test-price-guard",
+                "skuId": "TEST-SKU-0001",
+                "top": "bead",
+                "category": "筛选晶石",
+                "series": "筛选珠",
+                "name": "筛选珠 8mm",
+                "price": 0.01,
+                "size": 8,
+                "weight": 1,
+                "stock": 5,
+                "enabled": True,
+            }
+        )
+    service.save_material(
+        {
+            "id": "facet-sku-8",
+            "skuId": "20000000008",
+            "top": "bead",
+            "category": "筛选晶石",
+            "series": "筛选珠",
+            "name": "筛选珠 8mm",
+            "primary_element": "water",
+            "effects": ["calm"],
+            "match_rules": ["no_limit"],
+            "price": 10,
+            "size": 8,
+            "weight": 1,
+            "stock": 5,
+            "enabled": True,
+        }
+    )
+
+    result = service.list_material_spus(
+        keyword="20000000008",
+        asset_state="missing_primary",
+        profile_state="complete",
+        include_facets=True,
+        page=1,
+        page_size=20,
+    )
+
+    assert result["pagination"]["total"] == 1
+    assert result["items"][0]["assetState"] == "missing_primary"
+    assert result["items"][0]["profileState"] == "complete"
+    assert {item["value"] for item in result["facets"]["asset_state"]} == {"missing_primary"}
+    assert {item["value"] for item in result["facets"]["profile_state"]} == {"complete"}
 
 
 def test_material_cdn_url_deduplicates_materials_prefix(monkeypatch):
@@ -1006,9 +1131,12 @@ def test_order_rejects_legacy_zero_price_without_snapshot(tmp_path, monkeypatch)
             "size": 8,
             "weight": 1,
             "stock": 10,
-            "enabled": True,
+            "enabled": False,
         }
     )
+    # Simulate a legacy record created before the test-price publishing guard.
+    with admin.connect() as connection:
+        connection.execute("UPDATE managed_materials SET enabled=1 WHERE id=?", (saved["id"],))
     migrate_order_integrity(db_path)
     service = OrderService(db_path)
     service.get_user = lambda _user_id: None
@@ -1157,7 +1285,6 @@ def test_order_material_snapshot_survives_material_update_and_delete(tmp_path, m
         assert item["price"] == "8.80"
         assert item["image_url"].endswith("/original.png")
         assert item["image_urls"] == [
-            "https://cdn-test.yustream.cn/materials/beads/original.png",
             "https://cdn-test.yustream.cn/materials/beads/original-side.png",
         ]
         assert bom["name"] == "Original Snapshot Bead"
@@ -2125,7 +2252,15 @@ def test_two_step_energy_to_diy_workbench_flow():
     assert recommendation_data["next_step"]["action"] == "navigate_to_diy_workbench"
     assert recommendation_data["workbench_payload"]["wrist_size_cm"] == 16.5
     plan = recommendation_data["workbench_payload"]["bracelet_plan"]
+    plans = recommendation_data["workbench_payload"]["bracelet_plans"]
     assert plan["layout"]
+    assert len(plans) == 3
+    assert {item["style"] for item in plans} == {
+        "daily_minimal",
+        "balanced_layers",
+        "signature_accent",
+    }
+    assert plan["plan_id"] == next(item["plan_id"] for item in plans if item["is_recommended"])
     assert plan["validation"]["is_valid"] is True
     assert all(check["passed"] for check in plan["validation"]["checks"])
 

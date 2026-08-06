@@ -67,6 +67,46 @@ test('workspace back always returns to home and relaunches on switch failure', (
   ]);
 });
 
+test('custom navigation does not render controls underneath the native capsule', () => {
+  const root = path.resolve(__dirname, '../..');
+  const workspaceWxml = fs.readFileSync(
+    path.join(root, 'miniprogram/pages/workspace/workspace.wxml'),
+    'utf8'
+  );
+  const workspaceWxss = fs.readFileSync(
+    path.join(root, 'miniprogram/pages/workspace/workspace.wxss'),
+    'utf8'
+  );
+  const decorativeCapsulePages = [
+    'miniprogram/pages/community/community.wxml',
+    'miniprogram/pages/community-detail/community-detail.wxml',
+    'miniprogram/pages/custom-mode/custom-mode.wxml',
+    'miniprogram/pages/assessment-guide/assessment-guide.wxml'
+  ];
+  const arSource = fs.readFileSync(
+    path.join(root, 'miniprogram/package-ar/pages/ar-tryon/ar-tryon.js'),
+    'utf8'
+  );
+  const arTemplate = fs.readFileSync(
+    path.join(root, 'miniprogram/package-ar/pages/ar-tryon/ar-tryon.wxml'),
+    'utf8'
+  );
+  const arStyles = fs.readFileSync(
+    path.join(root, 'miniprogram/package-ar/pages/ar-tryon/ar-tryon.wxss'),
+    'utf8'
+  );
+
+  assert.doesNotMatch(workspaceWxml, /aria-label="更多操作"|class="more-btn"/);
+  assert.doesNotMatch(workspaceWxss, /\.more-btn|\.more-dot/);
+  decorativeCapsulePages.forEach(relativePath => {
+    const template = fs.readFileSync(path.join(root, relativePath), 'utf8');
+    assert.doesNotMatch(template, /class="(?:nav-tools|nav-capsule|guide-nav-mark)"/);
+  });
+  assert.match(arSource, /getMenuButtonBoundingClientRect/);
+  assert.match(arTemplate, /--capsule-safe-right: \{\{capsuleSafeRight\}\}px/);
+  assert.match(arStyles, /padding:\s*var\(--safe-top\)\s+var\(--capsule-safe-right\)/);
+});
+
 test('existing assessment report shows a transition before navigation', () => {
   const page = loadPage('miniprogram/pages/assessment/assessment.js');
   const storage = {
@@ -150,4 +190,59 @@ test('home tab navigation relaunches the requested tab when switching fails', ()
     ['switchTab', '/pages/profile/profile'],
     ['reLaunch', '/pages/profile/profile']
   ]);
+});
+
+test('assessment keeps its page navigation above the step action dock', () => {
+  const root = path.resolve(__dirname, '../..');
+  const assessmentWxml = fs.readFileSync(
+    path.join(root, 'miniprogram/pages/assessment/assessment.wxml'),
+    'utf8'
+  );
+  const assessmentWxss = fs.readFileSync(
+    path.join(root, 'miniprogram/pages/assessment/assessment.wxss'),
+    'utf8'
+  );
+  const page = loadPage('miniprogram/pages/assessment/assessment.js');
+  const calls = [];
+  const instance = Object.assign({}, page, {
+    data: { ...page.data, submitting: false }
+  });
+  global.wx = {
+    switchTab(options) {
+      calls.push(['switchTab', options.url]);
+    },
+    navigateTo(options) {
+      calls.push(['navigateTo', options.url]);
+    }
+  };
+
+  instance.goToPage({ currentTarget: { dataset: { url: '/pages/home/home' } } });
+  instance.goToPage({ currentTarget: { dataset: { url: '/pages/my-plans/my-plans' } } });
+
+  assert.deepEqual(calls, [
+    ['switchTab', '/pages/home/home'],
+    ['navigateTo', '/pages/my-plans/my-plans']
+  ]);
+  assert.match(assessmentWxml, /class="lab-tabbar"/);
+  assert.match(assessmentWxml, /aria-label="测算，当前页"/);
+  assert.match(assessmentWxml, /data-url="\/pages\/home\/home"/);
+  assert.match(assessmentWxss, /--assessment-fixed-reserve/);
+  assert.match(assessmentWxss, /\.assessment-bottom\s*\{[\s\S]*?bottom: calc\(/);
+  assert.match(assessmentWxss, /\.lab-tabbar\s*\{[\s\S]*?position: fixed;/);
+});
+
+test('report layers provide a one-tap route back to the home tab', () => {
+  const report = loadPage('miniprogram/pages/report/report.js');
+  const basis = loadPage('miniprogram/pages/report-basis/report-basis.js');
+  const calls = [];
+  global.wx = {
+    switchTab(options) {
+      calls.push(options.url);
+    }
+  };
+
+  report.goHome();
+  basis.goHome();
+
+  assert.deepEqual(calls, ['/pages/home/home', '/pages/home/home']);
 });

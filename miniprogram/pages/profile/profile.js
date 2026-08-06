@@ -605,6 +605,14 @@ Page({
     wx.navigateTo({ url: '/pages/my-plans/my-plans' });
   },
 
+  viewCustomDesignRequests() {
+    if (!this.data.isLoggedIn) {
+      wx.showToast({ title: '请先登录后查看服务进度', icon: 'none' });
+      return;
+    }
+    wx.navigateTo({ url: '/subpackages/design/pages/design-service-list/design-service-list' });
+  },
+
   viewCommunityFavorites() {
     wx.navigateTo({ url: '/pages/community-favorites/community-favorites' });
   },

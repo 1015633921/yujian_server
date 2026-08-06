@@ -1,0 +1,14 @@
+{
+  "model_version": "bracelet-fit-v3",
+  "cases": [
+    {
+      "name": "16cm wrist with 24 8mm round beads",
+      "items": [8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8],
+      "wrist_size_cm": 16,
+      "allowance_mm": 8,
+      "expected_inner_mm": 167.416668,
+      "expected_status": "fit",
+      "expected_recommended_count": 24
+    }
+  ]
+}

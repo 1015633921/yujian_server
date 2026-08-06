@@ -19,9 +19,10 @@ from urllib.parse import parse_qs, urlencode, urlsplit, urlunsplit
 import httpx
 
 from .repository import DB_PATH
+from .bracelet_sizing import BRACELET_FIT_MODEL_VERSION, calculate_bracelet_fit
 from .database import connect_database, integrity_errors, runtime_schema_mutation_allowed, use_mysql
 from .feature_flags import kuaidi100_subscribe_enabled, mock_trade_enabled, payment_enabled
-from .materials import clean_image_urls, fetch_db_series_assets, series_asset_key
+from .materials import clean_gallery_image_urls, fetch_db_series_assets, series_asset_key
 from .money import stored_cents
 from .observability import current_request_id, log_event, metrics
 
@@ -271,6 +272,13 @@ class WechatPayConfig:
     def test_mode(self) -> bool:
         return mock_trade_enabled()
 
+    @property
+    def test_amount_mode(self) -> bool:
+        return os.getenv("APP_ENV", "").strip().lower() in {"test", "testing"}
+
+    def settlement_fee(self, amount_fee: int) -> int:
+        return 1 if self.test_amount_mode else int(amount_fee)
+
     def platform_cert_bytes(self) -> bytes | None:
         if self.platform_cert_text:
             return self.platform_cert_text.replace("\\n", "\n").encode("utf-8")
@@ -284,6 +292,11 @@ class WechatPayConfig:
         if self.public_key_path and Path(self.public_key_path).exists():
             return Path(self.public_key_path).read_bytes()
         return None
+
+
+def settlement_fee_for_config(config: Any, amount_fee: int) -> int:
+    settlement_fee = getattr(config, "settlement_fee", None)
+    return settlement_fee(amount_fee) if callable(settlement_fee) else int(amount_fee)
 
 
 class Kuaidi100Config:
@@ -1008,6 +1021,36 @@ class OrderService:
         ]
 
     def create_order(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._create_order(
+            payload,
+            initiate_payment=True,
+            require_receiver=True,
+        )
+
+    def create_pending_order(
+        self,
+        payload: dict[str, Any],
+        *,
+        validate_bracelet_fit: bool = True,
+    ) -> dict[str, Any]:
+        """Create an inventory-reserved order without opening a payment session."""
+        return self._create_order(
+            payload,
+            initiate_payment=False,
+            require_receiver=False,
+            reservation_ttl_seconds=self.custom_design_order_reservation_ttl_seconds(),
+            validate_bracelet_fit=validate_bracelet_fit,
+        )
+
+    def _create_order(
+        self,
+        payload: dict[str, Any],
+        *,
+        initiate_payment: bool,
+        require_receiver: bool,
+        reservation_ttl_seconds: int | None = None,
+        validate_bracelet_fit: bool = True,
+    ) -> dict[str, Any]:
         user_id = str(payload.get("user_id") or "").strip()
         if not user_id:
             raise ValueError("user_id 不能为空")
@@ -1016,7 +1059,12 @@ class OrderService:
         replay = self.resolve_idempotent_order(user_id, idempotency_key, request_hash, wait=False)
         if replay:
             return replay
-        receiver = self.normalize_order_receiver(payload.get("receiver") or {})
+        receiver_payload = payload.get("receiver") or {}
+        receiver = (
+            self.normalize_order_receiver(receiver_payload)
+            if require_receiver or receiver_payload
+            else {}
+        )
         design = payload.get("design") or {}
         design_id = str(payload.get("design_id") or design.get("design_id") or "").strip()
         sequence = payload.get("sequence") or []
@@ -1024,7 +1072,10 @@ class OrderService:
             raise ValueError("订单材料不能为空")
         user = self.get_user(user_id) or {}
         timestamp = now_iso()
-        expires_at = self.reservation_expiry(timestamp)
+        expires_at = self.reservation_expiry(
+            timestamp,
+            ttl_seconds=reservation_ttl_seconds,
+        )
         history = [{"status": "pending_payment", "label": "订单已创建，等待支付", "time": timestamp}]
         order_id = generate_numeric_order_no()
 
@@ -1040,6 +1091,8 @@ class OrderService:
                     (user_id, idempotency_key, request_hash, timestamp, timestamp),
                 )
                 snapshots, reservations = self.lock_validate_and_snapshot_items(connection, sequence)
+                if validate_bracelet_fit:
+                    design = self.validate_and_snapshot_bracelet_fit(design, snapshots)
                 total_fee = sum(int(item["subtotal_cents"]) for item in snapshots)
                 if total_fee <= 0:
                     raise OrderPricingError("订单金额无效，订单未创建")
@@ -1121,6 +1174,13 @@ class OrderService:
             raise OrderConflictError("订单请求冲突，请勿重复提交") from exc
 
         order = self.get_order(order_id)
+        if not initiate_payment:
+            self.complete_order_request(user_id, idempotency_key)
+            return {
+                "order": order,
+                "payment": {},
+                "idempotent_replay": False,
+            }
         try:
             payment = self.create_wechat_payment(order)
         except Exception:
@@ -1160,9 +1220,25 @@ class OrderService:
         return max(60, min(configured, 24 * 60 * 60))
 
     @classmethod
-    def reservation_expiry(cls, created_at: str) -> str:
+    def reservation_expiry(
+        cls,
+        created_at: str,
+        *,
+        ttl_seconds: int | None = None,
+    ) -> str:
         created = datetime.fromisoformat(created_at)
-        return (created + timedelta(seconds=cls.reservation_ttl_seconds())).isoformat()
+        seconds = cls.reservation_ttl_seconds() if ttl_seconds is None else int(ttl_seconds)
+        return (created + timedelta(seconds=seconds)).isoformat()
+
+    @staticmethod
+    def custom_design_order_reservation_ttl_seconds() -> int:
+        try:
+            configured = int(
+                os.getenv("CUSTOM_DESIGN_ORDER_RESERVATION_TTL_SECONDS", "86400")
+            )
+        except ValueError:
+            configured = 86400
+        return max(15 * 60, min(configured, 24 * 60 * 60))
 
     @staticmethod
     def cents_text(cents: int) -> str:
@@ -1257,10 +1333,75 @@ class OrderService:
             raise OrderPriceChangedError("价格已更新，请确认") from exc
         return int(rounded * 100)
 
+    @staticmethod
+    def requested_wrist_size_cm(design: dict[str, Any]) -> float | None:
+        if not isinstance(design, dict):
+            return None
+        summary = design.get("summary") if isinstance(design.get("summary"), dict) else {}
+        for value in (
+            design.get("wristSize"),
+            design.get("wrist_size"),
+            design.get("wrist_size_cm"),
+            summary.get("wristSize"),
+            summary.get("wrist_size"),
+            summary.get("wrist_size_cm"),
+        ):
+            try:
+                wrist_size_cm = float(value)
+            except (TypeError, ValueError):
+                continue
+            if 10 <= wrist_size_cm <= 25:
+                return wrist_size_cm
+        return None
+
+    @classmethod
+    def validate_and_snapshot_bracelet_fit(
+        cls,
+        design: dict[str, Any],
+        sequence: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        if not isinstance(design, dict):
+            return design
+        wrist_size_cm = cls.requested_wrist_size_cm(design)
+        if wrist_size_cm is None:
+            return design
+        fit = calculate_bracelet_fit(
+            sequence,
+            wrist_size_cm,
+            allowance_mm=8,
+            tolerance_mm=5,
+            min_count=8,
+            max_count=40,
+        )
+        status = fit["status"]
+        if status != "fit":
+            messages = {
+                "short": "当前方案腕围偏短，请返回工作台调整后再提交",
+                "long": "当前方案腕围偏长，请返回工作台调整后再提交",
+                "unverifiable": "当前方案缺少完整物理规格，请返回工作台确认材料",
+                "empty": "当前方案缺少可串接材料，请返回工作台调整",
+            }
+            raise OrderPricingError(messages.get(status, "当前方案腕围校验失败，请返回工作台调整"))
+        summary = dict(design.get("summary") or {})
+        summary.update({
+            "wristSize": wrist_size_cm,
+            "length": f"{fit['actual_inner_mm'] / 10:.1f}",
+            "currentWrist": f"{max(0.0, fit['actual_inner_mm'] / 10 - fit['allowance_mm'] / 10):.1f}",
+            "warning": "合适",
+            "fitStatus": status,
+            "fitErrorMm": round(float(fit["error_mm"]), 3),
+            "sizingModelVersion": BRACELET_FIT_MODEL_VERSION,
+            "targetInnerMm": round(float(fit["target_inner_mm"]), 3),
+            "actualInnerMm": round(float(fit["actual_inner_mm"]), 3),
+        })
+        return {**design, "summary": summary}
+
     def lock_validate_and_snapshot_items(
         self,
         connection,
         sequence: list[dict[str, Any]],
+        *,
+        include_validation_metadata: bool = False,
     ) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]]:
         self.validate_attachment_sequence(sequence)
         requested: list[tuple[dict[str, Any], str, int]] = []
@@ -1315,11 +1456,28 @@ class OrderService:
             client_cents = self.client_price_cents(item)
             if client_cents is not None and client_cents != unit_cents:
                 changed.append(str(material.get("name") or reference))
+            selected_image_url = str(
+                item.get("selected_image_url")
+                or ((item.get("placement") or {}).get("image_url") if isinstance(item.get("placement"), dict) else "")
+                or ""
+            ).strip()
+            gallery_image_urls = clean_gallery_image_urls(
+                material.get("image_urls_json"),
+                material.get("image_url") or "",
+                top=material.get("top") or "",
+            )
+            if selected_image_url and selected_image_url not in gallery_image_urls:
+                raise OrderPricingError(
+                    f"材料图库已更新，请重新确认：{material.get('name') or reference}"
+                )
             material_id = str(material.get("id") or "").strip()
             sku_code = str(material.get("skuId") or material_id).strip()
             if not material_id:
                 raise OrderPricingError("SKU 数据不完整，订单未创建")
             subtotal_cents = unit_cents * quantity
+            physical_specs = self.loads(material.get("physical_specs_json") or "", {})
+            if not isinstance(physical_specs, dict):
+                physical_specs = {}
             snapshot = {
                 **{
                     key: value
@@ -1337,10 +1495,10 @@ class OrderService:
                 "element": material.get("element") or "",
                 "size": material.get("size") or 0,
                 "image_url": material.get("image_url") or "",
-                "image_urls": clean_image_urls(
+                "image_urls": clean_gallery_image_urls(
                     material.get("image_urls_json"),
                     material.get("image_url") or "",
-                    material.get("image_path") or "",
+                    top=material.get("top") or "",
                 ),
                 "quantity": quantity,
                 "unit_price_cents": unit_cents,
@@ -1350,6 +1508,13 @@ class OrderService:
                 "subtotal": self.cents_text(subtotal_cents),
                 "price_version": str(material.get("updated_at") or ""),
             }
+            if physical_specs:
+                snapshot["physical_specs"] = physical_specs
+            if selected_image_url:
+                snapshot["selected_image_url"] = selected_image_url
+            if include_validation_metadata:
+                snapshot["gallery_image_urls"] = gallery_image_urls
+                snapshot["top"] = material.get("top") or "bead"
             snapshots.append(snapshot)
             reservation = reservations.setdefault(
                 material_id,
@@ -1419,7 +1584,7 @@ class OrderService:
             f"""
             SELECT id, skuId, top, category, series, grade, name, effect, element,
                    price_cents, size, weight, color, shine, image_path, image_url,
-                   image_urls_json, stock, reserved_stock, enabled, updated_at
+                   image_urls_json, physical_specs_json, stock, reserved_stock, enabled, updated_at
             FROM managed_materials
             WHERE id IN ({marks}) OR skuId IN ({marks})
             ORDER BY id{lock_clause}
@@ -1711,7 +1876,7 @@ class OrderService:
             "description": "宇涧水晶 DIY 手串",
             "out_trade_no": order["out_trade_no"],
             "notify_url": config.notify_url,
-            "amount": {"total": int(order["total_fee"]), "currency": order["currency"]},
+            "amount": {"total": settlement_fee_for_config(config, order["total_fee"]), "currency": order["currency"]},
             "payer": {"openid": order["openid"]},
         }
         url_path = "/v3/pay/transactions/jsapi"
@@ -1743,6 +1908,7 @@ class OrderService:
             raise ValueError("订单已超时，请重新确认价格与库存")
         if order["status"] != "pending_payment" or order["payment_status"] != "unpaid":
             raise ValueError("当前订单状态不能继续支付")
+        self.normalize_order_receiver(order.get("receiver") or {})
         return {"order": order, "payment": self.create_wechat_payment(order)}
 
     def mark_paid_for_dev(self, order_id: str, user_id: str) -> dict[str, Any]:
@@ -1867,6 +2033,7 @@ class OrderService:
         return self.get_order(order_id)
 
     def confirm_receipt(self, order_id: str, user_id: str) -> dict[str, Any]:
+        completed = False
         with self.connect() as connection:
             self.begin_order_transaction(connection)
             row = self.order_row_for_update(connection, order_id)
@@ -1884,6 +2051,9 @@ class OrderService:
                 event_label="用户确认收货",
                 connection=connection,
             )
+            completed = True
+        if completed:
+            self.refund_custom_design_deposit_after_completion(order_id)
         return self.get_order(order_id)
 
     def cancel_order(self, order_id: str, user_id: str, reason: str = "") -> dict[str, Any]:
@@ -2237,7 +2407,9 @@ class OrderService:
         status: str = "",
         case_type: str = "",
         limit: int = 100,
-    ) -> list[dict[str, Any]]:
+        offset: int = 0,
+        include_meta: bool = False,
+    ) -> list[dict[str, Any]] | dict[str, Any]:
         normalized_status = str(status or "").strip()
         normalized_type = str(case_type or "").strip()
         if normalized_status and normalized_status not in AFTER_SALE_STATUS_TEXT:
@@ -2261,7 +2433,8 @@ class OrderService:
             )
             params.extend([value, value, value, value, value])
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
-        params.append(max(1, min(int(limit or 100), 500)))
+        normalized_limit = max(1, min(int(limit or 100), 500))
+        normalized_offset = max(0, int(offset or 0))
         with self.connect() as connection:
             rows = connection.execute(
                 f"""
@@ -2286,10 +2459,14 @@ class OrderService:
                     ELSE 7
                   END,
                   c.created_at DESC
-                LIMIT ?
+                LIMIT ? OFFSET ?
                 """,
-                params,
+                [*params, normalized_limit, normalized_offset],
             ).fetchall()
+            total = connection.execute(
+                f"SELECT COUNT(*) AS count FROM after_sale_cases c LEFT JOIN orders o ON o.order_id = c.order_id {where}",
+                params,
+            ).fetchone()["count"]
         result = []
         for raw_row in rows:
             row = dict(raw_row)
@@ -2307,7 +2484,15 @@ class OrderService:
                 "refund": self.loads(row.get("current_refund_json") or "", {}),
             }
             result.append(item)
-        return result
+        if not include_meta:
+            return result
+        return {
+            "items": result,
+            "total": total,
+            "limit": normalized_limit,
+            "offset": normalized_offset,
+            "has_more": normalized_offset + len(result) < total,
+        }
 
     def admin_get_after_sale_case(self, case_id: str) -> dict[str, Any]:
         normalized_case_id = str(case_id or "").strip()
@@ -3059,8 +3244,8 @@ class OrderService:
             "out_refund_no": out_refund_no,
             "reason": str(reason or "用户申请退款")[:80],
             "amount": {
-                "refund": refund_fee,
-                "total": total_fee,
+                "refund": settlement_fee_for_config(config, refund_fee),
+                "total": settlement_fee_for_config(config, total_fee),
                 "currency": order.get("currency") or "CNY",
             },
         }
@@ -3796,6 +3981,7 @@ class OrderService:
         if current_time.tzinfo is None:
             current_time = current_time.replace(tzinfo=timezone.utc)
         current_time = current_time.astimezone(timezone.utc)
+        completed = False
         with self.connect() as connection:
             self.begin_order_transaction(connection)
             row = self.order_row_for_update(connection, order_id)
@@ -3816,7 +4002,22 @@ class OrderService:
                 event_label="快递签收满7天，订单自动完成",
                 connection=connection,
             )
-            return True
+            completed = True
+        if completed:
+            self.refund_custom_design_deposit_after_completion(order_id)
+        return completed
+
+    def refund_custom_design_deposit_after_completion(self, order_id: str) -> None:
+        """Refund a linked design deposit only after its merchandise order completes."""
+        try:
+            # Local import avoids a module import cycle between the two services.
+            from .custom_design_service import CustomDesignService
+
+            CustomDesignService(self.db_path, order_service=self).refund_deposit_for_completed_order(order_id)
+        except Exception:
+            # The order is already committed. A temporary refund-provider failure
+            # must not make a completed order look unsuccessful to the customer.
+            external_logger.exception("custom design deposit refund side effect failed")
 
     def complete_signed_orders_due(
         self,
@@ -4526,7 +4727,7 @@ class OrderService:
             raise PaymentWebhookError("order_missing", "微信支付回调订单不存在")
         order_row = dict(row)
         order = self.public_order(order_row)
-        if paid_total != int(order["total_fee"]):
+        if paid_total != settlement_fee_for_config(config, order["total_fee"]):
             raise PaymentWebhookError("amount_mismatch", "微信支付回调金额与订单不一致")
         if not currency or currency != str(order["currency"] or "").upper():
             raise PaymentWebhookError("currency_mismatch", "微信支付回调币种与订单不一致")
@@ -4779,9 +4980,9 @@ class OrderService:
             "refund_amount_invalid",
             "微信退款回调金额格式错误",
         )
-        if total_fee != int(order["total_fee"]):
+        if total_fee != settlement_fee_for_config(config, order["total_fee"]):
             raise PaymentWebhookError("amount_mismatch", "退款原订单金额不一致")
-        expected_refund = int(refund.get("refund_fee") or order["total_fee"])
+        expected_refund = settlement_fee_for_config(config, refund.get("refund_fee") or order["total_fee"])
         if refund_fee <= 0 or refund_fee != expected_refund or refund_fee > total_fee:
             raise PaymentWebhookError("refund_amount_mismatch", "微信退款金额与退款申请不一致")
         refund_id = str(refund_result.get("refund_id") or "").strip()
@@ -4893,10 +5094,10 @@ class OrderService:
             query_refund_fee = int(amount.get("refund"))
         except (TypeError, ValueError):
             raise ValueError("微信退款查询结果金额字段非法") from None
-        if query_total_fee != int(order.get("total_fee") or 0):
+        if query_total_fee != settlement_fee_for_config(config, order.get("total_fee") or 0):
             raise ValueError("微信退款查询结果原订单金额不匹配")
         expected_refund = int(refund.get("refund_fee") or order.get("total_fee") or 0)
-        if expected_refund <= 0 or query_refund_fee != expected_refund:
+        if expected_refund <= 0 or query_refund_fee != settlement_fee_for_config(config, expected_refund):
             raise ValueError("微信退款查询结果退款金额不匹配")
         if amount.get("currency") and amount.get("currency") != (order.get("currency") or "CNY"):
             raise ValueError("微信退款查询结果币种不匹配")
@@ -5379,7 +5580,11 @@ class OrderService:
     def validate_and_refresh_material_prices(self, sequence: list[dict[str, Any]]) -> list[dict[str, Any]]:
         with self.connect() as connection:
             self.begin_order_transaction(connection)
-            snapshots, _ = self.lock_validate_and_snapshot_items(connection, sequence)
+            snapshots, _ = self.lock_validate_and_snapshot_items(
+                connection,
+                sequence,
+                include_validation_metadata=True,
+            )
             return snapshots
 
     @staticmethod
