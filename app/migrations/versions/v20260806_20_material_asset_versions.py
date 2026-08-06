@@ -22,6 +22,10 @@ def _columns(connection, backend: str, database: str) -> set[str]:
 
 def upgrade(connection, backend: str, database: str = "") -> None:
     """Add optimistic-concurrency and audit storage for gallery publishing."""
+    # The legacy taxonomy table can use utf8mb4_unicode_ci while fresh MySQL
+    # tables inherit utf8mb4_0900_ai_ci.  Normalize the only text comparison
+    # in this migration so upgrades work across both generations of schemas.
+    collate = " COLLATE utf8mb4_unicode_ci" if backend == "mysql" else ""
     if "asset_version" not in _columns(connection, backend, database):
         column_type = "INT NOT NULL DEFAULT 1" if backend == "mysql" else "INTEGER NOT NULL DEFAULT 1"
         connection.execute(f"ALTER TABLE material_taxonomy ADD COLUMN asset_version {column_type}")
@@ -92,13 +96,14 @@ def upgrade(connection, backend: str, database: str = "") -> None:
     # Preserve the pre-migration visual state as V1, so the first gallery
     # publish always has a recoverable before-image rather than starting at V2.
     rows = connection.execute(
-        """
+        f"""
         SELECT item_id, asset_version, image_url, image_urls_json, updated_at
         FROM material_taxonomy s
         WHERE kind='series'
           AND NOT EXISTS (
             SELECT 1 FROM material_asset_versions v
-            WHERE v.series_id=s.item_id AND v.asset_version=s.asset_version
+            WHERE v.series_id{collate}=s.item_id{collate}
+              AND v.asset_version=s.asset_version
           )
         """
     ).fetchall()
