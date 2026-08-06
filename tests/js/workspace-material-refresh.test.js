@@ -98,3 +98,51 @@ test('workspace uses the gallery as-is and never filters it by the primary image
     image_urls: gallery
   }), gallery);
 });
+
+test('workspace keeps its entry mask until the initial bracelet images are ready', async () => {
+  const page = loadWorkspacePage();
+  const imageCache = {};
+  const instance = Object.assign({}, page, {
+    data: {
+      ...page.data,
+      workspaceLoading: true,
+      selected: ['bead-a'],
+      placements: [{ image_url: 'https://cdn.example.com/bracelet.webp' }],
+      visibleMaterials: [{ image_url: 'https://cdn.example.com/card.webp' }]
+    },
+    workspaceReadyFlags: { layout: true, canvas: true, materials: true, images: false },
+    canvasImageCache: imageCache,
+    getCachedSelectedMaterials() {
+      return [{ image_url: 'https://cdn.example.com/bracelet.webp' }];
+    },
+    getCanvasImage(url) {
+      imageCache[url] = { loading: true, waiters: [] };
+      return null;
+    },
+    preloadWorkspaceNativeImage() {
+      return Promise.resolve();
+    },
+    markWorkspaceReady(flag) {
+      this.workspaceReadyFlags[flag] = true;
+      if (flag === 'images') clearTimeout(this.workspaceLoadingFallbackTimer);
+    }
+  });
+
+  instance.maybePreloadWorkspaceEntryImages();
+  assert.equal(instance.workspaceEntryImagePreloadStarted, true);
+  assert.equal(imageCache['https://cdn.example.com/bracelet.webp'].waiters.length, 1);
+  imageCache['https://cdn.example.com/bracelet.webp'].waiters[0]();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(instance.workspaceReadyFlags.images, true);
+});
+
+test('workspace does not reveal a pending recommendation before its images can be queued', () => {
+  const page = loadWorkspacePage();
+  const instance = Object.assign({}, page, {
+    data: { ...page.data, workspaceLoading: true },
+    workspaceReadyFlags: { layout: true, canvas: true, materials: true, images: false },
+    pendingBackendRecommendation: true
+  });
+  instance.maybePreloadWorkspaceEntryImages();
+  assert.equal(instance.workspaceEntryImagePreloadStarted, undefined);
+});

@@ -107,3 +107,16 @@ test('workspace keeps gestures separate without adding rotation controls or hint
   assert.doesNotMatch(wxml, /拖珠换位 · 拖外环旋转|rotateStringedRingStep/);
   assert.doesNotMatch(wxss, /ring-rotation-handle|ring-interaction-status|stringed-gesture-guide/);
 });
+
+test('finishing stringing clears loose per-item offsets before rendering the ring', () => {
+  const source = fs.readFileSync(
+    path.join(root, 'miniprogram/pages/workspace/workspace.js'),
+    'utf8'
+  );
+  const start = source.indexOf('  startStringingPhysics() {');
+  const end = source.indexOf('\n  removeItem(e) {', start);
+  const method = source.slice(start, end);
+
+  assert.match(method, /dx:\s*0,\s*\n\s*dy:\s*0,/);
+  assert.match(source, /completeStringing\(\)[\s\S]*map\(placement => \(\{ \.\.\.placement, dx: 0, dy: 0 \}\)\)/);
+});

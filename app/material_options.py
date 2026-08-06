@@ -678,6 +678,7 @@ def normalize_material_params(value: Any) -> dict[str, Any]:
         params.pop("placement_mode", None)
     for key in (
         "string_axis_width_mm",
+        "radial_depth_mm",
         "body_width_mm",
         "body_height_mm",
         "compatible_bead_size_mm",
@@ -702,6 +703,7 @@ def normalize_sku_physical_specs(value: Any) -> dict[str, float]:
         key: params[key]
         for key in (
             "string_axis_width_mm",
+            "radial_depth_mm",
             "body_width_mm",
             "body_height_mm",
             "compatible_bead_size_mm",

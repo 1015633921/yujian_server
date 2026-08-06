@@ -4961,6 +4961,9 @@ class AdminService:
         price = float((result.get("sku") or {}).get("price_per_bead") or display_price)
         ops = {
             "cost_price": cost_price,
+            "stock": stock,
+            "reserved_stock": int(float(row.get("reserved_stock") or 0)),
+            "available_stock": max(0, stock - int(float(row.get("reserved_stock") or 0))),
             "safety_stock": safety_stock,
             "supplier_name": row.get("supplier_name") or "",
             "purchase_note": row.get("purchase_note") or "",
@@ -5107,7 +5110,14 @@ class AdminService:
             return status in {"loss", "low"}
         return True
 
-    def list_orders(self, keyword: str = "", status: str = "", limit: int = 100) -> list[dict[str, Any]]:
+    def list_orders(
+        self,
+        keyword: str = "",
+        status: str = "",
+        limit: int = 100,
+        offset: int = 0,
+        include_meta: bool = False,
+    ) -> list[dict[str, Any]] | dict[str, Any]:
         clauses = []
         params: list[Any] = []
         if status:
@@ -5120,13 +5130,26 @@ class AdminService:
             value = f"%{keyword}%"
             params.extend([value, value, value, value])
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
-        params.append(limit)
+        params.extend([limit, offset])
         with self.connect() as connection:
             rows = connection.execute(
-                f"SELECT * FROM orders {where} ORDER BY created_at DESC LIMIT ?",
+                f"SELECT * FROM orders {where} ORDER BY created_at DESC LIMIT ? OFFSET ?",
                 params,
             ).fetchall()
-        return [self.public_order(dict(row)) for row in rows]
+            total = connection.execute(
+                f"SELECT COUNT(*) AS count FROM orders {where}",
+                params[:-2],
+            ).fetchone()["count"]
+        items = [self.public_order(dict(row)) for row in rows]
+        if not include_meta:
+            return items
+        return {
+            "items": items,
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+            "has_more": offset + len(items) < total,
+        }
 
     def get_order(self, order_id: str) -> dict[str, Any]:
         with self.connect() as connection:

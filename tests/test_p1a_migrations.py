@@ -51,7 +51,9 @@ def test_p1a_migration_is_additive_idempotent_and_independently_reversible(tmp_p
         "idx_payment_webhook_transaction",
     }.issubset(indexes(db_path, "payment_webhook_events"))
 
-    assert downgrade("sqlite", db_path, steps=14) == [
+    assert downgrade("sqlite", db_path, steps=16) == [
+        "20260806_18_custom_design_queue_indexes",
+        "20260806_17_custom_design_deposits",
         "20260727_16_custom_design_workbench",
         "20260727_15_report_codes",
         "20260727_14_custom_design_service",
@@ -86,4 +88,7 @@ def test_p1a_migration_is_additive_idempotent_and_independently_reversible(tmp_p
         "20260727_14_custom_design_service",
         "20260727_15_report_codes",
         "20260727_16_custom_design_workbench",
+
+        "20260806_17_custom_design_deposits",
+        "20260806_18_custom_design_queue_indexes",
     ]

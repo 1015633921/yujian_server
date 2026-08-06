@@ -33,6 +33,11 @@ class AssessmentRequest(BaseModel):
     birth_time: time
     birth_time_unknown: bool = False
     birth_place: NonEmptyString
+    # New clients submit the selected province/city path as well as the
+    # backwards-compatible city display name.  The server uses the full path
+    # to disambiguate the versioned city-centre dataset; it never accepts a
+    # client-supplied coordinate as the authoritative location.
+    birth_place_path: str | None = Field(default=None, max_length=160)
     location_code: str | None = Field(default=None, max_length=80)
     lng: float | None = Field(default=None, ge=-180, le=180, description="出生地经度")
     lat: float | None = Field(default=None, ge=-90, le=90, description="出生地纬度")
@@ -198,12 +203,19 @@ class CustomDesignRequestCreate(BaseModel):
     report_version: int = Field(ge=1, le=10000)
     assessment_id: str | None = Field(default=None, max_length=80)
     wrist_size_cm: float = Field(ge=10, le=25)
-    bead_size_mm: int = Field(ge=4, le=20)
+    # The designer workbench and customer selector both support 6–16 mm.
+    # Keep the service-order contract aligned so a request cannot become
+    # impossible to fulfil in the workbench.
+    bead_size_mm: int = Field(ge=6, le=16)
     budget: str = Field(default="", max_length=80)
     style_preference: str = Field(default="", max_length=80)
     color_preference: str = Field(default="", max_length=120)
     accessory_preference: str = Field(default="", max_length=80)
     wear_scene: str = Field(default="", max_length=80)
+    # New clients set this only after the customer explicitly chooses the
+    # service preferences.  Old records remain readable and are marked for a
+    # designer confirmation instead of being silently treated as user intent.
+    preference_confirmed: bool = False
     note: str = Field(default="", max_length=500)
 
 
@@ -338,7 +350,11 @@ class SolarTimeInfo(BaseModel):
     total_correction_minutes: float | None = None
     location_source: str
     resolved_location_code: str | None = None
+    resolved_location_name: str | None = None
+    resolved_location_precision: str | None = None
     timezone: str = "Asia/Shanghai"
+    utc_offset_minutes: int | None = None
+    standard_meridian_longitude: float | None = None
     calibration_status: str = "legacy_unknown"
     calibration_source: str = "legacy_unknown"
     calibration_version: str = "legacy_unknown"
@@ -383,6 +399,9 @@ class BraceletLayoutItem(BaseModel):
     bead_size_mm: int | None = None
     actual_material_size_mm: float | None = None
     string_axis_width_mm: float | None = None
+    material_params: dict = Field(default_factory=dict)
+    physical_specs: dict = Field(default_factory=dict)
+    placement_mode: str = ""
 
 
 class BraceletPlan(BaseModel):

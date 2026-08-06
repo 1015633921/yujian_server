@@ -7,8 +7,10 @@ from typing import Any
 
 
 ELEMENT_ORDER = ("木", "火", "土", "金", "水")
-REPORT_ALGORITHM_VERSION = "energy-assessment-2026-07-12-v1"
-REPORT_SCHEMA_VERSION = 2
+# A report snapshot must identify the true-solar-time rule and location dataset
+# generation it was built with. Historical snapshots remain immutable.
+REPORT_ALGORITHM_VERSION = "energy-assessment-2026-08-06-location-calibration-v2"
+REPORT_SCHEMA_VERSION = 3
 
 ELEMENT_STYLE_GUIDANCE = {
     "木": {

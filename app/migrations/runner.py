@@ -23,6 +23,8 @@ from app.migrations.versions import v20260724_13_web_login_pairing
 from app.migrations.versions import v20260727_14_custom_design_service
 from app.migrations.versions import v20260727_15_report_codes
 from app.migrations.versions import v20260727_16_custom_design_workbench
+from app.migrations.versions import v20260806_17_custom_design_deposits
+from app.migrations.versions import v20260806_18_custom_design_queue_indexes
 
 MIGRATIONS = [
     v20260712_01_p0a_security,
@@ -41,6 +43,8 @@ MIGRATIONS = [
     v20260727_14_custom_design_service,
     v20260727_15_report_codes,
     v20260727_16_custom_design_workbench,
+    v20260806_17_custom_design_deposits,
+    v20260806_18_custom_design_queue_indexes,
 ]
 
 

@@ -8,7 +8,7 @@ const {
 } = require('../../miniprogram/utils/braceletSizing');
 const { buildFreshWorkspaceDraft } = require('../../miniprogram/utils/workspaceImport');
 
-test('backend recommendation expands evenly to the requested wrist count', () => {
+test('recommendation chooses the closest physical wrist fit instead of always rounding up', () => {
   const source = Array.from({ length: 20 }, (_, index) => `bead-${index}`);
   const targetCount = recommendBeadCount(Array(20).fill(8), 16, {
     allowanceMm: 8,
@@ -18,13 +18,13 @@ test('backend recommendation expands evenly to the requested wrist count', () =>
   const expanded = expandSequenceToCount(source, targetCount);
   const effectiveWristCm = estimateInnerCircumferenceMm(Array(expanded.length).fill(8)) / 10 - 0.8;
 
-  assert.equal(targetCount, 25);
-  assert.equal(expanded.length, 25);
+  assert.equal(targetCount, 24);
+  assert.equal(expanded.length, 24);
   source.forEach(id => assert.ok(expanded.includes(id)));
-  assert.ok(effectiveWristCm >= 16);
+  assert.ok(Math.abs(effectiveWristCm - 16) <= 0.5);
 });
 
-test('community recipe rounds up so the effective wrist size is never undersized', () => {
+test('community recipe uses the same closest-fit count as the backend', () => {
   const recipe = ['clearQuartz8', 'moonstone8'];
   const targetCount = recommendBeadCount([8, 8], 16, {
     allowanceMm: 8,
@@ -34,8 +34,18 @@ test('community recipe rounds up so the effective wrist size is never undersized
   const selected = expandSequenceToCount(recipe, targetCount);
   const effectiveWristCm = estimateInnerCircumferenceMm(Array(selected.length).fill(8)) / 10 - 0.8;
 
-  assert.equal(selected.length, 25);
-  assert.ok(effectiveWristCm >= 16);
+  assert.equal(selected.length, 24);
+  assert.ok(Math.abs(effectiveWristCm - 16) <= 0.5);
+});
+
+test('recommended count remains stable even when the current sequence is already too long', () => {
+  const targetCount = recommendBeadCount(Array(30).fill(8), 16, {
+    allowanceMm: 8,
+    minCount: 8,
+    maxCount: 40
+  });
+
+  assert.equal(targetCount, 24);
 });
 
 test('new imports start with a fresh design identity and the source title', () => {

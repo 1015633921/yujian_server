@@ -4,6 +4,12 @@ import hashlib
 import math
 import os
 
+from .bracelet_sizing import (
+    BRACELET_FIT_MODEL_VERSION,
+    calculate_bracelet_fit,
+    estimate_inner_circumference_mm,
+    recommend_bead_count,
+)
 from .copy_safety import safe_display_text, safe_wish_label
 from .energy import ELEMENTS, WISH_MAPPING
 from .material_knowledge import (
@@ -398,72 +404,18 @@ class RecommendationEngine:
     @staticmethod
     def estimate_stringed_bead_count(wrist_size_cm: float, bead_size_mm: int) -> int:
         bead_size = max(float(bead_size_mm or 8), 1)
-        target_mm = max(float(wrist_size_cm or 0) * 10 + STRINGED_COMFORT_ALLOWANCE_MM, 0)
-        candidates = [
-            (
-                count,
-                RecommendationEngine.estimate_stringed_length_mm([bead_size] * count),
-            )
-            for count in range(MIN_RECOMMENDED_BEAD_COUNT, MAX_RECOMMENDED_BEAD_COUNT + 1)
-        ]
-        return min(
-            candidates,
-            key=lambda item: (
-                abs(item[1] - target_mm),
-                item[1] < target_mm,
-                item[0],
-            ),
-        )[0]
+        return recommend_bead_count(
+            [bead_size],
+            wrist_size_cm,
+            allowance_mm=STRINGED_COMFORT_ALLOWANCE_MM,
+            min_count=MIN_RECOMMENDED_BEAD_COUNT,
+            max_count=MAX_RECOMMENDED_BEAD_COUNT,
+        )
 
     @staticmethod
     def estimate_stringed_length_mm(bead_sizes_mm: list[float]) -> float:
         """Approximate the wearable inner circumference of a closed round-bead loop."""
-        sizes: list[float] = []
-        for raw_size in bead_sizes_mm:
-            try:
-                size = float(raw_size)
-            except (TypeError, ValueError):
-                continue
-            if math.isfinite(size) and size > 0:
-                sizes.append(size)
-        if len(sizes) < 3:
-            return 0.0
-
-        radii = [size / 2 for size in sizes]
-        contacts = [
-            radii[index] + radii[(index + 1) % len(radii)]
-            for index in range(len(radii))
-        ]
-
-        def central_angles(center_radius: float) -> list[float]:
-            return [
-                2 * math.asin(min(1.0, contact / (2 * center_radius)))
-                for contact in contacts
-            ]
-
-        lower = max(max(radii), max(contacts) / 2) * (1 + 1e-9)
-        lower_angle = sum(central_angles(lower))
-        if lower_angle < 2 * math.pi:
-            return 0.0
-
-        upper = max(lower * 2, sum(contacts))
-        while sum(central_angles(upper)) > 2 * math.pi:
-            upper *= 2
-
-        for _ in range(72):
-            midpoint = (lower + upper) / 2
-            if sum(central_angles(midpoint)) > 2 * math.pi:
-                lower = midpoint
-            else:
-                upper = midpoint
-
-        center_radius = (lower + upper) / 2
-        angles = central_angles(center_radius)
-        inner_circumference = 0.0
-        for index, radius in enumerate(radii):
-            bead_angle = (angles[index - 1] + angles[index]) / 2
-            inner_circumference += max(0.0, center_radius - radius) * bead_angle
-        return inner_circumference
+        return estimate_inner_circumference_mm(bead_sizes_mm)
 
     @staticmethod
     def material_is_sellable(material: dict | None) -> bool:
@@ -502,23 +454,33 @@ class RecommendationEngine:
         layout: list[dict],
         items: list[dict],
     ) -> dict:
-        sizes = [
-            float(
-                item.get("string_axis_width_mm")
-                or item.get("actual_material_size_mm")
-                or item.get("bead_size_mm")
-                or request.bead_size_mm
-            )
+        sizing_items = [
+            {
+                **item,
+                "string_axis_width_mm": (
+                    item.get("string_axis_width_mm")
+                    or item.get("actual_material_size_mm")
+                    or item.get("bead_size_mm")
+                    or request.bead_size_mm
+                ),
+            }
             for item in layout
         ]
-        effective_length_mm = RecommendationEngine.estimate_stringed_length_mm(sizes)
-        estimated_length_cm = round(effective_length_mm / 10, 1)
-        target_length_cm = round(float(request.wrist_size_cm) + STRINGED_COMFORT_ALLOWANCE_MM / 10, 1)
+        fit = calculate_bracelet_fit(
+            sizing_items,
+            request.wrist_size_cm,
+            allowance_mm=STRINGED_COMFORT_ALLOWANCE_MM,
+            tolerance_mm=STRINGED_LENGTH_TOLERANCE_CM * 10,
+            min_count=MIN_RECOMMENDED_BEAD_COUNT,
+            max_count=MAX_RECOMMENDED_BEAD_COUNT,
+        )
+        estimated_length_cm = round(fit["actual_inner_mm"] / 10, 1)
+        target_length_cm = round(fit["target_inner_mm"] / 10, 1)
         count_valid = (
             MIN_RECOMMENDED_BEAD_COUNT <= bead_count <= MAX_RECOMMENDED_BEAD_COUNT
             and len(layout) == bead_count
         )
-        length_valid = abs(estimated_length_cm - target_length_cm) <= STRINGED_LENGTH_TOLERANCE_CM
+        length_valid = fit["status"] == "fit"
         sellable_valid = all(item.get("material_id") and item.get("available") for item in items)
         price_valid = all(
             isinstance(item.get("unit_price"), (int, float))
@@ -578,6 +540,9 @@ class RecommendationEngine:
             "target_stringed_length_cm": target_length_cm,
             "length_tolerance_cm": STRINGED_LENGTH_TOLERANCE_CM,
             "max_bead_count": MAX_RECOMMENDED_BEAD_COUNT,
+            "sizing_model_version": BRACELET_FIT_MODEL_VERSION,
+            "fit_status": fit["status"],
+            "fit_error_mm": round(float(fit["error_mm"]), 3),
         }
 
     @staticmethod
@@ -1214,6 +1179,9 @@ class RecommendationEngine:
             "bead_size_mm": item.get("bead_size_mm"),
             "actual_material_size_mm": item.get("actual_material_size_mm"),
             "string_axis_width_mm": item.get("string_axis_width_mm"),
+            "material_params": item.get("material_params") or {},
+            "physical_specs": item.get("physical_specs") or {},
+            "placement_mode": item.get("placement_mode") or "",
             "preferred_bead_size_mm": item.get("preferred_bead_size_mm") or item.get("bead_size_mm"),
             "material_id": item.get("material_id", ""),
             "source_material_id": item.get("source_material_id", ""),
@@ -1396,13 +1364,13 @@ class RecommendationEngine:
                 layout,
                 items,
             )
-            error = abs(validation["estimated_stringed_length_cm"] - target_cm)
-            rank = (error, count, sequence, items, layout, validation)
-            if best is None or rank[:2] < best[:2]:
+            error = validation["estimated_stringed_length_cm"] - target_cm
+            rank = (abs(error), error < 0, count, sequence, items, layout, validation)
+            if best is None or rank[:3] < best[:3]:
                 best = rank
         if not best:
             return None
-        _, count, sequence, items, layout, validation = best
+        _, _, count, sequence, items, layout, validation = best
         if not validation["is_valid"]:
             return None
         estimated_price = round(

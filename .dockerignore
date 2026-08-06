@@ -14,6 +14,8 @@ certs
 data
 docs
 miniprogram
+admin-web/node_modules
+admin-web/dist
 specs
 tests
 tools

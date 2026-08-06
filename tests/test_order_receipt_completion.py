@@ -34,7 +34,9 @@ def test_receipt_completion_migration_backfills_signed_order_and_round_trips(tmp
     OrderService(db_path)
     AssessmentRepository(db_path)
     upgrade("sqlite", db_path)
-    assert downgrade("sqlite", db_path, steps=10) == [
+    assert downgrade("sqlite", db_path, steps=12) == [
+        "20260806_18_custom_design_queue_indexes",
+        "20260806_17_custom_design_deposits",
         "20260727_16_custom_design_workbench",
         "20260727_15_report_codes",
         "20260727_14_custom_design_service",
@@ -83,6 +85,9 @@ def test_receipt_completion_migration_backfills_signed_order_and_round_trips(tmp
         "20260727_14_custom_design_service",
         "20260727_15_report_codes",
         "20260727_16_custom_design_workbench",
+
+        "20260806_17_custom_design_deposits",
+        "20260806_18_custom_design_queue_indexes",
     ]
     assert {"logistics_signed_at", "auto_complete_at"} <= columns(db_path, "orders")
     assert "idx_orders_auto_complete" in indexes(db_path, "orders")
@@ -101,7 +106,9 @@ def test_receipt_completion_migration_backfills_signed_order_and_round_trips(tmp
     assert migrated["auto_complete_at"] == row["auto_complete_at"]
     assert upgrade("sqlite", db_path) == []
 
-    assert downgrade("sqlite", db_path, steps=10) == [
+    assert downgrade("sqlite", db_path, steps=12) == [
+        "20260806_18_custom_design_queue_indexes",
+        "20260806_17_custom_design_deposits",
         "20260727_16_custom_design_workbench",
         "20260727_15_report_codes",
         "20260727_14_custom_design_service",

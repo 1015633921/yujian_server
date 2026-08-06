@@ -35,6 +35,7 @@ def report_payload(user_id: str) -> dict:
 
 def test_custom_design_request_is_private_and_uses_independent_service_state(monkeypatch):
     monkeypatch.setenv("REPORT_VERSIONING_V2_ENABLED", "true")
+    monkeypatch.setenv("WECHAT_PAY_TEST_MODE", "true")
     user_id = f"custom-design-{uuid4().hex}"
     headers = user_headers(user_id)
     report_response = client.post(
@@ -55,17 +56,39 @@ def test_custom_design_request_is_private_and_uses_independent_service_state(mon
         "color_preference": "蓝白、低饱和",
         "accessory_preference": "少量银饰",
         "wear_scene": "日常佩戴",
+        "preference_confirmed": True,
         "note": "希望整体轻盈",
     }
+    invalid_size = client.post(
+        "/api/v1/custom-design-requests",
+        headers=headers,
+        json={**payload, "bead_size_mm": 5},
+    )
+    assert invalid_size.status_code == 422
     created = client.post("/api/v1/custom-design-requests", headers=headers, json=payload)
     assert created.status_code == 200, created.text
     request = created.json()["data"]
-    assert request["status"] == "submitted"
+    assert request["status"] == "deposit_pending"
+    assert request["deposit"]["status"] == "unpaid"
+    assert request["deposit"]["amount_fee"] == 990
+    assert request["deposit"]["amount_text"] == "9.90"
     assert request["report_code"].startswith("RPT-")
     assert request["report_summary"]["core_conclusion"]
+    assert request["design_brief"]["status"] == "ready"
+    assert request["design_brief"]["lineage"]["report_code"] == request["report_code"]
+    assert request["design_brief"]["hard_constraints"][0]["value"] == "16 cm"
+    assert request["design_brief"]["hard_constraints"][1]["value"] == "8 mm"
+    assert request["design_brief"]["preferences"]["accessory"] == "少量银饰"
+    assert request["design_brief"]["preferences"]["wear_scene"] == "日常佩戴"
+    assert request["design_brief"]["preferences"]["confirmed"] is True
     assert "birthday" not in str(request["report_summary"])
+    assert "birthday" not in str(request["design_brief"])
     assert request["proposals"] == []
     assert "birthday" not in str(request)
+
+    paid = api_module.custom_design_service.mark_deposit_paid_for_dev(request["request_id"], user_id)
+    assert paid["status"] == "submitted"
+    assert paid["deposit"]["status"] == "paid"
 
     with api_module.custom_design_service.connect() as connection:
         snapshot = connection.execute(
@@ -83,6 +106,8 @@ def test_custom_design_request_is_private_and_uses_independent_service_state(mon
     assert legacy_admin_view["report_summary"]["core_conclusion"]
     assert legacy_admin_view["report_summary"]["mbti_analysis"]["type"] == "INFJ"
     assert legacy_admin_view["report_summary"]["core_wishes"] == ["健康护身/保持专注"]
+    assert legacy_admin_view["design_brief"]["status"] == "ready"
+    assert "birthday" not in str(legacy_admin_view["design_brief"])
 
     duplicate = client.post("/api/v1/custom-design-requests", headers=headers, json=payload)
     assert duplicate.status_code == 400

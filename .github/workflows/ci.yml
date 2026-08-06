@@ -27,12 +27,15 @@ jobs:
         with:
           node-version: "24.17.0"
           cache: npm
-          cache-dependency-path: miniprogram/package-lock.json
+          cache-dependency-path: |
+            miniprogram/package-lock.json
+            admin-web/package-lock.json
       - name: Install pinned toolchain and dependencies
         run: |
           npm install --global npm@11.13.0
           python -m pip install --require-hashes -r requirements-dev.lock
           npm ci --prefix miniprogram
+          npm ci --prefix admin-web
       - name: Validate versions and repository
         run: |
           python scripts/check_toolchain.py
@@ -44,6 +47,10 @@ jobs:
           python -m compileall -q app scripts
           npm run build:check --prefix miniprogram
           npm test --prefix miniprogram
+          npm run lint --prefix admin-web
+          npm run typecheck --prefix admin-web
+          npm test --prefix admin-web
+          npm run build --prefix admin-web
       - name: Validate migrations and backend
         run: |
           python scripts/check_migrations.py --backend sqlite
@@ -61,17 +68,23 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "24.17.0"
+          cache: npm
+          cache-dependency-path: |
+            miniprogram/package-lock.json
+            admin-web/package-lock.json
       - name: Install locked audit tools
         run: |
           npm install --global npm@11.13.0
           python -m pip install --require-hashes -r requirements-dev.lock
           npm ci --prefix miniprogram
+          npm ci --prefix admin-web
       - name: Scan source and dependencies
         run: |
           python scripts/scan_secrets.py
           python scripts/check_repository.py
           pip-audit -r requirements.lock
           npm audit --prefix miniprogram --omit=dev --audit-level=high
+          npm audit --prefix admin-web --omit=dev --audit-level=high
 
   container:
     runs-on: ubuntu-24.04

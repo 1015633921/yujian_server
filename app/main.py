@@ -20,6 +20,7 @@ assert_startup_configuration()
 from .admin_api import admin_router  # noqa: E402
 from .ai_material_api import ai_material_router  # noqa: E402
 from .admin_page import admin_page  # noqa: E402
+from .admin_v2_page import admin_v2_asset_dir, admin_v2_page  # noqa: E402
 from .api import legacy_router, router  # noqa: E402
 from .web_login_pairing import web_login_pairing_router  # noqa: E402
 from .observability import (
@@ -139,7 +140,9 @@ async def admin_static_cache_control(request: Request, call_next):
     if request.headers.get("authorization") or request.url.path.startswith("/api/v1/auth/web-pairings"):
         response.headers["Cache-Control"] = "no-store"
         response.headers["Pragma"] = "no-cache"
-    elif path == "/admin":
+    elif path.startswith(("/static/admin-v2/assets/", "/admin-v2/assets/", "/test-api/admin-v2/assets/")):
+        response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+    elif path in {"/admin", "/admin-v2", "/test-api/admin-v2"} or path.startswith(("/admin-v2/", "/test-api/admin-v2/")):
         response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
         response.headers["Pragma"] = "no-cache"
     elif path.startswith("/static/admin/"):
@@ -152,6 +155,16 @@ async def admin_static_cache_control(request: Request, call_next):
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 STATIC_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+app.mount(
+    "/admin-v2/assets",
+    StaticFiles(directory=admin_v2_asset_dir(), check_dir=False),
+    name="admin-v2-assets",
+)
+app.mount(
+    "/test-api/admin-v2/assets",
+    StaticFiles(directory=admin_v2_asset_dir(), check_dir=False),
+    name="test-admin-v2-assets",
+)
 
 
 @app.get("/", tags=["system"])
@@ -212,6 +225,14 @@ def internal_metrics(authorization: str | None = Header(default=None)):
 @app.get("/admin", tags=["后台管理"], include_in_schema=False)
 def admin():
     return admin_page()
+
+
+@app.get("/admin-v2", tags=["后台管理"], include_in_schema=False)
+@app.get("/admin-v2/{path:path}", tags=["后台管理"], include_in_schema=False)
+@app.get("/test-api/admin-v2", tags=["后台管理"], include_in_schema=False)
+@app.get("/test-api/admin-v2/{path:path}", tags=["后台管理"], include_in_schema=False)
+def admin_v2(request: Request):
+    return admin_v2_page(request)
 
 
 @app.exception_handler(RequestValidationError)

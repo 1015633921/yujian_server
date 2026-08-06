@@ -11,6 +11,8 @@ const state = {
   materialAssetUi: { items: [], busy: false, targetTop: 'accessory', targetCategoryId: '', targetSeriesId: '', mode: 'replace', message: '' },
   aiTagUi: { items: [], selectedId: '', imageIndex: 0, busy: false },
   customDesignWorkbench: null,
+  customDesignDetailRequestId: 0,
+  customDesignMaterialDisplayCache: new Map(),
   warehouseTab: 'overview',
   cache: { materials: [], materialSpus: [], materialRefs: [], materialOptions: null, materialTypes: [], materialTaxonomy: [], homeBanners: [], orders: [], customDesignRequests: [], afterSales: [], communityPosts: [], recommendationPlans: [], admins: [], loginLogs: [], dailyRules: null, warehouse: { items: [], options: null, batches: [], movements: [], overview: null } }
 };
@@ -263,7 +265,12 @@ async function boot(){
   try{
     state.admin=state.admin||await api('/api/v1/admin/me');$('authView').classList.add('hide');$('appView').classList.remove('hide');
     $('adminName').textContent=state.admin.display_name||state.admin.username;$('todayText').textContent=new Date().toLocaleDateString('zh-CN',{year:'numeric',month:'long',day:'numeric',weekday:'short'});
+    const target=new URLSearchParams(location.search),targetPage=target.get('page')||'',targetRequest=target.get('request')||'';
+    if(targetPage==='designRequests'&&/^[A-Za-z0-9_-]{1,80}$/.test(targetRequest)){
+      switchPage(targetPage);openCustomDesignRequest(targetRequest);return;
+    }
     await Promise.all([loadDashboard(),loadSystemStatus()]);
+    if(Object.prototype.hasOwnProperty.call(pageMeta,targetPage))switchPage(targetPage);
   }catch(e){localStorage.removeItem(ADMIN_TOKEN_KEY);state.token='';$('authView').classList.remove('hide');$('appView').classList.add('hide')}
 }
 function switchPage(page){
@@ -374,38 +381,153 @@ async function loadOrders(){
     orderRowActions(x)
   ]));
 }
-function customDesignStatusText(status){return ({submitted:'待设计',designing:'设计中',proposed:'待用户确认',revision_requested:'待调整',confirmed:'已确认',closed:'已结束'})[status]||(status?'状态更新':'-')}
-function customDesignEventText(eventType){return ({submitted:'用户提交申请',draft_saved:'设计师保存草稿',proposal_published:'设计师提交方案',proposal_confirmed:'用户确认方案',order_created:'系统生成待支付订单',revision_requested:'用户申请调整',closed:'服务已结束'})[eventType]||'服务状态更新'}
-function customDesignTextList(value){return (Array.isArray(value)?value:[value]).map(item=>typeof item==='object'?(item.label||item.name||item.value||item.keyword||''):item).filter(Boolean).join('、')||'未提供'}
+function customDesignStatusText(status){return ({deposit_pending:'待付保证金',submitted:'待设计',designing:'设计中',proposed:'待用户确认',revision_requested:'待调整',completed:'设计已完成',confirmed:'已确认（历史）',closed:'已结束'})[status]||(status?'状态更新':'-')}
+function customDesignEventText(eventType){return ({deposit_created:'已创建设计保证金',deposit_paid:'设计保证金已支付',deposit_refunded:'设计保证金已退回',deposit_refund_processing:'设计保证金退款处理中',deposit_refund_failed:'设计保证金退款待重试',draft_saved:'设计师保存草稿',proposal_published:'设计师提交方案',proposal_confirmed:'用户确认设计完成',order_created:'系统生成待支付订单',revision_requested:'用户申请调整',closed:'服务已结束'})[eventType]||'服务状态更新'}
+const CUSTOM_DESIGN_ENUM_LABELS={
+  solar_plexus:'太阳轮',third_eye:'眉心轮',root:'海底轮',sacral:'脐轮',heart:'心轮',throat:'喉轮',crown:'顶轮',
+  clear:'清透',white:'白色',pink:'粉色',blue:'蓝色',green:'绿色',purple:'紫色',gold:'金色',red:'红色',orange:'橙色',yellow:'黄色',brown:'棕色',black:'黑色',indigo:'靛蓝',gray:'灰色',
+  rose_garden:'粉绿花园',sea_salt_blue:'海盐蓝白',sunlit_gold:'金橙日光',moon_violet:'紫白月光',earth_red:'红棕大地',black_gold:'黑金镜面',
+  solar_plexus_chakra:'太阳轮',
+  INFP:'INFP · 调停者',INFJ:'INFJ · 提倡者',INTP:'INTP · 逻辑学家',INTJ:'INTJ · 建筑师',ENFP:'ENFP · 竞选者',ENFJ:'ENFJ · 主人公',ENTP:'ENTP · 辩论家',ENTJ:'ENTJ · 指挥官',ISFP:'ISFP · 探险家',ISFJ:'ISFJ · 守卫者',ISTP:'ISTP · 鉴赏家',ISTJ:'ISTJ · 物流师',ESFP:'ESFP · 表演者',ESFJ:'ESFJ · 执政官',ESTP:'ESTP · 企业家',ESTJ:'ESTJ · 总经理'
+};
+function customDesignEnumLabel(value){const text=String(value??'').trim();return CUSTOM_DESIGN_ENUM_LABELS[text]||CUSTOM_DESIGN_ENUM_LABELS[text.toLowerCase()]||text}
+function customDesignTextList(value){return (Array.isArray(value)?value:[value]).map(item=>{if(item&&typeof item==='object')return customDesignEnumLabel(item.label||item.name||item.value||item.keyword||'');return customDesignEnumLabel(item)}).filter(Boolean).join('、')||'未提供'}
+function customDesignBriefPalette(label,items=[]){
+  const rows=(items||[]).filter(item=>item&&item.label);
+  if(!rows.length)return '';
+  return `<div class="custom-design-brief-palette"><span>${esc(label)}</span><div>${rows.map(item=>`<b title="${esc(item.reason||'')}"><i style="background:${esc(item.hex||'#d8ddd3')}"></i>${esc(item.label)}</b>`).join('')}</div></div>`;
+}
+function customDesignBriefSection(request,{compact=false}={}){
+  const brief=request?.design_brief;
+  const cls=`custom-design-brief${compact?' custom-design-brief--compact':''}`;
+  if(!brief||brief.status==='partial'){
+    return `<section class="${cls} custom-design-brief--partial"><div><span>DESIGN BRIEF</span><h3>设计指引待补全</h3><p>当前报告依据不足，先以用户手围、珠径、预算和明确偏好完成设计。</p></div></section>`;
+  }
+  const goal=brief.design_goal||{},intervention=brief.intervention||{},palette=brief.palette||{},structure=brief.structure||{};
+  const constraints=(brief.hard_constraints||[]).filter(item=>item&&item.label);
+  const roles=(brief.material_roles||[]).filter(item=>item&&item.label);
+  const warnings=(brief.warnings||[]).filter(item=>item&&item.message);
+  const evidence=(brief.source_evidence||[]).filter(item=>item&&item.source).slice(0,compact?2:5);
+  const preference=brief.preferences||{};
+  const paletteHtml=[
+    customDesignBriefPalette('基础',palette.base),
+    customDesignBriefPalette('辅助',palette.support),
+    compact?'':customDesignBriefPalette('点睛',palette.accent),
+    compact?'':customDesignBriefPalette('限制',palette.avoid)
+  ].join('');
+  const visibleConstraints=(compact?constraints.slice(0,3):constraints).map(item=>`<span><small>${esc(item.label)}</small>${esc(item.value||'待确认')}</span>`).join('');
+  const rolesHtml=compact
+    ?`<p class="custom-design-brief-role-line">${roles.map(item=>`${esc(item.label)}${item.element?`·${esc(item.element)}`:''}`).join('　')}</p>`
+    :`<div class="custom-design-brief-roles">${roles.map(item=>`<div><span>${esc(item.label)}${item.element?` · ${esc(item.element)}`:''}</span><b>${esc(item.purpose||'')}</b><small>${esc(item.reason||'')}</small></div>`).join('')}</div>`;
+  const warningRows=(compact?warnings.slice(0,1):warnings).map(item=>`<p class="${esc(item.level||'info')}"><b>${esc(item.label||'设计提醒')}</b>${esc(item.message)}</p>`).join('');
+  return `<section class="${cls}"><div class="custom-design-brief-head"><div><span>DESIGN BRIEF · ${esc(brief.rule_version||'V1')}</span><h3>${esc(goal.title||'以用户偏好完成专属设计')}</h3></div><b>${esc(intervention.label||'审美优先')}</b></div><p class="custom-design-brief-summary">${esc(goal.summary||intervention.reason||'')}</p><div class="custom-design-brief-constraints">${visibleConstraints}</div>${!compact&&(preference.accessory||preference.wear_scene)?`<p class="custom-design-brief-preference">配饰：${esc(preference.accessory||'待确认')} · 场景：${esc(preference.wear_scene||'待确认')}<small>${esc(preference.source||'')}</small></p>`:''}<div class="custom-design-brief-palette-grid">${paletteHtml||'<p>暂未生成色板</p>'}</div>${rolesHtml}<div class="custom-design-brief-structure"><b>结构</b><span>${esc(structure.direction||'以用户风格和佩戴舒适度为主')}</span>${!compact&&structure.reduce?`<small>避免：${esc(structure.reduce)}</small>`:''}</div>${warningRows?`<div class="custom-design-brief-warnings">${warningRows}</div>`:''}${!compact&&evidence.length?`<details class="custom-design-brief-evidence"><summary>为什么这样设计</summary><div>${evidence.map(item=>`<p><b>${esc(item.source)}</b><span>${esc(item.value||'')}</span><small>${esc(item.effect||'')}</small></p>`).join('')}</div></details>`:''}</section>`;
+}
 function customDesignReportSection(request){
   const report=request.report_summary||{},conclusion=report.core_conclusion||{},ranking=report.ranking||{},balance=report.balance||{},guide=report.style_guidance||{};
   const elements=(report.elements||[]).map(item=>`${item.name||''} ${num(item.percent)}%`).filter(Boolean).join(' · ')||'报告内容暂不可用';
-  const adjustment=(report.adjustment_strategy||[]).map(item=>`${item.role||''}：${item.element||''}`).filter(Boolean).join(' · ')||'未提供';
+  const adjustment=(report.adjustment_strategy||[]).map(item=>`${customDesignEnumLabel(item.role||'')}：${customDesignEnumLabel(item.element||'')}`).filter(Boolean).join(' · ')||'未提供';
   const wishes=(report.core_wishes||[]).filter(Boolean).join('、')||'未填写';
   const keywords=(report.keywords||[]).map(item=>item.label||item.name||item.value||'').filter(Boolean).join('、')||'未提供';
   const mbti=report.mbti_analysis||{},chakra=report.chakra_analysis||{},mood=report.mood_analysis||{},zodiac=report.zodiac_analysis||{};
-  return `<section class="detail-section"><div class="detail-section-head"><div><span>ASSESSMENT REPORT</span><h3>测算内容与结果</h3><p>报告 ID：${esc(request.report_code||request.report_id)} · 第 ${num(request.report_version,1)} 版</p></div></div><div class="detail-grid">${detailItem('测算结论',conclusion.title||'未提供')}${detailItem('平衡状态',balance.label?`${balance.label}${Number.isFinite(Number(balance.score))?` · ${num(balance.score)} 分`:''}`:'未提供')}${detailItem('用户诉求',wishes)}${detailItem('五行比例',elements)}${detailItem('主导 / 次要',ranking.dominant?`${ranking.dominant} / ${ranking.secondary||'-'}`:'未提供')}${detailItem('喜用方向',customDesignTextList(report.useful_elements))}${detailItem('建议调整',adjustment)}${detailItem('推荐色彩',customDesignTextList(guide.recommended_colors))}${detailItem('材质质感',guide.recommended_texture||'未提供')}${detailItem('结构方向',guide.structure_direction||'未提供')}${detailItem('应减少',guide.reduce||'未提供')}${detailItem('测算关键词',keywords)}${detailItem('MBTI 倾向',mbti.selected===false?'未选择':customDesignTextList([mbti.type,...(mbti.keywords||[])]))}${detailItem('脉轮侧重',customDesignTextList([chakra.primary_chakra,...(chakra.color_families||[])]))}${detailItem('情绪色彩',customDesignTextList([mood.palette_name||mood.palette_id,...(mood.visual_tags||[])]))}${detailItem('星座参考',customDesignTextList([zodiac.name,zodiac.element,zodiac.suggestion]))}</div>${conclusion.summary?`<p class="custom-design-report-summary">${esc(conclusion.summary)}</p>`:''}</section>`
+  return `<details class="detail-section custom-design-evidence"><summary class="custom-design-evidence-head"><div><span>ASSESSMENT EVIDENCE</span><h3>查看测算依据</h3><p>报告 ID：${esc(request.report_code||request.report_id)} · 第 ${num(request.report_version,1)} 版</p></div><b>展开</b></summary><div class="detail-grid">${detailItem('测算结论',conclusion.title||'未提供')}${detailItem('元素分布均衡度',balance.label?`${balance.label}${Number.isFinite(Number(balance.score))?` · ${num(balance.score)} 分`:''}`:'未提供')}${detailItem('用户诉求',wishes)}${detailItem('五行比例',elements)}${detailItem('主导 / 次要',ranking.dominant?`${ranking.dominant} / ${ranking.secondary||'-'}`:'未提供')}${detailItem('喜用方向',customDesignTextList(report.useful_elements))}${detailItem('建议调整',adjustment)}${detailItem('主导元素参考色',customDesignTextList(guide.recommended_colors))}${detailItem('材质质感',guide.recommended_texture||'未提供')}${detailItem('结构方向',guide.structure_direction||'未提供')}${detailItem('应减少',guide.reduce||'未提供')}${detailItem('测算关键词',keywords)}${detailItem('MBTI 倾向',mbti.selected===false?'未选择':customDesignTextList([mbti.type,...(mbti.keywords||[])]))}${detailItem('脉轮侧重',customDesignTextList([chakra.primary_chakra_name||chakra.primary_chakra,...(chakra.color_families||[])]))}${detailItem('情绪色彩',customDesignTextList([mood.name||mood.palette_name||mood.palette_id,...(mood.visual_tags||[])]))}${detailItem('星座参考',customDesignTextList([zodiac.name,zodiac.element,zodiac.suggestion]))}</div>${conclusion.summary?`<p class="custom-design-report-summary">${esc(conclusion.summary)}</p>`:''}</details>`
 }
 async function loadCustomDesignRequests(){
   const status=formValue('designRequestStatus');
   const rows=await api(`/api/v1/admin/custom-design-requests?${new URLSearchParams({status})}`);
   state.cache.customDesignRequests=rows;
-  $('designRequestsTable').innerHTML=table(['服务单','用户偏好','状态 / 首稿时效','方案版本','提交时间','操作'],rows.map(x=>[
+  $('designRequestsTable').innerHTML=table(['服务单','用户偏好','状态 / 保证金','方案版本','提交时间','操作'],rows.map(x=>[
     `<b>${esc(x.request_id)}</b><br><small>测算报告 ID：${esc(x.report_code||x.report_id)} · 第 ${num(x.report_version,1)} 版</small>`,
     `<b>${esc(x.request?.style_preference||'未指定风格')}</b><br><small>${esc(x.request?.wrist_size_cm||'-')}cm · ${esc(x.request?.bead_size_mm||'-')}mm · ${esc(x.request?.budget||'预算未填')}</small>`,
-    `${statusPill(x.status,customDesignStatusText(x.status))}<br><small>${x.first_draft_due_at?`首稿 ${esc(fmtTime(x.first_draft_due_at))}`:'-'}</small>`,
+    `${statusPill(x.status,customDesignStatusText(x.status))}<br><small>保证金 ¥${esc(x.deposit?.amount_text||'0.00')} · ${esc(({unpaid:'待支付',prepay_ready:'待支付',processing:'支付中',paid:'已支付',refund_submitting:'退款提交中',refunding:'退款中',refunded:'已退回',refund_failed:'退款待重试'})[x.deposit?.status]||'-')}</small><br><small>${x.first_draft_due_at?`首稿 ${esc(fmtTime(x.first_draft_due_at))}`:'未进入设计队列'}</small>`,
     `<b>${(x.proposals||[]).length} 版</b><br><small>${(x.proposals||[])[0]?.title?esc((x.proposals||[])[0].title):'尚未上传'}</small>`,
     fmtTime(x.created_at),
     `<button class="mini-btn ${['submitted','designing','revision_requested'].includes(x.status)?'primary':''}" onclick="openCustomDesignRequest('${esc(x.request_id)}')">${['submitted','designing','revision_requested'].includes(x.status)?'开始设计':'查看工单'}</button>`
   ]));
 }
+function customDesignDisplayMaterialIds(request){
+  const ids=new Set();
+  (request?.proposals||[]).forEach(proposal=>(proposal?.workbench?.layout||[]).forEach(item=>{
+    const id=String(item?.material_id||item?.id||'').trim();
+    if(id)ids.add(id);
+  }));
+  return [...ids];
+}
+async function loadCustomDesignDisplayMaterials(request){
+  const ids=customDesignDisplayMaterialIds(request),cache=state.customDesignMaterialDisplayCache;
+  const missing=ids.filter(id=>!cache.has(id));
+  if(missing.length){
+    const params=new URLSearchParams({compact:'true',slim:'true',ids:missing.join(',')});
+    const payload=await api(`/api/v1/materials?${params}`);
+    (payload?.materials||[]).forEach(item=>{
+      const id=String(item?.id||'').trim();
+      if(id)cache.set(id,item);
+    });
+  }
+  return new Map(ids.map(id=>[id,cache.get(id)]).filter(([,item])=>item));
+}
 async function openCustomDesignRequest(id){
-  const x=await api(`/api/v1/admin/custom-design-requests/${encodeURIComponent(id)}`);
+  const sequence=++state.customDesignDetailRequestId;
+  openDrawer('CUSTOM DESIGN',`人工搭配 · ${id}`,`<div class="content-hint" role="status">正在加载服务单详情…</div>`);
+  try{
+    const x=await api(`/api/v1/admin/custom-design-requests/${encodeURIComponent(id)}`);
+    const materialMap=await loadCustomDesignDisplayMaterials(x);
+    if(sequence!==state.customDesignDetailRequestId)return;
   const latest=(x.proposals||[])[0];
   const timeline=(x.events||[]).slice().reverse().map(e=>`<div class="timeline-item"><b>${esc(customDesignEventText(e.event_type))}</b><span>${esc(customDesignStatusText(e.from_status))} → ${esc(customDesignStatusText(e.to_status))} · ${fmtTime(e.created_at)}</span>${e.note?`<p>${esc(e.note)}</p>`:''}</div>`).join('')||'<div class="empty-inline">暂无记录</div>';
-  const images=(x.proposals||[]).flatMap(p=>p.image_urls||[]).map(url=>`<a href="${esc(url)}" target="_blank" rel="noopener"><img class="admin-design-image" src="${esc(url)}" alt="方案图"></a>`).join('')||'<div class="empty-inline">尚未上传方案图片</div>';
-  const canPublish=!['confirmed','closed'].includes(x.status);
-  openDrawer('CUSTOM DESIGN',`人工搭配 · ${x.request_id}`,`${customDesignReportSection(x)}<section class="detail-section"><div class="detail-section-head"><div><span>USER PREFERENCE</span><h3>用户佩戴偏好</h3></div>${statusPill(x.status,customDesignStatusText(x.status))}</div><div class="detail-grid">${detailItem('手围',`${esc(x.request?.wrist_size_cm||'-')} cm`)}${detailItem('珠径',`${esc(x.request?.bead_size_mm||'-')} mm`)}${detailItem('预算',x.request?.budget||'未填写')}${detailItem('风格',x.request?.style_preference||'未填写')}${detailItem('色彩',x.request?.color_preference||'未填写')}${detailItem('备注',x.request?.note||'无')}</div></section><section class="detail-section"><div class="detail-section-head"><div><span>STRUCTURED DESIGN</span><h3>结构化搭配方案</h3><p>${latest?.workbench?.layout?.length?`最新方案已固化 ${latest.workbench.layout.length} 颗材料。`:'尚未发布可执行的珠子排布。'}</p></div></div>${canPublish?`<button class="btn primary" onclick="openCustomDesignWorkbench('${esc(x.request_id)}')">${x.draft?.workbench?.layout?.length?'继续编辑草稿':latest?.workbench?.layout?.length?'基于最新方案调整':'进入设计师工作台'}</button>`:latest?.order_id?`<div class="content-hint">用户已确认，待支付订单：${esc(latest.order_id)}</div>`:'<div class="content-hint">方案已确认</div>'}</section><section class="detail-section"><div class="detail-section-head"><div><span>REFERENCE IMAGE</span><h3>方案参考图</h3></div></div><div class="admin-design-images">${images}</div></section><section class="detail-section"><div class="detail-section-head"><div><span>SERVICE HISTORY</span><h3>服务记录</h3></div></div><div class="timeline">${timeline}</div></section>`);
+  const images=(x.proposals||[]).flatMap(p=>(p.image_urls||[]).map(url=>({url,version:p.proposal_version,title:p.title}))).map(item=>`<a href="${esc(item.url)}" target="_blank" rel="noopener"><img class="admin-design-image" src="${esc(item.url)}" alt="方案${num(item.version,1)}参考图" loading="lazy" decoding="async"><small>方案 ${num(item.version,1)} · ${esc(item.title||'参考图')}</small></a>`).join('')||'<div class="empty-inline">尚未上传方案图片</div>';
+  const compositions=(x.proposals||[]).map(proposal=>customDesignProposalLayoutHtml(proposal,materialMap)).filter(Boolean).join('')||'<div class="empty-inline">暂无结构化珠子排布</div>';
+  const canPublish=!['deposit_pending','completed','confirmed','closed'].includes(x.status);
+  const deposit=x.deposit||{};
+  const depositText=({unpaid:'等待用户支付',prepay_ready:'等待用户支付',processing:'微信支付处理中',paid:'已支付，服务进行中',refund_submitting:'退款指令提交中',refunding:'微信退款处理中',refunded:'已原路退回',refund_failed:'退款失败，用户可再次触发'})[deposit.status]||'保证金记录不可用';
+  const briefPreferences=x.design_brief?.preferences||{};
+  const latestRevision=(x.events||[]).slice().reverse().find(item=>item.event_type==='revision_requested'&&item.note);
+  const preferenceItems=[
+    detailItem('手围',`${x.request?.wrist_size_cm??'-'} cm`),
+    detailItem('珠径',`${x.request?.bead_size_mm??'-'} mm`),
+    detailItem('预算',x.request?.budget||'未填写'),
+    detailItem('风格',x.request?.style_preference||'未填写'),
+    detailItem('色彩',x.request?.color_preference||'未填写'),
+    detailItem('配饰',x.request?.accessory_preference||'未填写'),
+    detailItem('佩戴场景',x.request?.wear_scene||'未填写'),
+    detailItem('备注',x.request?.note||'无'),
+    latestRevision?detailItem('本轮调整',latestRevision.note):''
+  ].join('');
+  const designAction=canPublish
+    ?`<button class="btn primary" onclick="openCustomDesignWorkbench('${esc(x.request_id)}')">${x.draft?.workbench?.layout?.length?'继续编辑草稿':latest?.workbench?.layout?.length?'基于最新方案调整':'进入设计师工作台'}</button>`
+    :latest?.order_id
+      ?`<div class="content-hint">用户已下单，待支付订单：${esc(latest.order_id)}</div>`
+      :x.status==='deposit_pending'
+        ?'<div class="content-hint">用户支付保证金后才会进入设计队列。</div>'
+        :'<div class="content-hint">设计已完成，商品下单与保证金退款互不影响。</div>';
+  const content=[
+    customDesignBriefSection(x),
+    customDesignReportSection(x),
+    `<section class="detail-section"><div class="detail-section-head"><div><span>USER PREFERENCE</span><h3>用户佩戴偏好</h3><p>${esc(briefPreferences.source||'服务单记录')}</p></div>${statusPill(x.status,customDesignStatusText(x.status))}</div><div class="detail-grid">${preferenceItems}</div></section>`,
+    `<section class="detail-section"><div class="detail-section-head"><div><span>REFUNDABLE DESIGN DEPOSIT</span><h3>可退设计保证金</h3><p>¥${esc(deposit.amount_text||'0.00')} · ${esc(depositText)}</p></div></div><div class="content-hint">保证金独立于商品订单；用户确认设计完成后，由系统原路退款。</div></section>`,
+    `<section class="detail-section"><div class="detail-section-head"><div><span>STRUCTURED DESIGN</span><h3>方案设计细节</h3><p>${latest?.workbench?.layout?.length?`最新方案已固化 ${latest.workbench.layout.length} 颗材料。`:'尚未发布可执行的珠子排布。'}</p></div></div>${designAction}</section>`,
+    `<section class="detail-section"><div class="detail-section-head"><div><span>BEAD COMPOSITION</span><h3>珠子组成与排布</h3></div></div>${compositions}</section>`,
+    `<section class="detail-section"><div class="detail-section-head"><div><span>REFERENCE IMAGE</span><h3>方案参考图</h3></div></div><div class="admin-design-images">${images}</div></section>`,
+    `<section class="detail-section"><div class="detail-section-head"><div><span>SERVICE HISTORY</span><h3>服务记录</h3></div></div><div class="timeline">${timeline}</div></section>`
+  ].join('');
+  openDrawer('CUSTOM DESIGN',`人工搭配 · ${x.request_id}`,content);
+  }catch(error){
+    if(sequence!==state.customDesignDetailRequestId)return;
+    $('drawerBody').innerHTML=`<div class="content-hint">详情加载失败：${esc(error?.message||'请稍后重试')}</div>`;
+  }
+}
+
+function customDesignProposalLayoutHtml(proposal,materialMap){
+  const layout=proposal?.workbench?.layout||[];
+  if(!layout.length)return '';
+  const rows=layout.map((item,index)=>{
+    const material=materialMap.get(String(item.material_id||item.id||''))||{};
+    const sku=material.sku||{};
+    const name=material.id?customDesignMaterialName(material):(item.name||item.material_id||'未命名材料');
+    const size=customDesignMaterialSize(material)||item.size_mm||'-';
+    const image=item.selected_image_url||item.image_url||customDesignMaterialImages(material)[0]||'';
+    return `<div class="admin-composition-row"><span>${index+1}</span>${image?`<img src="${esc(image)}" alt="${esc(name)}" loading="lazy" decoding="async">`:''}<div><b>${esc(name)}</b><small>${esc(size)}mm · ${money(customDesignMaterialPrice(material)||item.price||0)} · ${esc(sku.material_code||item.material_id||'')}</small></div></div>`;
+  }).join('');
+  return `<div class="admin-composition-card"><div class="admin-composition-head"><b>方案 ${num(proposal.proposal_version,1)} · ${esc(proposal.title||'未命名方案')}</b><span>${layout.length} 颗</span></div>${proposal.description?`<p>${esc(proposal.description)}</p>`:''}<div class="admin-composition-list">${rows}</div></div>`;
 }
 
 function customDesignMaterialImages(material={}){
@@ -426,7 +548,9 @@ function customDesignMaterialPrice(material={}){
 }
 function customDesignMaterialStock(material={}){
   const sku=material.sku||{};
-  return num(sku.stock??material.stock,0)-num(sku.reserved_stock??material.reserved_stock,0);
+  const stock=num(sku.stock??material.stock,0);
+  const reserved=num(material.reserved_stock??sku.reserved_stock,0);
+  return Math.max(0,stock-reserved);
 }
 function customDesignWorkbenchPayload(){
   const workbench=state.customDesignWorkbench;
@@ -486,11 +610,31 @@ function customDesignSequenceHtml(){
     return `<div class="designer-sequence-item"><span>${index+1}</span><img src="${esc(item.selectedImageUrl)}" alt=""><div><b>${esc(customDesignMaterialName(item.material))}</b><small>${esc(customDesignMaterialSize(item.material)||'-')}mm · ${money(customDesignMaterialPrice(item.material))}</small><select onchange="changeCustomDesignMaterialImage(${index},this.value)">${options}</select></div><div class="designer-sequence-actions"><button onclick="moveCustomDesignMaterial(${index},-1)" ${index===0?'disabled':''}>↑</button><button onclick="moveCustomDesignMaterial(${index},1)" ${index===layout.length-1?'disabled':''}>↓</button><button onclick="removeCustomDesignMaterial(${index})">×</button></div></div>`;
   }).join('');
 }
+function customDesignCandidateHtml(){
+  const candidates=state.customDesignWorkbench?.candidates;
+  if(!candidates)return '<section class="designer-candidates"><div class="designer-candidates-head"><div><span>BRIEF CANDIDATES</span><b>正在整理材料候选</b></div><small>不会自动加入手串</small></div><p class="designer-candidates-message">正在按本单的手围、珠径、色板、角色规则和实时库存核对材料。</p></section>';
+  if(candidates.status!=='ready')return `<section class="designer-candidates designer-candidates--unavailable"><div class="designer-candidates-head"><div><span>BRIEF CANDIDATES</span><b>材料候选暂不可用</b></div></div><p class="designer-candidates-message">${esc(candidates.message||'请先补全设计指引或稍后重试。')}</p></section>`;
+  const active=candidates.active_constraints||{},budget=candidates.budget||{};
+  const budgetText=budget.raw?`预算 ${budget.raw}`:'预算待确认';
+  const groupHtml=(candidates.candidate_groups||[]).map(group=>{
+    const rows=(group.items||[]).map(item=>{
+      const estimate=item.single_material_string_estimate;
+      const estimateText=estimate===null||estimate===undefined
+        ?`单颗 ${money(item.price)}`
+        :`单材整串约 ${money(estimate)}`;
+      const caution=(item.cautions||[])[0]||'';
+      return `<button class="designer-candidate" onclick="addCustomDesignMaterial('${esc(item.material_id)}')"><img src="${esc(item.image_url)}" alt=""><span><b>${esc(item.name)}</b><small>${esc(item.top==='accessory'?'配饰':`${item.size_mm||'-'}mm`)} · ${money(item.price)} · 可用 ${num(item.available_stock)}</small><em>${esc((item.reasons||[]).slice(0,2).join(' · '))}</em>${caution?`<i class="${item.budget_status==='over'?'attention':''}">${esc(caution)}</i>`:''}</span><strong>＋</strong><u>${esc(estimateText)}</u></button>`;
+    }).join('')||'<div class="designer-candidate-empty">暂无符合本单约束的候选；可继续从下方材料库人工选择。</div>';
+    return `<div class="designer-candidate-group"><div><b>${esc(group.label||'候选材料')}</b><small>仅供设计参考</small></div><div class="designer-candidate-list">${rows}</div></div>`;
+  }).join('');
+  return `<section class="designer-candidates"><div class="designer-candidates-head"><div><span>BRIEF CANDIDATES</span><b>按本单设计指引筛选</b></div><small>${esc(budgetText)} · ${num(active.wrist_size_cm)}cm / ${num(active.bead_size_mm)}mm</small></div><p class="designer-candidates-message">${esc(candidates.message||'候选不会自动加入手串。')}</p><div class="designer-candidate-summary">按当前规格估算约 ${num(candidates.estimated_bead_count)} 颗；发布方案时仍会重新校验图库、价格和库存。</div>${groupHtml}</section>`;
+}
 function renderCustomDesignWorkbench(){
   const workbench=state.customDesignWorkbench;
   if(!workbench)return;
   const layout=workbench.layout||[];
-  $('drawerBody').innerHTML=`<div class="designer-workbench"><section class="designer-stage"><div class="designer-stage-head"><div><span>LIVE STRUCTURE</span><h3>${esc(workbench.request.report_code||workbench.request.report_id)}</h3></div><div><b>${layout.length} 颗</b><small>${money(customDesignWorkbenchTotal())}</small></div></div><div class="designer-ring">${customDesignWorkbenchRing()}</div><div class="designer-controls"><label>手围<input id="designer_wrist_size" type="number" min="12" max="26" step=".5" value="${esc(workbench.wristSize)}" onchange="updateCustomDesignWorkbenchMeta()"></label><label>珠径<input id="designer_bead_size" type="number" min="6" max="16" step="1" value="${esc(workbench.beadSize)}" onchange="updateCustomDesignWorkbenchMeta()"></label></div><label>设计说明<textarea id="designer_notes" maxlength="1000" placeholder="记录结构、配色与配饰逻辑">${esc(workbench.notes||'')}</textarea></label></section><section class="designer-library"><div class="designer-tabs"><b>材料库</b><input id="designer_material_keyword" value="${esc(workbench.keyword||'')}" placeholder="搜索品种、分类或编码" oninput="filterCustomDesignMaterials(this.value)"></div><div class="designer-material-list">${customDesignCatalogHtml()}</div></section><section class="designer-sequence"><div class="designer-tabs"><b>逐颗排布</b><span>顺序即用户工作台顺序</span></div><div class="designer-sequence-list">${customDesignSequenceHtml()}</div></section><section class="designer-publish"><div class="form-grid"><label>${fieldLabel('方案名称',true)}<input id="custom_design_title" value="${esc(workbench.title||'专属手串方案')}" maxlength="160"></label>${imageUploadField('custom_design_image','参考图（可选）',workbench.imageUrl||'','custom-design',false)}<label class="full">${fieldLabel('给用户的设计说明',false)}<textarea id="custom_design_description" maxlength="2000" placeholder="说明主材、配色、结构与佩戴感">${esc(workbench.description||'')}</textarea></label></div><div class="form-actions"><button class="btn secondary" onclick="saveCustomDesignDraft()">保存草稿</button><button class="btn primary" onclick="publishCustomDesignProposal()">发布给用户</button></div></section></div>`;
+  const brief=customDesignBriefSection(workbench.request,{compact:true});
+  $('drawerBody').innerHTML=`<div class="designer-workbench"><section class="designer-stage"><div class="designer-stage-head"><div><span>LIVE STRUCTURE</span><h3>${esc(workbench.request.report_code||workbench.request.report_id)}</h3></div><div><b>${layout.length} 颗</b><small>${money(customDesignWorkbenchTotal())}</small></div></div>${brief}<div class="designer-ring">${customDesignWorkbenchRing()}</div><div class="designer-controls"><label>手围<input id="designer_wrist_size" type="number" min="10" max="25" step=".5" value="${esc(workbench.wristSize)}" onchange="updateCustomDesignWorkbenchMeta()"></label><label>珠径<input id="designer_bead_size" type="number" min="6" max="16" step="1" value="${esc(workbench.beadSize)}" onchange="updateCustomDesignWorkbenchMeta()"></label></div><label>设计说明<textarea id="designer_notes" maxlength="1000" placeholder="记录结构、配色与配饰逻辑">${esc(workbench.notes||'')}</textarea></label></section>${customDesignCandidateHtml()}<section class="designer-library"><div class="designer-tabs"><b>材料库</b><input id="designer_material_keyword" value="${esc(workbench.keyword||'')}" placeholder="搜索品种、分类或编码" oninput="filterCustomDesignMaterials(this.value)"></div><div class="designer-material-list">${customDesignCatalogHtml()}</div></section><section class="designer-sequence"><div class="designer-tabs"><b>逐颗排布</b><span>顺序即用户工作台顺序</span></div><div class="designer-sequence-list">${customDesignSequenceHtml()}</div></section><section class="designer-publish"><div class="form-grid"><label>${fieldLabel('方案名称',true)}<input id="custom_design_title" value="${esc(workbench.title||'专属手串方案')}" maxlength="160"></label>${imageUploadField('custom_design_image','参考图（可选）',workbench.imageUrl||'','custom-design',false)}<label class="full">${fieldLabel('给用户的设计说明',false)}<textarea id="custom_design_description" maxlength="2000" placeholder="说明主材、配色、结构与佩戴感">${esc(workbench.description||'')}</textarea></label></div><div class="form-actions"><button class="btn secondary" onclick="saveCustomDesignDraft()">保存草稿</button><button class="btn primary" onclick="publishCustomDesignProposal()">发布给用户</button></div></section></div>`;
 }
 async function openCustomDesignWorkbench(id){
   const [request,materials]=await Promise.all([
@@ -513,19 +657,45 @@ async function openCustomDesignWorkbench(id){
     notes:source.notes||'',
     title:latest.title||'专属手串方案',
     description:latest.description||'',
-    imageUrl:(latest.image_urls||[])[0]||''
+    imageUrl:(latest.image_urls||[])[0]||'',
+    candidates:null,
+    candidateRequestId:0
   };
   openDrawer('DESIGNER WORKBENCH',`设计师工作台 · ${request.request_id}`,'');
   $('drawer').classList.add('designer-drawer');
+  renderCustomDesignWorkbench();
+  refreshCustomDesignCandidates();
+}
+async function refreshCustomDesignCandidates(){
+  const workbench=state.customDesignWorkbench;
+  if(!workbench)return;
+  const requestId=workbench.request?.request_id;
+  const sequence=++workbench.candidateRequestId;
+  try{
+    const candidates=await api(`/api/v1/admin/custom-design-requests/${encodeURIComponent(requestId)}/material-candidates`,{
+      method:'POST',
+      body:JSON.stringify({
+        selected_material_ids:(workbench.layout||[]).map(item=>String(item.material?.id||'')).filter(Boolean),
+        wrist_size_cm:workbench.wristSize,
+        bead_size_mm:workbench.beadSize
+      })
+    });
+    if(state.customDesignWorkbench!==workbench||sequence!==workbench.candidateRequestId)return;
+    workbench.candidates=candidates;
+  }catch(error){
+    if(state.customDesignWorkbench!==workbench||sequence!==workbench.candidateRequestId)return;
+    workbench.candidates={status:'unavailable',message:error.message||'候选材料加载失败，请稍后重试。'};
+  }
   renderCustomDesignWorkbench();
 }
 function filterCustomDesignMaterials(value){state.customDesignWorkbench.keyword=value;const list=document.querySelector('.designer-material-list');if(list)list.innerHTML=customDesignCatalogHtml()}
 function updateCustomDesignWorkbenchMeta(){
   const workbench=state.customDesignWorkbench;
   captureCustomDesignWorkbenchForm();
-  workbench.wristSize=Math.max(12,Math.min(26,num(formValue('designer_wrist_size'),workbench.wristSize)));
+  workbench.wristSize=Math.max(10,Math.min(25,num(formValue('designer_wrist_size'),workbench.wristSize)));
   workbench.beadSize=Math.max(6,Math.min(16,num(formValue('designer_bead_size'),workbench.beadSize)));
   renderCustomDesignWorkbench();
+  refreshCustomDesignCandidates();
 }
 function addCustomDesignMaterial(id){
   const workbench=state.customDesignWorkbench,material=(workbench.materials||[]).find(item=>String(item.id)===String(id));
@@ -534,8 +704,9 @@ function addCustomDesignMaterial(id){
   captureCustomDesignWorkbenchForm();
   workbench.layout.push({material,selectedImageUrl:image});
   renderCustomDesignWorkbench();
+  refreshCustomDesignCandidates();
 }
-function removeCustomDesignMaterial(index){captureCustomDesignWorkbenchForm();state.customDesignWorkbench.layout.splice(index,1);renderCustomDesignWorkbench()}
+function removeCustomDesignMaterial(index){captureCustomDesignWorkbenchForm();state.customDesignWorkbench.layout.splice(index,1);renderCustomDesignWorkbench();refreshCustomDesignCandidates()}
 function moveCustomDesignMaterial(index,direction){
   const layout=state.customDesignWorkbench.layout,target=index+direction;
   if(target<0||target>=layout.length)return;
@@ -566,16 +737,17 @@ async function publishCustomDesignProposal(){
 }
 async function openCustomDesignSettings(){
   const setting=await api('/api/v1/admin/custom-design-requests/settings');
-  openDrawer('CUSTOM DESIGN SETTINGS','人工搭配服务设置',`<div class="form-grid"><label>${fieldLabel('每日可接申请数',true)}<input id="custom_design_capacity" type="number" min="0" max="200" value="${num(setting.daily_capacity,12)}"></label><label>${fieldLabel('首稿承诺时效（小时）',true)}<input id="custom_design_sla" type="number" min="1" max="168" value="${num(setting.sla_hours,24)}"></label></div><div class="content-hint">达到每日名额后，小程序会停止接收新申请。此设置不影响已提交工单。</div><div class="form-actions"><button class="btn secondary" onclick="closeDrawer()">取消</button><button class="btn primary" onclick="saveCustomDesignSettings()">保存设置</button></div>`);
+  openDrawer('CUSTOM DESIGN SETTINGS','人工搭配服务设置',`<div class="form-grid"><label>${fieldLabel('每日可接申请数',true)}<input id="custom_design_capacity" type="number" min="0" max="200" value="${num(setting.daily_capacity,12)}"></label><label>${fieldLabel('首稿承诺时效（小时）',true)}<input id="custom_design_sla" type="number" min="1" max="168" value="${num(setting.sla_hours,24)}"></label><label>${fieldLabel('可退设计保证金（分）',true)}<input id="custom_design_deposit" type="number" min="100" max="100000" value="${num(setting.deposit_amount_fee,2900)}"></label></div><div class="content-hint">用户支付保证金后才进入设计队列；设计完成并由用户确认后，系统自动原路退款。已创建的保证金金额不会被此设置改写。</div><div class="form-actions"><button class="btn secondary" onclick="closeDrawer()">取消</button><button class="btn primary" onclick="saveCustomDesignSettings()">保存设置</button></div>`);
 }
 function openCustomDesignStandard(){
   openDrawer('CUSTOM DESIGN STANDARD','人工搭配设计规范',`<section class="detail-section"><div class="detail-section-head"><div><span>V1 DELIVERY STANDARD</span><h3>逐颗设计，结构化交付</h3><p>设计师必须在工作台选用真实上架材料并固化顺序、价格和图库图，参考图仅作补充。</p></div></div><div class="detail-grid">${detailItem('清透自然','蓝白 / 雾绿 / 透明系；1 主材 + 1–2 辅材，保持留白')}${detailItem('高级极简','单色或邻近色；1–2 材质，避免复杂隔片')}${detailItem('温柔治愈','柔粉 / 月光白 / 浅紫；圆润、低对比')}${detailItem('东方禅意','米白 / 茶色 / 墨绿；稳定重心、少量金属')}</div></section><section class="detail-section"><div class="detail-section-head"><div><span>NON-NEGOTIABLES</span><h3>成串与交付底线</h3></div></div><ul class="standard-list"><li>常规款最多 3 种珠材；异形配饰最多 2 处，避免强行加入金属。</li><li>一串只保留一个视觉主角，预算、手围与珠径必须匹配用户申请。</li><li>每颗材料必须有可用库存和图库图；发布前系统会再次核对价格。</li><li>草稿与发布阶段不占库存；用户确认后自动生成待支付订单并预占 24 小时。</li></ul></section><div class="form-actions"><button class="btn primary" onclick="closeDrawer()">我已了解</button></div>`);
 }
 async function saveCustomDesignSettings(){
-  const daily_capacity=num(formValue('custom_design_capacity'),-1),sla_hours=num(formValue('custom_design_sla'),0);
+  const daily_capacity=num(formValue('custom_design_capacity'),-1),sla_hours=num(formValue('custom_design_sla'),0),deposit_amount_fee=num(formValue('custom_design_deposit'),0);
   if(!Number.isInteger(daily_capacity)||daily_capacity<0||daily_capacity>200){toast('每日名额应为 0–200 的整数');return}
   if(!Number.isInteger(sla_hours)||sla_hours<1||sla_hours>168){toast('首稿时效应为 1–168 小时');return}
-  await api('/api/v1/admin/custom-design-requests/settings',{method:'PUT',body:JSON.stringify({daily_capacity,sla_hours})});closeDrawer();toast('服务设置已保存');
+  if(!Number.isInteger(deposit_amount_fee)||deposit_amount_fee<100||deposit_amount_fee>100000){toast('设计保证金应为 1–1000 元');return}
+  await api('/api/v1/admin/custom-design-requests/settings',{method:'PUT',body:JSON.stringify({daily_capacity,sla_hours,deposit_amount_fee})});closeDrawer();toast('服务设置已保存');
 }
 function afterSaleStatusPill(status,text){
   const cls=['requested','refund_pending','refund_submitting','refunding'].includes(status)?'danger':['awaiting_return','returning'].includes(status)?'warn':['resolved','rejected','canceled'].includes(status)?'muted':'';
@@ -3421,7 +3593,7 @@ function detailItem(label,value){return `<div class="detail-item"><span>${label}
 function topLabel(v){const item=materialTypes(true).find(x=>(x.code||x.id)===v);return item?.name||({bead:'珠子',accessory:'配饰',incense:'合香珠',pendant:'花托/吊坠'})[v]||v}
 function fmtTime(v){if(!v)return'-';const d=new Date(v);return Number.isNaN(d.getTime())?esc(v):d.toLocaleString('zh-CN',{hour12:false})}
 function openDrawer(eyebrow,title,html){const drawer=$('drawer');$('drawerEyebrow').textContent=eyebrow;$('drawerTitle').textContent=title;$('drawerBody').innerHTML=html;$('drawerMask').classList.remove('hide');drawer.classList.remove('hide');drawer.scrollTop=0}
-function closeDrawer(){$('drawerMask').classList.add('hide');$('drawer').classList.add('hide');$('drawer').classList.remove('designer-drawer');state.customDesignWorkbench=null}
+function closeDrawer(){state.customDesignDetailRequestId++;$('drawerMask').classList.add('hide');$('drawer').classList.add('hide');$('drawer').classList.remove('designer-drawer');state.customDesignWorkbench=null}
 async function ensureWarehouseOptions(force=false){
   if(force||!state.cache.warehouse.options)state.cache.warehouse.options=await api('/api/v1/admin/warehouse/options');
   renderWarehouseFilters();

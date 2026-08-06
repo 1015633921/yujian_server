@@ -1,10 +1,13 @@
 from datetime import date, time
+import json
 import math
+from pathlib import Path
 
 import pytest
 
 from app.energy import ELEMENTS, ENERGY_WEIGHTS, EnergyCalculator
 from app.copy_safety import safe_display_text
+from app.bracelet_sizing import calculate_bracelet_fit, recommend_bead_count
 from app.material_knowledge import crystal_elements
 from app.recommendation import CORE_WISH_TAGS, RecommendationEngine
 from app.schemas import AssessmentRequest
@@ -123,16 +126,18 @@ def test_chakra_and_mood_inputs_affect_dynamic_breakdown():
 def test_true_solar_time_uses_chengdu_longitude():
     result = EnergyCalculator().calculate(make_request())
 
-    assert result["solar_time"]["longitude"] == 104.0665
-    assert result["solar_time"]["location_source"] == "built_in_place_lookup"
+    assert result["solar_time"]["longitude"] == 104.0667
+    assert result["solar_time"]["location_source"] == "versioned_city_center_dataset"
+    assert result["solar_time"]["resolved_location_name"] == "四川省·成都市"
+    assert result["solar_time"]["resolved_location_precision"] == "city-seat"
     assert result["solar_time"]["total_correction_minutes"] < 0
 
 
 def test_true_solar_time_uses_lanzhou_longitude():
     result = EnergyCalculator().calculate(make_request(birth_place="兰州"))
 
-    assert result["solar_time"]["longitude"] == 103.8343
-    assert result["solar_time"]["location_source"] == "built_in_place_lookup"
+    assert result["solar_time"]["longitude"] == 103.8399
+    assert result["solar_time"]["location_source"] == "versioned_city_center_dataset"
 
 
 def test_recommendation_primary_follows_wish_and_support_avoids_primary_elements():
@@ -216,6 +221,25 @@ def test_recommendation_uses_preferred_bead_size_in_items_and_layout():
 def test_stringed_bead_count_accounts_for_closed_bracelet_loss():
     assert RecommendationEngine.estimate_stringed_bead_count(15.5, 8) == 23
     assert RecommendationEngine.estimate_stringed_bead_count(16, 10) == 20
+
+
+def test_server_fit_contract_matches_the_closest_count_rule_used_by_the_workspace():
+    fixture_path = Path(__file__).parent / "fixtures" / "bracelet-sizing-golden.json"
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+    sample = fixture["cases"][0]
+    fit = calculate_bracelet_fit(
+        sample["items"],
+        sample["wrist_size_cm"],
+        allowance_mm=sample["allowance_mm"],
+        min_count=8,
+        max_count=40,
+    )
+
+    assert recommend_bead_count([8] * 30, 16, min_count=8, max_count=40) == 24
+    assert fit["model_version"] == fixture["model_version"]
+    assert fit["status"] == sample["expected_status"]
+    assert fit["recommended_count"] == sample["expected_recommended_count"]
+    assert fit["actual_inner_mm"] == pytest.approx(sample["expected_inner_mm"], abs=0.001)
 
 
 def test_round_bead_inner_circumference_uses_closed_ring_geometry():

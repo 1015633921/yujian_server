@@ -19,7 +19,7 @@ $Root = Split-Path -Parent $PSScriptRoot
 $Service = if ($Env -eq "prod") { "api" } else { "api-test" }
 $PackageName = if ($Env -eq "prod") { "yujian_prod_deploy_current.tar.gz" } else { "yujian_test_deploy_current.tar.gz" }
 $LocalHealth = if ($Env -eq "prod") { "http://127.0.0.1:8000/health" } else { "http://127.0.0.1:8001/health" }
-$PublicHealth = if ($Env -eq "prod") { "https://api.yustream.cn/health" } else { "https://api.yustream.cn/test-api/health" }
+$PublicHealth = if ($Env -eq "prod") { "https://api.yustream.cn/health" } else { "https://operation-test.yustream.cn/health" }
 $PackagePath = Join-Path $Root $PackageName
 $RemotePackage = "/tmp/$PackageName"
 
@@ -34,11 +34,11 @@ if (-not (Test-Path $KeyPath)) {
 
 Set-Location $Root
 
-Step "Packing backend + admin static files for $Env"
+Step "Packing backend + Vue admin source for $Env"
 if (Test-Path $PackagePath) {
   Remove-Item -LiteralPath $PackagePath -Force
 }
-tar -czf $PackagePath app static scripts/migrate_sqlite_to_mysql.py scripts/regenerate_material_skus_and_knowledge.py requirements.txt Dockerfile compose.yaml
+tar --exclude='admin-web/node_modules' --exclude='admin-web/dist' -czf $PackagePath app static admin-web scripts/migrate_sqlite_to_mysql.py scripts/regenerate_material_skus_and_knowledge.py requirements.txt Dockerfile compose.yaml
 
 Step "Uploading package to $Server"
 scp -i $KeyPath $PackagePath "${Server}:$RemotePackage"

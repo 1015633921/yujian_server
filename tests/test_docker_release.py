@@ -50,7 +50,7 @@ def test_docker_profiles_share_one_contract_and_isolate_runtime() -> None:
     assert test.nginx_upstream_file != prod.nginx_upstream_file
     assert test.nginx_upstream_name != prod.nginx_upstream_name
     assert set(test.slot_ports.values()).isdisjoint(prod.slot_ports.values())
-    assert "/test-api/" in test.public_health_url
+    assert test.public_health_url == "https://operation-test.yustream.cn/health/ready"
     assert "/test-api/" not in prod.public_health_url
     assert test.image_repository == prod.image_repository
     assert test.backend_network == prod.backend_network
@@ -198,10 +198,33 @@ def test_deployment_workflow_has_one_environment_choice_and_no_kubernetes() -> N
     assert "Hash the minimal backend build context" in workflow
     assert "Package the minimal test build context" in workflow
     assert "build_remote_test_image.sh" in workflow
+    assert "configure_operation_test_domain.sh" in workflow
+    assert "deploy/nginx" in workflow
     assert "YUJIAN_LOCAL_TEST_IMAGE=1" in workflow
     assert "kubectl" not in workflow
     assert "k3s" not in workflow.lower()
     assert "--password-stdin" in workflow
+
+
+def test_operation_test_domain_keeps_the_test_upstream_and_separates_api_routes() -> None:
+    http_config = (ROOT / "deploy" / "nginx" / "yujian-operation-test-http.conf").read_text(
+        encoding="utf-8",
+    )
+    https_config = (ROOT / "deploy" / "nginx" / "yujian-operation-test.conf").read_text(
+        encoding="utf-8",
+    )
+    script = (ROOT / "scripts" / "configure_operation_test_domain.sh").read_text(
+        encoding="utf-8",
+    )
+
+    assert "server_name operation-test.yustream.cn;" in http_config
+    assert "location ^~ /.well-known/acme-challenge/" in http_config
+    assert "proxy_pass http://yujian_test_active/admin-v2/;" in https_config
+    assert "location ^~ /api/" in https_config
+    assert "proxy_pass http://yujian_test_active;" in https_config
+    assert "ssl_certificate /etc/letsencrypt/live/operation-test.yustream.cn/fullchain.pem;" in https_config
+    assert "certbot certonly --webroot" in script
+    assert "nginx -t" in script
 
 
 def test_dockerfile_keeps_dynamic_labels_after_dependency_layer() -> None:

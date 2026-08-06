@@ -45,18 +45,8 @@ test('workspace gives the material drawer more room without collapsing the tray'
   assert.ok(tallStyle['--workspace-drawer-height'] > shortStyle['--workspace-drawer-height']);
   assert.ok(shortLayout.stageLayout.size >= 580);
   assert.ok(tallLayout.stageLayout.size >= 670);
-  const shortOverlap =
-    shortStyle['--workspace-top-chrome']
-      + shortStyle['--workspace-canvas-height']
-      + shortStyle['--workspace-drawer-height']
-      - shortViewport;
-  const tallOverlap =
-    tallStyle['--workspace-top-chrome']
-      + tallStyle['--workspace-canvas-height']
-      + tallStyle['--workspace-drawer-height']
-      - tallViewport;
-  assert.equal(shortOverlap, 0);
-  assert.equal(tallOverlap, 0);
+  assert.equal(shortStyle['--workspace-canvas-height'], undefined);
+  assert.equal(tallStyle['--workspace-canvas-height'], undefined);
 });
 
 test('profile exposes manual phone input and keeps WeChat phone shortcut visible', () => {
@@ -288,18 +278,15 @@ test('workspace keeps large-screen tray controls above the material drawer', () 
     viewportRpx,
     bottomInsetRpx: 65
   }).style);
-  const drawerTop = viewportRpx - style['--workspace-drawer-height'];
+  const workbenchHeight = style['--workspace-workbench-height'];
   const randomButtonBottom = style['--workspace-top-chrome']
     + style['--workspace-random-top']
     + style['--workspace-random-height'];
+  const workbenchBottom = style['--workspace-top-chrome'] + workbenchHeight;
 
-  assert.equal(
-    style['--workspace-top-chrome']
-      + style['--workspace-canvas-height']
-      + style['--workspace-drawer-height'],
-    viewportRpx
-  );
-  assert.ok(drawerTop - randomButtonBottom >= 10);
+  assert.equal(style['--workspace-canvas-height'], undefined);
+  assert.ok(workbenchBottom - randomButtonBottom >= 10);
+  assert.ok(workbenchBottom - randomButtonBottom <= 24);
 });
 
 test('workspace reserves the device bottom inset without lifting the drawer over the workbench', () => {
@@ -324,14 +311,8 @@ test('workspace reserves the device bottom inset without lifting the drawer over
     0
   );
   assert.equal(withInset['--workspace-stage-size'], withoutInset['--workspace-stage-size']);
-  assert.equal(
-    withInset['--workspace-top-chrome']
-      + withInset['--workspace-canvas-height']
-      + withInset['--workspace-drawer-height'],
-    withoutInset['--workspace-top-chrome']
-      + withoutInset['--workspace-canvas-height']
-      + withoutInset['--workspace-drawer-height']
-  );
+  assert.equal(withInset['--workspace-canvas-height'], undefined);
+  assert.equal(withoutInset['--workspace-canvas-height'], undefined);
 });
 
 test('workspace keeps all physics collisions silent and only shakes on tray-wall impact', () => {
@@ -684,7 +665,7 @@ test('workspace retries the canvas renderer when drawing fails', () => {
   assert.equal(failureReason, 'bracelet canvas render failed');
 });
 
-test('workspace overlays suppress existing canvases without destroying their nodes', () => {
+test('workspace overlays unmount canvases and reinitialize them after closing', () => {
   const page = loadPage('miniprogram/pages/workspace/workspace.js');
   let stopped = 0;
   let cleared = 0;
@@ -717,7 +698,7 @@ test('workspace overlays suppress existing canvases without destroying their nod
   global.wx = { nextTick: callback => callback() };
 
   instance.hideWorkspaceCanvasForOverlay();
-  assert.equal(instance.data.workspaceCanvasVisible, true);
+  assert.equal(instance.data.workspaceCanvasVisible, false);
   assert.equal(instance.data.workspaceCanvasSuppressed, true);
   assert.equal(stopped, 1);
   assert.equal(cleared, 1);
@@ -725,14 +706,14 @@ test('workspace overlays suppress existing canvases without destroying their nod
   instance.restoreWorkspaceCanvasAfterOverlay();
   assert.equal(instance.data.workspaceCanvasVisible, true);
   assert.equal(instance.data.workspaceCanvasSuppressed, false);
-  assert.equal(reinitialized, 0);
-  assert.equal(rendered, 1);
+  assert.equal(reinitialized, 1);
+  assert.equal(rendered, 0);
 
   const workspaceWxml = fs.readFileSync(
     path.resolve(__dirname, '../../miniprogram/pages/workspace/workspace.wxml'),
     'utf8'
   );
-  assert.match(workspaceWxml, /workspaceCanvasSuppressed \? 'workspace-canvas-suppressed'/);
+  assert.match(workspaceWxml, /wx:if="\{\{workspaceCanvasVisible\}\}"/);
 });
 
 test('workspace restores a suppressed canvas after returning from checkout', () => {
@@ -887,7 +868,11 @@ test('workspace renders adjusted metal assets without synthetic highlights or fi
   assert.doesNotMatch(workspaceWxss, /workspace-silver-filter|material-tone-silver/);
 });
 
-test('workspace keeps the selected bead card inside the bracelet center', () => {
+test('workspace bead taps keep the drawer stable without rendering an info card', () => {
+  const workspaceJs = fs.readFileSync(
+    path.resolve(__dirname, '../../miniprogram/pages/workspace/workspace.js'),
+    'utf8'
+  );
   const workspaceWxml = fs.readFileSync(
     path.resolve(__dirname, '../../miniprogram/pages/workspace/workspace.wxml'),
     'utf8'
@@ -896,19 +881,66 @@ test('workspace keeps the selected bead card inside the bracelet center', () => 
     path.resolve(__dirname, '../../miniprogram/pages/workspace/workspace.wxss'),
     'utf8'
   );
-  const circleStart = workspaceWxml.indexOf('<view class="bracelet-circle');
-  const cardStart = workspaceWxml.indexOf('class="order-panel bead-info-panel"');
-  const watermarkStart = workspaceWxml.indexOf('class="completion-watermark', cardStart);
-  const cardRule = workspaceWxss.match(/\.bead-info-panel\s*\{[^}]+\}/s);
+  assert.doesNotMatch(workspaceWxml, /bead-info-panel|selectedBeadInfo/);
+  assert.doesNotMatch(workspaceWxss, /\.bead-info-/);
+  assert.match(workspaceJs, /selectWorkspaceBead\(index\)/);
+  assert.doesNotMatch(workspaceJs, /selectedBeadInfo:\s*this\.buildSelectedBeadInfo/);
+  assert.doesNotMatch(workspaceWxml, /beadInfoCanvasSnapshot|bracelet-canvas-snapshot/);
+  assert.doesNotMatch(workspaceJs, /captureBeadInfoCanvasSnapshot|beadInfoCanvasSnapshot/);
+});
 
-  assert.ok(circleStart >= 0);
-  assert.ok(cardStart > circleStart);
-  assert.ok(watermarkStart > cardStart);
-  assert.match(workspaceWxml, /class="order-panel bead-info-panel" catchtap="stopPropagation"/);
-  assert.ok(cardRule);
-  assert.match(cardRule[0], /top:\s*50%/);
-  assert.match(cardRule[0], /bottom:\s*auto/);
-  assert.match(cardRule[0], /transform:\s*translate\(-50%,\s*-50%\)/);
+test('workspace bead selection keeps interaction state without opening a card', () => {
+  const page = loadPage('miniprogram/pages/workspace/workspace.js');
+  let rendered = 0;
+  const instance = Object.assign({}, page, {
+    data: {
+      ...page.data,
+      workspaceCanvasVisible: true,
+      workspaceCanvasSuppressed: false,
+      selectedItems: []
+    },
+    setData(updates, callback) {
+      Object.assign(this.data, updates);
+      if (callback) callback();
+    },
+    scheduleCanvasRender() {
+      rendered += 1;
+    }
+  });
+
+  instance.selectWorkspaceBead(0);
+
+  assert.equal(instance.data.workspaceCanvasVisible, true);
+  assert.equal(instance.data.workspaceCanvasSuppressed, false);
+  assert.equal(instance.data.selectedBeadIndex, 0);
+  assert.equal(instance.data.selectedBeadInfo, null);
+  assert.equal(rendered, 1);
+});
+
+test('workspace canvas avoids redundant touch handlers and physics-frame snapshot work', () => {
+  const workspaceJs = fs.readFileSync(
+    path.resolve(__dirname, '../../miniprogram/pages/workspace/workspace.js'),
+    'utf8'
+  );
+  const workspaceWxml = fs.readFileSync(
+    path.resolve(__dirname, '../../miniprogram/pages/workspace/workspace.wxml'),
+    'utf8'
+  );
+  const canvas = workspaceWxml.match(/<canvas[\s\S]*?id="braceletCanvas"[\s\S]*?<\/canvas>/);
+  const touchLayer = workspaceWxml.match(/<view[\s\S]*?class="bracelet-touch-layer[\s\S]*?<\/view>/);
+  const motionMethod = workspaceJs.slice(
+    workspaceJs.indexOf('  hasActiveBraceletCanvasMotion()'),
+    workspaceJs.indexOf('  hasActiveCanvasMotion()')
+  );
+
+  assert.ok(canvas);
+  assert.doesNotMatch(canvas[0], /catchtouch/);
+  assert.ok(touchLayer);
+  assert.match(touchLayer[0], /catchtouchstart="onBraceletCanvasTouchStart"/);
+  assert.match(motionMethod, /this\.physicsTimer/);
+  assert.match(workspaceJs, /const physicsLoopActive = !!this\.physicsTimer/);
+  assert.match(workspaceJs, /&& !physicsLoopActive\s+&& \(hasBraceletMotion/);
+  assert.match(workspaceJs, /const maxCanvasDpr = this\.isLowPerformanceDevice \? 1\.75/);
 });
 
 test('workspace material selection randomly uses gallery entries without primary or URL deduplication', () => {
@@ -1355,8 +1387,32 @@ test('report turns element ratios and poetic tags into actionable styling guidan
     solar_time: { true_solar_time: '2000-01-01 12:00' }
   });
   assert.equal(unsupported.hasTrueSolarTime, false);
-  assert.equal(unsupported.trueSolarTime, '');
-  assert.equal(unsupported.trueSolarTimeLabel, '未完成地点校准');
+  assert.equal(unsupported.trueSolarTime, '—');
+  assert.equal(unsupported.trueSolarTimeLabel, '出生地点未匹配');
+  assert.match(unsupported.trueSolarTimeDescription, /重新选择省市/);
+
+  const unknownTime = instance.buildViewReport({
+    final_energy_profile: { 木: 20, 火: 20, 土: 20, 金: 20, 水: 20 },
+    interpretation: { balance_index: 100 },
+    input_summary: {},
+    calibration_status: 'not_required'
+  });
+  const invalidLocation = instance.buildViewReport({
+    final_energy_profile: { 木: 20, 火: 20, 土: 20, 金: 20, 水: 20 },
+    interpretation: { balance_index: 100 },
+    input_summary: {},
+    calibration_status: 'invalid_location'
+  });
+  const legacy = instance.buildViewReport({
+    final_energy_profile: { 木: 20, 火: 20, 土: 20, 金: 20, 水: 20 },
+    interpretation: { balance_index: 100 },
+    input_summary: {},
+    calibration_status: 'legacy_unknown'
+  });
+  assert.equal(unknownTime.trueSolarTimeLabel, '待补充出生时刻');
+  assert.match(unknownTime.trueSolarTimeDescription, /12:00/);
+  assert.equal(invalidLocation.trueSolarTimeLabel, '地点信息异常');
+  assert.equal(legacy.trueSolarTimeLabel, '旧报告未校准');
 });
 
 test('report derives stable key elements for tied and incomplete profiles', () => {
@@ -1626,7 +1682,40 @@ test('report basis page reads the prepared view and summarizes participating inp
   assert.equal(instance.data.generationLogicText, '元素结构影响调节方向，佩戴目标影响使用场景，性格偏好影响材质与排列，当下状态影响本次氛围建议。');
   assert.equal(instance.data.generatedAtText, '2026-07-12 16:40');
   instance.showSolarTimeInfo();
-  assert.match(global.wx.lastModal.content, /经度、时区与日期/);
+  assert.match(global.wx.lastModal.content, /城市中心坐标、时区与出生日期/);
+});
+
+test('report basis keeps calibration states truthful and distinct', () => {
+  const page = loadPage('miniprogram/pages/report-basis/report-basis.js');
+  const applied = page.buildVersionedView({
+    input_snapshot: { birth_place: '北京市' },
+    calibration: {
+      status: 'applied',
+      details: {
+        calibrated_time: '1994-05-18 11:48',
+        resolved_location_name: '北京市'
+      }
+    }
+  });
+  const unknownTime = page.buildVersionedView({
+    calibration: { status: 'not_required', details: {} }
+  });
+  const unsupported = page.buildVersionedView({
+    calibration: { status: 'unsupported', details: {} }
+  });
+  const invalid = page.buildVersionedView({
+    calibration: { status: 'invalid_location', details: {} }
+  });
+  const legacy = page.buildVersionedView({
+    calibration: { status: 'legacy_unknown', details: {} }
+  });
+
+  assert.equal(applied.trueSolarTime, '1994-05-18 11:48');
+  assert.match(applied.trueSolarTimeDescription, /北京市的城市中心坐标/);
+  assert.equal(unknownTime.trueSolarTimeLabel, '待补充出生时刻');
+  assert.equal(unsupported.trueSolarTimeLabel, '出生地点未匹配');
+  assert.equal(invalid.trueSolarTimeLabel, '地点信息异常');
+  assert.equal(legacy.trueSolarTimeLabel, '旧报告未校准');
 });
 
 test('report basis rejects an outdated snapshot after the report changes', () => {
@@ -1922,4 +2011,32 @@ test('assessment restores required fields from an older report before opening th
   assert.deepEqual(instance.data.form.wishes, ['事业专注']);
   assert.deepEqual(instance.data.form.chakraAnswers, ['表达感']);
   assert.equal(instance.data.form.moodPaletteId, 'mist_blue');
+});
+
+test('assessment requires an explicit birth city and sends a stable city calibration identity', () => {
+  const page = loadPage('miniprogram/pages/assessment/assessment.js');
+  const instance = Object.assign({}, page, {
+    data: { ...page.data, form: { ...page.data.form } }
+  });
+  const completedBasicForm = {
+    ...instance.data.form,
+    name: '小宇',
+    birthDate: '1994-05-18',
+    birthPlace: ''
+  };
+  const selected = instance.regionFromPickerIndex([0, 0]);
+  const source = fs.readFileSync(
+    path.resolve(__dirname, '../../miniprogram/pages/assessment/assessment.js'),
+    'utf8'
+  );
+
+  assert.equal(instance.data.form.birthPlace, '');
+  assert.deepEqual(instance.data.form.birthRegion, []);
+  assert.equal(instance.canProceed('basic', completedBasicForm), false);
+  assert.equal(selected.birthPlace, '北京市');
+  assert.equal(selected.birthPlacePath, '北京市/北京市');
+  assert.match(selected.locationCode, /^cn:city:v1:[a-z0-9]+$/);
+  assert.equal(selected.locationCode, instance.regionFromPickerIndex([0, 0]).locationCode);
+  assert.match(source, /birth_place_path:\s*form\.birthPlacePath/);
+  assert.match(source, /location_code:\s*form\.locationCode/);
 });

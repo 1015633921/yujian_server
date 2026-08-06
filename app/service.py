@@ -22,7 +22,7 @@ from .observability import log_event, safe_exception_frames
 from .schemas import AssessmentRequest, DIYRecommendationRequest
 
 CHINA_TZ = ZoneInfo("Asia/Shanghai")
-DIY_RECOMMENDATION_CACHE_VERSION = "2026-07-24-composer-v2"
+DIY_RECOMMENDATION_CACHE_VERSION = "2026-08-06-bracelet-fit-v3"
 LOGGER = logging.getLogger(__name__)
 
 ELEMENT_ZEN_WORDS = {
@@ -482,7 +482,17 @@ class AssessmentService:
     def natal_fingerprint(request: AssessmentRequest) -> str:
         payload = request.model_dump(
             mode="json",
-            include={"name", "birthday", "birth_time", "birth_place", "lng", "lat"},
+            include={
+                "name",
+                "birthday",
+                "birth_time",
+                "birth_time_unknown",
+                "birth_place",
+                "birth_place_path",
+                "location_code",
+                "lng",
+                "lat",
+            },
         )
         raw = f"natal:{json.dumps(payload, ensure_ascii=False, sort_keys=True)}".encode("utf-8")
         return hashlib.sha256(raw).hexdigest()
@@ -515,6 +525,7 @@ class AssessmentService:
             "birth_time": request.birth_time.strftime("%H:%M"),
             "birth_time_unknown": request.birth_time_unknown,
             "birth_place": request.birth_place,
+            "birth_place_path": request.birth_place_path,
             "location_code": request.location_code,
             "lng": request.lng,
             "lat": request.lat,

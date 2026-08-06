@@ -64,7 +64,9 @@ def test_price_cents_migration_backfills_only_exact_positive_legacy_prices(tmp_p
     AdminService(db_path)
     OrderService(db_path)
     upgrade("sqlite", db_path)
-    assert downgrade("sqlite", db_path, steps=11) == [
+    assert downgrade("sqlite", db_path, steps=13) == [
+        "20260806_18_custom_design_queue_indexes",
+        "20260806_17_custom_design_deposits",
         "20260727_16_custom_design_workbench",
         "20260727_15_report_codes",
         "20260727_14_custom_design_service",
@@ -97,6 +99,9 @@ def test_price_cents_migration_backfills_only_exact_positive_legacy_prices(tmp_p
         "20260727_14_custom_design_service",
         "20260727_15_report_codes",
         "20260727_16_custom_design_workbench",
+
+        "20260806_17_custom_design_deposits",
+        "20260806_18_custom_design_queue_indexes",
     ]
     assert upgrade("sqlite", db_path) == []
     with sqlite3.connect(db_path) as connection:
@@ -110,7 +115,9 @@ def test_price_cents_migration_backfills_only_exact_positive_legacy_prices(tmp_p
     assert values[ids[1]] is None
     assert values[ids[2]] is None
 
-    assert downgrade("sqlite", db_path, steps=11) == [
+    assert downgrade("sqlite", db_path, steps=13) == [
+        "20260806_18_custom_design_queue_indexes",
+        "20260806_17_custom_design_deposits",
         "20260727_16_custom_design_workbench",
         "20260727_15_report_codes",
         "20260727_14_custom_design_service",

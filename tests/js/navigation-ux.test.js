@@ -191,3 +191,58 @@ test('home tab navigation relaunches the requested tab when switching fails', ()
     ['reLaunch', '/pages/profile/profile']
   ]);
 });
+
+test('assessment keeps its page navigation above the step action dock', () => {
+  const root = path.resolve(__dirname, '../..');
+  const assessmentWxml = fs.readFileSync(
+    path.join(root, 'miniprogram/pages/assessment/assessment.wxml'),
+    'utf8'
+  );
+  const assessmentWxss = fs.readFileSync(
+    path.join(root, 'miniprogram/pages/assessment/assessment.wxss'),
+    'utf8'
+  );
+  const page = loadPage('miniprogram/pages/assessment/assessment.js');
+  const calls = [];
+  const instance = Object.assign({}, page, {
+    data: { ...page.data, submitting: false }
+  });
+  global.wx = {
+    switchTab(options) {
+      calls.push(['switchTab', options.url]);
+    },
+    navigateTo(options) {
+      calls.push(['navigateTo', options.url]);
+    }
+  };
+
+  instance.goToPage({ currentTarget: { dataset: { url: '/pages/home/home' } } });
+  instance.goToPage({ currentTarget: { dataset: { url: '/pages/my-plans/my-plans' } } });
+
+  assert.deepEqual(calls, [
+    ['switchTab', '/pages/home/home'],
+    ['navigateTo', '/pages/my-plans/my-plans']
+  ]);
+  assert.match(assessmentWxml, /class="lab-tabbar"/);
+  assert.match(assessmentWxml, /aria-label="测算，当前页"/);
+  assert.match(assessmentWxml, /data-url="\/pages\/home\/home"/);
+  assert.match(assessmentWxss, /--assessment-fixed-reserve/);
+  assert.match(assessmentWxss, /\.assessment-bottom\s*\{[\s\S]*?bottom: calc\(/);
+  assert.match(assessmentWxss, /\.lab-tabbar\s*\{[\s\S]*?position: fixed;/);
+});
+
+test('report layers provide a one-tap route back to the home tab', () => {
+  const report = loadPage('miniprogram/pages/report/report.js');
+  const basis = loadPage('miniprogram/pages/report-basis/report-basis.js');
+  const calls = [];
+  global.wx = {
+    switchTab(options) {
+      calls.push(options.url);
+    }
+  };
+
+  report.goHome();
+  basis.goHome();
+
+  assert.deepEqual(calls, ['/pages/home/home', '/pages/home/home']);
+});

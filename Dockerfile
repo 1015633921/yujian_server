@@ -1,3 +1,14 @@
+FROM node:24.17.0-bookworm-slim@sha256:862263c612aa437e3037674b85419622a9d93bff80aa1eee5398dfe686375532 AS admin_web_build
+
+WORKDIR /workspace/admin-web
+
+COPY admin-web/package.json admin-web/package-lock.json ./
+RUN npm ci
+
+COPY admin-web ./
+RUN npm run build
+
+
 FROM python:3.12.13-slim-bookworm@sha256:8a7e7cc04fd3e2bd787f7f24e22d5d119aa590d429b50c95dfe12b3abe52f48b
 
 ARG BUILD_CONTEXT_HASH=unknown
@@ -15,6 +26,7 @@ RUN python -m pip install --index-url "$PIP_INDEX_URL" --require-hashes -r requi
 
 COPY --chown=10001:10001 app ./app
 COPY --chown=10001:10001 static ./static
+COPY --from=admin_web_build --chown=10001:10001 /workspace/admin-web/dist ./static/admin-v2
 COPY scripts/migrate_sqlite_to_mysql.py ./scripts/migrate_sqlite_to_mysql.py
 COPY scripts/regenerate_material_skus_and_knowledge.py ./scripts/regenerate_material_skus_and_knowledge.py
 

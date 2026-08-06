@@ -51,6 +51,7 @@ jobs:
               Dockerfile \
               requirements.lock \
               app \
+              admin-web \
               static/admin \
               scripts/migrate_sqlite_to_mysql.py \
               scripts/regenerate_material_skus_and_knowledge.py |
@@ -87,8 +88,10 @@ jobs:
         run: |
           tar -czf "${RUNNER_TEMP}/yujian-docker-${RELEASE_VERSION}.tar.gz" \
             compose.release.yaml \
+            deploy/nginx \
             deploy/environments \
             scripts/deploy.py \
+            scripts/configure_operation_test_domain.sh \
             scripts/release_state.py \
             scripts/validate_image_ref.py \
             scripts/validate_release_env.py \
@@ -101,9 +104,12 @@ jobs:
           RELEASE_VERSION: ${{ steps.release.outputs.release }}
         run: |
           tar -czf "${RUNNER_TEMP}/yujian-context-${RELEASE_VERSION}.tar.gz" \
+            --exclude='admin-web/node_modules' \
+            --exclude='admin-web/dist' \
             Dockerfile \
             requirements.lock \
             app \
+            admin-web \
             static/admin \
             scripts/migrate_sqlite_to_mysql.py \
             scripts/regenerate_material_skus_and_knowledge.py
@@ -146,6 +152,11 @@ jobs:
           fi
           ssh "${ssh_args[@]}" "${target}" \
             "set -e; umask 077; mkdir -p '${release_dir}'; tar -xzf '${remote_archive}' -C '${release_dir}'; rm -f '${remote_archive}'"
+
+          if [[ "${TARGET_ENVIRONMENT}" == "test" ]]; then
+            ssh "${ssh_args[@]}" "${target}" \
+              "set -e; cd '${release_dir}'; bash scripts/configure_operation_test_domain.sh"
+          fi
 
           if [[ "${TARGET_ENVIRONMENT}" == "test" ]]; then
             ssh "${ssh_args[@]}" "${target}" \

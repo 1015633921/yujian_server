@@ -80,6 +80,40 @@ test('stringed preview derives the final workspace rotation from the bead center
   assert.match(beads[2].style, /rotate\(90\.0deg\)/);
 });
 
+test('order preview can force a closed ring instead of saved partial drag positions', () => {
+  const sequence = sequenceWithPlacements([
+    { x: 205, y: 280 },
+    { x: 260, y: 360 },
+    { x: 350, y: 370 },
+    { x: 405, y: 280 },
+    { x: 340, y: 205 },
+    { x: 250, y: 205 }
+  ]);
+  const beads = buildDesignPreviewBeads(sequence, [], {
+    isLooseMode: false,
+    previewForceRing: true,
+    workspaceStageCenter: 300
+  });
+  const distances = beads.map(item => Math.hypot(item.previewX - 280, item.previewY - 280));
+  assert.ok(Math.max(...distances) - Math.min(...distances) < 1);
+});
+
+test('preview keeps an unbound bead-cap record visible instead of leaving a missing bead', () => {
+  const sequence = [
+    ...sequenceWithPlacements([{ x: 205, y: 280 }, { x: 395, y: 280 }]),
+    {
+      id: 'legacy-cap-without-host',
+      name: '历史隔珠',
+      size: 8,
+      attachment_mode: 'bead_cap',
+      material_params: { bead_shape: 'bead_cap', placement_mode: 'attached_side' },
+      image_url: 'https://cdn.example.com/legacy-cap.webp'
+    }
+  ];
+  const beads = buildDesignPreviewBeads(sequence, [], { previewForceRing: true });
+  assert.equal(beads.filter(item => !item.isAttachment).length, 3);
+});
+
 test('workspace checkout snapshot keeps the visual fields used by the preview', () => {
   const workspaceSource = fs.readFileSync(path.resolve(
     __dirname,
