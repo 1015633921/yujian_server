@@ -45,19 +45,23 @@ def upgrade(connection, backend: str, database: str = "") -> None:
     else:
         connection.execute(f"CREATE INDEX IF NOT EXISTS {INDEX_NAME} ON managed_materials (series_id)")
 
+    # Test and legacy MySQL schemas may use different utf8mb4 collations for
+    # old SKU/taxonomy columns.  Make both sides explicit before joining them.
+    collate = " COLLATE utf8mb4_unicode_ci" if backend == "mysql" else ""
+
     # Existing SKU rows predate series_id.  Resolve them once from the current
     # taxonomy so subsequent renames and category moves use the stable key.
     connection.execute(
-        """
+        f"""
         UPDATE managed_materials
         SET series_id=(
             SELECT s.item_id
             FROM material_taxonomy s
             JOIN material_taxonomy c ON c.item_id=s.parent_id
             WHERE s.kind='series' AND c.kind='category'
-              AND s.top=managed_materials.top
-              AND c.name=managed_materials.category
-              AND s.name=COALESCE(NULLIF(managed_materials.series, ''), managed_materials.name)
+              AND s.top{collate}=managed_materials.top{collate}
+              AND c.name{collate}=managed_materials.category{collate}
+              AND s.name{collate}=COALESCE(NULLIF(managed_materials.series, ''), managed_materials.name){collate}
             ORDER BY s.created_at ASC, s.item_id ASC
             LIMIT 1
         )
@@ -67,9 +71,9 @@ def upgrade(connection, backend: str, database: str = "") -> None:
             FROM material_taxonomy s
             JOIN material_taxonomy c ON c.item_id=s.parent_id
             WHERE s.kind='series' AND c.kind='category'
-              AND s.top=managed_materials.top
-              AND c.name=managed_materials.category
-              AND s.name=COALESCE(NULLIF(managed_materials.series, ''), managed_materials.name)
+              AND s.top{collate}=managed_materials.top{collate}
+              AND c.name{collate}=managed_materials.category{collate}
+              AND s.name{collate}=COALESCE(NULLIF(managed_materials.series, ''), managed_materials.name){collate}
           )
         """
     )
