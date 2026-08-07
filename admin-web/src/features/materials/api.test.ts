@@ -10,6 +10,7 @@ import {
   createMaterialSku,
   getMaterialSeries,
   getMaterialPreviews,
+  invalidateMaterialOptionsCache,
   listMaterialOptions,
   listMaterialSpus,
   listMaterialTaxonomy,
@@ -25,6 +26,7 @@ describe('material directory api', () => {
   beforeEach(() => {
     window.history.replaceState({}, '', '/admin-v2/material-directory')
     storeToken('operator-token')
+    invalidateMaterialOptionsCache()
     vi.restoreAllMocks()
   })
 
@@ -75,6 +77,36 @@ describe('material directory api', () => {
     expect(String(fetchMock.mock.calls[0]?.[0])).toContain('/api/v1/admin/material-options')
     const [, request] = fetchMock.mock.calls[0] as [string, RequestInit]
     expect(new Headers(request.headers).get('authorization')).toBe('Bearer operator-token')
+  })
+
+  it('reuses the material option dictionary across directory and profile requests', async () => {
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(
+      new Response(JSON.stringify({ code: 0, data: { elements: [], grades: [] } }), { status: 200, headers: { 'content-type': 'application/json' } }),
+    ))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const [directoryOptions, profileOptions] = await Promise.all([
+      listMaterialOptions(),
+      listMaterialOptions(),
+    ])
+    const laterProfileOptions = await listMaterialOptions()
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(profileOptions).toBe(directoryOptions)
+    expect(laterProfileOptions).toBe(directoryOptions)
+  })
+
+  it('invalidates cached options after a taxonomy mutation', async () => {
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(
+      new Response(JSON.stringify({ code: 0, data: { elements: [] } }), { status: 200, headers: { 'content-type': 'application/json' } }),
+    ))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await listMaterialOptions()
+    await saveMaterialSeries({ category_id: 'category-1', name: '新建品种', sort_order: 10, enabled: true })
+    await listMaterialOptions()
+
+    expect(fetchMock).toHaveBeenCalledTimes(3)
   })
 
   it('uses the guarded directory mutations instead of a direct SKU mutation', async () => {

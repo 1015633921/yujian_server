@@ -55,10 +55,12 @@ const profile = ref<MaterialSeries | null>(null)
 const draft = ref<SeriesDraft | null>(null)
 const materialOptions = ref<MaterialOptionsPayload | null>(null)
 const loading = ref(true)
+const optionsLoading = ref(false)
 const saving = ref(false)
 const error = ref('')
 const notice = ref('')
 let controller: AbortController | null = null
+let loadRequest = 0
 
 const seriesId = computed(() => String(route.params.seriesId || '').trim())
 const canManage = computed(() => auth.admin?.role !== 'viewer')
@@ -134,23 +136,33 @@ async function load(): Promise<void> {
   }
   controller?.abort()
   controller = new AbortController()
+  const requestId = ++loadRequest
   loading.value = true
+  optionsLoading.value = true
   error.value = ''
   notice.value = ''
   try {
-    const [item, nextOptions] = await Promise.all([
-      getMaterialSeries(seriesId.value, controller.signal),
-      listMaterialOptions(controller.signal),
-    ])
+    const item = await getMaterialSeries(seriesId.value, controller.signal)
+    if (requestId !== loadRequest) return
     profile.value = item
-    materialOptions.value = nextOptions
     draft.value = makeDraft(item)
+    // The options endpoint is slow. It is cached feature-wide and deliberately
+    // kept out of the detail page's critical path.
+    void listMaterialOptions().then((nextOptions) => {
+      if (requestId === loadRequest) materialOptions.value = nextOptions
+    }).catch((cause: unknown) => {
+      if (requestId === loadRequest) {
+        notice.value = cause instanceof Error ? `字段选项加载失败：${cause.message}` : '字段选项加载失败，请稍后重试'
+      }
+    }).finally(() => {
+      if (requestId === loadRequest) optionsLoading.value = false
+    })
   } catch (cause) {
     if (!(cause instanceof DOMException && cause.name === 'AbortError')) {
       error.value = cause instanceof Error ? cause.message : '品种资料读取失败'
     }
   } finally {
-    loading.value = false
+    if (requestId === loadRequest) loading.value = false
   }
 }
 
@@ -313,7 +325,7 @@ onBeforeUnmount(() => controller?.abort())
           </RouterLink>
           <button
             class="primary-action"
-            :disabled="!canManage || saving"
+            :disabled="!canManage || saving || optionsLoading"
             @click="save"
           >
             {{ saving ? '正在保存…' : '保存完整资料' }}
@@ -614,7 +626,7 @@ onBeforeUnmount(() => controller?.abort())
           <button
             class="primary-action"
             type="submit"
-            :disabled="!canManage || saving"
+            :disabled="!canManage || saving || optionsLoading"
           >
             {{ saving ? '正在保存…' : '保存完整资料' }}
           </button>

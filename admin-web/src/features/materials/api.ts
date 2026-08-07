@@ -202,6 +202,26 @@ export interface MaterialOptionsPayload {
   option_items?: MaterialOptionItem[]
 }
 
+// The directory and profile routes both need this immutable-in-normal-use
+// dictionary. Keep it at the feature boundary so route navigation does not
+// trigger the expensive endpoint again in the same admin session.
+let materialOptionsCache: MaterialOptionsPayload | null = null
+let materialOptionsRequest: Promise<MaterialOptionsPayload> | null = null
+let materialOptionsCacheGeneration = 0
+
+export function invalidateMaterialOptionsCache(): void {
+  materialOptionsCacheGeneration += 1
+  materialOptionsCache = null
+  materialOptionsRequest = null
+}
+
+function invalidateMaterialOptionsAfter<T>(request: Promise<T>): Promise<T> {
+  return request.then((result) => {
+    invalidateMaterialOptionsCache()
+    return result
+  })
+}
+
 export interface MaterialTypeInput {
   id?: string
   code?: string
@@ -319,8 +339,25 @@ export function listMaterialTypes(includeDisabled = false, signal?: AbortSignal)
   return apiRequest(`/api/v1/admin/material-types?include_disabled=${includeDisabled}`, { signal })
 }
 
-export function listMaterialOptions(signal?: AbortSignal): Promise<MaterialOptionsPayload> {
-  return apiRequest('/api/v1/admin/material-options', { signal })
+export function listMaterialOptions(_signal?: AbortSignal): Promise<MaterialOptionsPayload> {
+  void _signal
+  if (materialOptionsCache) return Promise.resolve(materialOptionsCache)
+  if (materialOptionsRequest) return materialOptionsRequest
+  // Do not attach a route AbortSignal: this request is shared by the
+  // directory and profile routes, so navigating while it is in flight must
+  // not cancel it for the next route.
+  const requestGeneration = materialOptionsCacheGeneration
+  const request = apiRequest<MaterialOptionsPayload>('/api/v1/admin/material-options')
+    .then((payload) => {
+      if (requestGeneration === materialOptionsCacheGeneration) materialOptionsCache = payload
+      return payload
+    })
+  materialOptionsRequest = request
+  void request.then(
+    () => { if (materialOptionsRequest === request) materialOptionsRequest = null },
+    () => { if (materialOptionsRequest === request) materialOptionsRequest = null },
+  )
+  return request
 }
 
 export function listMaterialTaxonomy(top: string, includeDisabled = true, signal?: AbortSignal): Promise<MaterialCategory[]> {
@@ -391,43 +428,61 @@ export function batchUpdateMaterialSkus(input: {
 }
 
 export function saveMaterialType(input: MaterialTypeInput): Promise<MaterialType> {
-  return apiRequest('/api/v1/admin/material-types', { method: 'POST', body: JSON.stringify(input) })
+  return invalidateMaterialOptionsAfter(
+    apiRequest('/api/v1/admin/material-types', { method: 'POST', body: JSON.stringify(input) }),
+  )
 }
 
 export function saveMaterialCategory(input: MaterialCategoryInput): Promise<MaterialCategory> {
-  return apiRequest('/api/v1/admin/material-taxonomy/categories', { method: 'POST', body: JSON.stringify(input) })
+  return invalidateMaterialOptionsAfter(
+    apiRequest('/api/v1/admin/material-taxonomy/categories', { method: 'POST', body: JSON.stringify(input) }),
+  )
 }
 
 export function saveMaterialSeries(input: MaterialSeriesInput): Promise<MaterialSeries> {
-  return apiRequest('/api/v1/admin/material-taxonomy/series', { method: 'POST', body: JSON.stringify(input) })
+  return invalidateMaterialOptionsAfter(
+    apiRequest('/api/v1/admin/material-taxonomy/series', { method: 'POST', body: JSON.stringify(input) }),
+  )
 }
 
 /** Uses the immutable series ID so a rename can never be interpreted as a new product. */
 export function updateMaterialSeries(seriesId: string, input: MaterialSeriesInput): Promise<MaterialSeries> {
-  return apiRequest(`/api/v1/admin/material-taxonomy/series/${encodeURIComponent(seriesId)}`, {
-    method: 'PATCH',
-    body: JSON.stringify(input),
-  })
+  return invalidateMaterialOptionsAfter(
+    apiRequest(`/api/v1/admin/material-taxonomy/series/${encodeURIComponent(seriesId)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    }),
+  )
 }
 
 export function disableMaterialType(typeCode: string): Promise<void> {
-  return apiRequest(`/api/v1/admin/material-types/${encodeURIComponent(typeCode)}`, { method: 'DELETE' })
+  return invalidateMaterialOptionsAfter(
+    apiRequest(`/api/v1/admin/material-types/${encodeURIComponent(typeCode)}`, { method: 'DELETE' }),
+  )
 }
 
 export function disableMaterialTaxonomyItem(itemId: string): Promise<void> {
-  return apiRequest(`/api/v1/admin/material-taxonomy/${encodeURIComponent(itemId)}`, { method: 'DELETE' })
+  return invalidateMaterialOptionsAfter(
+    apiRequest(`/api/v1/admin/material-taxonomy/${encodeURIComponent(itemId)}`, { method: 'DELETE' }),
+  )
 }
 
 export function deleteEmptyMaterialType(typeCode: string): Promise<void> {
-  return apiRequest('/api/v1/admin/material-types/batch-delete', { method: 'POST', body: JSON.stringify({ ids: [typeCode] }) })
+  return invalidateMaterialOptionsAfter(
+    apiRequest('/api/v1/admin/material-types/batch-delete', { method: 'POST', body: JSON.stringify({ ids: [typeCode] }) }),
+  )
 }
 
 export function deleteEmptyMaterialCategory(categoryId: string): Promise<void> {
-  return apiRequest('/api/v1/admin/material-taxonomy/categories/batch-delete', { method: 'POST', body: JSON.stringify({ ids: [categoryId] }) })
+  return invalidateMaterialOptionsAfter(
+    apiRequest('/api/v1/admin/material-taxonomy/categories/batch-delete', { method: 'POST', body: JSON.stringify({ ids: [categoryId] }) }),
+  )
 }
 
 export function deleteEmptyMaterialSeries(seriesId: string): Promise<void> {
-  return apiRequest('/api/v1/admin/material-taxonomy/series/batch-delete', { method: 'POST', body: JSON.stringify({ ids: [seriesId] }) })
+  return invalidateMaterialOptionsAfter(
+    apiRequest('/api/v1/admin/material-taxonomy/series/batch-delete', { method: 'POST', body: JSON.stringify({ ids: [seriesId] }) }),
+  )
 }
 
 export function uploadMaterialAsset(file: Blob, filename: string): Promise<MaterialAssetUploadResult> {
