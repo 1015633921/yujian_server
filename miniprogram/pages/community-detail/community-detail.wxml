@@ -16,7 +16,14 @@
   </view>
 
   <view class="hero-media yu-card">
-    <image wx:if="{{viewPost.imageUrl}}" class="hero-image" src="{{viewPost.imageUrl}}" mode="aspectFill"></image>
+    <block wx:if="{{viewPost.imageUrls.length}}">
+      <swiper class="hero-swiper" indicator-dots="{{viewPost.imageUrls.length > 1}}" indicator-color="rgba(255,255,255,.65)" indicator-active-color="#FFFFFF" circular="{{viewPost.imageUrls.length > 1}}">
+        <swiper-item wx:for="{{viewPost.imageUrls}}" wx:key="*this">
+          <image class="hero-image" src="{{item}}" mode="aspectFill" data-url="{{item}}" bindtap="previewImage"></image>
+        </swiper-item>
+      </swiper>
+      <view wx:if="{{viewPost.imageUrls.length > 1}}" class="hero-image-count">{{viewPost.imageUrls.length}} 张图片</view>
+    </block>
     <view wx:else class="bracelet-stage">
       <image
         wx:for="{{viewPost.visualBeads}}"

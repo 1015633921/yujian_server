@@ -366,7 +366,7 @@ MYSQL_SCHEMA = [
       post_id VARCHAR(100) PRIMARY KEY, title VARCHAR(255) NOT NULL, author VARCHAR(120) NOT NULL,
       description TEXT, story LONGTEXT, scene VARCHAR(255), author_note TEXT, likes INT NOT NULL DEFAULT 0,
       tone VARCHAR(40), recipe_json LONGTEXT NOT NULL, materials_json LONGTEXT NOT NULL, tags_json LONGTEXT NOT NULL,
-      image_url VARCHAR(2000), is_home_hot TINYINT NOT NULL DEFAULT 0,
+      image_url VARCHAR(2000), image_urls_json LONGTEXT, is_home_hot TINYINT NOT NULL DEFAULT 0,
       status VARCHAR(40) NOT NULL, sort_order INT NOT NULL DEFAULT 0,
       created_at VARCHAR(40) NOT NULL, updated_at VARCHAR(40) NOT NULL,
       INDEX idx_community_posts_status_sort (status, sort_order, updated_at),
@@ -509,6 +509,7 @@ def ensure_mysql_columns(connection: MySQLConnection) -> None:
         },
         "community_posts": {
             "is_home_hot": "ALTER TABLE community_posts ADD COLUMN is_home_hot TINYINT NOT NULL DEFAULT 0",
+            "image_urls_json": "ALTER TABLE community_posts ADD COLUMN image_urls_json LONGTEXT",
         }
     }
     for table, columns in migrations.items():

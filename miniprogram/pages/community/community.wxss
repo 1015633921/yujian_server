@@ -197,6 +197,20 @@ page {
   height: 100%;
 }
 
+.post-image-count {
+  position: absolute;
+  right: 18rpx;
+  top: 18rpx;
+  z-index: 2;
+  padding: 8rpx 13rpx;
+  border: 1rpx solid rgba(255,255,255,.46);
+  border-radius: 999rpx;
+  color: #fff;
+  background: rgba(25,25,25,.45);
+  font-size: 20rpx;
+  font-weight: 760;
+}
+
 .bracelet-preview {
   position: absolute;
   left: 50%;

@@ -81,6 +81,7 @@
         </view>
         <view class="media-shade"></view>
         <view class="hot-pill">♡ {{item.heatText}}</view>
+        <view wx:if="{{item.imageCount > 1}}" class="post-image-count">图集 {{item.imageCount}}</view>
         <view class="post-copy">
           <view class="post-title">{{item.title}}</view>
           <view class="post-desc">{{item.desc}}</view>

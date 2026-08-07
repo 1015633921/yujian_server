@@ -407,7 +407,15 @@ class CommunityPostPayload(BaseModel):
     recipe: list[str] = []
     materials: list[str] = []
     tags: list[str] = []
-    image_url: str | None = ""
+    image_url: str | None = Field(default="", max_length=2000)
+    image_urls: list[str] = Field(default_factory=list, max_length=12)
+
+    @field_validator("image_urls")
+    @classmethod
+    def validate_image_urls(cls, values: list[str]) -> list[str]:
+        if any(not str(value).strip() or len(str(value).strip()) > 2000 for value in values):
+            raise ValueError("封面图片地址不能为空，且单条不能超过 2000 个字符")
+        return values
     is_home_hot: bool = False
     status: str = "draft"
     sort_order: int = 0

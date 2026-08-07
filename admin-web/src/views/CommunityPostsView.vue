@@ -5,23 +5,44 @@ import PageEmptyState from '@/components/ui/PageEmptyState.vue'
 import PageErrorState from '@/components/ui/PageErrorState.vue'
 import PageHeading from '@/components/ui/PageHeading.vue'
 import { createCommunityPost, deleteCommunityPost, listCommunityPosts, updateCommunityPost, uploadAdminMedia, type CommunityPost, type ContentStatus } from '@/features/content/api'
-import { listMaterials, type Material } from '@/features/materials/api'
+import { getMaterialPreviews, listMaterials, type Material, type MaterialPreview } from '@/features/materials/api'
 import { useAuthStore } from '@/stores/auth'
 
-interface Editor { id: string; title: string; author: string; desc: string; story: string; scene: string; authorNote: string; likes: number; tone: string; recipeText: string; tagsText: string; imageUrl: string; homeHot: boolean; status: ContentStatus; sortOrder: number }
-const auth = useAuthStore(); const rows = ref<CommunityPost[]>([]); const keyword = ref(''); const status = ref(''); const homeHot = ref(''); const selectedId = ref(''); const loading = ref(true); const saving = ref(false); const uploading = ref(false); const materialLoading = ref(false); const materialKeyword = ref(''); const materialRows = ref<Material[]>([]); const error = ref(''); const notice = ref(''); const file = ref<HTMLInputElement | null>(null); let controller: AbortController | null = null; let materialController: AbortController | null = null
-const editor = reactive<Editor>({ id: '', title: '', author: '宇涧主理人', desc: '', story: '', scene: '', authorNote: '', likes: 0, tone: 'clear', recipeText: '', tagsText: '', imageUrl: '', homeHot: false, status: 'draft', sortOrder: 0 })
-const canManage = computed(() => auth.admin?.role !== 'viewer'); const split = (value: string) => value.split(/[\n,，、]/).map((item) => item.trim()).filter(Boolean); const statusLabel = (value: string) => ({ draft: '草稿', published: '已发布', hidden: '隐藏' })[value] || value
-function reset(): void { selectedId.value = ''; Object.assign(editor, { id: '', title: '', author: '宇涧主理人', desc: '', story: '', scene: '', authorNote: '', likes: 0, tone: 'clear', recipeText: '', tagsText: '', imageUrl: '', homeHot: false, status: 'draft', sortOrder: 0 }); notice.value = '' }
-function edit(item: CommunityPost): void { selectedId.value = item.id; Object.assign(editor, { id: item.id, title: item.title, author: item.author, desc: item.desc, story: item.story, scene: item.scene, authorNote: item.authorNote, likes: item.likes, tone: item.tone, recipeText: item.recipe.join('\n'), tagsText: item.tags.join('\n'), imageUrl: item.image_url, homeHot: item.is_home_hot, status: item.status, sortOrder: item.sort_order }); notice.value = '' }
-function payload() { const recipe = split(editor.recipeText); return { title: editor.title.trim(), author: editor.author.trim() || '宇涧主理人', desc: editor.desc.trim(), story: editor.story.trim(), scene: editor.scene.trim(), authorNote: editor.authorNote.trim(), likes: Math.max(0, Number(editor.likes) || 0), tone: editor.tone, recipe, materials: recipe, tags: split(editor.tagsText), image_url: editor.imageUrl.trim(), is_home_hot: editor.homeHot, status: editor.status, sort_order: Math.max(0, Number(editor.sortOrder) || 0) } }
+interface Editor { id: string; title: string; author: string; desc: string; story: string; sceneTags: string[]; authorNote: string; likes: number; tone: string; recipeText: string; tagsText: string; imageUrls: string[]; homeHot: boolean; status: ContentStatus; sortOrder: number }
+interface SelectedMaterial { id: string; name: string; series: string; imageUrl: string; size?: number; unresolved: boolean }
+const auth = useAuthStore(); const rows = ref<CommunityPost[]>([]); const keyword = ref(''); const status = ref(''); const homeHot = ref(''); const selectedId = ref(''); const loading = ref(true); const saving = ref(false); const uploading = ref(false); const materialLoading = ref(false); const materialKeyword = ref(''); const materialRows = ref<Material[]>([]); const selectedMaterialRows = ref<MaterialPreview[]>([]); const sceneDraft = ref(''); const imageDraft = ref(''); const error = ref(''); const notice = ref(''); const file = ref<HTMLInputElement | null>(null); let controller: AbortController | null = null; let materialController: AbortController | null = null; let selectedMaterialController: AbortController | null = null
+const editor = reactive<Editor>({ id: '', title: '', author: '宇涧主理人', desc: '', story: '', sceneTags: [], authorNote: '', likes: 0, tone: 'clear', recipeText: '', tagsText: '', imageUrls: [], homeHot: false, status: 'draft', sortOrder: 0 })
+const canManage = computed(() => auth.admin?.role !== 'viewer'); const split = (value: string) => value.split(/[\n,，、；;]/).map((item) => item.trim()).filter(Boolean); const unique = (values: string[]) => [...new Set(values)]; const statusLabel = (value: string) => ({ draft: '草稿', published: '已发布', hidden: '隐藏' })[value] || value
+const selectedMaterialIds = computed(() => unique(split(editor.recipeText)))
+function materialReferenceId(item: Material | MaterialPreview): string { return ('sku' in item ? item.sku?.sku_id : (item as MaterialPreview).sku_id || (item as MaterialPreview).skuId) || item.id }
+function materialId(item: Material | MaterialPreview): string { return materialReferenceId(item) }
+function materialAliases(item: Material | MaterialPreview): string[] { return unique([item.id, materialReferenceId(item)].filter(Boolean)) }
+function materialLabel(item: Material | MaterialPreview): string { return item.name || item.series || '未命名材料' }
+function materialSize(item: Material | MaterialPreview): number | undefined { return item.size || ('sku' in item ? item.sku?.size_mm : undefined) }
+const selectedMaterials = computed<SelectedMaterial[]>(() => selectedMaterialIds.value.map((id) => {
+  const material = [...materialRows.value, ...selectedMaterialRows.value].find((item) => materialAliases(item).includes(id))
+  return material ? { id, name: materialLabel(material), series: material.series || '', imageUrl: material.image_url || '', size: materialSize(material), unresolved: false } : { id, name: id, series: '未能读取材料详情', imageUrl: '', unresolved: true }
+}))
+function cleanImageUrls(values: string[]): string[] { return unique(values.map((value) => value.trim()).filter(Boolean)).slice(0, 12) }
+function reset(): void { selectedId.value = ''; selectedMaterialRows.value = []; sceneDraft.value = ''; imageDraft.value = ''; Object.assign(editor, { id: '', title: '', author: '宇涧主理人', desc: '', story: '', sceneTags: [], authorNote: '', likes: 0, tone: 'clear', recipeText: '', tagsText: '', imageUrls: [], homeHot: false, status: 'draft', sortOrder: 0 }); notice.value = '' }
+function edit(item: CommunityPost): void { selectedId.value = item.id; sceneDraft.value = ''; imageDraft.value = ''; Object.assign(editor, { id: item.id, title: item.title, author: item.author, desc: item.desc, story: item.story, sceneTags: unique(split(item.scene)), authorNote: item.authorNote, likes: item.likes, tone: item.tone, recipeText: item.recipe.join('\n'), tagsText: item.tags.join('\n'), imageUrls: cleanImageUrls(item.image_urls?.length ? item.image_urls : [item.image_url]), homeHot: item.is_home_hot, status: item.status, sortOrder: item.sort_order }); notice.value = '' }
+function addSceneTags(): void { const next = unique([...editor.sceneTags, ...split(sceneDraft.value)]); if (!next.length || next.length === editor.sceneTags.length) { sceneDraft.value = ''; return }; if (next.join('、').length > 255) { notice.value = '适用场景标签合计不能超过 255 个字符。'; return }; editor.sceneTags = next; sceneDraft.value = '' }
+function removeSceneTag(tag: string): void { editor.sceneTags = editor.sceneTags.filter((item) => item !== tag) }
+function addImageUrl(): void { const next = cleanImageUrls([...editor.imageUrls, imageDraft.value]); if (next.length === editor.imageUrls.length && imageDraft.value.trim()) { notice.value = editor.imageUrls.length >= 12 ? '封面图片最多 12 张。' : '该图片已添加。'; return }; editor.imageUrls = next; imageDraft.value = '' }
+function removeImage(index: number): void { editor.imageUrls.splice(index, 1) }
+function moveImage(index: number, direction: -1 | 1): void { const target = index + direction; const current = editor.imageUrls[index]; const adjacent = editor.imageUrls[target]; if (!current || !adjacent || target < 0 || target >= editor.imageUrls.length) return; const next = [...editor.imageUrls]; next[index] = adjacent; next[target] = current; editor.imageUrls = next }
+function payload() { const recipe = selectedMaterialIds.value; const imageUrls = cleanImageUrls(editor.imageUrls); return { title: editor.title.trim(), author: editor.author.trim() || '宇涧主理人', desc: editor.desc.trim(), story: editor.story.trim(), scene: editor.sceneTags.join('、'), authorNote: editor.authorNote.trim(), likes: Math.max(0, Number(editor.likes) || 0), tone: editor.tone, recipe, materials: recipe, tags: split(editor.tagsText), image_url: imageUrls[0] || '', image_urls: imageUrls, is_home_hot: editor.homeHot, status: editor.status, sort_order: Math.max(0, Number(editor.sortOrder) || 0) } }
 async function load(): Promise<void> { controller?.abort(); controller = new AbortController(); loading.value = true; error.value = ''; try { rows.value = await listCommunityPosts({ keyword: keyword.value, status: status.value, homeHot: homeHot.value }, controller.signal); if (selectedId.value && !rows.value.some((item) => item.id === selectedId.value)) reset() } catch (cause) { if (cause instanceof DOMException && cause.name === 'AbortError') return; error.value = cause instanceof Error ? cause.message : '社区灵感加载失败' } finally { loading.value = false } }
-async function save(): Promise<void> { if (!canManage.value || saving.value) return; const data = payload(); if (!data.title) { notice.value = '请填写标题。'; return }; if (!data.image_url) { notice.value = '请上传或填写封面图片。'; return }; saving.value = true; notice.value = ''; try { const saved = editor.id ? await updateCommunityPost(editor.id, data) : await createCommunityPost(data); await load(); edit(saved); notice.value = '灵感内容已保存。' } catch (cause) { notice.value = cause instanceof Error ? cause.message : '保存失败。' } finally { saving.value = false } }
+async function save(): Promise<void> { if (!canManage.value || saving.value) return; const data = payload(); if (!data.title) { notice.value = '请填写标题。'; return }; if (!data.image_urls.length) { notice.value = '请至少上传或填写一张封面图片。'; return }; saving.value = true; notice.value = ''; try { const saved = editor.id ? await updateCommunityPost(editor.id, data) : await createCommunityPost(data); await load(); edit(saved); notice.value = '灵感内容已保存。' } catch (cause) { notice.value = cause instanceof Error ? cause.message : '保存失败。' } finally { saving.value = false } }
 async function remove(): Promise<void> { if (!canManage.value || !editor.id || saving.value || !window.confirm(`删除「${editor.title}」后无法恢复，确定继续吗？`)) return; saving.value = true; try { await deleteCommunityPost(editor.id); reset(); await load(); notice.value = '灵感内容已删除。' } catch (cause) { notice.value = cause instanceof Error ? cause.message : '删除失败。' } finally { saving.value = false } }
-async function upload(event: Event): Promise<void> { const next = (event.target as HTMLInputElement).files?.[0]; if (!next || !next.type.startsWith('image/')) { notice.value = '请选择图片文件。'; return }; uploading.value = true; try { editor.imageUrl = (await uploadAdminMedia(next, 'community')).image_url; notice.value = '封面已上传。' } catch (cause) { notice.value = cause instanceof Error ? cause.message : '图片上传失败。' } finally { uploading.value = false; if (file.value) file.value.value = '' } }
+async function upload(event: Event): Promise<void> { const files = Array.from((event.target as HTMLInputElement).files || []).filter((item) => item.type.startsWith('image/')); if (!files.length) { notice.value = '请选择图片文件。'; return }; const remaining = 12 - editor.imageUrls.length; if (remaining <= 0) { notice.value = '封面图片最多 12 张。'; return }; uploading.value = true; try { const uploaded = await Promise.all(files.slice(0, remaining).map(async (item) => (await uploadAdminMedia(item, 'community')).image_url)); editor.imageUrls = cleanImageUrls([...editor.imageUrls, ...uploaded]); notice.value = `已上传 ${uploaded.length} 张封面图片。`; } catch (cause) { notice.value = cause instanceof Error ? cause.message : '图片上传失败。' } finally { uploading.value = false; if (file.value) file.value.value = '' } }
 async function searchMaterials(): Promise<void> { materialController?.abort(); materialController = new AbortController(); materialLoading.value = true; try { materialRows.value = (await listMaterials({ keyword: materialKeyword.value, top: '', status: 'enabled', page: 1, pageSize: 12 }, materialController.signal)).items } catch (cause) { if (!(cause instanceof DOMException && cause.name === 'AbortError')) notice.value = cause instanceof Error ? cause.message : '材料搜索失败。' } finally { materialLoading.value = false } }
-function addMaterial(item: Material): void { const id = item.sku?.sku_id || item.id; const recipe = split(editor.recipeText); if (!recipe.includes(id)) editor.recipeText = [...recipe, id].join('\n'); notice.value = `已加入 ${item.name || item.series || '材料规格'}。` }
-watch([keyword, status, homeHot], () => void load()); onBeforeUnmount(() => { controller?.abort(); materialController?.abort() }); void load()
+async function loadSelectedMaterials(ids: string[]): Promise<void> { selectedMaterialController?.abort(); if (!ids.length) { selectedMaterialRows.value = []; return }; selectedMaterialController = new AbortController(); try { const chunks = Array.from({ length: Math.ceil(ids.length / 20) }, (_, index) => ids.slice(index * 20, index * 20 + 20)); selectedMaterialRows.value = (await Promise.all(chunks.map((chunk) => getMaterialPreviews(chunk, selectedMaterialController?.signal)))).flat() } catch (cause) { if (!(cause instanceof DOMException && cause.name === 'AbortError')) selectedMaterialRows.value = [] } }
+function isMaterialSelected(item: Material): boolean { return selectedMaterialIds.value.includes(materialId(item)) }
+function toggleMaterial(item: Material): void { const id = materialId(item); const next = isMaterialSelected(item) ? selectedMaterialIds.value.filter((value) => value !== id) : [...selectedMaterialIds.value, id]; editor.recipeText = next.join('\n') }
+function removeMaterial(id: string): void { editor.recipeText = selectedMaterialIds.value.filter((value) => value !== id).join('\n') }
+watch(selectedMaterialIds, (ids) => void loadSelectedMaterials(ids))
+watch([keyword, status, homeHot], () => void load()); onBeforeUnmount(() => { controller?.abort(); materialController?.abort(); selectedMaterialController?.abort() }); void load()
 </script>
 
 <template>
@@ -104,8 +125,8 @@ watch([keyword, status, homeHot], () => void load()); onBeforeUnmount(() => { co
           @click="edit(item)"
         >
           <img
-            v-if="item.image_url"
-            :src="item.image_url"
+            v-if="item.image_urls?.[0] || item.image_url"
+            :src="item.image_urls?.[0] || item.image_url"
             :alt="item.title"
           ><i v-else /><p><strong>{{ item.title }}</strong><small>{{ item.author }} · {{ item.is_home_hot ? '首页热门' : item.scene || '未设场景' }}</small></p><span>{{ item.tone }}</span><b :class="`status-${item.status}`">{{ statusLabel(item.status) }}</b><em>{{ item.sort_order }}</em>
         </button>
@@ -137,29 +158,99 @@ watch([keyword, status, homeHot], () => void load()); onBeforeUnmount(() => { co
         ></label><label class="content-banners__full">列表摘要<textarea
           v-model.trim="editor.desc"
           :disabled="!canManage"
-        /></label><section class="content-banners__image content-banners__full">
-          <div>
-            <img
-              v-if="editor.imageUrl"
-              :src="editor.imageUrl"
-              alt="灵感封面"
-            ><span v-else>尚未设置封面</span>
-          </div><p><strong>灵感封面</strong><small>上传图片或粘贴 URL。</small></p><input
+        /></label><section class="community-cover-gallery content-banners__full">
+          <header><div><span>灵感封面</span><small>首图用于列表和首页展示；详情页支持左右滑动查看全部图片。</small></div><strong>{{ editor.imageUrls.length }}/12</strong></header><input
             ref="file"
             accept="image/*"
+            multiple
             type="file"
             :disabled="!canManage || uploading"
             @change="upload"
-          ><input
-            v-model.trim="editor.imageUrl"
-            type="url"
-            placeholder="https://"
-            :disabled="!canManage"
+          ><div class="community-cover-gallery__url">
+            <input
+              v-model.trim="imageDraft"
+              type="url"
+              placeholder="https://"
+              :disabled="!canManage"
+              @keyup.enter.prevent="addImageUrl"
+            ><button
+              type="button"
+              :disabled="!canManage || !imageDraft.trim() || editor.imageUrls.length >= 12"
+              @click="addImageUrl"
+            >
+              添加图片
+            </button>
+          </div><p
+            v-if="!editor.imageUrls.length"
+            class="community-cover-gallery__empty"
           >
-        </section><label>适用场景<input
-          v-model.trim="editor.scene"
-          :disabled="!canManage"
-        ></label><label>色调<select
+            尚未设置封面图片。
+          </p><ol v-else>
+            <li
+              v-for="(url, index) in editor.imageUrls"
+              :key="url"
+            >
+              <img
+                :src="url"
+                :alt="`封面图片 ${index + 1}`"
+              ><strong>{{ index === 0 ? '主封面' : `图片 ${index + 1}` }}</strong><div>
+                <button
+                  type="button"
+                  :disabled="!canManage || index === 0"
+                  @click="moveImage(index, -1)"
+                >
+                  前移
+                </button><button
+                  type="button"
+                  :disabled="!canManage || index === editor.imageUrls.length - 1"
+                  @click="moveImage(index, 1)"
+                >
+                  后移
+                </button><button
+                  type="button"
+                  :disabled="!canManage"
+                  @click="removeImage(index)"
+                >
+                  移除
+                </button>
+              </div>
+            </li>
+          </ol>
+        </section><section class="community-scene-tags">
+          <header><span>适用场景</span><small>输入后按回车或点击添加，可配置多个场景标签。</small></header><div>
+            <input
+              v-model="sceneDraft"
+              placeholder="例如：通勤、会议、约会"
+              :disabled="!canManage"
+              @keyup.enter.prevent="addSceneTags"
+            ><button
+              type="button"
+              :disabled="!canManage || !sceneDraft.trim()"
+              @click="addSceneTags"
+            >
+              添加
+            </button>
+          </div><ul
+            v-if="editor.sceneTags.length"
+            aria-label="已添加的适用场景"
+          >
+            <li
+              v-for="tag in editor.sceneTags"
+              :key="tag"
+            >
+              <span>{{ tag }}</span><button
+                type="button"
+                :aria-label="`移除场景标签 ${tag}`"
+                :disabled="!canManage"
+                @click="removeSceneTag(tag)"
+              >
+                移除
+              </button>
+            </li>
+          </ul><p v-else>
+            暂未添加场景标签。
+          </p>
+        </section><label>色调<select
           v-model="editor.tone"
           :disabled="!canManage"
         ><option value="clear">清透白</option><option value="gold">暖金</option><option value="zen">禅意灰绿</option><option value="dark">深色</option><option value="rose">柔粉</option><option value="earth">大地色</option></select></label><label>点赞数<input
@@ -171,10 +262,10 @@ watch([keyword, status, homeHot], () => void load()); onBeforeUnmount(() => { co
           v-model="editor.status"
           :disabled="!canManage"
         ><option value="draft">草稿</option><option value="published">已发布</option><option value="hidden">隐藏</option></select></label><section class="community-material-picker content-banners__full">
-          <header><span>配方材料</span><small>搜索后添加真实材料规格；不会加载整库。</small></header><div>
+          <header><span>配方材料</span><small>可多选；已选材料会跟随配方保存。</small></header><div>
             <input
               v-model.trim="materialKeyword"
-              placeholder="搜索材料名称、SKU 或品种"
+              placeholder="搜索材料名称、SKU 或品种后多选"
               :disabled="!canManage || materialLoading"
               @keyup.enter.prevent="searchMaterials"
             ><button
@@ -184,10 +275,43 @@ watch([keyword, status, homeHot], () => void load()); onBeforeUnmount(() => { co
             >
               {{ materialLoading ? '搜索中…' : '搜索材料' }}
             </button>
-          </div><ol v-if="materialRows.length">
+          </div><section
+            v-if="selectedMaterials.length"
+            class="community-material-picker__selected"
+            aria-live="polite"
+          >
+            <header><strong>已选 {{ selectedMaterials.length }} 项</strong><small>点击“移除”可取消选择</small></header><ul>
+              <li
+                v-for="item in selectedMaterials"
+                :key="item.id"
+                :class="{ 'is-unresolved': item.unresolved }"
+              >
+                <img
+                  v-if="item.imageUrl"
+                  :src="item.imageUrl"
+                  :alt="item.name"
+                ><i v-else /><p><strong>{{ item.name }}</strong><small>{{ item.unresolved ? item.series : `${item.series || '材料规格'}${item.size ? ` · ${item.size}mm` : ''}` }}</small></p><button
+                  type="button"
+                  :disabled="!canManage"
+                  @click="removeMaterial(item.id)"
+                >
+                  移除
+                </button>
+              </li>
+            </ul>
+          </section><p
+            v-else
+            class="community-material-picker__empty"
+          >
+            尚未选择材料。搜索后可连续勾选多个材料。
+          </p><ol
+            v-if="materialRows.length"
+            class="community-material-picker__results"
+          >
             <li
               v-for="item in materialRows"
               :key="item.id"
+              :class="{ 'is-selected': isMaterialSelected(item) }"
             >
               <img
                 v-if="item.image_url"
@@ -196,9 +320,10 @@ watch([keyword, status, homeHot], () => void load()); onBeforeUnmount(() => { co
               ><i v-else /><p><strong>{{ item.name || item.series || '未命名材料' }}</strong><small>{{ item.series || '材料规格' }} · {{ item.size || item.sku?.size_mm || '—' }}mm</small></p><button
                 type="button"
                 :disabled="!canManage"
-                @click="addMaterial(item)"
+                :aria-pressed="isMaterialSelected(item)"
+                @click="toggleMaterial(item)"
               >
-                添加
+                {{ isMaterialSelected(item) ? '已选' : '选择' }}
               </button>
             </li>
           </ol>

@@ -44,13 +44,28 @@ function normalizeLikes(item) {
   return `${value}`;
 }
 
+function coverImages(item) {
+  const values = []
+    .concat(item.image_urls || [])
+    .concat(item.cover_images || [])
+    .concat(item.image_url || [])
+    .concat(item.cover_image || [])
+    .concat(item.coverUrl || [])
+    .concat(item.image || [])
+    .concat(item.thumbnail || []);
+  return [...new Set(values
+    .map(value => cleanText(value && typeof value === 'object' ? value.url || value.image_url || value.src : value, ''))
+    .filter(Boolean))];
+}
+
 function normalizePost(item, index) {
   const tone = cleanText(item.tone, ['blue', 'clear', 'gold', 'pink', 'black'][index % 5]);
   const tags = Array.isArray(item.tags) ? item.tags.filter(Boolean) : [];
   const title = cleanText(item.title, `灵感方案 ${index + 1}`);
   const desc = cleanText(item.desc || item.description || item.summary, '真实材质搭配，可带入 DIY 工作台继续调整。');
   const author = cleanText(item.author || item.creator || item.nickname, '宇涧灵感室');
-  const imageUrl = cleanText(item.image_url || item.cover_image || item.coverUrl || item.image || item.thumbnail, '');
+  const imageUrls = coverImages(item);
+  const imageUrl = imageUrls[0] || '';
   const sceneText = tags[0] || cleanText(item.scene, '日常搭配');
 
   return {
@@ -61,6 +76,8 @@ function normalizePost(item, index) {
     author,
     tone,
     imageUrl,
+    imageUrls,
+    imageCount: imageUrls.length,
     heatText: normalizeLikes(item),
     sceneText,
     displayTags: tags.slice(0, 3),

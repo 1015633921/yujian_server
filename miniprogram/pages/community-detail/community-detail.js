@@ -130,6 +130,21 @@ function firstImageUrl(entry) {
     .find(url => typeof url === 'string' && url.trim()) || '';
 }
 
+function coverImages(entry) {
+  if (!entry || typeof entry !== 'object') return [];
+  const candidates = []
+    .concat(entry.image_urls || [])
+    .concat(entry.cover_images || [])
+    .concat(entry.image_url || [])
+    .concat(entry.cover_image || [])
+    .concat(entry.coverUrl || [])
+    .concat(entry.image || [])
+    .concat(entry.thumbnail || []);
+  return [...new Set(candidates
+    .map(item => cleanText(item && typeof item === 'object' ? item.url || item.image_url || item.image || item.src : item, ''))
+    .filter(Boolean))];
+}
+
 function materialCode(entry, fallback = '') {
   if (!entry || typeof entry !== 'object') return cleanText(entry, fallback);
   return cleanText(
@@ -211,7 +226,8 @@ function normalizePost(post) {
   const story = cleanText(post.story, '这条方案以清透、耐看和日常佩戴为核心，适合从真实材质出发继续微调。');
   const scene = cleanText(post.scene, '适合通勤、轻社交、日常穿搭和想要低负担佩戴的场景。');
   const authorNote = cleanText(post.authorNote || post.author_note, '进入 DIY 工作台后，可以按自己的手围、预算和颜色偏好继续调整。');
-  const imageUrl = cleanText(post.image_url || post.cover_image || post.coverUrl || post.image || post.thumbnail, '');
+  const imageUrls = coverImages(post);
+  const imageUrl = imageUrls[0] || '';
   return {
     raw: post,
     id: cleanText(post.id || post.post_id || post.slug, ''),
@@ -226,6 +242,7 @@ function normalizePost(post) {
     toneColor: toneConfig.color,
     toneSoft: toneConfig.soft,
     imageUrl,
+    imageUrls,
     dateText: cleanText(post.updated_at, todayText()).slice(0, 10),
     materials: materialEntries(post, toneConfig),
     visualBeads: createRingBeads(toneConfig.sequence),
@@ -318,6 +335,12 @@ Page({
     } catch (error) {
       wx.showToast({ title: error.message || '收藏失败，请重试', icon: 'none' });
     }
+  },
+
+  previewImage(e) {
+    const current = e.currentTarget.dataset.url;
+    const urls = (this.data.viewPost || {}).imageUrls || [];
+    if (current && urls.length) wx.previewImage({ current, urls });
   },
 
   useSame() {

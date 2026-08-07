@@ -77,6 +77,15 @@ def json_value(value: Any, default: Any = None) -> Any:
         return [] if default is None else default
 
 
+def community_image_urls(value: Any, primary_url: str = "") -> list[str]:
+    """Return a stable, de-duplicated cover gallery with the primary cover first."""
+    urls = clean_image_urls([primary_url, *(value or [])] if isinstance(value, list) else value)
+    if primary_url:
+        primary = normalize_material_image_url(primary_url)
+        urls = [primary, *[url for url in urls if url != primary]] if primary else urls
+    return urls[:12]
+
+
 def normalize_material_search_keyword(value: Any) -> str:
     """Make pasted/IME Chinese material keywords safe for SQL matching."""
     normalized = unicodedata.normalize("NFKC", str(value or ""))
@@ -390,6 +399,7 @@ class AdminService:
                     materials_json TEXT NOT NULL,
                     tags_json TEXT NOT NULL,
                     image_url TEXT,
+                    image_urls_json TEXT,
                     is_home_hot INTEGER NOT NULL DEFAULT 0,
                     status TEXT NOT NULL,
                     sort_order INTEGER NOT NULL DEFAULT 0,
@@ -3254,10 +3264,14 @@ class AdminService:
             columns = {row["Field"] for row in rows}
             if "is_home_hot" not in columns:
                 connection.execute("ALTER TABLE community_posts ADD COLUMN is_home_hot TINYINT NOT NULL DEFAULT 0")
+            if "image_urls_json" not in columns:
+                connection.execute("ALTER TABLE community_posts ADD COLUMN image_urls_json LONGTEXT")
             return
         columns = {row["name"] for row in connection.execute("PRAGMA table_info(community_posts)").fetchall()}
         if "is_home_hot" not in columns:
             connection.execute("ALTER TABLE community_posts ADD COLUMN is_home_hot INTEGER NOT NULL DEFAULT 0")
+        if "image_urls_json" not in columns:
+            connection.execute("ALTER TABLE community_posts ADD COLUMN image_urls_json TEXT")
 
     def _ensure_default_white_quartz_series(self, connection) -> None:
         timestamp = now_iso()
@@ -7302,6 +7316,7 @@ class AdminService:
             connection.execute("DELETE FROM content_blocks WHERE block_id = ?", (block_id,))
 
     def public_community_post(self, row: dict[str, Any]) -> dict[str, Any]:
+        image_urls = community_image_urls(json_value(row.get("image_urls_json"), []), row.get("image_url") or "")
         return {
             "id": row.get("post_id"),
             "title": row.get("title") or "",
@@ -7315,7 +7330,8 @@ class AdminService:
             "recipe": json_value(row.get("recipe_json"), []),
             "materials": json_value(row.get("materials_json"), []),
             "tags": json_value(row.get("tags_json"), []),
-            "image_url": row.get("image_url") or "",
+            "image_url": image_urls[0] if image_urls else "",
+            "image_urls": image_urls,
             "is_home_hot": bool(row.get("is_home_hot")),
             "status": row.get("status") or "draft",
             "sort_order": int(row.get("sort_order") or 0),
@@ -7343,6 +7359,7 @@ class AdminService:
             "scenes": scenes,
             "tags": post.get("tags") or [],
             "image_url": post.get("image_url") or "",
+            "image_urls": post.get("image_urls") or [],
             "is_home_hot": bool(post.get("is_home_hot")),
             "status": post.get("status") or "draft",
             "sort_order": int(post.get("sort_order") or 0),
@@ -7405,6 +7422,9 @@ class AdminService:
             "status": str(payload.get("status") or "draft").strip(),
             "sort_order": int(payload.get("sort_order") or 0),
         }
+        image_urls = community_image_urls(payload.get("image_urls") or [], item["image_url"])
+        item["image_urls_json"] = json_text(image_urls)
+        item["image_url"] = image_urls[0] if image_urls else ""
         if not item["title"]:
             raise ValueError("标题不能为空")
         with self.connect() as connection:
@@ -7413,13 +7433,13 @@ class AdminService:
                 connection.execute(
                     """
                     UPDATE community_posts SET title=?, author=?, description=?, story=?, scene=?, author_note=?,
-                    likes=?, tone=?, recipe_json=?, materials_json=?, tags_json=?, image_url=?, is_home_hot=?, status=?,
+                    likes=?, tone=?, recipe_json=?, materials_json=?, tags_json=?, image_url=?, image_urls_json=?, is_home_hot=?, status=?,
                     sort_order=?, updated_at=? WHERE post_id=?
                     """,
                     (
                         item["title"], item["author"], item["description"], item["story"], item["scene"],
                         item["author_note"], item["likes"], item["tone"], item["recipe_json"],
-                        item["materials_json"], item["tags_json"], item["image_url"], item["is_home_hot"], item["status"],
+                        item["materials_json"], item["tags_json"], item["image_url"], item["image_urls_json"], item["is_home_hot"], item["status"],
                         item["sort_order"], timestamp, item_id,
                     ),
                 )
@@ -7428,13 +7448,13 @@ class AdminService:
                     """
                     INSERT INTO community_posts
                     (post_id, title, author, description, story, scene, author_note, likes, tone, recipe_json,
-                     materials_json, tags_json, image_url, is_home_hot, status, sort_order, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     materials_json, tags_json, image_url, image_urls_json, is_home_hot, status, sort_order, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         item["post_id"], item["title"], item["author"], item["description"], item["story"],
                         item["scene"], item["author_note"], item["likes"], item["tone"], item["recipe_json"],
-                        item["materials_json"], item["tags_json"], item["image_url"], item["is_home_hot"], item["status"],
+                        item["materials_json"], item["tags_json"], item["image_url"], item["image_urls_json"], item["is_home_hot"], item["status"],
                         item["sort_order"], timestamp, timestamp,
                     ),
                 )

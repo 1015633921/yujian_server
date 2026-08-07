@@ -30,8 +30,8 @@ export interface HomeBannerInput {
 }
 
 export interface AdminMediaUpload { image_url: string; url: string; key: string }
-export interface CommunityPost { id: string; title: string; author: string; desc: string; story: string; scene: string; authorNote: string; likes: number; tone: string; recipe: string[]; materials: Array<string | Record<string, unknown>>; tags: string[]; image_url: string; is_home_hot: boolean; status: ContentStatus; sort_order: number; updated_at?: string }
-export interface CommunityPostInput { title: string; author: string; desc: string; story: string; scene: string; authorNote: string; likes: number; tone: string; recipe: string[]; materials: string[]; tags: string[]; image_url: string; is_home_hot: boolean; status: ContentStatus; sort_order: number }
+export interface CommunityPost { id: string; title: string; author: string; desc: string; story: string; scene: string; authorNote: string; likes: number; tone: string; recipe: string[]; materials: Array<string | Record<string, unknown>>; tags: string[]; image_url: string; image_urls: string[]; is_home_hot: boolean; status: ContentStatus; sort_order: number; updated_at?: string }
+export interface CommunityPostInput { title: string; author: string; desc: string; story: string; scene: string; authorNote: string; likes: number; tone: string; recipe: string[]; materials: string[]; tags: string[]; image_url: string; image_urls?: string[]; is_home_hot: boolean; status: ContentStatus; sort_order: number }
 export interface ContentBlock { block_id: string; section: string; title: string; subtitle: string; body: string; image_url: string; action_text: string; action_url: string; status: ContentStatus; sort_order: number }
 export type ContentBlockInput = Omit<ContentBlock, 'block_id'>
 
