@@ -62,6 +62,19 @@ FEATURED_MATERIAL_PRIORITY_KEYWORDS: tuple[tuple[int, tuple[str, ...]], ...] = (
     (5, ("幽灵", "满天星", "四季幽灵", "绿幽灵", "白幽灵", "彩幽灵", "红幽灵", "黄幽灵", "紫幽灵", "千层幽灵")),
 )
 
+# Newly migrated taxonomy rows use ``0`` until an operator assigns a position.
+# It means “unassigned”, not “display first”.
+UNASSIGNED_TAXONOMY_SORT_ORDER = 1_000_000
+
+
+def taxonomy_sort_priority(value: object, fallback: int = UNASSIGNED_TAXONOMY_SORT_ORDER) -> int:
+    """Return a positive operator order; zero and invalid values are unassigned."""
+    try:
+        order = int(float(value))
+    except (TypeError, ValueError):
+        return fallback
+    return order if order > 0 else UNASSIGNED_TAXONOMY_SORT_ORDER
+
 
 def material_display_text(item: dict) -> str:
     return "".join(
@@ -122,10 +135,7 @@ def material_customer_sort_key(item: dict) -> tuple:
         value = item.get(key)
         if value is None or value == "":
             return sort_order
-        try:
-            return int(float(value))
-        except (TypeError, ValueError):
-            return sort_order
+        return taxonomy_sort_priority(value)
 
     category_sort_order = taxonomy_order("category_sort_order")
     series_sort_order = taxonomy_order("series_sort_order")
@@ -599,10 +609,7 @@ def build_material_payload(materials: list[dict], version: dict | None = None) -
             category = str(item.get("category") or "").strip()
             if not category:
                 continue
-            try:
-                sort_order = int(item.get("category_sort_order") or 0)
-            except (TypeError, ValueError):
-                sort_order = 0
+            sort_order = taxonomy_sort_priority(item.get("category_sort_order"))
             category_sort_orders[category] = min(category_sort_orders.get(category, sort_order), sort_order)
         ordered_categories = sorted(category_sort_orders, key=lambda name: (category_sort_orders[name], name))
         categories_by_top[tab["key"]] = [ALL_OPTION_LABEL, *ordered_categories]
@@ -611,10 +618,7 @@ def build_material_payload(materials: list[dict], version: dict | None = None) -
             series = item.get("series") or item.get("name") or ""
             if series:
                 series_by_category.setdefault(category_key, set()).add(series)
-                try:
-                    sort_order = int(item.get("series_sort_order") or 0)
-                except (TypeError, ValueError):
-                    sort_order = 0
+                sort_order = taxonomy_sort_priority(item.get("series_sort_order"))
                 existing_order = series_sort_orders.setdefault(category_key, {}).get(series, sort_order)
                 series_sort_orders[category_key][series] = min(existing_order, sort_order)
 
@@ -783,8 +787,16 @@ def list_db_materials_page(
                 rows = connection.execute(
                     f"""
                 SELECT m.*,
-                       CASE WHEN c.item_id IS NULL THEN COALESCE(m.sort_order, 0) ELSE c.sort_order END AS category_sort_order,
-                       CASE WHEN s.item_id IS NULL THEN COALESCE(m.sort_order, 0) ELSE s.sort_order END AS series_sort_order
+                       CASE
+                         WHEN c.item_id IS NULL THEN COALESCE(m.sort_order, 0)
+                         WHEN c.sort_order > 0 THEN c.sort_order
+                         ELSE 1000000
+                       END AS category_sort_order,
+                       CASE
+                         WHEN s.item_id IS NULL THEN COALESCE(m.sort_order, 0)
+                         WHEN s.sort_order > 0 THEN s.sort_order
+                         ELSE 1000000
+                       END AS series_sort_order
                 FROM managed_materials m
                 LEFT JOIN material_taxonomy c
                   ON c.kind='category' AND c.top=m.top AND c.name=m.category
@@ -794,9 +806,17 @@ def list_db_materials_page(
                 WHERE {where}
                 ORDER BY
                     COALESCE(m.top, '') ASC,
-                    CASE WHEN c.item_id IS NULL THEN COALESCE(m.sort_order, 0) ELSE c.sort_order END ASC,
+                    CASE
+                      WHEN c.item_id IS NULL THEN COALESCE(m.sort_order, 0)
+                      WHEN c.sort_order > 0 THEN c.sort_order
+                      ELSE 1000000
+                    END ASC,
                     COALESCE(m.category, '') ASC,
-                    CASE WHEN s.item_id IS NULL THEN COALESCE(m.sort_order, 0) ELSE s.sort_order END ASC,
+                    CASE
+                      WHEN s.item_id IS NULL THEN COALESCE(m.sort_order, 0)
+                      WHEN s.sort_order > 0 THEN s.sort_order
+                      ELSE 1000000
+                    END ASC,
                     COALESCE(NULLIF(m.series, ''), m.name, '') ASC,
                     m.size ASC,
                     COALESCE(m.material_code, '') ASC,
