@@ -9,6 +9,7 @@ import {
   batchUpdateMaterialSkus,
   createMaterialSku,
   getMaterialSeries,
+  getMaterialPreviews,
   listMaterialOptions,
   listMaterialSpus,
   listMaterialTaxonomy,
@@ -127,6 +128,18 @@ describe('material directory api', () => {
     expect(String(fetchMock.mock.calls[2]?.[0])).toContain('materials')
     expect(fetchMock.mock.calls[2]?.[1]).toMatchObject({ method: 'POST' })
     expect(String(fetchMock.mock.calls[2]?.[1]?.body)).toContain('"id":"mat_retry_safe_id"')
+  })
+
+  it('loads selected material previews in one compact request', async () => {
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(
+      new Response(JSON.stringify({ code: 0, data: { materials: [{ id: 'sku-1', name: '月光石' }] } }), { status: 200, headers: { 'content-type': 'application/json' } }),
+    ))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const previews = await getMaterialPreviews(['sku-1', 'sku-2', 'sku-1'])
+
+    expect(previews).toEqual([{ id: 'sku-1', name: '月光石' }])
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain('compact=true&slim=true&ids=sku-1%2Csku-2')
   })
 
   it('uploads only processed file data and binds the returned COS keys to a series gallery', async () => {

@@ -41,6 +41,16 @@ export interface MaterialPage {
   }
 }
 
+export interface MaterialPreview {
+  id: string
+  sku_id?: string
+  skuId?: string
+  name?: string
+  series?: string
+  image_url?: string
+  size?: number
+}
+
 export interface MaterialSpu {
   id: string
   series_id?: string
@@ -300,6 +310,16 @@ export function listMaterials(
     page_size: String(query.pageSize),
   })
   return apiRequest<MaterialPage>(`/api/v1/admin/materials?${params}`, { signal })
+}
+
+export async function getMaterialPreviews(materialIds: string[], signal?: AbortSignal): Promise<MaterialPreview[]> {
+  const ids = [...new Set(materialIds.map((item) => item.trim()).filter(Boolean))]
+  if (!ids.length) return []
+  const payload = await apiRequest<{ materials?: MaterialPreview[] }>(
+    `/api/v1/materials?compact=true&slim=true&ids=${encodeURIComponent(ids.join(','))}`,
+    { signal },
+  )
+  return Array.isArray(payload.materials) ? payload.materials : []
 }
 
 export function listMaterialSpus(query: MaterialSpuQuery, signal?: AbortSignal): Promise<MaterialSpuPage> {
