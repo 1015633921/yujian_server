@@ -107,24 +107,44 @@ def featured_material_rank(item: dict) -> int:
 
 
 def material_customer_sort_key(item: dict) -> tuple:
-    """Keep SKU variants next to one another, ordered by their diameter.
+    """Keep the operator-maintained taxonomy order through to the workspace.
 
-    ``series`` is the operator-maintained variety/style.  Some legacy rows do
-    not have one, in which case the display name is the best available group
-    key.  When a style has multiple material codes, diameter still takes
-    priority: every 8 mm option is shown before every 10 mm option.
+    Category and series orders come from ``material_taxonomy``.  Some legacy
+    rows do not have a taxonomy link, so their SKU-level order remains a safe
+    fallback.  Variants of the same series then stay together by diameter.
     """
     top = str(item.get("top") or (item.get("sku") or {}).get("top") or "")
     category = str(item.get("category") or (item.get("sku") or {}).get("category") or "")
     series = str(item.get("series") or (item.get("sku") or {}).get("series") or item.get("name") or "")
     material_code = str(item.get("material_code") or item.get("materialCode") or item.get("skuId") or "")
     sort_order = int(float(item.get("sort_order") or item.get("sortOrder") or 0))
+    def taxonomy_order(key: str) -> int:
+        value = item.get(key)
+        if value is None or value == "":
+            return sort_order
+        try:
+            return int(float(value))
+        except (TypeError, ValueError):
+            return sort_order
+
+    category_sort_order = taxonomy_order("category_sort_order")
+    series_sort_order = taxonomy_order("series_sort_order")
     try:
         size = float(item.get("size") or (item.get("sku") or {}).get("size_mm") or 0)
     except (TypeError, ValueError):
         size = 0
     item_id = str(item.get("id") or item.get("skuId") or "")
-    return (top, category, series, size, material_code, sort_order, item_id)
+    return (
+        top,
+        category_sort_order,
+        category,
+        series_sort_order,
+        series,
+        size,
+        material_code,
+        sort_order,
+        item_id,
+    )
 
 
 def sort_materials_for_customer(materials: list[dict]) -> list[dict]:
@@ -569,6 +589,7 @@ def filter_static_materials(
 def build_material_payload(materials: list[dict], version: dict | None = None) -> dict:
     categories_by_top = {}
     series_by_category = {}
+    series_sort_orders: dict[str, dict[str, int]] = {}
     db_facets = list_db_material_facets()
     for tab in TOP_TABS:
         pool = db_facets if db_facets is not None else MATERIAL_CATALOG
@@ -590,6 +611,12 @@ def build_material_payload(materials: list[dict], version: dict | None = None) -
             series = item.get("series") or item.get("name") or ""
             if series:
                 series_by_category.setdefault(category_key, set()).add(series)
+                try:
+                    sort_order = int(item.get("series_sort_order") or 0)
+                except (TypeError, ValueError):
+                    sort_order = 0
+                existing_order = series_sort_orders.setdefault(category_key, {}).get(series, sort_order)
+                series_sort_orders[category_key][series] = min(existing_order, sort_order)
 
     return {
         "cdn_base_url": material_cdn_base_url(),
@@ -598,7 +625,10 @@ def build_material_payload(materials: list[dict], version: dict | None = None) -
         "top_tabs": TOP_TABS,
         "categories_by_top": categories_by_top,
         "series_by_category": {
-            key: [ALL_OPTION_LABEL, *sorted(values)]
+            key: [
+                ALL_OPTION_LABEL,
+                *sorted(values, key=lambda name: (series_sort_orders.get(key, {}).get(name, 0), name)),
+            ]
             for key, values in series_by_category.items()
         },
         "materials": materials,
@@ -660,10 +690,14 @@ def list_db_material_facets() -> list[dict] | None:
                 rows = connection.execute(
                     """
                     SELECT m.top, m.category, m.series, m.name,
-                           COALESCE(c.sort_order, 0) AS category_sort_order
+                           COALESCE(c.sort_order, 0) AS category_sort_order,
+                           COALESCE(s.sort_order, 0) AS series_sort_order
                     FROM managed_materials m
                     LEFT JOIN material_taxonomy c
                       ON c.kind='category' AND c.top=m.top AND c.name=m.category
+                    LEFT JOIN material_taxonomy s
+                      ON s.kind='series' AND s.parent_id=c.item_id
+                     AND (s.item_id=m.series_id OR (COALESCE(m.series_id, '')='' AND s.name=COALESCE(NULLIF(m.series, ''), m.name)))
                     WHERE m.enabled = 1
                     """
                 ).fetchall()
@@ -672,7 +706,7 @@ def list_db_material_facets() -> list[dict] | None:
                 # initialized; their legacy category order remains unchanged.
                 rows = connection.execute(
                     """
-                    SELECT top, category, series, name, 0 AS category_sort_order
+                    SELECT top, category, series, name, 0 AS category_sort_order, 0 AS series_sort_order
                     FROM managed_materials
                     WHERE enabled = 1
                     """
@@ -688,25 +722,27 @@ def build_db_material_filters(
     category: str | None = None,
     series: str | None = None,
     ids: list[str] | None = None,
+    table_alias: str = "",
 ) -> tuple[list[str], list[str]]:
-    clauses = ["enabled = 1"]
+    prefix = f"{table_alias}." if table_alias else ""
+    clauses = [f"{prefix}enabled = 1"]
     params: list[str] = []
     if top:
-        clauses.append("top = ?")
+        clauses.append(f"{prefix}top = ?")
         params.append(top)
     if ids:
         placeholders = ",".join("?" for _ in ids)
-        clauses.append(f"(id IN ({placeholders}) OR skuId IN ({placeholders}) OR material_code IN ({placeholders}))")
+        clauses.append(f"({prefix}id IN ({placeholders}) OR {prefix}skuId IN ({placeholders}) OR {prefix}material_code IN ({placeholders}))")
         params.extend([*ids, *ids, *ids])
     if not is_all_option(category):
-        clauses.append("category = ?")
+        clauses.append(f"{prefix}category = ?")
         params.append(category or "")
     if not is_all_option(series):
-        clauses.append("COALESCE(NULLIF(series, ''), name) = ?")
+        clauses.append(f"COALESCE(NULLIF({prefix}series, ''), {prefix}name) = ?")
         params.append(series or "")
     search_terms = expand_search_terms(keyword)
     if search_terms:
-        fields = ["name", "category", "series", "grade", "effect", "element", "skuId"]
+        fields = [f"{prefix}{field}" for field in ("name", "category", "series", "grade", "effect", "element", "skuId")]
         term_clauses = []
         for term in search_terms:
             term_clauses.append("(" + " OR ".join(f"{field} LIKE ?" for field in fields) + ")")
@@ -732,28 +768,65 @@ def list_db_materials_page(
     current_page = max(1, int(page or 1))
     size = max(1, min(60, int(page_size or 24)))
     offset = (current_page - 1) * size
-    clauses, params = build_db_material_filters(top=top, keyword=keyword, category=category, series=series)
+    clauses, params = build_db_material_filters(
+        top=top,
+        keyword=keyword,
+        category=category,
+        series=series,
+        table_alias="m",
+    )
     where = " AND ".join(clauses)
     try:
         with connect_database() as connection:
-            total_row = connection.execute(f"SELECT COUNT(*) AS total FROM managed_materials WHERE {where}", params).fetchone()
-            rows = connection.execute(
-                f"""
-                SELECT *
-                FROM managed_materials
+            total_row = connection.execute(f"SELECT COUNT(*) AS total FROM managed_materials m WHERE {where}", params).fetchone()
+            try:
+                rows = connection.execute(
+                    f"""
+                SELECT m.*,
+                       CASE WHEN c.item_id IS NULL THEN COALESCE(m.sort_order, 0) ELSE c.sort_order END AS category_sort_order,
+                       CASE WHEN s.item_id IS NULL THEN COALESCE(m.sort_order, 0) ELSE s.sort_order END AS series_sort_order
+                FROM managed_materials m
+                LEFT JOIN material_taxonomy c
+                  ON c.kind='category' AND c.top=m.top AND c.name=m.category
+                LEFT JOIN material_taxonomy s
+                  ON s.kind='series' AND s.parent_id=c.item_id
+                 AND (s.item_id=m.series_id OR (COALESCE(m.series_id, '')='' AND s.name=COALESCE(NULLIF(m.series, ''), m.name)))
                 WHERE {where}
                 ORDER BY
-                    COALESCE(top, '') ASC,
-                    COALESCE(category, '') ASC,
-                    COALESCE(NULLIF(series, ''), name, '') ASC,
-                    size ASC,
-                    COALESCE(material_code, '') ASC,
-                    sort_order ASC,
-                    id ASC
+                    COALESCE(m.top, '') ASC,
+                    CASE WHEN c.item_id IS NULL THEN COALESCE(m.sort_order, 0) ELSE c.sort_order END ASC,
+                    COALESCE(m.category, '') ASC,
+                    CASE WHEN s.item_id IS NULL THEN COALESCE(m.sort_order, 0) ELSE s.sort_order END ASC,
+                    COALESCE(NULLIF(m.series, ''), m.name, '') ASC,
+                    m.size ASC,
+                    COALESCE(m.material_code, '') ASC,
+                    m.sort_order ASC,
+                    m.id ASC
                 LIMIT ? OFFSET ?
                 """,
-                [*params, size, offset],
-            ).fetchall()
+                    [*params, size, offset],
+                ).fetchall()
+            except Exception:
+                # Compatibility with an older deployment while its taxonomy
+                # table is being initialized.  The normal path above is the
+                # only one used once hierarchy management is available.
+                legacy_where = " AND ".join(build_db_material_filters(
+                    top=top,
+                    keyword=keyword,
+                    category=category,
+                    series=series,
+                )[0])
+                rows = connection.execute(
+                    f"""
+                    SELECT *
+                    FROM managed_materials
+                    WHERE {legacy_where}
+                    ORDER BY top ASC, category ASC, COALESCE(NULLIF(series, ''), name, '') ASC,
+                             size ASC, COALESCE(material_code, '') ASC, sort_order ASC, id ASC
+                    LIMIT ? OFFSET ?
+                    """,
+                    [*params, size, offset],
+                ).fetchall()
             row_dicts = [dict(row) for row in rows]
             series_assets = fetch_db_series_assets(connection, row_dicts)
     except Exception:
