@@ -6,6 +6,14 @@ import { defineConfig } from 'vitest/config'
 export default defineConfig({
   plugins: [vue()],
   base: './',
+  build: {
+    // The FastAPI application serves the SPA from this directory in every
+    // environment.  Keeping the Vite output aligned with that contract makes
+    // a local or Docker build immediately usable at /admin-v2 and
+    // /test-api/admin-v2 instead of leaving the route with an empty shell.
+    outDir: '../static/admin-v2',
+    emptyOutDir: true,
+  },
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),

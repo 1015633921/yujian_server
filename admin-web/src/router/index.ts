@@ -119,6 +119,18 @@ const router = createRouter({
           meta: { title: '社区灵感' },
         },
         {
+          path: 'community-posts/new',
+          name: 'community-post-new',
+          component: () => import('@/views/CommunityPostDetailView.vue'),
+          meta: { title: '新增社区灵感' },
+        },
+        {
+          path: 'community-posts/:postId',
+          name: 'community-post-detail',
+          component: () => import('@/views/CommunityPostDetailView.vue'),
+          meta: { title: '社区灵感详情' },
+        },
+        {
           path: 'content-blocks',
           name: 'content-blocks',
           component: () => import('@/views/ContentBlocksView.vue'),

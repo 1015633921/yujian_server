@@ -21,9 +21,21 @@ def _request_host(request: Request) -> str:
     return value.strip().split(":", 1)[0].lower()
 
 
-def _base_path(path: str, host: str = "") -> str:
+def _request_prefix(request: Request) -> str:
+    """Read the trusted reverse-proxy prefix, if one was supplied."""
+    value = str(request.headers.get("x-forwarded-prefix") or "").split(",", 1)[0].strip()
+    if not value or not value.startswith("/") or value.startswith("//"):
+        return ""
+    if any(character.isspace() for character in value):
+        return ""
+    return value.rstrip("/")
+
+
+def _base_path(path: str, host: str = "", forwarded_prefix: str = "") -> str:
     if host == DEDICATED_TEST_ADMIN_HOST:
         return "/"
+    if forwarded_prefix:
+        return f"{forwarded_prefix}/admin-v2/"
     marker = "/admin-v2"
     index = path.find(marker)
     prefix = path[:index] if index >= 0 else ""
@@ -36,7 +48,9 @@ def admin_v2_page(request: Request) -> HTMLResponse:
     if not index_path.is_file():
         raise HTTPException(status_code=503, detail="新版运营后台构建产物暂不可用")
     html = index_path.read_text(encoding="utf-8")
-    base = escape(_base_path(request.url.path, _request_host(request)), quote=True)
+    base = escape(
+        _base_path(request.url.path, _request_host(request), _request_prefix(request)), quote=True
+    )
     if "<head>" not in html:
         raise HTTPException(status_code=503, detail="新版运营后台入口文件无效")
     return HTMLResponse(

@@ -1,12 +1,15 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
+import ActionConfirmDialog from '@/components/ui/ActionConfirmDialog.vue'
 import PageErrorState from '@/components/ui/PageErrorState.vue'
 import { getAfterSale, retryAfterSaleRefund, reviewAfterSale, submitAfterSaleRefund, syncAfterSaleRefund } from '@/features/after-sales/api'
 import { actionConfig, afterSaleEventLabel, afterSaleEventStatusText, afterSaleNextStep, afterSaleStatusLabel, afterSaleStatusTone, formatAfterSaleDate } from '@/features/after-sales/presentation'
 import type { AfterSaleCase } from '@/features/after-sales/types'
 
-const route = useRoute(); const item = ref<AfterSaleCase | null>(null); const loading = ref(true); const error = ref(''); const note = ref(''); const acting = ref(false); const message = ref('')
+type Confirmation = { kind: 'review' | 'refund'; action: string; label: string; description: string; tone: 'default' | 'danger' }
+
+const route = useRoute(); const item = ref<AfterSaleCase | null>(null); const loading = ref(true); const error = ref(''); const note = ref(''); const acting = ref(false); const message = ref(''); const confirmation = ref<Confirmation | null>(null)
 let controller: AbortController | null = null; let version = 0
 const caseId = computed(() => String(route.params.caseId || ''))
 const returnLocation = computed(() => ({ name: 'after-sales', query: { keyword: route.query.keyword, status: route.query.status, type: route.query.type, page: route.query.page } }))
@@ -17,8 +20,11 @@ const canSync = computed(() => ['refund_pending', 'refund_submitting', 'refundin
 function actionLabel(action: string): string { return ({ request_return: '同意并要求寄回', approve_service: '接受并开始处理', confirm_return: '确认收到退回商品', complete: '标记服务已完成' })[action] || '更新工单' }
 function actionHint(action: string): string { return ({ request_return: '本操作不会退款。用户寄回商品并经确认后，才可进入退款环节。', approve_service: '请记录处理方式、寄送安排或预计完成时间。', confirm_return: '确认商品已收到并核验无误后，系统将生成待确认退款记录。', complete: '确认维修、改手围或补发已实际完成后再关闭工单。' })[action] || '' }
 async function load(): Promise<void> { const current = ++version; controller?.abort(); controller = new AbortController(); loading.value = true; error.value = ''; message.value = ''; try { const result = await getAfterSale(caseId.value, controller.signal); if (current !== version) return; item.value = result } catch (cause) { if (current !== version || (cause instanceof DOMException && cause.name === 'AbortError')) return; error.value = cause instanceof Error ? cause.message : '售后工单加载失败' } finally { if (current === version) loading.value = false } }
-async function review(action: string): Promise<void> { if (!item.value || acting.value) return; if (action === 'reject' && note.value.trim().length < 2) { message.value = '请填写至少 2 个字的拒绝原因。'; return }; if (!window.confirm(`确认执行“${actionLabel(action)}”吗？`)) return; acting.value = true; message.value = ''; try { item.value = await reviewAfterSale(item.value.case_id, action, note.value.trim()); note.value = ''; message.value = '工单已更新。' } catch (cause) { message.value = cause instanceof Error ? cause.message : '工单更新失败' } finally { acting.value = false } }
-async function refund(kind: 'submit' | 'sync' | 'retry'): Promise<void> { if (!item.value || acting.value) return; if (kind !== 'sync' && !note.value.trim()) { message.value = '请填写本次退款核验备注。'; return }; const labels = { submit: '发起微信原路退款', sync: '同步微信退款状态', retry: '核对并恢复退款' }; if (!window.confirm(`${labels[kind]}将触发真实支付状态操作，确认继续吗？`)) return; acting.value = true; message.value = ''; try { item.value = kind === 'submit' ? await submitAfterSaleRefund(item.value.case_id, note.value.trim()) : kind === 'sync' ? await syncAfterSaleRefund(item.value.case_id) : await retryAfterSaleRefund(item.value.case_id, note.value.trim()); note.value = ''; message.value = kind === 'sync' ? '已同步微信退款状态。' : '退款操作已提交，状态以微信返回为准。' } catch (cause) { message.value = cause instanceof Error ? cause.message : '退款操作失败' } finally { acting.value = false } }
+function requestReview(action: string): void { if (!item.value || acting.value) return; if (action === 'reject' && note.value.trim().length < 2) { message.value = '请填写至少 2 个字的拒绝原因。'; return }; confirmation.value = { kind: 'review', action, label: actionLabel(action), description: actionHint(action) || '该操作会更新售后工单状态，请确认处理依据与用户沟通记录。', tone: action === 'reject' ? 'danger' : 'default' } }
+async function review(action: string): Promise<void> { if (!item.value || acting.value) return; acting.value = true; message.value = ''; try { item.value = await reviewAfterSale(item.value.case_id, action, note.value.trim()); note.value = ''; confirmation.value = null; message.value = '工单已更新。' } catch (cause) { message.value = cause instanceof Error ? cause.message : '工单更新失败' } finally { acting.value = false } }
+function requestRefund(kind: 'submit' | 'sync' | 'retry'): void { if (!item.value || acting.value) return; if (kind !== 'sync' && !note.value.trim()) { message.value = '请填写本次退款核验备注。'; return }; const labels = { submit: '发起微信原路退款', sync: '同步微信退款状态', retry: '核对并恢复退款' }; confirmation.value = { kind: 'refund', action: kind, label: labels[kind], description: kind === 'sync' ? '将向支付渠道读取最新退款状态，不会新建退款。' : '该操作会触发真实支付状态变更，请核对退款金额、退回商品与处理备注。', tone: kind === 'sync' ? 'default' : 'danger' } }
+async function refund(kind: 'submit' | 'sync' | 'retry'): Promise<void> { if (!item.value || acting.value) return; acting.value = true; message.value = ''; try { item.value = kind === 'submit' ? await submitAfterSaleRefund(item.value.case_id, note.value.trim()) : kind === 'sync' ? await syncAfterSaleRefund(item.value.case_id) : await retryAfterSaleRefund(item.value.case_id, note.value.trim()); note.value = ''; confirmation.value = null; message.value = kind === 'sync' ? '已同步微信退款状态。' : '退款操作已提交，状态以微信返回为准。' } catch (cause) { message.value = cause instanceof Error ? cause.message : '退款操作失败' } finally { acting.value = false } }
+function confirmAction(): void { if (!confirmation.value) return; if (confirmation.value.kind === 'review') void review(confirmation.value.action); else void refund(confirmation.value.action as 'submit' | 'sync' | 'retry') }
 watch(caseId, () => void load(), { immediate: true }); onBeforeUnmount(() => controller?.abort())
 </script>
 
@@ -98,14 +104,14 @@ watch(caseId, () => void load(), { immediate: true }); onBeforeUnmount(() => con
                 type="button"
                 class="danger-outline"
                 :disabled="acting"
-                @click="review('reject')"
+                @click="requestReview('reject')"
               >
                 拒绝申请
               </button><button
                 v-if="item.status === 'requested' && item.type === 'return_refund'"
                 type="button"
                 :disabled="acting"
-                @click="review('prepare_direct_refund')"
+                @click="requestReview('prepare_direct_refund')"
               >
                 免退并批准退款
               </button><button
@@ -113,7 +119,7 @@ watch(caseId, () => void load(), { immediate: true }); onBeforeUnmount(() => con
                 type="button"
                 class="primary-action"
                 :disabled="acting"
-                @click="review(nextAction.action)"
+                @click="requestReview(nextAction.action)"
               >
                 {{ acting ? '处理中…' : nextAction.label }}
               </button>
@@ -141,13 +147,13 @@ watch(caseId, () => void load(), { immediate: true }); onBeforeUnmount(() => con
                 type="button"
                 class="danger-action"
                 :disabled="acting"
-                @click="refund('submit')"
+                @click="requestRefund('submit')"
               >
                 确认发起原路退款
               </button><button
                 type="button"
                 :disabled="acting"
-                @click="refund('sync')"
+                @click="requestRefund('sync')"
               >
                 同步微信退款状态
               </button><button
@@ -155,7 +161,7 @@ watch(caseId, () => void load(), { immediate: true }); onBeforeUnmount(() => con
                 type="button"
                 class="danger-outline"
                 :disabled="acting"
-                @click="refund('retry')"
+                @click="requestRefund('retry')"
               >
                 核对并恢复退款
               </button>
@@ -192,6 +198,27 @@ watch(caseId, () => void load(), { immediate: true }); onBeforeUnmount(() => con
           </section>
         </aside>
       </div>
+      <ActionConfirmDialog
+        :open="Boolean(confirmation)"
+        :title="confirmation?.label || '确认操作'"
+        :description="confirmation?.description"
+        :confirm-label="confirmation?.label || '确认提交'"
+        :tone="confirmation?.tone || 'default'"
+        :busy="acting"
+        @close="confirmation = null"
+        @confirm="confirmAction"
+      >
+        <dl>
+          <div><dt>售后工单</dt><dd>{{ item.case_id }}</dd></div>
+          <div><dt>关联订单</dt><dd>{{ item.order_id }}</dd></div>
+          <div><dt>申请金额</dt><dd>¥{{ item.requested_refund_amount || '0.00' }}</dd></div>
+          <div><dt>审核金额</dt><dd>{{ item.approved_refund_fee ? `¥${item.approved_refund_amount}` : '尚未批准' }}</dd></div>
+          <div><dt>退款状态</dt><dd>{{ refundState || '尚未进入退款' }}</dd></div>
+        </dl>
+        <p class="action-confirm__note">
+          处理备注：{{ note.trim() || '未填写' }}
+        </p>
+      </ActionConfirmDialog>
     </template>
   </section>
 </template>

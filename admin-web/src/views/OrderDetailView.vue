@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 
+import ActionConfirmDialog from '@/components/ui/ActionConfirmDialog.vue'
 import PageErrorState from '@/components/ui/PageErrorState.vue'
 import { getOrder, refreshOrderLogistics, shipOrder } from '@/features/orders/api'
 import { formatCurrency, formatOrderDate, orderStatusLabel, orderStatusTone, paymentStatusLabel, receiverAddress } from '@/features/orders/presentation'
@@ -18,6 +19,7 @@ const carrierCode = ref('shunfeng')
 const carrier = ref('顺丰速运')
 const trackingNo = ref('')
 const phoneTail = ref('')
+const shipmentConfirmOpen = ref(false)
 let controller: AbortController | null = null
 let version = 0
 
@@ -55,17 +57,22 @@ async function loadOrder(): Promise<void> {
   }
 }
 
-async function submitShipment(): Promise<void> {
+function requestShipment(): void {
   if (!order.value || shipping.value) return
   if (trackingNo.value.trim().length < 6) {
     actionMessage.value = '请填写至少 6 位的快递单号。'
     return
   }
-  if (!window.confirm(`确认将 ${order.value.order_id} 标记为已发货？`)) return
+  shipmentConfirmOpen.value = true
+}
+
+async function submitShipment(): Promise<void> {
+  if (!order.value || shipping.value) return
   shipping.value = true
   actionMessage.value = ''
   try {
     order.value = await shipOrder(order.value.order_id, { carrier: carrier.value, carrier_code: carrierCode.value, tracking_no: trackingNo.value.trim(), phone_tail: phoneTail.value.trim() })
+    shipmentConfirmOpen.value = false
     actionMessage.value = '发货信息已提交，物流订阅将由服务端继续处理。'
   } catch (cause) {
     actionMessage.value = cause instanceof Error ? cause.message : '发货提交失败'
@@ -172,7 +179,7 @@ onBeforeUnmount(() => controller?.abort())
             <form
               v-if="canShip"
               class="shipment-form"
-              @submit.prevent="submitShipment"
+              @submit.prevent="requestShipment"
             >
               <label><span>快递公司</span><select
                 :value="`${carrier}|${carrierCode}`"
@@ -273,6 +280,27 @@ onBeforeUnmount(() => controller?.abort())
           </section>
         </aside>
       </div>
+
+      <ActionConfirmDialog
+        :open="shipmentConfirmOpen"
+        title="确认提交发货信息"
+        description="提交后订单将进入已发货状态，物流订阅会继续由服务端处理。"
+        confirm-label="确认发货"
+        :busy="shipping"
+        @close="shipmentConfirmOpen = false"
+        @confirm="submitShipment"
+      >
+        <dl>
+          <div><dt>订单</dt><dd>{{ order.order_id }}</dd></div>
+          <div><dt>收货人</dt><dd>{{ order.receiver?.name || '-' }} · {{ order.receiver?.phone || '-' }}</dd></div>
+          <div><dt>快递公司</dt><dd>{{ carrier }}</dd></div>
+          <div><dt>快递单号</dt><dd>{{ trackingNo }}</dd></div>
+          <div><dt>查询尾号</dt><dd>{{ phoneTail || '未填写' }}</dd></div>
+        </dl>
+        <p class="action-confirm__note">
+          请确认已按当前订单的材料快照完成配货；提交后如需更正，请在履约记录中处理。
+        </p>
+      </ActionConfirmDialog>
     </template>
   </section>
 </template>

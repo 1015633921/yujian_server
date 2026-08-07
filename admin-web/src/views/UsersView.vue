@@ -5,10 +5,11 @@ import PageEmptyState from '@/components/ui/PageEmptyState.vue'
 import PageErrorState from '@/components/ui/PageErrorState.vue'
 import PageHeading from '@/components/ui/PageHeading.vue'
 import { listUsers, type AdminUser } from '@/features/users/api'
-const router = useRouter(); const rows = ref<AdminUser[]>([]); const keyword = ref(''); const profileStatus = ref(''); const energyTag = ref(''); const spendLevel = ref(''); const startDate = ref(''); const endDate = ref(''); const loading = ref(true); const error = ref(''); let controller: AbortController | null = null
+const router = useRouter(); const rows = ref<AdminUser[]>([]); const keyword = ref(''); const profileStatus = ref(''); const energyTag = ref(''); const spendLevel = ref(''); const startDate = ref(''); const endDate = ref(''); const loading = ref(true); const error = ref(''); let controller: AbortController | null = null; let debounceTimer: ReturnType<typeof setTimeout> | null = null
 const money = (value = 0) => new Intl.NumberFormat('zh-CN', { style: 'currency', currency: 'CNY', maximumFractionDigits: 0 }).format(value)
+function maskedIdentity(item: AdminUser): string { const phone = String(item.phone_number || '').trim(); if (/^\d{11}$/.test(phone)) return `${phone.slice(0, 3)}****${phone.slice(-4)}`; const id = String(item.user_id || ''); return id.length > 8 ? `用户 ID · ${id.slice(0, 3)}…${id.slice(-4)}` : '未绑定手机号' }
 async function load(): Promise<void> { controller?.abort(); controller = new AbortController(); loading.value = true; error.value = ''; try { rows.value = await listUsers({ keyword: keyword.value, profileStatus: profileStatus.value, energyTag: energyTag.value, spendLevel: spendLevel.value, startDate: startDate.value, endDate: endDate.value }, controller.signal) } catch (cause) { if (!(cause instanceof DOMException && cause.name === 'AbortError')) error.value = cause instanceof Error ? cause.message : '用户列表加载失败' } finally { loading.value = false } }
-watch([keyword, profileStatus, energyTag, spendLevel, startDate, endDate], () => void load()); onBeforeUnmount(() => controller?.abort()); void load()
+watch([keyword, profileStatus, energyTag, spendLevel, startDate, endDate], () => { if (debounceTimer) clearTimeout(debounceTimer); debounceTimer = setTimeout(() => void load(), 260) }); onBeforeUnmount(() => { controller?.abort(); if (debounceTimer) clearTimeout(debounceTimer) }); void load()
 </script>
 <template>
   <section class="workspace-page users-page">
@@ -98,7 +99,7 @@ watch([keyword, profileStatus, energyTag, spendLevel, startDate, endDate], () =>
             v-if="item.avatar_url"
             :src="item.avatar_url"
             :alt="item.nickname"
-          ><i v-else>{{ (item.nickname||'宇').slice(0,1) }}</i><strong>{{ item.nickname||'未设置昵称' }}</strong><small>{{ item.phone_number||item.user_id }}</small>
+          ><i v-else>{{ (item.nickname||'宇').slice(0,1) }}</i><strong>{{ item.nickname||'未设置昵称' }}</strong><small>{{ maskedIdentity(item) }}</small>
         </p><em>{{ item.energy_tags.join(' · ')||'暂无测算' }}</em><p><strong>{{ item.spend_level_text }}</strong><small>{{ money(item.paid_amount) }} · {{ item.order_count }} 单</small></p><span>{{ item.profile_status_text }}</span><small>{{ item.updated_at||'—' }}</small>
       </button>
     </div>

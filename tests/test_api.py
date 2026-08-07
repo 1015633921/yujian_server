@@ -88,15 +88,19 @@ def test_public_material_payload_honors_category_sort_order(monkeypatch):
         materials_module,
         "list_db_material_facets",
         lambda: [
-            {"top": "accessory", "category": "后置分类", "series": "A", "name": "A", "category_sort_order": 30},
-            {"top": "accessory", "category": "前置分类", "series": "B", "name": "B", "category_sort_order": 10},
-            {"top": "accessory", "category": "中间分类", "series": "C", "name": "C", "category_sort_order": 20},
+            {"top": "accessory", "category": "后置分类", "series": "A", "name": "A", "category_sort_order": 30, "series_sort_order": 10},
+            {"top": "accessory", "category": "前置分类", "series": "按名称靠后", "name": "按名称靠后", "category_sort_order": 10, "series_sort_order": 10},
+            {"top": "accessory", "category": "前置分类", "series": "按名称靠前", "name": "按名称靠前", "category_sort_order": 10, "series_sort_order": 20},
+            {"top": "accessory", "category": "前置分类", "series": "未配置排序", "name": "未配置排序", "category_sort_order": 10, "series_sort_order": 0},
+            {"top": "accessory", "category": "中间分类", "series": "C", "name": "C", "category_sort_order": 20, "series_sort_order": 10},
+            {"top": "accessory", "category": "未配置分类", "series": "D", "name": "D", "category_sort_order": 0, "series_sort_order": 0},
         ],
     )
 
     payload = materials_module.build_material_payload([], {"version": "test", "updated_at": ""})
 
-    assert payload["categories_by_top"]["accessory"] == ["全部", "前置分类", "中间分类", "后置分类"]
+    assert payload["categories_by_top"]["accessory"] == ["全部", "后置分类", "中间分类", "前置分类", "未配置分类"]
+    assert payload["series_by_category"]["accessory::前置分类"] == ["全部", "按名称靠前", "按名称靠后", "未配置排序"]
 
 
 def test_options_support_form_rendering():
@@ -169,6 +173,24 @@ def test_workspace_material_sort_groups_same_style_and_orders_by_size():
     sorted_ids = [item["id"] for item in sort_materials_for_customer(materials)]
 
     assert sorted_ids == ["cross-8", "rose-8", "rose-plated-9", "rose-10", "rose-12"]
+
+
+def test_workspace_material_sort_honors_category_and_series_order_before_names():
+    from app.materials import sort_materials_for_customer
+
+    materials = [
+        {"id": "late-category", "top": "bead", "category": "按名称靠前", "series": "A", "size": 8, "category_sort_order": 20, "series_sort_order": 10},
+        {"id": "late-series", "top": "bead", "category": "按名称靠后", "series": "按名称靠前", "size": 8, "category_sort_order": 10, "series_sort_order": 20},
+        {"id": "first-series", "top": "bead", "category": "按名称靠后", "series": "按名称靠后", "size": 8, "category_sort_order": 10, "series_sort_order": 10},
+        {"id": "unassigned", "top": "bead", "category": "未配置", "series": "未配置", "size": 8, "category_sort_order": 0, "series_sort_order": 0},
+    ]
+
+    assert [item["id"] for item in sort_materials_for_customer(materials)] == [
+        "late-category",
+        "late-series",
+        "first-series",
+        "unassigned",
+    ]
 
 
 def test_production_material_catalog_does_not_fall_back_to_demo_inventory(monkeypatch):
@@ -345,7 +367,8 @@ def test_pendant_material_allows_blank_primary_element(tmp_path):
         }
     )
     taxonomy = service.list_material_taxonomy(top="pendant", include_disabled=True)
-    saved_series = next(item for item in taxonomy[0]["series"] if item["id"] == series["id"])
+    saved_category = next(item for item in taxonomy if item["id"] == category["id"])
+    saved_series = next(item for item in saved_category["series"] if item["id"] == series["id"])
     assert saved_series["energy"]["primary_element"] == ""
     assert saved_series["energy"]["secondary_elements"] == []
 
@@ -520,6 +543,45 @@ def test_admin_material_spu_pagination_keeps_legacy_list_response(tmp_path):
     assert [item["sku"]["enabled"] for item in enabled_page["items"][0]["items"]] == [True]
     assert len(disabled_page["items"]) == 1
     assert [item["sku"]["enabled"] for item in disabled_page["items"][0]["items"]] == [False]
+
+
+def test_admin_material_spu_compact_lookup_avoids_quality_and_inventory_payload(tmp_path):
+    from app.admin_service import AdminService
+
+    service = AdminService(tmp_path / "material-spu-compact-lookup.db")
+    ensure_material_taxonomy(service, "compact-gem", "Compact Quartz")
+    for size, price in ((8, 8.8), (10, 10.8)):
+        service.save_material(
+            {
+                "id": f"compact_quartz_{size}",
+                "skuId": f"compact_quartz_{size}",
+                "material_code": "compact_quartz",
+                "top": "bead",
+                "category": "compact-gem",
+                "series": "Compact Quartz",
+                "name": "Compact Quartz",
+                "grade": "AAA" if size == 10 else "",
+                "price_per_bead": price,
+                "size_mm": size,
+                "stock": 9,
+            }
+        )
+
+    page = service.list_material_spus(keyword="Compact Quartz", page=1, page_size=20, compact=True)
+
+    assert page["pagination"]["total"] == 1
+    item = page["items"][0]
+    assert item["spu"]["series"] == "Compact Quartz"
+    assert item["spu"]["size_values"] == [8, 10]
+    assert item["spu"]["sku_options"] == [
+        {"id": "compact_quartz_8", "size_mm": 8},
+        {"id": "compact_quartz_10", "size_mm": 10, "grade": "AAA"},
+    ]
+    assert item["spu"]["min_price"] == 8.8
+    assert item["spu"]["max_price"] == 10.8
+    assert "items" not in item
+    assert "quality" not in item
+    assert "total_stock" not in item["spu"]
 
 
 def test_admin_material_spu_search_has_stable_tie_breakers(tmp_path):

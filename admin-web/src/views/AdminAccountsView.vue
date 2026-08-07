@@ -4,6 +4,7 @@ import { computed, onBeforeUnmount, reactive, ref } from 'vue'
 import PageEmptyState from '@/components/ui/PageEmptyState.vue'
 import PageErrorState from '@/components/ui/PageErrorState.vue'
 import PageHeading from '@/components/ui/PageHeading.vue'
+import ActionConfirmDialog from '@/components/ui/ActionConfirmDialog.vue'
 import {
   createAdmin,
   disableAdmin,
@@ -34,6 +35,7 @@ const loading = ref(true)
 const saving = ref(false)
 const error = ref('')
 const notice = ref('')
+const disableConfirmOpen = ref(false)
 const editor = reactive<AdminEditor>({ adminId: '', username: '', displayName: '', role: 'operator', status: 'active', password: '' })
 let controller: AbortController | null = null
 
@@ -55,6 +57,8 @@ function roleLabel(value: string): string { return ({ admin: '管理员', operat
 function statusLabel(value: string): string { return ({ active: '启用', disabled: '停用' })[value] || value || '—' }
 function reasonLabel(value: string): string { return ({ success: '登录成功', invalid_payload: '参数异常', unknown_user: '账号不存在', bad_password: '密码错误', locked_bad_password: '失败过多已锁定', locked: '账号锁定中', disabled: '账号已停用' })[value] || value || '—' }
 function timeLabel(value?: string): string { return value ? value.replace('T', ' ').slice(0, 16) : '—' }
+function maskedIp(value?: string): string { const ip = String(value || '').trim(); const parts = ip.split('.'); return parts.length === 4 ? `${parts[0]}.${parts[1]}.*.*` : ip ? '已记录' : '—' }
+function deviceLabel(value?: string): string { const agent = String(value || ''); if (!agent) return '—'; const platform = /Windows/i.test(agent) ? 'Windows' : /Macintosh|Mac OS/i.test(agent) ? 'Mac' : /iPhone|iPad/i.test(agent) ? 'iOS' : /Android/i.test(agent) ? 'Android' : '其他设备'; const client = /MicroMessenger/i.test(agent) ? '微信' : /Chrome/i.test(agent) ? 'Chrome' : /Safari/i.test(agent) ? 'Safari' : '浏览器'; return `${platform} · ${client}` }
 
 function resetEditor(): void {
   selectedId.value = ''
@@ -115,14 +119,19 @@ async function save(): Promise<void> {
   }
 }
 
-async function disable(): Promise<void> {
+function requestDisable(): void {
   if (!canManage.value || !selected.value || saving.value) return
   if (selected.value.admin_id === currentAdminId.value) { notice.value = '不能停用当前登录账号。'; return }
-  if (!window.confirm(`确认停用管理员账号「${selected.value.display_name || selected.value.username}」？该账号将无法继续登录。`)) return
+  disableConfirmOpen.value = true
+}
+
+async function disable(): Promise<void> {
+  if (!canManage.value || !selected.value || saving.value) return
   saving.value = true
   notice.value = ''
   try {
     await disableAdmin(selected.value.admin_id)
+    disableConfirmOpen.value = false
     resetEditor()
     await load()
     notice.value = '管理员账号已停用。'
@@ -177,7 +186,7 @@ void load()
       <div class="admin-accounts__tools">
         <input
           v-model.trim="keyword"
-          placeholder="搜索账号、角色、状态或 IP"
+          placeholder="搜索账号、角色或状态"
         >
         <small>{{ visibleAccounts.length }} 个账号 · {{ visibleLogs.length }} 条登录记录</small>
       </div>
@@ -234,7 +243,7 @@ void load()
               v-if="editor.adminId && selected?.status === 'active' && selected.admin_id !== currentAdminId"
               type="button"
               :disabled="saving"
-              @click="disable"
+              @click="requestDisable"
             >
               停用账号
             </button>
@@ -295,10 +304,20 @@ void load()
             v-for="item in visibleLogs"
             :key="item.log_id"
           >
-            <time>{{ timeLabel(item.created_at) }}</time><strong>{{ item.username || '—' }}</strong><b :class="item.success ? 'is-success' : 'is-failed'">{{ reasonLabel(item.reason) }}</b><span>{{ item.ip || '—' }}</span><small :title="item.user_agent">{{ item.user_agent || '—' }}</small>
+            <time>{{ timeLabel(item.created_at) }}</time><strong>{{ item.username || '—' }}</strong><b :class="item.success ? 'is-success' : 'is-failed'">{{ reasonLabel(item.reason) }}</b><span>{{ maskedIp(item.ip) }}</span><small>{{ deviceLabel(item.user_agent) }}</small>
           </article>
         </div>
       </section>
+      <ActionConfirmDialog
+        :open="disableConfirmOpen"
+        title="停用管理员账号"
+        :description="`账号「${selected?.display_name || selected?.username || '—'}」将立即无法登录后台；已有会话将在下次鉴权时失效。`"
+        confirm-label="确认停用"
+        tone="danger"
+        :busy="saving"
+        @close="disableConfirmOpen = false"
+        @confirm="disable"
+      />
     </template>
   </section>
 </template>

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import PageEmptyState from '@/components/ui/PageEmptyState.vue'
 import PageErrorState from '@/components/ui/PageErrorState.vue'
 import PageHeading from '@/components/ui/PageHeading.vue'
@@ -7,6 +7,15 @@ import { listAssessments, listCheckins, listDailyEnergies, type Assessment, type
 type Tab = 'assessments'|'daily'|'checkins'; const tab=ref<Tab>('assessments'); const keyword=ref(''); const wish=ref(''); const hideTests=ref(true); const rows=ref<Array<Assessment|DailyEnergy|Checkin>>([]); const loading=ref(true); const error=ref('')
 async function load(): Promise<void> { loading.value=true; error.value=''; try { rows.value=tab.value==='assessments'?await listAssessments({keyword:keyword.value,wish:wish.value,hideTests:hideTests.value}):tab.value==='daily'?await listDailyEnergies(keyword.value):await listCheckins(keyword.value) } catch(cause) { error.value=cause instanceof Error?cause.message:'能量数据加载失败' } finally { loading.value=false } }
 function switchTab(next:Tab):void { tab.value=next; void load() }; watch([keyword,wish,hideTests],()=>void load()); void load()
+function maskedUserId(value?: string): string { const id=String(value||''); return id.length>8?`${id.slice(0,3)}…${id.slice(-4)}`:id||'—' }
+const assessmentFunnel = computed(() => {
+  const assessments = rows.value.filter((item): item is Assessment => 'assessment_id' in item)
+  const ordered = assessments.filter((item) => item.conversion?.status === 'converted')
+  const paid = ordered.filter((item) => ['paid', 'success'].includes(String(item.conversion?.payment_status || '').toLowerCase()))
+  const rate = assessments.length ? Math.round((ordered.length / assessments.length) * 100) : 0
+  const paidAmount = paid.reduce((sum, item) => sum + Number(item.conversion?.amount || 0), 0)
+  return { total: assessments.length, ordered: ordered.length, paid: paid.length, rate, paidAmount }
+})
 </script>
 <template>
   <section class="workspace-page insights-page">
@@ -82,31 +91,41 @@ function switchTab(next:Tab):void { tab.value=next; void load() }; watch([keywor
       v-else-if="!rows.length"
       title="暂无符合条件的数据"
       message="调整筛选条件后重试。"
-    /><div
-      v-else
-      class="insights-ledger"
-    >
-      <article
-        v-for="item in rows"
-        :key="('assessment_id'in item?item.assessment_id:'energy_date'in item?`${item.user_id}-${item.energy_date}`:`${item.user_id}-${item.checkin_date}`)"
+    /><template v-else>
+      <section
+        v-if="tab === 'assessments'"
+        class="insights-funnel"
+        aria-label="当前筛选范围的测算转化汇总"
       >
-        <template v-if="'assessment_id'in item">
-          <strong>{{ item.name||item.user_id }} · {{ item.core_wish||'未设愿望' }}</strong><p>{{ item.formula?.tags?.map(x=>`${x.role||'珠材'} ${x.name||''}`).join(' · ')||'暂无配方' }}</p><small>{{ item.summary||'暂无摘要' }} · {{ item.created_at||'—' }}</small>
-          <RouterLink :to="{ name: 'energy-assessment-detail', params: { assessmentId: item.assessment_id } }">
-            查看详情
-          </RouterLink>
-        </template><template v-else-if="'energy_date'in item">
-          <strong>{{ item.energy_date }} · {{ item.user_id }}</strong><p>{{ item.title||'今日能量' }} · {{ item.recommended_stone||'—' }}</p><small>{{ item.lucky_color||'—' }} · {{ item.score??'—' }} 分</small>
-          <RouterLink :to="{ name: 'energy-daily-detail', params: { userId: item.user_id, energyDate: item.energy_date } }">
-            查看详情
-          </RouterLink>
-        </template><template v-else>
-          <strong>{{ item.checkin_date }} · {{ item.user_id }}</strong><p>心情 {{ item.mood??'—' }} · 睡眠 {{ item.sleep??'—' }} · 压力 {{ item.stress??'—' }}</p><small>{{ item.updated_at||'—' }}</small>
-          <RouterLink :to="{ name: 'energy-checkin-detail', params: { userId: item.user_id, checkinDate: item.checkin_date } }">
-            查看详情
-          </RouterLink>
-        </template>
-      </article>
-    </div>
+        <div><span>测算记录</span><strong>{{ assessmentFunnel.total }}</strong></div>
+        <div><span>关联订单</span><strong>{{ assessmentFunnel.ordered }}</strong><small>转化 {{ assessmentFunnel.rate }}%</small></div>
+        <div><span>已支付订单</span><strong>{{ assessmentFunnel.paid }}</strong><small>¥{{ assessmentFunnel.paidAmount.toFixed(2) }}</small></div>
+        <p>仅基于当前筛选结果（最多 200 条）汇总；关联订单按测算时间后的首笔订单计算。</p>
+      </section><div
+        class="insights-ledger"
+      >
+        <article
+          v-for="item in rows"
+          :key="('assessment_id'in item?item.assessment_id:'energy_date'in item?`${item.user_id}-${item.energy_date}`:`${item.user_id}-${item.checkin_date}`)"
+        >
+          <template v-if="'assessment_id'in item">
+            <strong>{{ item.name||maskedUserId(item.user_id) }} · {{ item.core_wish||'未设愿望' }}</strong><p>{{ item.formula?.tags?.map(x=>`${x.role||'珠材'} ${x.name||''}`).join(' · ')||'暂无配方' }}</p><small>{{ item.summary||'暂无摘要' }} · {{ item.created_at||'—' }}</small>
+            <RouterLink :to="{ name: 'energy-assessment-detail', params: { assessmentId: item.assessment_id } }">
+              查看详情
+            </RouterLink>
+          </template><template v-else-if="'energy_date'in item">
+            <strong>{{ item.energy_date }} · {{ maskedUserId(item.user_id) }}</strong><p>{{ item.title||'今日能量' }} · {{ item.recommended_stone||'—' }}</p><small>{{ item.lucky_color||'—' }} · {{ item.score??'—' }} 分</small>
+            <RouterLink :to="{ name: 'energy-daily-detail', params: { userId: item.user_id, energyDate: item.energy_date } }">
+              查看详情
+            </RouterLink>
+          </template><template v-else>
+            <strong>{{ item.checkin_date }} · {{ maskedUserId(item.user_id) }}</strong><p>心情 {{ item.mood??'—' }} · 睡眠 {{ item.sleep??'—' }} · 压力 {{ item.stress??'—' }}</p><small>{{ item.updated_at||'—' }}</small>
+            <RouterLink :to="{ name: 'energy-checkin-detail', params: { userId: item.user_id, checkinDate: item.checkin_date } }">
+              查看详情
+            </RouterLink>
+          </template>
+        </article>
+      </div>
+    </template>
   </section>
 </template>

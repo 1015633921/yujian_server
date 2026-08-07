@@ -943,7 +943,7 @@ test('workspace canvas avoids redundant touch handlers and physics-frame snapsho
   assert.match(workspaceJs, /const maxCanvasDpr = this\.isLowPerformanceDevice \? 1\.75/);
 });
 
-test('workspace material selection uses only unique gallery entries, never the primary image', () => {
+test('workspace material selection uses only unique gallery entries and ignores the separate primary field', () => {
   const page = loadPage('miniprogram/pages/workspace/workspace.js');
   const instance = Object.assign({}, page);
   const material = {
@@ -962,6 +962,7 @@ test('workspace material selection uses only unique gallery entries, never the p
 
   assert.deepEqual(urls, [
     'https://cdn.example.com/gallery-1.webp',
+    'https://cdn.example.com/primary.webp?v=2',
     'https://cdn.example.com/gallery-2.webp'
   ]);
 
@@ -978,7 +979,7 @@ test('workspace material selection uses only unique gallery entries, never the p
   assert.deepEqual(instance.materialOwnImageUrls({
     ...material,
     image_urls: ['https://cdn.example.com/primary.webp?v=2']
-  }), []);
+  }), ['https://cdn.example.com/primary.webp?v=2']);
 });
 
 test('workspace preloads the exact gallery image reserved for the next selection', () => {

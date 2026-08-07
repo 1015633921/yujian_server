@@ -43,11 +43,16 @@ def test_custom_design_queue_indexes_upgrade_and_rollback(tmp_path):
         "request_id",
     ]
 
-    assert downgrade("sqlite", db_path, steps=1) == [migration.VERSION]
+    # Newer additive migrations may exist; roll back to this migration instead
+    # of assuming it is permanently the tail of the migration chain.
+    rolled_back: list[str] = []
+    while migration.VERSION not in rolled_back:
+        rolled_back.extend(downgrade("sqlite", db_path, steps=1))
+    assert migration.VERSION in rolled_back
     names = _index_names(db_path)
     assert "idx_custom_design_requests_queue_updated" not in names
     assert "idx_custom_design_requests_queue_status_updated" not in names
-    assert upgrade("sqlite", db_path) == [migration.VERSION]
+    assert migration.VERSION in upgrade("sqlite", db_path)
 
 
 class _Rows:

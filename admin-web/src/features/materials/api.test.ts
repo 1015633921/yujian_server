@@ -111,18 +111,21 @@ describe('material directory api', () => {
     expect(fetchMock.mock.calls[1]?.[1]).toMatchObject({ method: 'PATCH' })
   })
 
-  it('loads series-first rows and sends revisions for conflict-safe SKU batch changes', async () => {
+  it('loads a compact series-first lookup without quality or stock computations', async () => {
     const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(
       new Response(JSON.stringify({ code: 0, data: { items: [], pagination: {} } }), { status: 200, headers: { 'content-type': 'application/json' } }),
     ))
     vi.stubGlobal('fetch', fetchMock)
 
-    await listMaterialSpus({ keyword: '', top: 'bead', category: '', status: '', stockState: 'low', profileState: '', page: 1, pageSize: 20 })
+    await listMaterialSpus({ keyword: '', top: 'bead', page: 1, pageSize: 20 })
     await batchUpdateMaterialSkus({ ids: ['sku-1'], action: 'stock', value: 12, expectedRevisions: { 'sku-1': 3 } })
     await createMaterialSku({ id: 'mat_retry_safe_id', top: 'bead', category: '水晶', series: '海蓝宝', name: '海蓝宝', price: 9.9, size: 8, weight: 1, stock: 0 })
 
     expect(String(fetchMock.mock.calls[0]?.[0])).toContain('material-spus?')
-    expect(String(fetchMock.mock.calls[0]?.[0])).toContain('include_facets=true')
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain('compact=true')
+    expect(String(fetchMock.mock.calls[0]?.[0])).not.toContain('include_facets=')
+    expect(String(fetchMock.mock.calls[0]?.[0])).not.toContain('profile_state=')
+    expect(String(fetchMock.mock.calls[0]?.[0])).not.toContain('stock_state=')
     expect(String(fetchMock.mock.calls[0]?.[0])).not.toContain('asset_state=')
     expect(String(fetchMock.mock.calls[0]?.[0])).not.toContain('spec_state=')
     expect(String(fetchMock.mock.calls[1]?.[0])).toContain('materials/batch')

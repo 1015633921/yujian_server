@@ -483,6 +483,8 @@ class WechatOrderPathPayload(BaseModel):
 class DailyEnergyRulesPayload(BaseModel):
     rules: dict[str, Any] = Field(default_factory=dict)
     reset_to_default: bool = False
+    restore_version: str = Field(default="", max_length=96)
+    change_note: str = Field(default="", max_length=300)
 
 
 class WarehouseItemPayload(BaseModel):
@@ -1646,6 +1648,7 @@ def material_spus(
     margin: str = Query(default="", max_length=20),
     profile_state: str = Query(default="", max_length=40),
     include_facets: bool = Query(default=False),
+    compact: bool = Query(default=False),
     sort_by: str = Query(default="sort_order", max_length=40),
     sort_order: str = Query(default="asc", max_length=10),
     page: int | None = Query(default=None, ge=1),
@@ -1665,6 +1668,7 @@ def material_spus(
             margin=margin,
             profile_state=profile_state,
             include_facets=include_facets,
+            compact=compact,
             sort_by=sort_by,
             sort_order=sort_order,
             page=page,
@@ -1945,6 +1949,8 @@ def patch_material_sku(
     authorization: str | None = Header(default=None),
 ):
     actor = require_admin(authorization)
+    if actor.get("role") == "viewer":
+        raise HTTPException(status_code=403, detail="只读账号不能修改材料 SKU")
     try:
         return success(
             admin_service.patch_material_sku(
@@ -1955,6 +1961,8 @@ def patch_material_sku(
             ),
             "SKU 已更新",
         )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     except MaterialConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:

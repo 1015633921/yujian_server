@@ -11,6 +11,7 @@ from typing import Any
 
 from .avatar_storage import AvatarStorage
 from .daily_rules import (
+    DAILY_RULES_HISTORY_SETTING_KEY,
     DAILY_RULES_SETTING_KEY,
     default_daily_energy_rules,
     daily_rules_version,
@@ -5429,7 +5430,23 @@ class AdminService:
             return None
         return json_value(row["setting_json"], None)
 
-    def save_setting(self, setting_key: str, value: Any, updated_at: str) -> None:
+    def get_setting_with_timestamp(self, setting_key: str) -> tuple[Any | None, str]:
+        with self.connect() as connection:
+            row = connection.execute(
+                "SELECT setting_json, updated_at FROM system_settings WHERE setting_key = ?",
+                (setting_key,),
+            ).fetchone()
+        if not row:
+            return None, ""
+        return json_value(row["setting_json"], None), str(row["updated_at"] or "")
+
+    def save_setting(
+        self,
+        setting_key: str,
+        value: Any,
+        updated_at: str,
+        connection: Any | None = None,
+    ) -> None:
         if use_mysql() and not self._force_sqlite:
             sql = """
                 INSERT INTO system_settings (setting_key, setting_json, updated_at)
@@ -5443,18 +5460,49 @@ class AdminService:
                 ON CONFLICT(setting_key) DO UPDATE SET
                     setting_json = excluded.setting_json, updated_at = excluded.updated_at
             """
-        with self.connect() as connection:
-            connection.execute(sql, (setting_key, json_text(value), updated_at))
+        params = (setting_key, json_text(value), updated_at)
+        if connection is not None:
+            connection.execute(sql, params)
+            return
+        with self.connect() as managed_connection:
+            managed_connection.execute(sql, params)
 
     def daily_energy_rules(self) -> dict[str, Any]:
-        raw = self.get_setting(DAILY_RULES_SETTING_KEY)
+        raw, updated_at = self.get_setting_with_timestamp(DAILY_RULES_SETTING_KEY)
         rules = normalize_daily_energy_rules(raw)
         return {
             "rules": rules,
             "public_options": public_daily_rules_payload(rules),
             "rules_version": daily_rules_version(rules),
-            "updated_at": "",
+            "updated_at": updated_at,
+            "history": self.daily_energy_rule_history(rules, updated_at),
         }
+
+    def daily_energy_rule_history(self, current_rules: dict[str, Any], updated_at: str) -> list[dict[str, Any]]:
+        raw = self.get_setting(DAILY_RULES_HISTORY_SETTING_KEY)
+        stored = raw if isinstance(raw, list) else []
+        history = [
+            item for item in stored
+            if isinstance(item, dict) and isinstance(item.get("rules"), dict) and item.get("version")
+        ][-20:]
+        current = {
+            "version": daily_rules_version(current_rules),
+            "updated_at": updated_at,
+            "actor": "当前生效版本",
+            "note": "当前正在生效的规则",
+            "current": True,
+        }
+        return [current, *[
+            {
+                "version": str(item["version"]),
+                "updated_at": str(item.get("updated_at") or ""),
+                "actor": str(item.get("actor") or "系统"),
+                "note": str(item.get("note") or ""),
+                "current": False,
+            }
+            for item in reversed(history)
+            if str(item["version"]) != current["version"]
+        ]]
 
     def save_daily_energy_rules(self, payload: dict[str, Any], actor: dict[str, Any]) -> dict[str, Any]:
         if (actor or {}).get("role") == "viewer":
@@ -5463,16 +5511,54 @@ class AdminService:
         if not isinstance(rules_payload, dict):
             raise ValueError("规则配置必须是 JSON 对象")
         reset_to_default = bool(payload.get("reset_to_default")) if isinstance(payload, dict) else False
-        if reset_to_default:
+        restore_version = str(payload.get("restore_version") or "").strip() if isinstance(payload, dict) else ""
+        change_note = str(payload.get("change_note") or "").strip() if isinstance(payload, dict) else ""
+        if restore_version:
+            history_raw = self.get_setting(DAILY_RULES_HISTORY_SETTING_KEY)
+            history = history_raw if isinstance(history_raw, list) else []
+            snapshot = next((item for item in reversed(history) if isinstance(item, dict) and item.get("version") == restore_version and isinstance(item.get("rules"), dict)), None)
+            if not snapshot:
+                raise ValueError("要恢复的规则版本不存在或已被清理")
+            rules_payload = snapshot["rules"]
+            change_note = change_note or f"恢复至 {restore_version}"
+        elif reset_to_default:
             rules_payload = default_daily_energy_rules()
         rules = normalize_daily_energy_rules(rules_payload)
         timestamp = now_iso()
-        self.save_setting(DAILY_RULES_SETTING_KEY, rules, timestamp)
+        previous_raw, previous_updated_at = self.get_setting_with_timestamp(DAILY_RULES_SETTING_KEY)
+        # The shipped default is a real active version even before it has been
+        # written to system_settings.  Snapshot it on the first custom publish
+        # so the operator can immediately undo that first change.
+        previous_rules = normalize_daily_energy_rules(previous_raw)
+        history_raw = self.get_setting(DAILY_RULES_HISTORY_SETTING_KEY)
+        history = history_raw if isinstance(history_raw, list) else []
+        previous_version = daily_rules_version(previous_rules)
+        if not any(isinstance(item, dict) and item.get("version") == previous_version for item in history):
+            history.append({
+                "version": previous_version,
+                "rules": previous_rules,
+                "updated_at": previous_updated_at,
+                "actor": "历史规则",
+                "note": "首次记录前的规则快照",
+            })
+        next_version = daily_rules_version(rules)
+        history = [item for item in history if not (isinstance(item, dict) and item.get("version") == next_version)]
+        history.append({
+            "version": next_version,
+            "rules": rules,
+            "updated_at": timestamp,
+            "actor": str((actor or {}).get("display_name") or (actor or {}).get("username") or "系统"),
+            "note": change_note or ("恢复默认规则" if reset_to_default else "发布规则"),
+        })
+        with self.connect() as connection:
+            self.save_setting(DAILY_RULES_HISTORY_SETTING_KEY, history[-20:], timestamp, connection)
+            self.save_setting(DAILY_RULES_SETTING_KEY, rules, timestamp, connection)
         return {
             "rules": rules,
             "public_options": public_daily_rules_payload(rules),
             "rules_version": daily_rules_version(rules),
             "updated_at": timestamp,
+            "history": self.daily_energy_rule_history(rules, timestamp),
         }
 
     @staticmethod
@@ -6359,6 +6445,82 @@ class AdminService:
             "profileIssueKeys": profile_issue_keys,
         }
 
+    @staticmethod
+    def material_spu_compact_group(
+        items: list[dict[str, Any]],
+        series_assets: dict[tuple[str, str, str], dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Return only the fields needed by the day-to-day material list.
+
+        This deliberately bypasses knowledge enrichment, quality scoring and
+        inventory/margin calculations.  Those are useful in a detail or
+        governance screen, but make a normal lookup list slower and noisier.
+        """
+        first = items[0]
+        series_id = str(first.get("series_id") or "").strip()
+        top = str(first.get("top") or "")
+        category = str(first.get("category") or "")
+        series = str(first.get("series") or first.get("name") or "")
+        material_code = str(first.get("material_code") or "")
+        asset = (
+            series_assets.get(("series_id", series_id, ""))
+            if series_id
+            else series_assets.get((top or "bead", category, series))
+        ) or {}
+        image_urls = list(asset.get("image_urls") or [])
+        image = str(asset.get("image_url") or "").strip() or (image_urls[0] if image_urls else "")
+
+        prices: list[float] = []
+        sizes: set[float] = set()
+        sku_options: list[dict[str, Any]] = []
+        for item in items:
+            try:
+                prices.append(float(cents_to_text(stored_cents(item.get("price_cents"), field_name="材料价格"))))
+            except ValueError:
+                prices.append(float(item.get("price") or 0))
+            try:
+                size = float(item.get("size") or 0)
+            except (TypeError, ValueError):
+                size = 0
+            if size > 0:
+                normalized_size = round(size, 3)
+                sizes.add(normalized_size)
+            else:
+                normalized_size = 0
+            material_id = str(item.get("id") or "").strip()
+            if material_id:
+                option: dict[str, Any] = {"id": material_id, "size_mm": normalized_size}
+                grade = str(item.get("grade") or "").strip()
+                if grade:
+                    option["grade"] = grade
+                sku_options.append(option)
+        sku_options.sort(
+            key=lambda option: (
+                float(option["size_mm"] or 0) <= 0,
+                float(option["size_mm"] or 0),
+                option["id"],
+            )
+        )
+
+        fallback_key = f"{top}::{category}::{series}::{material_code}"
+        return {
+            "id": series_id or fallback_key,
+            "series_id": series_id,
+            "spu": {
+                "series_id": series_id,
+                "top": top,
+                "category": category,
+                "series": series,
+                "material_code": material_code,
+                "sku_count": len(items),
+                "min_price": min(prices) if prices else 0,
+                "max_price": max(prices) if prices else 0,
+                "size_values": sorted(sizes),
+                "sku_options": sku_options,
+                "image": image,
+            },
+        }
+
     def list_material_spus(
         self,
         keyword: str = "",
@@ -6371,6 +6533,7 @@ class AdminService:
         margin: str = "",
         profile_state: str = "",
         include_facets: bool = False,
+        compact: bool = False,
         sort_by: str = "sort_order",
         sort_order: str = "asc",
         page: int | None = None,
@@ -6388,6 +6551,7 @@ class AdminService:
                 sort_order=sort_order,
                 page=page or 1,
                 page_size=page_size or 20,
+                compact=compact,
             )
 
         materials = self.list_materials(
@@ -6466,6 +6630,7 @@ class AdminService:
         sort_order: str = "asc",
         page: int = 1,
         page_size: int = 20,
+        compact: bool = False,
     ) -> dict[str, Any]:
         page, page_size, offset = self.normalize_pagination(page, page_size)
         clauses, params = self.material_filter_sql(
@@ -6550,7 +6715,9 @@ class AdminService:
                 """,
                 [*row_params, *params],
             ).fetchall()
-            materials = self.public_materials([dict(row) for row in sku_rows], connection)
+            raw_materials = [dict(row) for row in sku_rows]
+            series_assets = fetch_db_series_assets(connection, raw_materials) if compact else {}
+            materials = raw_materials if compact else self.public_materials(raw_materials, connection)
 
         groups: dict[tuple[str, str, str, str, str], list[dict[str, Any]]] = {}
         for item in materials:
@@ -6565,7 +6732,9 @@ class AdminService:
             )
             groups.setdefault(key, []).append(item)
         result = [
-            self.material_spu_group(items)
+            self.material_spu_compact_group(items, series_assets)
+            if compact
+            else self.material_spu_group(items)
             for key, items in sorted(groups.items(), key=lambda pair: group_order.get(pair[0], 10**9))
         ]
         return self.paginated_payload(result, int(total or 0), page, page_size)
@@ -6706,6 +6875,8 @@ class AdminService:
         expected_revision: int | None = None,
     ) -> dict[str, Any]:
         """Patch SKU-only data without allowing a variety record to be recreated."""
+        if (actor or {}).get("role") == "viewer":
+            raise PermissionError("只读账号不能修改材料 SKU")
         clean_id = str(material_id or "").strip()
         allowed = {
             "skuId", "name", "grade", "price", "price_per_bead", "size", "size_mm",

@@ -2354,10 +2354,15 @@ Page({
   materialOwnImageUrls(material = {}) {
     const urls = material.image_urls || material.image_pool || [];
     const list = Array.isArray(urls) ? urls : [urls];
-    // The gallery is the sole source for workspace material images.  Keep its
-    // entries exactly as configured: duplicate URLs deliberately retain their
-    // weighting in the random draw, and the primary image is unrelated.
-    return list.map(url => String(url || '').trim()).filter(Boolean);
+    const seen = Object.create(null);
+    // 选珠时只从图库随机取图；主图仅服务材料列表展示，不参与这里的候选计算。
+    // 按 URL 身份去重，避免同一图库文件因 query string 或重复记录获得额外随机权重。
+    return list.map(url => String(url || '').trim()).filter(url => {
+      const identity = this.normalizeImageUrlIdentity(url);
+      if (!identity || seen[identity]) return false;
+      seen[identity] = true;
+      return true;
+    });
   },
 
   buildMaterialImagePoolIndex(materials = []) {

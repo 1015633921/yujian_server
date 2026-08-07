@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 
+import ActionConfirmDialog from '@/components/ui/ActionConfirmDialog.vue'
 import PageErrorState from '@/components/ui/PageErrorState.vue'
 import {
   getCustomDesignCandidates,
@@ -47,11 +48,13 @@ const materialsTotal = ref(0)
 const materialsHasNext = ref(false)
 const materialsLoading = ref(false)
 const materialsError = ref('')
+const librarySelection = ref<CustomDesignAdminMaterial[]>([])
 const candidates = ref<CustomDesignCandidateResult | null>(null)
 const candidatesLoading = ref(false)
 const candidatesError = ref('')
 const saving = ref(false)
 const publishing = ref(false)
+const publishConfirmOpen = ref(false)
 const notice = ref('')
 const dirty = ref(false)
 let bootstrapController: AbortController | null = null
@@ -70,6 +73,7 @@ const totalFee = computed(() => layout.value.reduce((sum, item) => sum + materia
 const totalText = computed(() => `¥${totalFee.value.toFixed(2)}`)
 const candidateGroups = computed(() => candidates.value?.candidate_groups || [])
 const materialPageText = computed(() => materialsTotal.value ? `${materialsTotal.value} 件可设计材料` : '未找到匹配材料')
+const selectedLibraryIds = computed(() => new Set(librarySelection.value.map((item) => materialId(item))))
 
 function number(value: unknown, fallback = 0): number {
   const result = Number(value)
@@ -268,13 +272,40 @@ async function loadCandidates(): Promise<void> {
   }
 }
 
-function addMaterial(material: CustomDesignWorkbenchLayoutItem, selectedImage = ''): void {
+function addMaterial(material: CustomDesignWorkbenchLayoutItem, selectedImage = '', refreshCandidates = true): void {
   if (!editable.value) return
   const image = selectedImage || galleryImages(material)[0]
   if (!image) return
   layout.value.push({ instanceId: nextInstanceId(), material, selectedImageUrl: image })
   markDirty()
-  void loadCandidates()
+  if (refreshCandidates) void loadCandidates()
+}
+
+function toggleLibraryMaterial(material: CustomDesignAdminMaterial): void {
+  if (!editable.value) return
+  const id = materialId(material)
+  if (!id) return
+  if (selectedLibraryIds.value.has(id)) {
+    librarySelection.value = librarySelection.value.filter((item) => materialId(item) !== id)
+  } else {
+    librarySelection.value = [...librarySelection.value, material]
+  }
+}
+
+function addSelectedLibraryMaterials(): void {
+  if (!editable.value || !librarySelection.value.length) return
+  let added = false
+  for (const material of librarySelection.value) {
+    if (!supportsWorkbench(material)) continue
+    addMaterial(material, '', false)
+    added = true
+  }
+  librarySelection.value = []
+  if (added) void loadCandidates()
+}
+
+function clearLibrarySelection(): void {
+  librarySelection.value = []
 }
 
 function addCandidate(candidate: CustomDesignCandidateItem): void {
@@ -334,9 +365,13 @@ async function saveDraft(): Promise<void> {
   }
 }
 
+function requestPublish(): void {
+  if (!layout.value.length || !title.value.trim() || saving.value || publishing.value) return
+  publishConfirmOpen.value = true
+}
+
 async function publishProposal(): Promise<void> {
   if (!layout.value.length || !title.value.trim() || saving.value || publishing.value) return
-  if (!window.confirm('发布后用户将看到本次结构化方案，是否确认提交？')) return
   publishing.value = true
   notice.value = ''
   try {
@@ -347,6 +382,7 @@ async function publishProposal(): Promise<void> {
       workbench: workbenchPayload(),
     })
     dirty.value = false
+    publishConfirmOpen.value = false
     await router.replace({ name: 'design-request-detail', params: { requestId: requestId.value } })
   } catch (cause) {
     notice.value = cause instanceof Error ? cause.message : '方案发布失败'
@@ -573,6 +609,30 @@ onBeforeUnmount(() => {
             </option>
           </select>
         </div>
+        <div
+          v-if="librarySelection.length"
+          class="workbench-library__selection"
+        >
+          <div>
+            <strong>已选 {{ librarySelection.length }} 种材料</strong>
+            <span>{{ librarySelection.map(materialName).join(' · ') }}</span>
+          </div>
+          <button
+            type="button"
+            :disabled="!editable"
+            @click="clearLibrarySelection"
+          >
+            清除
+          </button>
+          <button
+            class="primary-action"
+            type="button"
+            :disabled="!editable"
+            @click="addSelectedLibraryMaterials"
+          >
+            加入逐颗排布
+          </button>
+        </div>
         <p v-if="materialsLoading">
           正在读取第 {{ materialPage }} 页材料…
         </p>
@@ -591,13 +651,15 @@ onBeforeUnmount(() => {
             :key="material.id"
             type="button"
             :disabled="!editable"
-            @click="addMaterial(material)"
+            :class="{ 'is-selected': selectedLibraryIds.has(materialId(material)) }"
+            :aria-pressed="selectedLibraryIds.has(materialId(material))"
+            @click="toggleLibraryMaterial(material)"
           >
             <img
               :src="galleryImages(material)[0]"
               :alt="materialName(material)"
             >
-            <span><b>{{ materialName(material) }}</b><small>{{ materialTopValue(material) === 'accessory' ? '配饰' : `${materialSize(material)} mm` }} · ¥{{ materialPrice(material).toFixed(2) }} · 可用 {{ availableStock(material) }}</small></span><i>＋</i>
+            <span><b>{{ materialName(material) }}</b><small>{{ materialTopValue(material) === 'accessory' ? '配饰' : `${materialSize(material)} mm` }} · ¥{{ materialPrice(material).toFixed(2) }} · 可用 {{ availableStock(material) }}</small></span><i>{{ selectedLibraryIds.has(materialId(material)) ? '✓' : '＋' }}</i>
           </button>
         </div>
         <div
@@ -667,18 +729,21 @@ onBeforeUnmount(() => {
             <div class="sequence-actions">
               <button
                 type="button"
+                aria-label="上移当前材料"
                 :disabled="!editable || index === 0"
                 @click="moveMaterial(item.instanceId, -1)"
               >
                 ↑
               </button><button
                 type="button"
+                aria-label="下移当前材料"
                 :disabled="!editable || index === layout.length - 1"
                 @click="moveMaterial(item.instanceId, 1)"
               >
                 ↓
               </button><button
                 type="button"
+                aria-label="移除当前材料"
                 :disabled="!editable"
                 @click="removeMaterial(item.instanceId)"
               >
@@ -725,12 +790,31 @@ onBeforeUnmount(() => {
           </button><button
             type="button"
             :disabled="!editable || !layout.length || !title.trim() || saving || publishing"
-            @click="publishProposal"
+            @click="requestPublish"
           >
             {{ publishing ? '发布中…' : '发布给用户 →' }}
           </button>
         </div>
       </section>
+      <ActionConfirmDialog
+        :open="publishConfirmOpen"
+        title="确认发布方案给用户"
+        description="发布会创建新的方案版本，并将服务单转为待用户确认。材料价格、库存和图库会在提交时再次校验。"
+        confirm-label="确认发布"
+        :busy="publishing"
+        @close="publishConfirmOpen = false"
+        @confirm="publishProposal"
+      >
+        <dl>
+          <div><dt>方案名称</dt><dd>{{ title }}</dd></div>
+          <div><dt>材料数量</dt><dd>{{ layout.length }} 颗</dd></div>
+          <div><dt>预计价格</dt><dd>{{ totalText }}</dd></div>
+          <div><dt>佩戴参数</dt><dd>{{ wristSize }} cm · {{ beadSize }} mm</dd></div>
+        </dl>
+        <p class="action-confirm__note">
+          发布后会保留当前材料、价格和图片快照；后续修改将建立新版本，不会覆盖本次方案。
+        </p>
+      </ActionConfirmDialog>
     </template>
   </section>
 </template>

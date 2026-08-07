@@ -96,6 +96,7 @@ def test_nginx_location_conversion_is_scoped_and_preserves_prefix_semantics() ->
 """
     converted = replace_location_proxy(source, "/test-api/", "yujian_test_active", True)
     assert "proxy_pass http://yujian_test_active/;" in converted
+    assert "proxy_set_header X-Forwarded-Prefix /test-api;" in converted
     assert "proxy_pass http://127.0.0.1:8006;" in converted
     converted = replace_location_proxy(converted, "/", "yujian_prod_active", False)
     assert "proxy_pass http://yujian_prod_active;" in converted

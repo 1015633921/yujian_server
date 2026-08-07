@@ -9,6 +9,7 @@ from .copy_safety import safe_display_text, safe_wish_label
 from .energy import ELEMENTS
 
 DAILY_RULES_SETTING_KEY = "daily_energy_rules"
+DAILY_RULES_HISTORY_SETTING_KEY = "daily_energy_rules_history"
 
 
 DEFAULT_DAILY_ENERGY_RULES: dict[str, Any] = {

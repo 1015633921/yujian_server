@@ -41,10 +41,11 @@ describe('user api', () => {
   it('reads, saves and resets daily rules through the protected rules endpoint', async () => {
     const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(new Response(JSON.stringify({ code: 0, data: {} }), { status: 200, headers: { 'content-type': 'application/json' } })))
     vi.stubGlobal('fetch', fetchMock)
-    await getDailyRules(); await saveDailyRules({ scenes: [] }); await saveDailyRules({}, true)
+    await getDailyRules(); await saveDailyRules({ scenes: [] }, { changeNote: '调整场景' }); await saveDailyRules({}, { resetToDefault: true, restoreVersion: 'rules-v1' })
     expect(String(fetchMock.mock.calls[0]?.[0])).toContain('daily-energy-rules')
     expect(fetchMock.mock.calls.slice(1).map(([, init]) => (init as RequestInit).method)).toEqual(['PUT', 'PUT'])
     expect(String(fetchMock.mock.calls[2]?.[1]?.body)).toContain('"reset_to_default":true')
+    expect(String(fetchMock.mock.calls[2]?.[1]?.body)).toContain('"restore_version":"rules-v1"')
   })
 
   it('reads service readiness without requesting sensitive configuration values', async () => {

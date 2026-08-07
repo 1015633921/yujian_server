@@ -115,7 +115,10 @@ def test_legacy_sku_image_payload_is_promoted_to_the_series(tmp_path):
     assert saved["visual"]["image_source"] == "series"
     assert saved["visual"]["sku_image_urls"] == []
     taxonomy = service.list_material_taxonomy(top="accessory", include_disabled=True)
-    assert taxonomy[0]["series"][0]["image_url"] == sku_image
+    saved_series = next(
+        item for group in taxonomy for item in group["series"] if item["material_code"] == "alloy_accessory"
+    )
+    assert saved_series["image_url"] == sku_image
 
 
 def test_series_image_update_clears_legacy_sku_overrides_and_updates_all_skus(tmp_path):

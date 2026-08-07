@@ -82,7 +82,7 @@ test('physical-only edits invalidate page and selected-material signatures', () 
   assert.notEqual(beforeSelectedSignature, afterSelectedSignature);
 });
 
-test('workspace excludes the primary image from its random gallery pool', () => {
+test('workspace uses the gallery pool without consulting the separate primary image field', () => {
   const page = loadWorkspacePage();
   const instance = Object.assign({}, page, {
     normalizeImageUrlIdentity(value) {
@@ -96,7 +96,7 @@ test('workspace excludes the primary image from its random gallery pool', () => 
     top: 'accessory',
     image_url: primary,
     image_urls: gallery
-  }), ['https://cdn.example.com/side.webp']);
+  }), gallery);
 });
 
 test('workspace keeps its entry mask until the initial bracelet images are ready', async () => {

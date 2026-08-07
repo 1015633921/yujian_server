@@ -184,6 +184,38 @@ const evidenceRows = computed(() => {
 
 const evidenceConclusionSummary = computed(() => text(record((evidence.value || {}).core_conclusion).summary, ''))
 
+const evidenceRawRows = computed(() => flattenEvidence(evidence.value || {}))
+
+function evidenceLabel(value: string): string {
+  const labels: Record<string, string> = {
+    core_conclusion: '测算结论', core_wishes: '核心诉求', elements: '五行分布', useful_elements: '喜用方向',
+    adjustment_strategy: '建议调整', keywords: '设计关键词', balance: '均衡度', ranking: '元素排序',
+    style_guidance: '风格指导', mbti_analysis: 'MBTI 参考', chakra_analysis: '脉轮参考',
+    mood_analysis: '情绪色彩', zodiac_analysis: '星座参考', title: '标题', summary: '摘要',
+    description: '说明', score: '分值', status: '状态', label: '标签', name: '名称',
+    element: '五行', percent: '占比', percentage: '占比', value: '数值', reason: '依据',
+    recommendation: '建议', suggestion: '建议', type: '类型', selected: '是否选择',
+  }
+  return labels[value] || value.replace(/_/g, ' ')
+}
+
+function flattenEvidence(value: unknown, path: string[] = []): Array<{ label: string; value: string }> {
+  if (value === null || value === undefined || value === '') return []
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    return [{ label: path.map(evidenceLabel).join(' · ') || '测算依据', value: String(value) }]
+  }
+  if (Array.isArray(value)) {
+    if (value.every((item) => ['string', 'number', 'boolean'].includes(typeof item))) {
+      return [{ label: path.map(evidenceLabel).join(' · '), value: value.map(String).join(' · ') }]
+    }
+    return value.flatMap((item, index) => flattenEvidence(item, [...path, `第 ${index + 1} 项`]))
+  }
+  if (typeof value === 'object') {
+    return Object.entries(value as Record<string, unknown>).flatMap(([key, item]) => flattenEvidence(item, [...path, key]))
+  }
+  return []
+}
+
 function resetRegions(): void {
   evidence.value = null
   proposals.value = []
@@ -455,6 +487,21 @@ onBeforeUnmount(() => controller?.abort())
             >
               {{ evidenceConclusionSummary }}
             </p>
+            <details
+              v-if="evidenceRawRows.length"
+              class="detail-evidence-raw"
+            >
+              <summary>展开完整测算依据（{{ evidenceRawRows.length }} 项）</summary>
+              <p>以下为当前报告已脱敏的全部测算字段，不会省略新版可用信息。</p>
+              <dl>
+                <template
+                  v-for="row in evidenceRawRows"
+                  :key="`${row.label}-${row.value}`"
+                >
+                  <dt>{{ row.label }}</dt><dd>{{ row.value }}</dd>
+                </template>
+              </dl>
+            </details>
           </div>
         </section>
 

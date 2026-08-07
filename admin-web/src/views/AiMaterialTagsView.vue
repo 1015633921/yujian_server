@@ -4,6 +4,7 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import PageEmptyState from '@/components/ui/PageEmptyState.vue'
 import PageErrorState from '@/components/ui/PageErrorState.vue'
 import PageHeading from '@/components/ui/PageHeading.vue'
+import ActionConfirmDialog from '@/components/ui/ActionConfirmDialog.vue'
 import {
   applyAiMaterialTag,
   listAiMaterialTags,
@@ -31,6 +32,7 @@ const loading = ref(true)
 const error = ref('')
 const busy = ref(false)
 const notice = ref('')
+const confirmAction = ref<'rejected' | 'apply' | ''>('')
 let controller: AbortController | null = null
 
 const canManage = computed(() => auth.admin?.role !== 'viewer')
@@ -42,6 +44,13 @@ const selected = computed(() => visibleItems.value.find((item) => item.annotatio
 const payload = computed<AiTagPayload>(() => selected.value?.reviewer_final && Object.keys(selected.value.reviewer_final).length ? selected.value.reviewer_final : selected.value?.parsed_response || {})
 const image = computed(() => selected.value?.image_urls[Math.min(imageIndex.value, Math.max(0, (selected.value?.image_urls.length || 1) - 1))] || '')
 const counts = computed(() => Object.fromEntries(statuses.slice(1).map(({ value }) => [value, items.value.filter((item) => item.status === value).length])))
+const confirmTitle = computed(() => confirmAction.value === 'apply' ? '应用 AI 审核结果' : '驳回 AI 打标结果')
+const confirmDescription = computed(() => {
+  const name = selected.value?.series || '当前材料'
+  return confirmAction.value === 'apply'
+    ? `将「${name}」已审核的视觉标签写入材料资料。名称、分类、图片、价格、库存、尺寸、五行、功效和养护资料不会被修改。`
+    : `将「${name}」的打标结果标记为驳回；审核备注会保留，方便后续重新生成和复核。`
+})
 
 function date(value?: string): string { return value ? new Intl.DateTimeFormat('zh-CN', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(value)) : '-' }
 function tags(value?: string[]): string { return value?.filter(Boolean).join(' · ') || '—' }
@@ -64,7 +73,6 @@ async function load(): Promise<void> {
 async function review(action: 'approved' | 'rejected'): Promise<void> {
   if (!selected.value || !canManage.value || busy.value) return
   if (action === 'rejected' && !notes.value.trim()) { notice.value = '驳回前请填写原因，方便后续重新判断。'; return }
-  if (action === 'rejected' && !window.confirm(`确定驳回「${selected.value.series}」的打标结果吗？`)) return
   busy.value = true; notice.value = ''
   try {
     const next = await reviewAiMaterialTag(selected.value.annotation_id, action, notes.value.trim(), payload.value)
@@ -73,15 +81,32 @@ async function review(action: 'approved' | 'rejected'): Promise<void> {
   } catch (cause) { notice.value = cause instanceof Error ? cause.message : '审核保存失败。' } finally { busy.value = false }
 }
 
+function requestReject(): void {
+  if (!selected.value || !canManage.value || busy.value) return
+  if (!notes.value.trim()) { notice.value = '驳回前请填写原因，方便后续重新判断。'; return }
+  confirmAction.value = 'rejected'
+}
+
 async function apply(): Promise<void> {
   if (!selected.value || !canManage.value || busy.value || selected.value.status !== 'approved') return
-  if (!window.confirm(`确定将「${selected.value.series}」的已审核视觉标签应用到材料资料吗？\n\n名称、分类、图片、价格、库存、尺寸、五行、功效和养护资料不会被修改。`)) return
   busy.value = true; notice.value = ''
   try {
     const next = await applyAiMaterialTag(selected.value.annotation_id)
     items.value = items.value.map((item) => item.annotation_id === next.annotation_id ? next : item)
     select(next); notice.value = 'AI 标签已应用到材料资料。'
   } catch (cause) { notice.value = cause instanceof Error ? cause.message : '应用到材料资料失败。' } finally { busy.value = false }
+}
+
+function requestApply(): void {
+  if (!selected.value || !canManage.value || busy.value || selected.value.status !== 'approved') return
+  confirmAction.value = 'apply'
+}
+
+async function resolveConfirm(): Promise<void> {
+  const action = confirmAction.value
+  if (action === 'rejected') await review('rejected')
+  if (action === 'apply') await apply()
+  if (!busy.value) confirmAction.value = ''
 }
 
 watch(filter, () => void load())
@@ -232,7 +257,7 @@ void load()
                 class="danger-outline"
                 type="button"
                 :disabled="!canManage || busy"
-                @click="review('rejected')"
+                @click="requestReject"
               >
                 驳回
               </button><button
@@ -248,7 +273,7 @@ void load()
                 class="primary-action"
                 type="button"
                 :disabled="!canManage || busy"
-                @click="apply"
+                @click="requestApply"
               >
                 应用到材料资料
               </button><button
@@ -267,6 +292,16 @@ void load()
           message="在左侧队列中查看材料图片、视觉评分和搭配建议。"
         />
       </div>
+      <ActionConfirmDialog
+        :open="Boolean(confirmAction)"
+        :title="confirmTitle"
+        :description="confirmDescription"
+        :confirm-label="confirmAction === 'apply' ? '确认应用' : '确认驳回'"
+        :tone="confirmAction === 'apply' ? 'default' : 'danger'"
+        :busy="busy"
+        @close="confirmAction = ''"
+        @confirm="resolveConfirm"
+      />
     </div>
   </section>
 </template>

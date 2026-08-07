@@ -97,4 +97,27 @@ describe('CustomDesignWorkbenchView', () => {
     await flushPromises()
     expect(wrapper.text()).toContain('草稿已保存')
   })
+
+  it('lets an operator select multiple library materials before adding them to the layout', async () => {
+    api.listCustomDesignMaterials.mockResolvedValue({
+      items: [
+        { id: 'M3', material_id: 'M3', name: '白水晶', price: 8, size_mm: 8, top: 'bead', stock: 10, image_urls: ['https://cdn.example.com/m3.webp'] },
+        { id: 'M4', material_id: 'M4', name: '黑曜石', price: 9, size_mm: 8, top: 'bead', stock: 10, image_urls: ['https://cdn.example.com/m4.webp'] },
+      ],
+      pagination: { total: 2, has_next: false },
+    })
+    const wrapper = await createPage()
+    const choices = wrapper.findAll('.workbench-materials button')
+    expect(choices).toHaveLength(2)
+    await choices[0]!.trigger('click')
+    await choices[1]!.trigger('click')
+    expect(wrapper.text()).toContain('已选 2 种材料')
+    const requestsBeforeBatchAdd = api.getCustomDesignCandidates.mock.calls.length
+    const add = wrapper.findAll('button').find((item) => item.text() === '加入逐颗排布')
+    await add!.trigger('click')
+    expect(wrapper.findAll('.workbench-sequence__list article')).toHaveLength(4)
+    expect(wrapper.text()).toContain('白水晶')
+    expect(wrapper.text()).toContain('黑曜石')
+    expect(api.getCustomDesignCandidates).toHaveBeenCalledTimes(requestsBeforeBatchAdd + 1)
+  })
 })

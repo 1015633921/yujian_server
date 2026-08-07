@@ -338,7 +338,8 @@ def test_basic_variety_edit_preserves_optional_profile(tmp_path):
         }
     )
 
-    saved = service.list_material_taxonomy(top="accessory", include_disabled=True)[0]["series"][0]
+    taxonomy = service.list_material_taxonomy(top="accessory", include_disabled=True)
+    saved = next(item for group in taxonomy for item in group["series"] if item["id"] == variety["id"])
     assert saved["name"] == "红幽灵随形精品"
     assert saved["image_url"] == "https://cdn-test.yustream.cn/materials/red-phantom.webp"
     assert saved["energy"]["primary_element"] == "fire"

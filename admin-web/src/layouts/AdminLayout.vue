@@ -9,6 +9,53 @@ const auth = useAuthStore()
 const router = useRouter()
 const navigationOpen = ref(false)
 const legacyUrl = legacyAdminPath()
+const navigationGroups = [
+  {
+    label: '工作台',
+    items: [{ to: { name: 'overview' }, label: '经营概览' }],
+  },
+  {
+    label: '履约服务',
+    items: [
+      { to: { name: 'design-requests' }, label: '人工搭配' },
+      { to: { name: 'orders' }, label: '订单履约' },
+      { to: { name: 'after-sales' }, label: '售后服务' },
+    ],
+  },
+  {
+    label: '材料中心',
+    items: [
+      { to: { name: 'materials' }, label: '珠材管理' },
+      { to: { name: 'material-directory' }, label: '材料目录' },
+      { to: { name: 'material-assets' }, label: '素材处理' },
+      { to: { name: 'ai-material-tags' }, label: 'AI 打标审核' },
+    ],
+  },
+  {
+    label: '用户与洞察',
+    items: [
+      { to: { name: 'users' }, label: '用户中心' },
+      { to: { name: 'energy-insights' }, label: '能量数据' },
+    ],
+  },
+  {
+    label: '平台治理',
+    items: [
+      { to: { name: 'daily-energy-rules' }, label: '每日能量规则' },
+      { to: { name: 'admin-accounts' }, label: '管理员账号' },
+      { to: { name: 'system-status' }, label: '系统配置' },
+    ],
+  },
+  {
+    label: '其他功能',
+    items: [
+      { to: { name: 'warehouse' }, label: '仓库库存' },
+      { to: { name: 'home-banners' }, label: '首页 Banner' },
+      { to: { name: 'community-posts' }, label: '社区灵感' },
+      { to: { name: 'content-blocks' }, label: '内容板块' },
+    ],
+  },
+]
 const roleLabel = computed(() => {
   const labels: Record<string, string> = {
     admin: '管理员',
@@ -51,114 +98,20 @@ async function logout(): Promise<void> {
         class="admin-navigation"
         aria-label="新版后台导航"
       >
-        <span class="admin-navigation__label">运营工作台</span>
-        <RouterLink
-          to="/overview"
-          @click="navigationOpen = false"
+        <template
+          v-for="group in navigationGroups"
+          :key="group.label"
         >
-          经营概览
-        </RouterLink>
-
-        <RouterLink
-          to="/design-requests"
-          @click="navigationOpen = false"
-        >
-          人工搭配
-        </RouterLink>
-
-        <RouterLink
-          to="/orders"
-          @click="navigationOpen = false"
-        >
-          订单履约
-        </RouterLink>
-
-        <RouterLink
-          to="/after-sales"
-          @click="navigationOpen = false"
-        >
-          售后服务
-        </RouterLink>
-        <RouterLink
-          to="/materials"
-          @click="navigationOpen = false"
-        >
-          珠材管理
-        </RouterLink>
-        <RouterLink
-          to="/material-directory"
-          @click="navigationOpen = false"
-        >
-          目录设置
-        </RouterLink>
-        <RouterLink
-          to="/material-assets"
-          @click="navigationOpen = false"
-        >
-          图库处理
-        </RouterLink>
-        <RouterLink
-          to="/ai-material-tags"
-          @click="navigationOpen = false"
-        >
-          AI 打标审核
-        </RouterLink>
-        <RouterLink
-          to="/warehouse"
-          @click="navigationOpen = false"
-        >
-          仓库库存
-        </RouterLink>
-
-        <RouterLink
-          to="/home-banners"
-          @click="navigationOpen = false"
-        >
-          首页 Banner
-        </RouterLink>
-        <RouterLink
-          to="/community-posts"
-          @click="navigationOpen = false"
-        >
-          社区灵感
-        </RouterLink>
-        <RouterLink
-          to="/content-blocks"
-          @click="navigationOpen = false"
-        >
-          内容板块
-        </RouterLink>
-        <RouterLink
-          to="/users"
-          @click="navigationOpen = false"
-        >
-          用户中心
-        </RouterLink>
-        <RouterLink
-          to="/energy-insights"
-          @click="navigationOpen = false"
-        >
-          能量数据
-        </RouterLink>
-        <RouterLink
-          to="/daily-energy-rules"
-          @click="navigationOpen = false"
-        >
-          每日能量规则
-        </RouterLink>
-        <RouterLink
-          to="/system-status"
-          @click="navigationOpen = false"
-        >
-          系统配置
-        </RouterLink>
-
-        <RouterLink
-          to="/admin-accounts"
-          @click="navigationOpen = false"
-        >
-          管理员账号
-        </RouterLink>
+          <span class="admin-navigation__label">{{ group.label }}</span>
+          <RouterLink
+            v-for="item in group.items"
+            :key="item.label"
+            :to="item.to"
+            @click="navigationOpen = false"
+          >
+            {{ item.label }}
+          </RouterLink>
+        </template>
       </nav>
 
       <div class="admin-sidebar__foot">

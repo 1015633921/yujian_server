@@ -388,6 +388,24 @@ def replace_location_proxy(
     indentation = lines[index][: len(lines[index]) - len(lines[index].lstrip())]
     suffix = "/" if strip_prefix else ""
     lines[index] = f"{indentation}proxy_pass http://{upstream_name}{suffix};\n"
+    prefix_header = "proxy_set_header X-Forwarded-Prefix"
+    depth = 0
+    header_index: int | None = None
+    for candidate in range(start, len(lines)):
+        line = lines[candidate]
+        depth += line.count("{") - line.count("}")
+        if candidate > start and depth > 0 and line.lstrip().startswith(prefix_header):
+            header_index = candidate
+        if candidate > start and depth == 0:
+            break
+    if strip_prefix:
+        header = f"{indentation}{prefix_header} {location.rstrip('/')};\n"
+        if header_index is None:
+            lines.insert(index + 1, header)
+        else:
+            lines[header_index] = header
+    elif header_index is not None:
+        lines.pop(header_index)
     return "".join(lines)
 
 
@@ -417,15 +435,12 @@ def ensure_nginx_routing(profile: EnvironmentProfile) -> None:
     upstream_before = (
         profile.nginx_upstream_file.read_text(encoding="utf-8") if upstream_existed else ""
     )
-    reference = f"proxy_pass http://{profile.nginx_upstream_name}"
-    config_after = config_before
-    if reference not in config_before:
-        config_after = replace_location_proxy(
-            config_before,
-            profile.nginx_location,
-            profile.nginx_upstream_name,
-            profile.nginx_strip_prefix,
-        )
+    config_after = replace_location_proxy(
+        config_before,
+        profile.nginx_location,
+        profile.nginx_upstream_name,
+        profile.nginx_strip_prefix,
+    )
     if not upstream_existed:
         atomic_write(
             profile.nginx_upstream_file,

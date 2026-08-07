@@ -64,7 +64,10 @@ def test_price_cents_migration_backfills_only_exact_positive_legacy_prices(tmp_p
     AdminService(db_path)
     OrderService(db_path)
     upgrade("sqlite", db_path)
-    assert downgrade("sqlite", db_path, steps=15) == [
+    assert downgrade("sqlite", db_path, steps=18) == [
+        "20260807_23_community_post_image_gallery",
+        "20260806_22_material_catalog_indexes",
+        "20260806_21_material_sku_revisions",
         "20260806_20_material_asset_versions",
         "20260806_19_material_series_identity",
         "20260806_18_custom_design_queue_indexes",
@@ -106,6 +109,9 @@ def test_price_cents_migration_backfills_only_exact_positive_legacy_prices(tmp_p
         "20260806_18_custom_design_queue_indexes",
         "20260806_19_material_series_identity",
         "20260806_20_material_asset_versions",
+        "20260806_21_material_sku_revisions",
+        "20260806_22_material_catalog_indexes",
+        "20260807_23_community_post_image_gallery",
     ]
     assert upgrade("sqlite", db_path) == []
     with sqlite3.connect(db_path) as connection:
@@ -119,7 +125,10 @@ def test_price_cents_migration_backfills_only_exact_positive_legacy_prices(tmp_p
     assert values[ids[1]] is None
     assert values[ids[2]] is None
 
-    assert downgrade("sqlite", db_path, steps=15) == [
+    assert downgrade("sqlite", db_path, steps=18) == [
+        "20260807_23_community_post_image_gallery",
+        "20260806_22_material_catalog_indexes",
+        "20260806_21_material_sku_revisions",
         "20260806_20_material_asset_versions",
         "20260806_19_material_series_identity",
         "20260806_18_custom_design_queue_indexes",

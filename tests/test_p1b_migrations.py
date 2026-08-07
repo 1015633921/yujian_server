@@ -25,7 +25,10 @@ def test_p1b_migration_backfills_stable_legacy_snapshot_and_round_trips(tmp_path
     OrderService(db_path)
     AssessmentRepository(db_path)
     upgrade("sqlite", db_path)
-    assert downgrade("sqlite", db_path, steps=17) == [
+    assert downgrade("sqlite", db_path, steps=20) == [
+        "20260807_23_community_post_image_gallery",
+        "20260806_22_material_catalog_indexes",
+        "20260806_21_material_sku_revisions",
         "20260806_20_material_asset_versions",
         "20260806_19_material_series_identity",
         "20260806_18_custom_design_queue_indexes",
@@ -89,6 +92,11 @@ def test_p1b_migration_backfills_stable_legacy_snapshot_and_round_trips(tmp_path
 
         "20260806_17_custom_design_deposits",
         "20260806_18_custom_design_queue_indexes",
+        "20260806_19_material_series_identity",
+        "20260806_20_material_asset_versions",
+        "20260806_21_material_sku_revisions",
+        "20260806_22_material_catalog_indexes",
+        "20260807_23_community_post_image_gallery",
     ]
     with sqlite3.connect(db_path) as connection:
         first = connection.execute(
@@ -99,7 +107,12 @@ def test_p1b_migration_backfills_stable_legacy_snapshot_and_round_trips(tmp_path
     first_report_id = first[0]
     assert upgrade("sqlite", db_path) == []
 
-    assert downgrade("sqlite", db_path, steps=15) == [
+    assert downgrade("sqlite", db_path, steps=20) == [
+        "20260807_23_community_post_image_gallery",
+        "20260806_22_material_catalog_indexes",
+        "20260806_21_material_sku_revisions",
+        "20260806_20_material_asset_versions",
+        "20260806_19_material_series_identity",
         "20260806_18_custom_design_queue_indexes",
         "20260806_17_custom_design_deposits",
         "20260727_16_custom_design_workbench",
@@ -135,6 +148,11 @@ def test_p1b_migration_backfills_stable_legacy_snapshot_and_round_trips(tmp_path
 
         "20260806_17_custom_design_deposits",
         "20260806_18_custom_design_queue_indexes",
+        "20260806_19_material_series_identity",
+        "20260806_20_material_asset_versions",
+        "20260806_21_material_sku_revisions",
+        "20260806_22_material_catalog_indexes",
+        "20260807_23_community_post_image_gallery",
     ]
     with sqlite3.connect(db_path) as connection:
         second_report_id = connection.execute(

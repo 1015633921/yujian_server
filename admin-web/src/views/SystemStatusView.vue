@@ -8,12 +8,14 @@ import { getSystemStatus, type SystemStatus } from '@/features/users/api'
 const data = ref<SystemStatus | null>(null)
 const loading = ref(true)
 const error = ref('')
+const checkedAt = ref('')
 
 async function load(): Promise<void> {
   loading.value = true
   error.value = ''
   try {
     data.value = await getSystemStatus()
+    checkedAt.value = new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }).format(new Date())
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : '系统状态加载失败'
   } finally {
@@ -66,7 +68,7 @@ void load()
         <div class="system-status__summary">
           <span>配置就绪</span>
           <strong>{{ data?.ready_count ?? '—' }}</strong>
-          <p>共 {{ data?.total_count ?? '—' }} 项服务检查已完成。</p>
+          <p>共 {{ data?.total_count ?? '—' }} 项服务检查已完成{{ checkedAt ? ` · 最近检查 ${checkedAt}` : '' }}。</p>
         </div>
 
         <div class="system-status__list">

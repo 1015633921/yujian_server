@@ -194,7 +194,8 @@ def test_binding_material_assets_preserves_profile_and_supports_append(tmp_path)
     # Binding a gallery must never infer or replace the separately managed cover.
     assert appended["image_url"] == "https://cdn.example.com/cover.webp"
 
-    saved = service.list_material_taxonomy(top="accessory", include_disabled=True)[0]["series"][0]
+    taxonomy = service.list_material_taxonomy(top="accessory", include_disabled=True)
+    saved = next(item for group in taxonomy for item in group["series"] if item["id"] == series["id"])
     assert saved["energy"]["primary_element"] == "wood"
     assert saved["energy"]["effects"] == ["focus"]
     assert saved["material_params"]["bead_shape"] == "nugget"
@@ -210,7 +211,7 @@ def test_binding_material_assets_preserves_profile_and_supports_append(tmp_path)
 def test_bead_series_are_always_exposed_as_round_while_accessory_shape_is_preserved(tmp_path):
     service = AdminService(tmp_path / "bead-series-round.db")
     bead_category = service.save_material_category({"top": "bead", "name": "水晶"})
-    service.save_material_series(
+    bead_series = service.save_material_series(
         {
             "category_id": bead_category["id"],
             "name": "测试珠子",
@@ -231,7 +232,7 @@ def test_bead_series_are_always_exposed_as_round_while_accessory_shape_is_preser
         }
     )
     accessory_category = service.save_material_category({"top": "accessory", "name": "隔珠"})
-    service.save_material_series(
+    accessory_series = service.save_material_series(
         {
             "category_id": accessory_category["id"],
             "name": "测试隔珠",
@@ -239,8 +240,10 @@ def test_bead_series_are_always_exposed_as_round_while_accessory_shape_is_preser
         }
     )
 
-    bead = service.list_material_taxonomy(top="bead", include_disabled=True)[0]["series"][0]
-    accessory = service.list_material_taxonomy(top="accessory", include_disabled=True)[0]["series"][0]
+    bead_taxonomy = service.list_material_taxonomy(top="bead", include_disabled=True)
+    accessory_taxonomy = service.list_material_taxonomy(top="accessory", include_disabled=True)
+    bead = next(item for group in bead_taxonomy for item in group["series"] if item["id"] == bead_series["id"])
+    accessory = next(item for group in accessory_taxonomy for item in group["series"] if item["id"] == accessory_series["id"])
 
     assert bead["material_params"]["bead_shape"] == "round"
     assert accessory["material_params"]["bead_shape"] == "nugget"
@@ -263,7 +266,8 @@ def test_primary_image_can_also_be_kept_in_the_gallery(tmp_path):
         }
     )
 
-    initially_saved = service.list_material_taxonomy(top="accessory", include_disabled=True)[0]["series"][0]
+    taxonomy = service.list_material_taxonomy(top="accessory", include_disabled=True)
+    initially_saved = next(item for group in taxonomy for item in group["series"] if item["id"] == series["id"])
     assert initially_saved["image_url"] == "https://cdn.example.com/main.webp"
     assert initially_saved["image_urls"] == [
         "https://cdn.example.com/main.webp",
@@ -291,7 +295,8 @@ def test_primary_image_can_also_be_kept_in_the_gallery(tmp_path):
         "https://cdn.example.com/side.webp",
         "https://cdn.example.com/angle.webp",
     ]
-    stored = service.list_material_taxonomy(top="accessory", include_disabled=True)[0]["series"][0]
+    taxonomy = service.list_material_taxonomy(top="accessory", include_disabled=True)
+    stored = next(item for group in taxonomy for item in group["series"] if item["id"] == series["id"])
     assert stored["image_url"] == "https://cdn.example.com/main.webp"
     assert stored["image_urls"] == [
         "https://cdn.example.com/main.webp",
@@ -607,3 +612,20 @@ def test_material_asset_endpoints_block_viewer(monkeypatch):
     )
     assert upload.status_code == 403
     assert bind.status_code == 403
+
+
+def test_material_sku_patch_endpoint_blocks_viewer(monkeypatch):
+    monkeypatch.setattr(
+        admin_api_module,
+        "require_admin",
+        lambda _authorization: {"admin_id": "viewer-1", "username": "viewer", "role": "viewer"},
+    )
+
+    response = client.patch(
+        "/api/v1/admin/materials/material-1",
+        headers={"Authorization": "Bearer test"},
+        json={"price": 12.5, "expected_revision": 1},
+    )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "只读账号不能修改材料 SKU"

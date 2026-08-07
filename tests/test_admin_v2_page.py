@@ -25,6 +25,13 @@ def test_admin_v2_deep_routes_inject_correct_asset_base_and_cache_headers(tmp_pa
     assert test.status_code == 200
     assert '<base href="/test-api/admin-v2/">' in test.text
 
+    proxied_test = client.get(
+        "/admin-v2/design-requests/CD-001/workbench",
+        headers={"x-forwarded-prefix": "/test-api"},
+    )
+    assert proxied_test.status_code == 200
+    assert '<base href="/test-api/admin-v2/">' in proxied_test.text
+
     dedicated_host = client.get(
         "/admin-v2/design-requests/CD-001/workbench",
         headers={"host": "operation-test.yustream.cn", "x-forwarded-host": "operation-test.yustream.cn"},

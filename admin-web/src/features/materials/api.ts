@@ -22,6 +22,7 @@ export interface Material {
     safety_stock?: number
     enabled?: boolean
     size_mm?: number
+    weight_g?: number
     revision?: number
     available_stock?: number
     stock_status?: 'normal' | 'low' | 'out'
@@ -61,32 +62,22 @@ export interface MaterialSpu {
     series?: string
     material_code?: string
     sku_count?: number
-    total_stock?: number
-    enabled_count?: number
     min_price?: number
     max_price?: number
     size_values?: number[]
-    profile_state?: string
+    sku_options?: Array<{ id: string; size_mm?: number; grade?: string }>
     image?: string
   }
-  items: Material[]
-  energy?: { primary_element?: string }
-  profileState?: string
 }
 
 export interface MaterialSpuPage {
   items: MaterialSpu[]
-  facets?: Record<string, Array<{ value: string; count: number }>>
   pagination: MaterialPage['pagination']
 }
 
 export interface MaterialSpuQuery {
   keyword: string
   top: string
-  category: string
-  status: string
-  stockState: string
-  profileState: string
   page: number
   pageSize: number
 }
@@ -317,11 +308,7 @@ export function listMaterialSpus(query: MaterialSpuQuery, signal?: AbortSignal):
   const params = new URLSearchParams({
     keyword: query.keyword,
     top: query.top,
-    category: query.category,
-    status: query.status,
-    stock_state: query.stockState,
-    profile_state: query.profileState,
-    include_facets: 'true',
+    compact: 'true',
     sort_by: 'sort_order',
     sort_order: 'asc',
     page: String(query.page),

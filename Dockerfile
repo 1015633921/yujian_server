@@ -26,7 +26,9 @@ RUN python -m pip install --index-url "$PIP_INDEX_URL" --require-hashes -r requi
 
 COPY --chown=10001:10001 app ./app
 COPY --chown=10001:10001 static ./static
-COPY --from=admin_web_build --chown=10001:10001 /workspace/admin-web/dist ./static/admin-v2
+# Vite writes the admin bundle into the service's static mount so local and
+# container builds use the exact same asset layout.
+COPY --from=admin_web_build --chown=10001:10001 /workspace/static/admin-v2 ./static/admin-v2
 COPY scripts/migrate_sqlite_to_mysql.py ./scripts/migrate_sqlite_to_mysql.py
 COPY scripts/regenerate_material_skus_and_knowledge.py ./scripts/regenerate_material_skus_and_knowledge.py
 

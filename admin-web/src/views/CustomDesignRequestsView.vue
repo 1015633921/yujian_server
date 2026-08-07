@@ -46,6 +46,31 @@ const offset = computed(() => (currentPage.value - 1) * PAGE_SIZE)
 const firstResult = computed(() => (items.value.length ? offset.value + 1 : 0))
 const lastResult = computed(() => offset.value + items.value.length)
 const legacyUrl = legacyAdminPath()
+const sortedItems = computed(() => [...items.value].sort((left, right) => queuePriority(left) - queuePriority(right)))
+
+function dueMinutes(value?: string | null): number | null {
+  if (!value) return null
+  const time = new Date(value).getTime()
+  return Number.isFinite(time) ? Math.round((time - Date.now()) / 60_000) : null
+}
+
+function queuePriority(item: CustomDesignListItem): number {
+  const minutes = dueMinutes(item.first_draft_due_at)
+  if (minutes !== null && minutes <= 0) return 0
+  if (minutes !== null && minutes <= 24 * 60) return 1
+  if (['submitted', 'revision_requested'].includes(item.status)) return 2
+  if (item.status === 'designing') return 3
+  return 4
+}
+
+function dueLabel(value?: string | null): string {
+  const minutes = dueMinutes(value)
+  if (minutes === null) return '尚未设首稿时限'
+  if (minutes <= 0) return `已超时 ${Math.max(1, Math.ceil(Math.abs(minutes) / 60))} 小时`
+  if (minutes < 60) return `剩余 ${minutes} 分钟`
+  if (minutes < 24 * 60) return `剩余 ${Math.ceil(minutes / 60)} 小时`
+  return `首稿 ${formatAdminDate(value)}`
+}
 
 function setStatus(event: Event): void {
   const status = normalizeCustomDesignStatus((event.target as HTMLSelectElement).value)
@@ -242,7 +267,7 @@ onBeforeUnmount(() => requestController?.abort())
         </div>
 
         <article
-          v-for="item in items"
+          v-for="item in sortedItems"
           :key="item.request_id"
           class="design-request-row"
           role="row"
@@ -280,10 +305,9 @@ onBeforeUnmount(() => requestController?.abort())
             >
               {{ customDesignStatusLabel(item.status) }}
             </b>
-            <span v-if="item.first_draft_due_at">
-              首稿 {{ formatAdminDate(item.first_draft_due_at) }}
-            </span>
-            <span v-else>尚未进入设计队列</span>
+            <span
+              :class="{ 'design-request-cell__overdue': dueMinutes(item.first_draft_due_at) !== null && dueMinutes(item.first_draft_due_at)! <= 0 }"
+            >{{ dueLabel(item.first_draft_due_at) }}</span>
           </div>
 
           <div
