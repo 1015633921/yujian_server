@@ -691,8 +691,9 @@ def list_db_material_facets() -> list[dict] | None:
     try:
         with connect_database() as connection:
             try:
+                series_link = material_taxonomy_series_link_sql(connection)
                 rows = connection.execute(
-                    """
+                    f"""
                     SELECT m.top, m.category, m.series, m.name,
                            COALESCE(c.sort_order, 0) AS category_sort_order,
                            COALESCE(s.sort_order, 0) AS series_sort_order
@@ -701,7 +702,7 @@ def list_db_material_facets() -> list[dict] | None:
                       ON c.kind='category' AND c.top=m.top AND c.name=m.category
                     LEFT JOIN material_taxonomy s
                       ON s.kind='series' AND s.parent_id=c.item_id
-                     AND (s.item_id=m.series_id OR (COALESCE(m.series_id, '')='' AND s.name=COALESCE(NULLIF(m.series, ''), m.name)))
+                     AND ({series_link})
                     WHERE m.enabled = 1
                     """
                 ).fetchall()
@@ -718,6 +719,43 @@ def list_db_material_facets() -> list[dict] | None:
     except Exception:
         return None
     return [dict(row) for row in rows]
+
+
+def managed_materials_has_series_id(connection) -> bool:
+    """Check the SKU identity column without making catalogue reads fail on an old schema.
+
+    Test data created before the series-identity migration can still be served
+    during a rolling deployment.  The category facet query must not silently
+    discard operator-maintained category ordering merely because that optional
+    join key is absent.
+    """
+    try:
+        if use_mysql():
+            row = connection.execute(
+                """
+                SELECT COUNT(*) AS c
+                FROM information_schema.columns
+                WHERE table_schema = DATABASE()
+                  AND table_name = 'managed_materials'
+                  AND column_name = 'series_id'
+                """
+            ).fetchone()
+            return bool(row and int(row["c"] or 0))
+        columns = connection.execute("PRAGMA table_info(managed_materials)").fetchall()
+        return any(str(row["name"] or "") == "series_id" for row in columns)
+    except Exception:
+        return False
+
+
+def material_taxonomy_series_link_sql(connection, *, material_alias: str = "m", series_alias: str = "s") -> str:
+    """Return a rename-safe series join when available, with an old-schema fallback."""
+    series_name = f"COALESCE(NULLIF({material_alias}.series, ''), {material_alias}.name)"
+    if not managed_materials_has_series_id(connection):
+        return f"{series_alias}.name={series_name}"
+    return (
+        f"{series_alias}.item_id={material_alias}.series_id "
+        f"OR (COALESCE({material_alias}.series_id, '')='' AND {series_alias}.name={series_name})"
+    )
 
 
 def build_db_material_filters(
@@ -784,6 +822,7 @@ def list_db_materials_page(
         with connect_database() as connection:
             total_row = connection.execute(f"SELECT COUNT(*) AS total FROM managed_materials m WHERE {where}", params).fetchone()
             try:
+                series_link = material_taxonomy_series_link_sql(connection)
                 rows = connection.execute(
                     f"""
                 SELECT m.*,
@@ -802,7 +841,7 @@ def list_db_materials_page(
                   ON c.kind='category' AND c.top=m.top AND c.name=m.category
                 LEFT JOIN material_taxonomy s
                   ON s.kind='series' AND s.parent_id=c.item_id
-                 AND (s.item_id=m.series_id OR (COALESCE(m.series_id, '')='' AND s.name=COALESCE(NULLIF(m.series, ''), m.name)))
+                 AND ({series_link})
                 WHERE {where}
                 ORDER BY
                     COALESCE(m.top, '') ASC,

@@ -103,6 +103,53 @@ def test_public_material_payload_honors_category_sort_order(monkeypatch):
     assert payload["series_by_category"]["accessory::前置分类"] == ["全部", "按名称靠前", "按名称靠后", "未配置排序"]
 
 
+def test_material_facets_keep_category_order_when_series_identity_column_is_missing(tmp_path, monkeypatch):
+    """Older material tables must not make the workspace fall back to name order."""
+    import sqlite3
+    from app import materials as materials_module
+
+    database_path = tmp_path / "legacy-materials.db"
+    with sqlite3.connect(database_path) as connection:
+        connection.row_factory = sqlite3.Row
+        connection.executescript(
+            """
+            CREATE TABLE managed_materials (
+              id TEXT PRIMARY KEY, top TEXT NOT NULL, category TEXT NOT NULL,
+              series TEXT NOT NULL, name TEXT NOT NULL, enabled INTEGER NOT NULL
+            );
+            CREATE TABLE material_taxonomy (
+              item_id TEXT PRIMARY KEY, parent_id TEXT NOT NULL, kind TEXT NOT NULL,
+              top TEXT NOT NULL, name TEXT NOT NULL, sort_order INTEGER NOT NULL
+            );
+            INSERT INTO managed_materials (id, top, category, series, name, enabled) VALUES
+              ('clear-8', 'bead', '白水晶', '白水晶', '白水晶', 1),
+              ('amethyst-8', 'bead', '紫水晶', '紫水晶', '紫水晶', 1);
+            INSERT INTO material_taxonomy (item_id, parent_id, kind, top, name, sort_order) VALUES
+              ('category-clear', '', 'category', 'bead', '白水晶', 100),
+              ('category-amethyst', '', 'category', 'bead', '紫水晶', 99),
+              ('series-clear', 'category-clear', 'series', 'bead', '白水晶', 0),
+              ('series-amethyst', 'category-amethyst', 'series', 'bead', '紫水晶', 0);
+            """
+        )
+
+    monkeypatch.setattr(materials_module, "use_mysql", lambda: False)
+    monkeypatch.setattr("app.repository.DB_PATH", database_path)
+
+    def connect_legacy_database():
+        connection = sqlite3.connect(database_path)
+        connection.row_factory = sqlite3.Row
+        return connection
+
+    monkeypatch.setattr(materials_module, "connect_database", connect_legacy_database)
+
+    facets = materials_module.list_db_material_facets()
+    payload = materials_module.build_material_payload([], {"version": "test", "updated_at": ""})
+
+    assert facets is not None
+    assert {item["category"]: item["category_sort_order"] for item in facets} == {"白水晶": 100, "紫水晶": 99}
+    assert payload["categories_by_top"]["bead"][:3] == ["全部", "白水晶", "紫水晶"]
+
+
 def test_options_support_form_rendering():
     response = client.get("/api/v1/assessment/options")
     assert response.status_code == 200
