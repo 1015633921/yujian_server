@@ -63,8 +63,8 @@ FEATURED_MATERIAL_PRIORITY_KEYWORDS: tuple[tuple[int, tuple[str, ...]], ...] = (
 )
 
 # Newly migrated taxonomy rows use ``0`` until an operator assigns a position.
-# It means “unassigned”, not “display first”.
-UNASSIGNED_TAXONOMY_SORT_ORDER = 1_000_000
+# It means “unassigned”, not “display first”; valid values are sorted descending.
+UNASSIGNED_TAXONOMY_SORT_ORDER = -1
 
 
 def taxonomy_sort_priority(value: object, fallback: int = UNASSIGNED_TAXONOMY_SORT_ORDER) -> int:
@@ -146,9 +146,9 @@ def material_customer_sort_key(item: dict) -> tuple:
     item_id = str(item.get("id") or item.get("skuId") or "")
     return (
         top,
-        category_sort_order,
+        -category_sort_order,
         category,
-        series_sort_order,
+        -series_sort_order,
         series,
         size,
         material_code,
@@ -610,8 +610,8 @@ def build_material_payload(materials: list[dict], version: dict | None = None) -
             if not category:
                 continue
             sort_order = taxonomy_sort_priority(item.get("category_sort_order"))
-            category_sort_orders[category] = min(category_sort_orders.get(category, sort_order), sort_order)
-        ordered_categories = sorted(category_sort_orders, key=lambda name: (category_sort_orders[name], name))
+            category_sort_orders[category] = max(category_sort_orders.get(category, sort_order), sort_order)
+        ordered_categories = sorted(category_sort_orders, key=lambda name: (-category_sort_orders[name], name))
         categories_by_top[tab["key"]] = [ALL_OPTION_LABEL, *ordered_categories]
         for item in pool:
             category_key = f"{tab['key']}::{item.get('category', '')}"
@@ -620,7 +620,7 @@ def build_material_payload(materials: list[dict], version: dict | None = None) -
                 series_by_category.setdefault(category_key, set()).add(series)
                 sort_order = taxonomy_sort_priority(item.get("series_sort_order"))
                 existing_order = series_sort_orders.setdefault(category_key, {}).get(series, sort_order)
-                series_sort_orders[category_key][series] = min(existing_order, sort_order)
+                series_sort_orders[category_key][series] = max(existing_order, sort_order)
 
     return {
         "cdn_base_url": material_cdn_base_url(),
@@ -631,7 +631,7 @@ def build_material_payload(materials: list[dict], version: dict | None = None) -
         "series_by_category": {
             key: [
                 ALL_OPTION_LABEL,
-                *sorted(values, key=lambda name: (series_sort_orders.get(key, {}).get(name, 0), name)),
+                *sorted(values, key=lambda name: (-series_sort_orders.get(key, {}).get(name, UNASSIGNED_TAXONOMY_SORT_ORDER), name)),
             ]
             for key, values in series_by_category.items()
         },
@@ -790,12 +790,12 @@ def list_db_materials_page(
                        CASE
                          WHEN c.item_id IS NULL THEN COALESCE(m.sort_order, 0)
                          WHEN c.sort_order > 0 THEN c.sort_order
-                         ELSE 1000000
+                         ELSE -1
                        END AS category_sort_order,
                        CASE
                          WHEN s.item_id IS NULL THEN COALESCE(m.sort_order, 0)
                          WHEN s.sort_order > 0 THEN s.sort_order
-                         ELSE 1000000
+                         ELSE -1
                        END AS series_sort_order
                 FROM managed_materials m
                 LEFT JOIN material_taxonomy c
@@ -809,18 +809,18 @@ def list_db_materials_page(
                     CASE
                       WHEN c.item_id IS NULL THEN COALESCE(m.sort_order, 0)
                       WHEN c.sort_order > 0 THEN c.sort_order
-                      ELSE 1000000
-                    END ASC,
+                      ELSE -1
+                    END DESC,
                     COALESCE(m.category, '') ASC,
                     CASE
                       WHEN s.item_id IS NULL THEN COALESCE(m.sort_order, 0)
                       WHEN s.sort_order > 0 THEN s.sort_order
-                      ELSE 1000000
-                    END ASC,
+                      ELSE -1
+                    END DESC,
                     COALESCE(NULLIF(m.series, ''), m.name, '') ASC,
                     m.size ASC,
                     COALESCE(m.material_code, '') ASC,
-                    m.sort_order ASC,
+                    m.sort_order DESC,
                     m.id ASC
                 LIMIT ? OFFSET ?
                 """,
@@ -842,7 +842,7 @@ def list_db_materials_page(
                     FROM managed_materials
                     WHERE {legacy_where}
                     ORDER BY top ASC, category ASC, COALESCE(NULLIF(series, ''), name, '') ASC,
-                             size ASC, COALESCE(material_code, '') ASC, sort_order ASC, id ASC
+                             size ASC, COALESCE(material_code, '') ASC, sort_order DESC, id ASC
                     LIMIT ? OFFSET ?
                     """,
                     [*params, size, offset],
@@ -878,7 +878,7 @@ def list_db_materials(
     clauses, params = build_db_material_filters(top=top, keyword=keyword, category=category, series=series, ids=ids)
     try:
         with connect_database() as connection:
-            sql = f"SELECT * FROM managed_materials WHERE {' AND '.join(clauses)} ORDER BY sort_order ASC, updated_at DESC"
+            sql = f"SELECT * FROM managed_materials WHERE {' AND '.join(clauses)} ORDER BY sort_order DESC, updated_at DESC"
             rows = connection.execute(sql, params).fetchall()
             row_dicts = [dict(row) for row in rows]
             series_assets = fetch_db_series_assets(connection, row_dicts)

@@ -769,7 +769,7 @@ class AdminService:
             self._seed_material_types(conn)
             where = "" if include_disabled else "WHERE enabled = 1"
             rows = conn.execute(
-                f"SELECT * FROM material_types {where} ORDER BY sort_order ASC, name ASC"
+                f"SELECT * FROM material_types {where} ORDER BY sort_order DESC, name ASC"
             ).fetchall()
             category_counts: dict[str, int] = {}
             variety_counts: dict[str, int] = {}
@@ -1305,11 +1305,11 @@ class AdminService:
         self._ensure_material_taxonomy_schema(connection)
         rows = connection.execute(
             """
-            SELECT top, category, series, MIN(sort_order) AS sort_order
+            SELECT top, category, series, MAX(sort_order) AS sort_order
             FROM managed_materials
             WHERE COALESCE(category, '') <> ''
             GROUP BY top, category, series
-            ORDER BY MIN(sort_order), category, series
+            ORDER BY MAX(sort_order) DESC, category, series
             """
         ).fetchall()
         for row in rows:
@@ -1865,7 +1865,7 @@ class AdminService:
                 clauses.append("enabled = 1")
             where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
             rows = conn.execute(
-                f"SELECT * FROM material_taxonomy {where} ORDER BY sort_order ASC, name ASC",
+                f"SELECT * FROM material_taxonomy {where} ORDER BY sort_order DESC, name ASC",
                 params,
             ).fetchall()
             raw_rows = [dict(row) for row in rows]
@@ -2019,7 +2019,7 @@ class AdminService:
 
         filtered = [item for item in rows if matches(item)]
         filtered.sort(key=lambda item: (
-            int(item.get("sort_order") or 0),
+            -int(item.get("sort_order") or 0),
             str(item.get("category_name") or ""),
             str(item.get("name") or ""),
             str(item.get("id") or ""),
