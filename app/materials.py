@@ -725,12 +725,12 @@ def list_db_material_facets() -> list[dict] | None:
 
 
 def list_db_material_category_facets() -> list[dict] | None:
-    """Read workspace categories independently from SKU/series joins.
+    """Read workspace categories directly from their operator-owned taxonomy.
 
-    The left-hand category rail needs only its category name and operator
-    priority.  Keeping this query independent means an incomplete optional
-    SKU identity migration cannot silently turn the whole rail into a
-    page-local, name-sorted list.
+    The left-hand category rail is a navigation/configuration surface, not a
+    projection of the current SKU page.  Reading ``material_taxonomy``
+    directly both preserves categories with zero current SKUs and keeps the
+    configured order available when legacy SKU joins are incomplete.
     """
     try:
         from .repository import DB_PATH
@@ -742,13 +742,9 @@ def list_db_material_category_facets() -> list[dict] | None:
         with connect_database() as connection:
             rows = connection.execute(
                 """
-                SELECT m.top, m.category,
-                       COALESCE(MAX(c.sort_order), 0) AS category_sort_order
-                FROM managed_materials m
-                LEFT JOIN material_taxonomy c
-                  ON c.kind='category' AND c.top=m.top AND c.name=m.category
-                WHERE m.enabled = 1
-                GROUP BY m.top, m.category
+                SELECT top, name AS category, sort_order AS category_sort_order
+                FROM material_taxonomy
+                WHERE kind='category'
                 """
             ).fetchall()
     except Exception:
