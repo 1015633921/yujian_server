@@ -169,6 +169,9 @@ def test_admin_sku_edit_uses_v2_as_the_only_inventory_ledger_after_cutover(tmp_p
     assert listed[0]["sku"]["price_per_bead"] == 70.05
     assert listed[0]["sku"]["size_mm"] == 8.375
     assert grouped["items"][0]["spu"]["size_values"] == [8.375]
+    assert grouped["items"][0]["spu"]["sku_options"] == [
+        {"id": sku_id, "size_mm": 8.375}
+    ]
     with pytest.raises(MaterialConflictError):
         admin.patch_material_sku(sku_id, {"price": "71.00"}, expected_revision=revision)
     with admin.connect() as connection:

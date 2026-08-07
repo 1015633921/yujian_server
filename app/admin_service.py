@@ -6719,6 +6719,20 @@ class AdminService:
                 if float((item.get("sku") or {}).get("size_mm") or 0) > 0
             }
         )
+        sku_options: list[dict[str, Any]] = []
+        for item in sorted_items:
+            sku = item.get("sku") or {}
+            material_id = str(sku.get("id") or item.get("id") or "").strip()
+            if not material_id:
+                continue
+            option: dict[str, Any] = {
+                "id": material_id,
+                "size_mm": float(sku.get("size_mm") or 0),
+            }
+            grade = str(sku.get("grade") or "").strip()
+            if grade:
+                option["grade"] = grade
+            sku_options.append(option)
         profile_issue_keys: list[str] = []
         if not material_code:
             profile_issue_keys.append("material_code_missing")
@@ -6766,6 +6780,7 @@ class AdminService:
                 "quality_risk_count": quality_risk_count,
                 "sizes": sizes,
                 "size_values": numeric_sizes,
+                "sku_options": sku_options,
                 "image": image,
                 "profile_state": profile_state,
                 "profile_issue_keys": profile_issue_keys,
@@ -6836,7 +6851,7 @@ class AdminService:
             except (TypeError, ValueError):
                 size = 0
             if size > 0:
-                normalized_size = round(size, 3)
+                normalized_size = size
                 sizes.add(normalized_size)
             else:
                 normalized_size = 0
