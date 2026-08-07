@@ -25,7 +25,9 @@ def test_p1b_migration_backfills_stable_legacy_snapshot_and_round_trips(tmp_path
     OrderService(db_path)
     AssessmentRepository(db_path)
     upgrade("sqlite", db_path)
-    assert downgrade("sqlite", db_path, steps=20) == [
+    assert downgrade("sqlite", db_path, steps=22) == [
+        "20260807_25_material_catalog_v2",
+        "20260807_24_material_rule_cleanup",
         "20260807_23_community_post_image_gallery",
         "20260806_22_material_catalog_indexes",
         "20260806_21_material_sku_revisions",
@@ -97,6 +99,8 @@ def test_p1b_migration_backfills_stable_legacy_snapshot_and_round_trips(tmp_path
         "20260806_21_material_sku_revisions",
         "20260806_22_material_catalog_indexes",
         "20260807_23_community_post_image_gallery",
+        "20260807_24_material_rule_cleanup",
+        "20260807_25_material_catalog_v2",
     ]
     with sqlite3.connect(db_path) as connection:
         first = connection.execute(
@@ -107,7 +111,9 @@ def test_p1b_migration_backfills_stable_legacy_snapshot_and_round_trips(tmp_path
     first_report_id = first[0]
     assert upgrade("sqlite", db_path) == []
 
-    assert downgrade("sqlite", db_path, steps=20) == [
+    assert downgrade("sqlite", db_path, steps=22) == [
+        "20260807_25_material_catalog_v2",
+        "20260807_24_material_rule_cleanup",
         "20260807_23_community_post_image_gallery",
         "20260806_22_material_catalog_indexes",
         "20260806_21_material_sku_revisions",
@@ -153,6 +159,8 @@ def test_p1b_migration_backfills_stable_legacy_snapshot_and_round_trips(tmp_path
         "20260806_21_material_sku_revisions",
         "20260806_22_material_catalog_indexes",
         "20260807_23_community_post_image_gallery",
+        "20260807_24_material_rule_cleanup",
+        "20260807_25_material_catalog_v2",
     ]
     with sqlite3.connect(db_path) as connection:
         second_report_id = connection.execute(

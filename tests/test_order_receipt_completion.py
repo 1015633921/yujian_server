@@ -34,7 +34,9 @@ def test_receipt_completion_migration_backfills_signed_order_and_round_trips(tmp
     OrderService(db_path)
     AssessmentRepository(db_path)
     upgrade("sqlite", db_path)
-    assert downgrade("sqlite", db_path, steps=17) == [
+    assert downgrade("sqlite", db_path, steps=19) == [
+        "20260807_25_material_catalog_v2",
+        "20260807_24_material_rule_cleanup",
         "20260807_23_community_post_image_gallery",
         "20260806_22_material_catalog_indexes",
         "20260806_21_material_sku_revisions",
@@ -98,6 +100,8 @@ def test_receipt_completion_migration_backfills_signed_order_and_round_trips(tmp
         "20260806_21_material_sku_revisions",
         "20260806_22_material_catalog_indexes",
         "20260807_23_community_post_image_gallery",
+        "20260807_24_material_rule_cleanup",
+        "20260807_25_material_catalog_v2",
     ]
     assert {"logistics_signed_at", "auto_complete_at"} <= columns(db_path, "orders")
     assert "idx_orders_auto_complete" in indexes(db_path, "orders")
@@ -116,7 +120,9 @@ def test_receipt_completion_migration_backfills_signed_order_and_round_trips(tmp
     assert migrated["auto_complete_at"] == row["auto_complete_at"]
     assert upgrade("sqlite", db_path) == []
 
-    assert downgrade("sqlite", db_path, steps=17) == [
+    assert downgrade("sqlite", db_path, steps=19) == [
+        "20260807_25_material_catalog_v2",
+        "20260807_24_material_rule_cleanup",
         "20260807_23_community_post_image_gallery",
         "20260806_22_material_catalog_indexes",
         "20260806_21_material_sku_revisions",

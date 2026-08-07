@@ -52,6 +52,8 @@ def test_p0a_migration_is_explicit_idempotent_and_reversible(tmp_path):
         "20260806_21_material_sku_revisions",
         "20260806_22_material_catalog_indexes",
         "20260807_23_community_post_image_gallery",
+        "20260807_24_material_rule_cleanup",
+        "20260807_25_material_catalog_v2",
     ]
     assert upgrade("sqlite", db_path) == []
     assert "user_sessions" in sqlite_tables(db_path)
@@ -63,6 +65,8 @@ def test_p0a_migration_is_explicit_idempotent_and_reversible(tmp_path):
     }.issubset(sqlite_columns(db_path, "diy_designs"))
 
     assert downgrade("sqlite", db_path) == [
+        "20260807_25_material_catalog_v2",
+        "20260807_24_material_rule_cleanup",
         "20260807_23_community_post_image_gallery",
         "20260806_22_material_catalog_indexes",
         "20260806_21_material_sku_revisions",
@@ -115,4 +119,6 @@ def test_p0a_migration_is_explicit_idempotent_and_reversible(tmp_path):
         "20260806_21_material_sku_revisions",
         "20260806_22_material_catalog_indexes",
         "20260807_23_community_post_image_gallery",
+        "20260807_24_material_rule_cleanup",
+        "20260807_25_material_catalog_v2",
     ]

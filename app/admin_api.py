@@ -1681,6 +1681,18 @@ def material_options(authorization: str | None = Header(default=None)):
     return success(admin_service.material_options_payload())
 
 
+@admin_router.get("/material-editor-options", summary="材料编辑器轻量字段选项")
+def material_editor_options(authorization: str | None = Header(default=None)):
+    require_admin(authorization)
+    return success(admin_service.material_editor_options_payload())
+
+
+@admin_router.get("/material-catalog-v2/status", summary="材料目录 V2 切换验收状态")
+def material_catalog_v2_status(authorization: str | None = Header(default=None)):
+    require_admin(authorization)
+    return success(admin_service.material_catalog_v2_status())
+
+
 @admin_router.get("/material-types", summary="后台材料类型")
 def material_types(
     include_disabled: bool = Query(default=True),

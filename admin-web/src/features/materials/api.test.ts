@@ -74,7 +74,8 @@ describe('material directory api', () => {
 
     await listMaterialOptions()
 
-    expect(String(fetchMock.mock.calls[0]?.[0])).toContain('/api/v1/admin/material-options')
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain('/api/v1/admin/material-editor-options')
+    expect(String(fetchMock.mock.calls[0]?.[0])).not.toContain('/api/v1/admin/material-options')
     const [, request] = fetchMock.mock.calls[0] as [string, RequestInit]
     expect(new Headers(request.headers).get('authorization')).toBe('Bearer operator-token')
   })

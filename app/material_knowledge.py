@@ -699,6 +699,38 @@ def upsert_material_knowledge(
                     timestamp,
                 ),
             )
+        # material_knowledge remains a compatibility write surface during the
+        # transition. Keep every normalized series profile in the same
+        # transaction so AI tagging and older admin flows cannot leave V2 stale.
+        if table_exists(conn, "material_series_profiles_v2") and table_exists(
+            conn, "material_series_v2"
+        ):
+            profile = dict(item)
+            for key in ("code", "name", "created_at", "updated_at"):
+                profile.pop(key, None)
+            profile_json = json.dumps(profile, ensure_ascii=False, separators=(",", ":"))
+            series_rows = conn.execute(
+                "SELECT series_id FROM material_series_v2 WHERE material_code=?",
+                (item["code"],),
+            ).fetchall()
+            for series_row in series_rows:
+                series_id = str(series_row["series_id"])
+                existing_profile = conn.execute(
+                    "SELECT 1 FROM material_series_profiles_v2 WHERE series_id=?",
+                    (series_id,),
+                ).fetchone()
+                if existing_profile:
+                    conn.execute(
+                        "UPDATE material_series_profiles_v2 "
+                        "SET profile_json=?, updated_at=? WHERE series_id=?",
+                        (profile_json, timestamp, series_id),
+                    )
+                else:
+                    conn.execute(
+                        "INSERT INTO material_series_profiles_v2 "
+                        "(series_id, profile_json, created_at, updated_at) VALUES (?, ?, ?, ?)",
+                        (series_id, profile_json, timestamp, timestamp),
+                    )
         return public_knowledge(item)
 
     if connection is not None:

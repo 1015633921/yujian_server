@@ -1592,6 +1592,7 @@ class RecommendationEngine:
                 score += 4
         return score
 
+    @staticmethod
     def build_item(
         code: str,
         role: str,

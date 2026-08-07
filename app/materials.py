@@ -6,6 +6,7 @@ import time
 from urllib.parse import quote, urlsplit, urlunsplit
 
 from .database import connect_database, use_mysql
+from .feature_flags import material_catalog_v2_enabled
 from .material_knowledge import enrich_materials_with_knowledge, material_code_from_payload
 from .material_options import normalize_sku_physical_specs
 from .money import cents_to_text, stored_cents
@@ -652,6 +653,27 @@ def material_catalog_version() -> dict:
         return {"version": f"static-v1:{MATERIAL_SORT_POLICY_VERSION}", "updated_at": ""}
     try:
         with connect_database() as connection:
+            if material_catalog_v2_enabled():
+                row = connection.execute(
+                    """
+                    SELECT COUNT(*) AS total, COALESCE(MAX(k.updated_at), '') AS updated_at
+                    FROM material_skus_v2 k
+                    """
+                ).fetchone()
+                hierarchy = connection.execute(
+                    """
+                    SELECT MAX(updated_at) AS updated_at FROM (
+                        SELECT MAX(updated_at) AS updated_at FROM material_categories_v2
+                        UNION ALL SELECT MAX(updated_at) FROM material_series_v2
+                        UNION ALL SELECT MAX(updated_at) FROM material_series_profiles_v2
+                        UNION ALL SELECT MAX(updated_at) FROM material_series_assets_v2
+                        UNION ALL SELECT MAX(updated_at) FROM material_inventory_v2
+                    ) versions
+                    """
+                ).fetchone()
+                total = int(row["total"] or 0)
+                updated_at = max(str(row["updated_at"] or ""), str(hierarchy["updated_at"] or ""))
+                return {"version": f"v2:{total}:{updated_at}:{MATERIAL_SORT_POLICY_VERSION}", "updated_at": updated_at}
             row = connection.execute(
                 """
                 SELECT COUNT(*) AS total, COALESCE(MAX(updated_at), '') AS updated_at
@@ -690,6 +712,20 @@ def list_db_material_facets() -> list[dict] | None:
         return None
     try:
         with connect_database() as connection:
+            if material_catalog_v2_enabled():
+                rows = connection.execute(
+                    """
+                    SELECT c.type_code AS top, c.name AS category, s.name AS series, k.name,
+                           c.sort_order AS category_sort_order, s.sort_order AS series_sort_order
+                    FROM material_skus_v2 k
+                    JOIN material_inventory_v2 i ON i.sku_id=k.sku_id
+                    JOIN material_series_v2 s ON s.series_id=k.series_id
+                    JOIN material_categories_v2 c ON c.category_id=s.category_id
+                    JOIN material_types t ON t.type_code=c.type_code
+                    WHERE k.enabled=1 AND s.enabled=1 AND c.enabled=1 AND t.enabled=1
+                    """
+                ).fetchall()
+                return [dict(row) for row in rows]
             try:
                 rows = connection.execute(
                     """
@@ -718,6 +754,61 @@ def list_db_material_facets() -> list[dict] | None:
     except Exception:
         return None
     return [dict(row) for row in rows]
+
+
+def build_v2_material_filters(
+    top: str | None = None,
+    keyword: str | None = None,
+    category: str | None = None,
+    series: str | None = None,
+    ids: list[str] | None = None,
+) -> tuple[list[str], list[str]]:
+    clauses = ["k.enabled=1", "s.enabled=1", "c.enabled=1", "t.enabled=1"]
+    params: list[str] = []
+    if top:
+        clauses.append("c.type_code=?")
+        params.append(top)
+    if ids:
+        placeholders = ",".join("?" for _ in ids)
+        clauses.append(
+            f"(k.sku_id IN ({placeholders}) OR k.sku_code IN ({placeholders}) OR s.material_code IN ({placeholders}))"
+        )
+        params.extend([*ids, *ids, *ids])
+    if not is_all_option(category):
+        clauses.append("c.name=?")
+        params.append(category or "")
+    if not is_all_option(series):
+        clauses.append("s.name=?")
+        params.append(series or "")
+    search_terms = expand_search_terms(keyword)
+    if search_terms:
+        fields = ("k.name", "c.name", "s.name", "k.grade", "k.sku_code", "s.material_code", "p.profile_json")
+        term_clauses = []
+        for term in search_terms:
+            term_clauses.append("(" + " OR ".join(f"{field} LIKE ?" for field in fields) + ")")
+            params.extend([f"%{term}%"] * len(fields))
+        clauses.append("(" + " OR ".join(term_clauses) + ")")
+    return clauses, params
+
+
+V2_MATERIAL_SELECT = """
+    SELECT k.sku_id AS id, k.sku_code AS skuId, c.type_code AS top,
+           c.name AS category, s.name AS series, k.series_id, s.material_code,
+           k.grade, k.name, '' AS effect, '' AS element,
+           (k.price_cents / 100.0) AS price, k.price_cents,
+           k.size_mm AS size, k.weight_g AS weight, (k.cost_cents / 100.0) AS cost_price,
+           i.safety_stock, k.supplier_name, k.purchase_note,
+           s.color, s.shine, '' AS image_path, '' AS image_url, '[]' AS image_urls_json,
+           k.physical_specs_json, i.stock, i.reserved_stock, k.enabled, k.sort_order,
+           k.revision, k.created_at, k.updated_at,
+           c.sort_order AS category_sort_order, s.sort_order AS series_sort_order
+    FROM material_skus_v2 k
+    JOIN material_inventory_v2 i ON i.sku_id=k.sku_id
+    JOIN material_series_v2 s ON s.series_id=k.series_id
+    JOIN material_categories_v2 c ON c.category_id=s.category_id
+    JOIN material_types t ON t.type_code=c.type_code
+    LEFT JOIN material_series_profiles_v2 p ON p.series_id=s.series_id
+"""
 
 
 def build_db_material_filters(
@@ -782,6 +873,37 @@ def list_db_materials_page(
     where = " AND ".join(clauses)
     try:
         with connect_database() as connection:
+            if material_catalog_v2_enabled():
+                v2_clauses, v2_params = build_v2_material_filters(
+                    top=top, keyword=keyword, category=category, series=series
+                )
+                v2_where = " AND ".join(v2_clauses)
+                total_row = connection.execute(
+                    f"SELECT COUNT(*) AS total FROM material_skus_v2 k "
+                    "JOIN material_series_v2 s ON s.series_id=k.series_id "
+                    "JOIN material_categories_v2 c ON c.category_id=s.category_id "
+                    "JOIN material_types t ON t.type_code=c.type_code "
+                    "LEFT JOIN material_series_profiles_v2 p ON p.series_id=s.series_id "
+                    f"WHERE {v2_where}",
+                    v2_params,
+                ).fetchone()
+                rows = connection.execute(
+                    V2_MATERIAL_SELECT
+                    + f" WHERE {v2_where} "
+                    + "ORDER BY c.type_code ASC, c.sort_order DESC, c.name ASC, "
+                      "s.sort_order DESC, s.name ASC, k.size_mm ASC, s.material_code ASC, "
+                      "k.sort_order DESC, k.sku_id ASC LIMIT ? OFFSET ?",
+                    [*v2_params, size, offset],
+                ).fetchall()
+                row_dicts = [dict(row) for row in rows]
+                series_assets = fetch_db_series_assets(connection, row_dicts)
+                total = int(total_row["total"] or 0)
+                return [normalize_db_material(row, series_assets) for row in row_dicts], {
+                    "page": current_page,
+                    "page_size": size,
+                    "total": total,
+                    "has_more": offset + size < total,
+                }
             total_row = connection.execute(f"SELECT COUNT(*) AS total FROM managed_materials m WHERE {where}", params).fetchone()
             try:
                 rows = connection.execute(
@@ -878,7 +1000,14 @@ def list_db_materials(
     clauses, params = build_db_material_filters(top=top, keyword=keyword, category=category, series=series, ids=ids)
     try:
         with connect_database() as connection:
-            sql = f"SELECT * FROM managed_materials WHERE {' AND '.join(clauses)} ORDER BY sort_order DESC, updated_at DESC"
+            if material_catalog_v2_enabled():
+                v2_clauses, v2_params = build_v2_material_filters(
+                    top=top, keyword=keyword, category=category, series=series, ids=ids
+                )
+                sql = V2_MATERIAL_SELECT + f" WHERE {' AND '.join(v2_clauses)} ORDER BY k.sort_order DESC, k.updated_at DESC"
+                params = v2_params
+            else:
+                sql = f"SELECT * FROM managed_materials WHERE {' AND '.join(clauses)} ORDER BY sort_order DESC, updated_at DESC"
             rows = connection.execute(sql, params).fetchall()
             row_dicts = [dict(row) for row in rows]
             series_assets = fetch_db_series_assets(connection, row_dicts)
@@ -906,6 +1035,45 @@ def series_asset_key(row: dict) -> tuple[str, str, str]:
 def fetch_db_series_assets(connection, rows: list[dict]) -> dict[tuple[str, str, str], dict]:
     if not rows:
         return {}
+    if material_catalog_v2_enabled():
+        series_ids = sorted({str(row.get("series_id") or "").strip() for row in rows if str(row.get("series_id") or "").strip()})
+        if not series_ids:
+            return {}
+        placeholders = ", ".join(["?"] * len(series_ids))
+        series_rows = connection.execute(
+            f"""
+            SELECT s.series_id, s.material_code, s.color, s.shine, c.type_code AS top,
+                   c.name AS category_name, s.name, a.asset_role, a.image_path,
+                   a.image_url, a.sort_order
+            FROM material_series_v2 s
+            JOIN material_categories_v2 c ON c.category_id=s.category_id
+            LEFT JOIN material_series_assets_v2 a ON a.series_id=s.series_id AND a.enabled=1
+            WHERE s.series_id IN ({placeholders})
+            ORDER BY s.series_id, a.sort_order ASC
+            """,
+            series_ids,
+        ).fetchall()
+        grouped: dict[str, dict] = {}
+        for raw in series_rows:
+            item = dict(raw)
+            bucket = grouped.setdefault(str(item["series_id"]), {
+                "series_id": item["series_id"], "material_code": item.get("material_code") or "",
+                "color": item.get("color") or "", "shine": item.get("shine") or "",
+                "image_path": "", "image_url": "", "image_urls": [],
+                "top": item.get("top") or "", "category": item.get("category_name") or "",
+                "series": item.get("name") or "",
+            })
+            url = normalize_material_image_url(item.get("image_url") or "")
+            if item.get("asset_role") == "cover":
+                bucket["image_path"] = item.get("image_path") or ""
+                bucket["image_url"] = url
+            elif url:
+                bucket["image_urls"].append(url)
+        result: dict[tuple[str, str, str], dict] = {}
+        for item in grouped.values():
+            result[("series_id", item["series_id"], "")] = item
+            result[(item["top"], item["category"], item["series"])] = item
+        return result
     # `series_asset_key` starts with the literal ``series_id`` once a SKU has
     # been migrated.  The taxonomy query must still be constrained by the
     # material type, not by that key marker; otherwise every linked SKU misses

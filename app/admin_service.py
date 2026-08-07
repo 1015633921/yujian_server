@@ -20,6 +20,7 @@ from .daily_rules import (
 )
 from .materials import (
     MATERIAL_CATALOG,
+    V2_MATERIAL_SELECT,
     clean_gallery_image_urls,
     clean_image_urls,
     fetch_db_series_assets,
@@ -37,6 +38,7 @@ from .material_knowledge import (
     material_code_from_payload,
     material_code_token,
     normalize_knowledge_payload,
+    public_knowledge,
     upsert_material_knowledge,
 )
 from .material_options import (
@@ -50,7 +52,17 @@ from .material_options import (
 )
 from .repository import DB_PATH
 from .database import connect_database, integrity_errors, runtime_schema_mutation_allowed, use_mysql
-from .feature_flags import kuaidi100_subscribe_enabled
+from .feature_flags import kuaidi100_subscribe_enabled, material_catalog_v2_enabled
+from .material_catalog_v2 import (
+    delete_taxonomy_from_v2,
+    fetch_material_row_v2,
+    sync_legacy_category_to_v2,
+    sync_legacy_hierarchy_to_v2,
+    sync_legacy_series_to_v2,
+    sync_legacy_sku_to_v2,
+    sync_legacy_type_to_v2,
+    validate_material_catalog_v2,
+)
 from .wechat_trade_service import WechatTradeService
 
 
@@ -774,13 +786,37 @@ class AdminService:
             category_counts: dict[str, int] = {}
             variety_counts: dict[str, int] = {}
             sku_counts: dict[str, int] = {}
-            if self.table_exists(conn, "material_taxonomy"):
+            if material_catalog_v2_enabled():
+                for count_row in conn.execute(
+                    "SELECT type_code, COUNT(*) AS c FROM material_categories_v2 GROUP BY type_code"
+                ).fetchall():
+                    category_counts[str(count_row["type_code"] or "")] = int(count_row["c"] or 0)
+                for count_row in conn.execute(
+                    """
+                    SELECT c.type_code, COUNT(*) AS c
+                    FROM material_series_v2 s
+                    JOIN material_categories_v2 c ON c.category_id=s.category_id
+                    GROUP BY c.type_code
+                    """
+                ).fetchall():
+                    variety_counts[str(count_row["type_code"] or "")] = int(count_row["c"] or 0)
+                for count_row in conn.execute(
+                    """
+                    SELECT c.type_code, COUNT(*) AS c
+                    FROM material_skus_v2 k
+                    JOIN material_series_v2 s ON s.series_id=k.series_id
+                    JOIN material_categories_v2 c ON c.category_id=s.category_id
+                    GROUP BY c.type_code
+                    """
+                ).fetchall():
+                    sku_counts[str(count_row["type_code"] or "")] = int(count_row["c"] or 0)
+            elif self.table_exists(conn, "material_taxonomy"):
                 for row in conn.execute(
                     "SELECT top, kind, COUNT(*) AS c FROM material_taxonomy GROUP BY top, kind"
                 ).fetchall():
                     target = category_counts if row["kind"] == "category" else variety_counts
                     target[str(row["top"] or "")] = int(row["c"] or 0)
-            if self.table_exists(conn, "managed_materials"):
+            if not material_catalog_v2_enabled() and self.table_exists(conn, "managed_materials"):
                 for row in conn.execute(
                     "SELECT top, COUNT(*) AS c FROM managed_materials GROUP BY top"
                 ).fetchall():
@@ -880,6 +916,11 @@ class AdminService:
                 actor=actor,
                 summary=("更新材料类型：" if before else "新增材料类型：") + name,
             )
+            sync_legacy_type_to_v2(
+                connection,
+                requested_code,
+                include_inventory=not material_catalog_v2_enabled(),
+            )
         if not enabled:
             invalidate_material_cache()
         return {
@@ -922,6 +963,11 @@ class AdminService:
                 after={**before, "enabled": 0, "updated_at": timestamp},
                 actor=actor,
                 summary=f"停用材料类型：{before.get('name') or code}",
+            )
+            sync_legacy_type_to_v2(
+                connection,
+                code,
+                include_inventory=not material_catalog_v2_enabled(),
             )
         invalidate_material_cache()
         return {"disabled": code, **cascaded}
@@ -1600,6 +1646,35 @@ class AdminService:
                 "field_specs": field_specs,
             }
 
+    def material_editor_options_payload(self) -> dict[str, Any]:
+        """Return only editor dictionaries; never hydrate or repair the catalog tree."""
+        with self.connect() as connection:
+            options = public_material_options()
+            option_items = self.list_material_option_items(
+                connection=connection,
+                include_disabled=True,
+            )
+            enabled_by_type: dict[str, list[dict[str, Any]]] = {}
+            for item in option_items:
+                if item["enabled"]:
+                    enabled_by_type.setdefault(item["option_type"], []).append(
+                        {"key": item["key"], "label": item["label"]}
+                    )
+            for option_type in MUTABLE_MATERIAL_OPTION_TYPES:
+                if enabled_by_type.get(option_type):
+                    options[option_type] = enabled_by_type[option_type]
+            return {**options, "option_items": option_items}
+
+    def material_catalog_v2_status(self) -> dict[str, Any]:
+        """Report whether the normalized catalog is safe to receive read traffic."""
+        with self.connect() as connection:
+            return validate_material_catalog_v2(
+                connection,
+                mysql=use_mysql() and not self._force_sqlite,
+                database=os.getenv("MYSQL_DATABASE", ""),
+                compare_legacy_inventory=not material_catalog_v2_enabled(),
+            )
+
     @staticmethod
     def material_payload_list(value: Any) -> list[str]:
         if value in (None, ""):
@@ -1855,6 +1930,121 @@ class AdminService:
         connection: Any | None = None,
     ) -> list[dict[str, Any]]:
         def run(conn) -> list[dict[str, Any]]:
+            if material_catalog_v2_enabled():
+                clauses: list[str] = []
+                params: list[Any] = []
+                if top:
+                    clauses.append("c.type_code=?")
+                    params.append(top)
+                if not include_disabled:
+                    clauses.append("c.enabled=1")
+                where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+                category_rows = [
+                    dict(row)
+                    for row in conn.execute(
+                        f"SELECT c.* FROM material_categories_v2 c {where} ORDER BY c.sort_order DESC, c.name ASC",
+                        params,
+                    ).fetchall()
+                ]
+                if not category_rows:
+                    return []
+                category_ids = [str(row["category_id"]) for row in category_rows]
+                placeholders = ", ".join(["?"] * len(category_ids))
+                series_clauses = [f"s.category_id IN ({placeholders})"]
+                series_params: list[Any] = [*category_ids]
+                if not include_disabled:
+                    series_clauses.append("s.enabled=1")
+                series_rows = [
+                    dict(row)
+                    for row in conn.execute(
+                        f"""
+                        SELECT s.*, c.type_code AS top, p.profile_json
+                        FROM material_series_v2 s
+                        JOIN material_categories_v2 c ON c.category_id=s.category_id
+                        LEFT JOIN material_series_profiles_v2 p ON p.series_id=s.series_id
+                        WHERE {' AND '.join(series_clauses)}
+                        ORDER BY s.sort_order DESC, s.name ASC
+                        """,
+                        series_params,
+                    ).fetchall()
+                ]
+                series_ids = [str(row["series_id"]) for row in series_rows]
+                assets_by_series: dict[str, list[dict[str, Any]]] = {}
+                if series_ids:
+                    asset_marks = ", ".join(["?"] * len(series_ids))
+                    for raw_asset in conn.execute(
+                        f"""
+                        SELECT * FROM material_series_assets_v2
+                        WHERE series_id IN ({asset_marks}) AND enabled=1
+                        ORDER BY series_id, sort_order ASC, asset_id ASC
+                        """,
+                        series_ids,
+                    ).fetchall():
+                        asset = dict(raw_asset)
+                        assets_by_series.setdefault(str(asset["series_id"]), []).append(asset)
+                categories: dict[str, dict[str, Any]] = {
+                    str(row["category_id"]): {
+                        "id": row["category_id"],
+                        "parent_id": "",
+                        "kind": "category",
+                        "top": row.get("type_code") or "",
+                        "name": row.get("name") or "",
+                        "sort_order": int(row.get("sort_order") or 0),
+                        "enabled": bool(row.get("enabled")),
+                        "series": [],
+                    }
+                    for row in category_rows
+                }
+                for row in series_rows:
+                    profile = json_value(row.get("profile_json"), {})
+                    knowledge = public_knowledge(profile if isinstance(profile, dict) else {})
+                    assets = assets_by_series.get(str(row["series_id"]), [])
+                    primary = next(
+                        (str(asset.get("image_url") or "") for asset in assets if asset.get("asset_role") == "cover"),
+                        "",
+                    )
+                    gallery = [
+                        str(asset.get("image_url") or "")
+                        for asset in assets
+                        if asset.get("asset_role") != "cover" and asset.get("image_url")
+                    ]
+                    material_params = dict(knowledge.get("material_params") or {})
+                    if row.get("top") == "bead":
+                        material_params["bead_shape"] = "round"
+                    series_item = {
+                        "id": row["series_id"],
+                        "parent_id": row["category_id"],
+                        "kind": "series",
+                        "top": row.get("top") or "",
+                        "name": row.get("name") or "",
+                        "material_code": row.get("material_code") or "",
+                        "color": row.get("color") or "",
+                        "shine": row.get("shine") or "",
+                        "image_path": next((str(asset.get("image_path") or "") for asset in assets if asset.get("asset_role") == "cover"), ""),
+                        "image_url": primary,
+                        "image_urls": gallery,
+                        "asset_version": int(row.get("asset_version") or 1),
+                        "sort_order": int(row.get("sort_order") or 0),
+                        "enabled": bool(row.get("enabled")),
+                        "energy": {
+                            key: knowledge.get(key) or ({} if key == "chakra_weights" else [] if key not in {"primary_element", "color_family", "story"} else "")
+                            for key in (
+                                "primary_element", "secondary_elements", "chakras", "chakra_weights", "effects",
+                                "wish_pools", "color_family", "mood_tags", "visual_tags", "story",
+                            )
+                        },
+                        "rules": {
+                            "allowed_roles": knowledge.get("allowed_roles") or [],
+                            "match_rules": knowledge.get("match_rules") or [],
+                            "care_tags": knowledge.get("care_tags") or [],
+                        },
+                        "material_params": material_params,
+                        "asset": knowledge.get("asset") or {},
+                    }
+                    category = categories.get(str(row["category_id"]))
+                    if category is not None:
+                        category["series"].append(series_item)
+                return list(categories.values())
             self._ensure_material_taxonomy_schema(conn)
             clauses = []
             params: list[Any] = []
@@ -2040,6 +2230,82 @@ class AdminService:
         if not clean_id:
             raise ValueError("品种 ID 不能为空")
         with self.connect() as connection:
+            if material_catalog_v2_enabled():
+                row = connection.execute(
+                    """
+                    SELECT s.*, c.name AS category_name, c.type_code AS top, p.profile_json
+                    FROM material_series_v2 s
+                    JOIN material_categories_v2 c ON c.category_id=s.category_id
+                    LEFT JOIN material_series_profiles_v2 p ON p.series_id=s.series_id
+                    WHERE s.series_id=?
+                    """,
+                    (clean_id,),
+                ).fetchone()
+                if not row:
+                    raise ValueError("品种不存在")
+                item = dict(row)
+                profile_row = json_value(item.get("profile_json"), {})
+                knowledge = public_knowledge(profile_row if isinstance(profile_row, dict) else {})
+                assets = [
+                    dict(asset)
+                    for asset in connection.execute(
+                        """
+                        SELECT asset_role, image_url, image_path, sort_order
+                        FROM material_series_assets_v2
+                        WHERE series_id=? AND enabled=1
+                        ORDER BY sort_order ASC, asset_id ASC
+                        """,
+                        (clean_id,),
+                    ).fetchall()
+                ]
+                primary = next(
+                    (str(asset.get("image_url") or "") for asset in assets if asset.get("asset_role") == "cover"),
+                    "",
+                )
+                gallery = [
+                    str(asset.get("image_url") or "")
+                    for asset in assets
+                    if asset.get("asset_role") != "cover" and asset.get("image_url")
+                ]
+                material_params = dict(knowledge.get("material_params") or {})
+                if item.get("top") == "bead":
+                    material_params["bead_shape"] = "round"
+                return {
+                    "id": item["series_id"],
+                    "parent_id": item["category_id"],
+                    "category_name": item.get("category_name") or "",
+                    "kind": "series",
+                    "top": item.get("top") or "",
+                    "name": item.get("name") or "",
+                    "material_code": item.get("material_code") or "",
+                    "color": item.get("color") or "",
+                    "shine": item.get("shine") or "",
+                    "image_path": next((str(asset.get("image_path") or "") for asset in assets if asset.get("asset_role") == "cover"), ""),
+                    "image_url": primary,
+                    "image_urls": gallery,
+                    "asset_version": int(item.get("asset_version") or 1),
+                    "sort_order": int(item.get("sort_order") or 0),
+                    "enabled": bool(item.get("enabled")),
+                    "energy": {
+                        "primary_element": knowledge.get("primary_element") or "",
+                        "secondary_elements": knowledge.get("secondary_elements") or [],
+                        "chakras": knowledge.get("chakras") or [],
+                        "chakra_weights": knowledge.get("chakra_weights") or {},
+                        "effects": knowledge.get("effects") or [],
+                        "wish_pools": knowledge.get("wish_pools") or [],
+                        "color_family": knowledge.get("color_family") or "",
+                        "mood_tags": knowledge.get("mood_tags") or [],
+                        "visual_tags": knowledge.get("visual_tags") or [],
+                        "story": knowledge.get("story") or "",
+                    },
+                    "rules": {
+                        "allowed_roles": knowledge.get("allowed_roles") or [],
+                        "match_rules": knowledge.get("match_rules") or [],
+                        "care_tags": knowledge.get("care_tags") or [],
+                    },
+                    "material_params": material_params,
+                    "asset": knowledge.get("asset") or {},
+                }
             self._ensure_material_taxonomy_schema(connection)
             row = connection.execute(
                 "SELECT item_id, top FROM material_taxonomy WHERE item_id=? AND kind='series'",
@@ -2159,6 +2425,11 @@ class AdminService:
                 after=after,
                 actor=actor,
                 summary=("更新材料分类：" if before else "新增材料分类：") + name,
+            )
+            sync_legacy_hierarchy_to_v2(
+                connection,
+                item_id,
+                include_inventory=not material_catalog_v2_enabled(),
             )
         if not enabled:
             invalidate_material_cache()
@@ -2421,6 +2692,11 @@ class AdminService:
                 actor=actor,
                 summary=("更新材料品种：" if before else "新增材料品种：") + name,
             )
+            sync_legacy_hierarchy_to_v2(
+                connection,
+                item_id,
+                include_inventory=not material_catalog_v2_enabled(),
+            )
         invalidate_material_cache()
         return {
             "id": item_id,
@@ -2584,6 +2860,7 @@ class AdminService:
                     """,
                     (request_key, item["item_id"], json_text(result), timestamp),
                 )
+            sync_legacy_series_to_v2(connection, str(item["item_id"]))
         # The public material endpoint must not retain a pre-update gallery in
         # its process cache after this transaction commits.
         invalidate_material_cache()
@@ -2650,6 +2927,11 @@ class AdminService:
                 actor=actor,
                 summary=f"停用材料{'分类' if before.get('kind') == 'category' else '品种'}：{before.get('name') or clean_id}",
             )
+            sync_legacy_hierarchy_to_v2(
+                connection,
+                clean_id,
+                include_inventory=not material_catalog_v2_enabled(),
+            )
         invalidate_material_cache()
         return {"disabled": clean_id, **cascaded}
 
@@ -2713,6 +2995,8 @@ class AdminService:
             )
             if cursor.rowcount != len(rows):
                 raise ValueError("分类状态已变化，请刷新后重试")
+            for row in rows:
+                delete_taxonomy_from_v2(connection, str(row["item_id"]), "category")
             for row in rows:
                 self.record_material_audit(
                     connection,
@@ -2784,6 +3068,8 @@ class AdminService:
                     material_code = str(row.get("material_code") or "").strip()
                     if material_code:
                         connection.execute("DELETE FROM material_knowledge WHERE code=?", (material_code,))
+            for row in rows:
+                delete_taxonomy_from_v2(connection, str(row["item_id"]), "series")
             for row in rows:
                 self.record_material_audit(
                     connection,
@@ -6111,20 +6397,26 @@ class AdminService:
         sort_by: str = "sort_order",
         sort_order: str = "asc",
     ) -> list[dict[str, Any]]:
-        clauses, params = self.material_filter_sql(
-            keyword=keyword,
-            top=top,
-            category=category,
-            element=element,
-            status=status,
-        )
-        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
-        order_by, direction = self.material_sort_sql(sort_by, sort_order)
+        if material_catalog_v2_enabled():
+            clauses, params = self.material_v2_filter_sql(
+                keyword=keyword, top=top, category=category, element=element, status=status
+            )
+            where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+            order_by, direction = self.material_v2_sort_sql(sort_by, sort_order)
+            sql = f"{V2_MATERIAL_SELECT} {where} ORDER BY {order_by} {direction}, k.updated_at DESC"
+        else:
+            clauses, params = self.material_filter_sql(
+                keyword=keyword,
+                top=top,
+                category=category,
+                element=element,
+                status=status,
+            )
+            where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+            order_by, direction = self.material_sort_sql(sort_by, sort_order)
+            sql = f"SELECT * FROM managed_materials {where} ORDER BY {order_by} {direction}, updated_at DESC"
         with self.connect() as connection:
-            rows = connection.execute(
-                f"SELECT * FROM managed_materials {where} ORDER BY {order_by} {direction}, updated_at DESC",
-                params,
-            ).fetchall()
+            rows = connection.execute(sql, params).fetchall()
             materials = self.public_materials([dict(row) for row in rows], connection)
         if quality:
             materials = [item for item in materials if self.material_matches_quality(item, quality)]
@@ -6167,19 +6459,38 @@ class AdminService:
             total = len(materials)
             return self.paginated_payload(materials[offset : offset + page_size], total, page, page_size)
 
-        clauses, params = self.material_filter_sql(
-            keyword=keyword,
-            top=top,
-            category=category,
-            element=element,
-            status=status,
-        )
-        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
-        order_by, direction = self.material_sort_sql(sort_by, sort_order)
+        if material_catalog_v2_enabled():
+            clauses, params = self.material_v2_filter_sql(
+                keyword=keyword, top=top, category=category, element=element, status=status
+            )
+            where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+            order_by, direction = self.material_v2_sort_sql(sort_by, sort_order)
+            count_sql = (
+                "SELECT COUNT(*) AS c FROM material_skus_v2 k "
+                "JOIN material_inventory_v2 i ON i.sku_id=k.sku_id "
+                "JOIN material_series_v2 s ON s.series_id=k.series_id "
+                "JOIN material_categories_v2 c ON c.category_id=s.category_id "
+                "JOIN material_types t ON t.type_code=c.type_code "
+                "LEFT JOIN material_series_profiles_v2 p ON p.series_id=s.series_id "
+                f"{where}"
+            )
+            rows_sql = f"{V2_MATERIAL_SELECT} {where} ORDER BY {order_by} {direction}, k.updated_at DESC LIMIT ? OFFSET ?"
+        else:
+            clauses, params = self.material_filter_sql(
+                keyword=keyword,
+                top=top,
+                category=category,
+                element=element,
+                status=status,
+            )
+            where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+            order_by, direction = self.material_sort_sql(sort_by, sort_order)
+            count_sql = f"SELECT COUNT(*) AS c FROM managed_materials {where}"
+            rows_sql = f"SELECT * FROM managed_materials {where} ORDER BY {order_by} {direction}, updated_at DESC LIMIT ? OFFSET ?"
         with self.connect() as connection:
-            total = connection.execute(f"SELECT COUNT(*) AS c FROM managed_materials {where}", params).fetchone()["c"]
+            total = connection.execute(count_sql, params).fetchone()["c"]
             rows = connection.execute(
-                f"SELECT * FROM managed_materials {where} ORDER BY {order_by} {direction}, updated_at DESC LIMIT ? OFFSET ?",
+                rows_sql,
                 [*params, page_size, offset],
             ).fetchall()
             materials = self.public_materials([dict(row) for row in rows], connection)
@@ -6217,6 +6528,20 @@ class AdminService:
             "updated_at": "updated_at",
         }
         order_by = sort_columns.get(sort_by, "sort_order")
+        direction = "DESC" if str(sort_order).lower() == "desc" else "ASC"
+        return order_by, direction
+
+    @staticmethod
+    def material_v2_sort_sql(sort_by: str = "sort_order", sort_order: str = "asc") -> tuple[str, str]:
+        sort_columns = {
+            "sort_order": "k.sort_order",
+            "price": "k.price_cents",
+            "size": "k.size_mm",
+            "element": "p.profile_json",
+            "stock": "i.stock",
+            "updated_at": "k.updated_at",
+        }
+        order_by = sort_columns.get(sort_by, "k.sort_order")
         direction = "DESC" if str(sort_order).lower() == "desc" else "ASC"
         return order_by, direction
 
@@ -6268,6 +6593,37 @@ class AdminService:
             )
             value = f"%{keyword}%"
             params.extend([value, value, value, value, value, value, value, value, value])
+        return clauses, params
+
+    @staticmethod
+    def material_v2_filter_sql(
+        keyword: str = "",
+        top: str = "",
+        category: str = "",
+        element: str = "",
+        status: str = "",
+    ) -> tuple[list[str], list[Any]]:
+        clauses: list[str] = []
+        params: list[Any] = []
+        if top:
+            clauses.append("c.type_code=?")
+            params.append(top)
+        if category:
+            clauses.append("c.name=?")
+            params.append(category)
+        if element:
+            element_key = normalize_element_key(element) or element
+            clauses.append("p.profile_json LIKE ?")
+            params.append(f'%"primary_element":"{element_key}"%')
+        if status == "enabled":
+            clauses.append("k.enabled=1")
+        elif status == "disabled":
+            clauses.append("k.enabled=0")
+        keyword = normalize_material_search_keyword(keyword)
+        if keyword:
+            fields = ("k.sku_id", "k.sku_code", "k.name", "c.name", "s.name", "k.grade", "s.material_code", "p.profile_json")
+            clauses.append("(" + " OR ".join(f"{field} LIKE ?" for field in fields) + ")")
+            params.extend([f"%{keyword}%"] * len(fields))
         return clauses, params
 
     def list_material_refs(self, keyword: str = "", limit: int = 1000) -> list[dict[str, Any]]:
@@ -6358,10 +6714,9 @@ class AdminService:
         spu_key = f"{top}::{category}::{series}::{material_code}"
         numeric_sizes = sorted(
             {
-                int(float((item.get("sku") or {}).get("size_mm") or 0))
+                float((item.get("sku") or {}).get("size_mm") or 0)
                 for item in sorted_items
-                if float((item.get("sku") or {}).get("size_mm") or 0).is_integer()
-                and float((item.get("sku") or {}).get("size_mm") or 0) > 0
+                if float((item.get("sku") or {}).get("size_mm") or 0) > 0
             }
         )
         profile_issue_keys: list[str] = []
@@ -6538,7 +6893,7 @@ class AdminService:
         page_size: int | None = None,
     ) -> list[dict[str, Any]] | dict[str, Any]:
         paginated = page is not None or page_size is not None
-        if paginated and not (quality or stock_state or margin or profile_state or include_facets):
+        if paginated and not material_catalog_v2_enabled() and not (quality or stock_state or margin or profile_state or include_facets):
             return self.list_material_spus_paginated(
                 keyword=keyword,
                 top=top,
@@ -6746,6 +7101,23 @@ class AdminService:
     ) -> dict[str, Any]:
         timestamp = now_iso()
         item_id = material_id or payload.get("id") or self.generate_material_id(payload)
+        if material_id and material_catalog_v2_enabled():
+            sku_fields = {
+                key: value
+                for key, value in payload.items()
+                if key in {
+                    "skuId", "name", "grade", "price", "price_per_bead", "size", "size_mm",
+                    "weight", "weight_g", "cost_price", "safety_stock", "stock", "enabled",
+                    "sort_order", "physical_specs",
+                }
+                and value is not None
+            }
+            return self._patch_material_sku_v2(
+                str(item_id),
+                sku_fields,
+                actor=actor,
+                expected_revision=expected_revision,
+            )
         with self.connect() as connection:
             self._ensure_material_columns(connection)
             self._ensure_material_taxonomy_schema(connection)
@@ -6855,6 +7227,7 @@ class AdminService:
                 connection=connection,
                 force_update=has_explicit_knowledge(payload),
             )
+            sync_legacy_sku_to_v2(connection, item_id)
             self.record_material_audit(
                 connection,
                 action="update" if before else "create",
@@ -6884,6 +7257,13 @@ class AdminService:
         changes = {key: value for key, value in (patch or {}).items() if key in allowed and value is not None}
         if not changes:
             raise ValueError("请至少填写一个要更新的 SKU 字段")
+        if material_catalog_v2_enabled():
+            return self._patch_material_sku_v2(
+                clean_id,
+                changes,
+                actor=actor,
+                expected_revision=expected_revision,
+            )
         with self.connect() as connection:
             self._ensure_material_columns(connection)
             row = connection.execute("SELECT * FROM managed_materials WHERE id=?", (clean_id,)).fetchone()
@@ -6919,6 +7299,118 @@ class AdminService:
             actor=actor,
             expected_revision=expected_revision,
         )
+
+    def _patch_material_sku_v2(
+        self,
+        sku_id: str,
+        changes: dict[str, Any],
+        *,
+        actor: dict[str, Any] | None = None,
+        expected_revision: int | None = None,
+    ) -> dict[str, Any]:
+        timestamp = now_iso()
+        with self.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT k.*, i.stock, i.reserved_stock, i.safety_stock
+                FROM material_skus_v2 k
+                JOIN material_inventory_v2 i ON i.sku_id=k.sku_id
+                WHERE k.sku_id=?
+                """,
+                (sku_id,),
+            ).fetchone()
+            if not row:
+                raise ValueError("SKU 不存在，无法更新")
+            before = dict(row)
+            revision = max(1, int(before.get("revision") or 1))
+            if expected_revision is not None and revision != int(expected_revision):
+                raise MaterialConflictError("该 SKU 已被其他操作更新，请刷新后再保存")
+
+            sku_code = str(changes.get("skuId", before.get("sku_code") or "")).strip()
+            if not sku_code:
+                raise ValueError("SKU 编码不能为空")
+            duplicate = connection.execute(
+                "SELECT sku_id FROM material_skus_v2 WHERE sku_code=? AND sku_id<>?",
+                (sku_code, sku_id),
+            ).fetchone()
+            if duplicate:
+                raise ValueError("SKU 编码已存在")
+
+            price_value = changes.get("price_per_bead", changes.get("price"))
+            price_cents = (
+                money_to_cents(price_value, field_name="单颗售价")
+                if price_value not in (None, "")
+                else int(before.get("price_cents") or 0)
+            )
+            cost_cents = (
+                money_to_cents(changes["cost_price"], field_name="成本价")
+                if changes.get("cost_price") not in (None, "")
+                else int(before.get("cost_cents") or 0)
+            )
+            stock = max(0, int(float(changes.get("stock", before.get("stock") or 0))))
+            reserved_stock = max(0, int(before.get("reserved_stock") or 0))
+            if stock < reserved_stock:
+                raise ValueError(f"库存不能低于已预占数量 {reserved_stock}")
+            enabled = bool(changes.get("enabled", before.get("enabled", 1))) and stock > 0
+            if enabled and price_cents <= 1:
+                raise ValueError("0.01 元及以下仅可作为测试价保存，不能直接启用销售")
+            physical_specs = normalize_sku_physical_specs(
+                changes.get("physical_specs", before.get("physical_specs_json") or {})
+            )
+            next_revision = revision + 1
+            condition = " AND revision=?" if expected_revision is not None else ""
+            params: list[Any] = [
+                sku_code,
+                str(changes.get("name", before.get("name") or "")).strip(),
+                str(changes.get("grade", before.get("grade") or "")).strip(),
+                price_cents,
+                cost_cents,
+                float(changes.get("size_mm", changes.get("size", before.get("size_mm") or 0))),
+                float(changes.get("weight_g", changes.get("weight", before.get("weight_g") or 0))),
+                json_text(physical_specs),
+                1 if enabled else 0,
+                int(changes.get("sort_order", before.get("sort_order") or 0)),
+                timestamp,
+                sku_id,
+            ]
+            if expected_revision is not None:
+                params.append(revision)
+            cursor = connection.execute(
+                """
+                UPDATE material_skus_v2
+                SET sku_code=?, name=?, grade=?, price_cents=?, cost_cents=?, size_mm=?, weight_g=?,
+                    physical_specs_json=?, enabled=?, sort_order=?, updated_at=?, revision=revision+1
+                WHERE sku_id=?""" + condition,
+                params,
+            )
+            if cursor.rowcount != 1:
+                raise MaterialConflictError("该 SKU 已被其他操作更新，请刷新后再保存")
+            inventory_cursor = connection.execute(
+                """
+                UPDATE material_inventory_v2
+                SET stock=?, safety_stock=?, revision=revision+1, updated_at=?
+                WHERE sku_id=? AND reserved_stock<=?
+                """,
+                (
+                    stock,
+                    max(0, int(float(changes.get("safety_stock", before.get("safety_stock") or 0)))),
+                    timestamp,
+                    sku_id,
+                    stock,
+                ),
+            )
+            if inventory_cursor.rowcount != 1:
+                raise ValueError("库存不能低于已预占数量")
+            after = fetch_material_row_v2(connection, sku_id) or {}
+            self.record_material_audit(
+                connection,
+                action="update_v2",
+                before=before,
+                after={**after, "revision": next_revision},
+                actor=actor,
+            )
+        invalidate_material_cache()
+        return self.get_material(sku_id)
 
     def material_token(self, value: Any, fallback: str = "mat") -> str:
         text = str(value or "").strip().lower()
@@ -7048,6 +7540,10 @@ class AdminService:
 
     def get_material(self, material_id: str) -> dict[str, Any]:
         with self.connect() as connection:
+            if material_catalog_v2_enabled():
+                v2_row = fetch_material_row_v2(connection, material_id)
+                if v2_row:
+                    return self.public_material(v2_row, connection)
             row = connection.execute("SELECT * FROM managed_materials WHERE id = ?", (material_id,)).fetchone()
             if row:
                 return self.public_material(dict(row), connection)
@@ -7060,6 +7556,13 @@ class AdminService:
         actor: dict[str, Any] | None = None,
         expected_revision: int | None = None,
     ) -> None:
+        if material_catalog_v2_enabled():
+            self._delete_material_v2(
+                material_id,
+                actor=actor,
+                expected_revision=expected_revision,
+            )
+            return
         with self.connect() as connection:
             self._ensure_material_columns(connection)
             if use_mysql() and not self._force_sqlite:
@@ -7090,6 +7593,55 @@ class AdminService:
                 raise ValueError("SKU 存在未完成库存预占，不能删除")
             if before:
                 self.record_material_audit(connection, action="delete", before=before, actor=actor)
+                sync_legacy_sku_to_v2(connection, material_id)
+        invalidate_material_cache()
+
+    def _delete_material_v2(
+        self,
+        material_id: str,
+        *,
+        actor: dict[str, Any] | None = None,
+        expected_revision: int | None = None,
+    ) -> None:
+        with self.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT k.*, i.stock, i.reserved_stock, i.safety_stock
+                FROM material_skus_v2 k
+                JOIN material_inventory_v2 i ON i.sku_id=k.sku_id
+                WHERE k.sku_id=?
+                """,
+                (material_id,),
+            ).fetchone()
+            if not row:
+                return
+            before = dict(row)
+            if expected_revision is not None and int(before.get("revision") or 1) != int(expected_revision):
+                raise MaterialConflictError("该 SKU 已被其他操作更新，请刷新后再删除")
+            if int(before.get("reserved_stock") or 0) > 0:
+                raise ValueError("SKU 存在未完成库存预占，不能删除")
+            condition = " AND revision=?" if expected_revision is not None else ""
+            params: list[Any] = [material_id]
+            if expected_revision is not None:
+                params.append(int(expected_revision))
+            inventory_cursor = connection.execute(
+                "DELETE FROM material_inventory_v2 WHERE sku_id=? AND reserved_stock=0",
+                (material_id,),
+            )
+            if inventory_cursor.rowcount != 1:
+                raise ValueError("SKU 存在未完成库存预占，不能删除")
+            cursor = connection.execute(
+                "DELETE FROM material_skus_v2 WHERE sku_id=?" + condition,
+                params,
+            )
+            if cursor.rowcount != 1:
+                raise MaterialConflictError("该 SKU 已被其他操作更新，请刷新后再删除")
+            self.record_material_audit(
+                connection,
+                action="delete_v2",
+                before=before,
+                actor=actor,
+            )
         invalidate_material_cache()
 
     def batch_update_materials(
@@ -7103,6 +7655,14 @@ class AdminService:
         clean_ids = list(dict.fromkeys(str(item).strip() for item in ids if str(item).strip()))
         if not clean_ids:
             raise ValueError("请选择要操作的珠材")
+        if material_catalog_v2_enabled():
+            return self._batch_update_materials_v2(
+                clean_ids,
+                action,
+                value=value,
+                actor=actor,
+                expected_revisions=expected_revisions,
+            )
         placeholders = ", ".join(["?"] * len(clean_ids))
         timestamp = now_iso()
         with self.connect() as connection:
@@ -7227,6 +7787,8 @@ class AdminService:
                     clean_ids,
                 ).fetchall()
                 after_by_id = {row["id"]: dict(row) for row in after_rows}
+            for item_id in clean_ids:
+                sync_legacy_sku_to_v2(connection, item_id)
             for before in before_rows:
                 self.record_material_audit(
                     connection,
@@ -7237,6 +7799,111 @@ class AdminService:
                 )
         invalidate_material_cache()
         return {"action": action, "requested": len(clean_ids), "affected": affected}
+
+    def _batch_update_materials_v2(
+        self,
+        clean_ids: list[str],
+        action: str,
+        *,
+        value: Any = None,
+        actor: dict[str, Any] | None = None,
+        expected_revisions: dict[str, int] | None = None,
+    ) -> dict[str, Any]:
+        placeholders = ", ".join(["?"] * len(clean_ids))
+        timestamp = now_iso()
+        with self.connect() as connection:
+            lock_clause = " FOR UPDATE" if use_mysql() and not self._force_sqlite else ""
+            rows = [
+                dict(row)
+                for row in connection.execute(
+                    f"""
+                    SELECT k.*, i.stock, i.reserved_stock, i.safety_stock
+                    FROM material_skus_v2 k
+                    JOIN material_inventory_v2 i ON i.sku_id=k.sku_id
+                    WHERE k.sku_id IN ({placeholders}){lock_clause}
+                    """,
+                    clean_ids,
+                ).fetchall()
+            ]
+            if len(rows) != len(clean_ids):
+                raise ValueError("部分 SKU 已不存在，请刷新列表后重试")
+            if expected_revisions is not None:
+                if any(item_id not in expected_revisions for item_id in clean_ids):
+                    raise ValueError("批量操作缺少 SKU 版本号，请刷新列表后重试")
+                if any(
+                    int(row.get("revision") or 1) != int(expected_revisions[str(row["sku_id"])])
+                    for row in rows
+                ):
+                    raise MaterialConflictError("部分 SKU 已被其他操作更新，请刷新后重新选择")
+
+            if action == "enable":
+                if any(int(row.get("stock") or 0) <= 0 for row in rows):
+                    raise ValueError("存在库存为 0 的材料，请先补充库存后再启用")
+                if any(int(row.get("price_cents") or 0) <= 1 for row in rows):
+                    raise ValueError("0.01 元及以下为测试价，不能启用销售")
+                cursor = connection.execute(
+                    f"UPDATE material_skus_v2 SET enabled=1, updated_at=?, revision=revision+1 WHERE sku_id IN ({placeholders})",
+                    [timestamp, *clean_ids],
+                )
+            elif action == "disable":
+                cursor = connection.execute(
+                    f"UPDATE material_skus_v2 SET enabled=0, updated_at=?, revision=revision+1 WHERE sku_id IN ({placeholders})",
+                    [timestamp, *clean_ids],
+                )
+            elif action == "price":
+                price_cents = money_to_cents(value, field_name="价格")
+                if price_cents <= 1 and any(bool(row.get("enabled")) for row in rows):
+                    raise ValueError("0.01 元及以下为测试价，请先停用 SKU 后再修改价格")
+                cursor = connection.execute(
+                    f"UPDATE material_skus_v2 SET price_cents=?, updated_at=?, revision=revision+1 WHERE sku_id IN ({placeholders})",
+                    [price_cents, timestamp, *clean_ids],
+                )
+            elif action in {"stock", "safety_stock"}:
+                quantity = max(0, int(float(value)))
+                if action == "stock" and any(quantity < int(row.get("reserved_stock") or 0) for row in rows):
+                    raise ValueError("库存不能低于已预占数量")
+                column = "stock" if action == "stock" else "safety_stock"
+                cursor = connection.execute(
+                    f"UPDATE material_inventory_v2 SET {column}=?, updated_at=?, revision=revision+1 "
+                    f"WHERE sku_id IN ({placeholders})"
+                    + (" AND reserved_stock<=?" if action == "stock" else ""),
+                    [quantity, timestamp, *clean_ids, *([quantity] if action == "stock" else [])],
+                )
+                if cursor.rowcount != len(clean_ids):
+                    raise ValueError("库存不能低于已预占数量")
+                connection.execute(
+                    f"UPDATE material_skus_v2 SET enabled=CASE WHEN ? > 0 THEN enabled ELSE 0 END, "
+                    f"updated_at=?, revision=revision+1 WHERE sku_id IN ({placeholders})",
+                    [quantity if action == "stock" else 1, timestamp, *clean_ids],
+                )
+            elif action == "delete":
+                if any(int(row.get("reserved_stock") or 0) > 0 for row in rows):
+                    raise ValueError("SKU 存在未完成库存预占，不能删除")
+                inventory_cursor = connection.execute(
+                    f"DELETE FROM material_inventory_v2 WHERE sku_id IN ({placeholders}) AND reserved_stock=0",
+                    clean_ids,
+                )
+                if inventory_cursor.rowcount != len(clean_ids):
+                    raise ValueError("SKU 存在未完成库存预占，不能删除")
+                cursor = connection.execute(
+                    f"DELETE FROM material_skus_v2 WHERE sku_id IN ({placeholders})",
+                    clean_ids,
+                )
+            else:
+                raise ValueError("不支持的批量操作")
+            if cursor.rowcount != len(clean_ids):
+                raise MaterialConflictError("部分 SKU 已被其他操作更新，请刷新后重新选择")
+            for before in rows:
+                after = None if action == "delete" else fetch_material_row_v2(connection, str(before["sku_id"]))
+                self.record_material_audit(
+                    connection,
+                    action=f"batch_{action}_v2",
+                    before=before,
+                    after=after,
+                    actor=actor,
+                )
+        invalidate_material_cache()
+        return {"action": action, "requested": len(clean_ids), "affected": len(clean_ids)}
 
     def public_home_banner(self, row: dict[str, Any]) -> dict[str, Any]:
         return {

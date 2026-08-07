@@ -47,3 +47,7 @@ def kuaidi100_subscribe_enabled() -> bool:
 
 def web_login_pairing_enabled() -> bool:
     return enabled("WEB_LOGIN_PAIRING_ENABLED", False)
+
+
+def material_catalog_v2_enabled() -> bool:
+    return enabled("MATERIAL_CATALOG_V2_ENABLED", False)

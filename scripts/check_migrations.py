@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+import gc
+from contextlib import closing
 import os
 import shutil
 import sqlite3
@@ -23,16 +25,16 @@ def check_sqlite() -> None:
         root = Path(directory)
         database = root / "migration.db"
         restored = root / "restored.db"
-        AssessmentRepository(database)
-        OrderService(database)
-        AdminService(database)
+        repository = AssessmentRepository(database)
+        order_service = OrderService(database)
+        admin_service = AdminService(database)
         expected = [migration.VERSION for migration in MIGRATIONS]
         if upgrade("sqlite", database) != expected:
             raise RuntimeError("clean upgrade did not apply every migration")
         if upgrade("sqlite", database):
             raise RuntimeError("second upgrade was not idempotent")
         shutil.copy2(database, restored)
-        with sqlite3.connect(restored) as connection:
+        with closing(sqlite3.connect(restored)) as connection:
             active = connection.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0]
             history = connection.execute("SELECT COUNT(*) FROM schema_migration_history").fetchone()[0]
         if active != len(expected) or history != len(expected):
@@ -41,6 +43,10 @@ def check_sqlite() -> None:
             raise RuntimeError("downgrade order mismatch")
         if upgrade("sqlite", database) != expected:
             raise RuntimeError("upgrade after downgrade failed")
+        # Some Windows SQLite drivers keep finalizer-owned file handles alive
+        # until collection, which otherwise makes TemporaryDirectory cleanup fail.
+        del repository, order_service, admin_service
+        gc.collect()
 
 
 def check_mysql() -> None:

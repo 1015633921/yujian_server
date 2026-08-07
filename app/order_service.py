@@ -21,7 +21,13 @@ import httpx
 from .repository import DB_PATH
 from .bracelet_sizing import BRACELET_FIT_MODEL_VERSION, calculate_bracelet_fit
 from .database import connect_database, integrity_errors, runtime_schema_mutation_allowed, use_mysql
-from .feature_flags import kuaidi100_subscribe_enabled, mock_trade_enabled, payment_enabled
+from .feature_flags import (
+    kuaidi100_subscribe_enabled,
+    material_catalog_v2_enabled,
+    mock_trade_enabled,
+    payment_enabled,
+)
+from .material_catalog_v2 import fetch_order_material_rows_v2
 from .materials import clean_gallery_image_urls, fetch_db_series_assets, series_asset_key
 from .money import stored_cents
 from .observability import current_request_id, log_event, metrics
@@ -1578,6 +1584,12 @@ class OrderService:
             occupied_slots.add(slot)
 
     def fetch_locked_material_rows(self, connection, references: set[str]):
+        if material_catalog_v2_enabled():
+            return fetch_order_material_rows_v2(
+                connection,
+                references,
+                lock=self.mysql_transactions,
+            )
         marks = ", ".join(["?"] * len(references))
         lock_clause = " FOR UPDATE" if self.mysql_transactions else ""
         return connection.execute(
@@ -1603,14 +1615,33 @@ class OrderService:
         for sku_id in sorted(reservations):
             reservation = reservations[sku_id]
             quantity = int(reservation["quantity"])
-            cursor = connection.execute(
-                """
-                UPDATE managed_materials
-                SET reserved_stock = reserved_stock + ?
-                WHERE id = ? AND enabled = 1 AND stock - reserved_stock >= ?
-                """,
-                (quantity, sku_id, quantity),
-            )
+            if material_catalog_v2_enabled():
+                cursor = connection.execute(
+                    """
+                    UPDATE material_inventory_v2
+                    SET reserved_stock = reserved_stock + ?, revision = revision + 1
+                    WHERE sku_id = ? AND stock - reserved_stock >= ?
+                      AND EXISTS (
+                          SELECT 1
+                          FROM material_skus_v2 k
+                          JOIN material_series_v2 s ON s.series_id=k.series_id
+                          JOIN material_categories_v2 c ON c.category_id=s.category_id
+                          JOIN material_types t ON t.type_code=c.type_code
+                          WHERE k.sku_id=material_inventory_v2.sku_id
+                            AND k.enabled=1 AND s.enabled=1 AND c.enabled=1 AND t.enabled=1
+                      )
+                    """,
+                    (quantity, sku_id, quantity),
+                )
+            else:
+                cursor = connection.execute(
+                    """
+                    UPDATE managed_materials
+                    SET reserved_stock = reserved_stock + ?
+                    WHERE id = ? AND enabled = 1 AND stock - reserved_stock >= ?
+                    """,
+                    (quantity, sku_id, quantity),
+                )
             if cursor.rowcount != 1:
                 raise OrderPricingError(f"SKU 库存不足：{reservation['name']}")
             connection.execute(
@@ -1653,14 +1684,24 @@ class OrderService:
             if row["status"] != "reserved":
                 raise ValueError("库存预占已释放，不能确认支付")
             quantity = int(row["quantity"])
-            cursor = connection.execute(
-                """
-                UPDATE managed_materials
-                SET stock = stock - ?, reserved_stock = reserved_stock - ?
-                WHERE id = ? AND stock >= ? AND reserved_stock >= ?
-                """,
-                (quantity, quantity, row["sku_id"], quantity, quantity),
-            )
+            if material_catalog_v2_enabled():
+                cursor = connection.execute(
+                    """
+                    UPDATE material_inventory_v2
+                    SET stock = stock - ?, reserved_stock = reserved_stock - ?, revision = revision + 1
+                    WHERE sku_id = ? AND stock >= ? AND reserved_stock >= ?
+                    """,
+                    (quantity, quantity, row["sku_id"], quantity, quantity),
+                )
+            else:
+                cursor = connection.execute(
+                    """
+                    UPDATE managed_materials
+                    SET stock = stock - ?, reserved_stock = reserved_stock - ?
+                    WHERE id = ? AND stock >= ? AND reserved_stock >= ?
+                    """,
+                    (quantity, quantity, row["sku_id"], quantity, quantity),
+                )
             if cursor.rowcount != 1:
                 raise RuntimeError("库存预占确认失败，事务已回滚")
             connection.execute(
@@ -1686,14 +1727,24 @@ class OrderService:
             if row["status"] == "confirmed":
                 continue
             quantity = int(row["quantity"])
-            cursor = connection.execute(
-                """
-                UPDATE managed_materials
-                SET reserved_stock = reserved_stock - ?
-                WHERE id = ? AND reserved_stock >= ?
-                """,
-                (quantity, row["sku_id"], quantity),
-            )
+            if material_catalog_v2_enabled():
+                cursor = connection.execute(
+                    """
+                    UPDATE material_inventory_v2
+                    SET reserved_stock = reserved_stock - ?, revision = revision + 1
+                    WHERE sku_id = ? AND reserved_stock >= ?
+                    """,
+                    (quantity, row["sku_id"], quantity),
+                )
+            else:
+                cursor = connection.execute(
+                    """
+                    UPDATE managed_materials
+                    SET reserved_stock = reserved_stock - ?
+                    WHERE id = ? AND reserved_stock >= ?
+                    """,
+                    (quantity, row["sku_id"], quantity),
+                )
             if cursor.rowcount != 1:
                 raise RuntimeError("库存预占释放失败，事务已回滚")
             connection.execute(
@@ -1725,10 +1776,16 @@ class OrderService:
             )
             if cursor.rowcount != 1:
                 continue
-            connection.execute(
-                "UPDATE managed_materials SET stock = stock + ? WHERE id = ?",
-                (quantity, row["sku_id"]),
-            )
+            if material_catalog_v2_enabled():
+                connection.execute(
+                    "UPDATE material_inventory_v2 SET stock = stock + ?, revision = revision + 1 WHERE sku_id = ?",
+                    (quantity, row["sku_id"]),
+                )
+            else:
+                connection.execute(
+                    "UPDATE managed_materials SET stock = stock + ? WHERE id = ?",
+                    (quantity, row["sku_id"]),
+                )
             restocked += 1
         return restocked
 

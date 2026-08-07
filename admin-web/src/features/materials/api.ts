@@ -347,7 +347,7 @@ export function listMaterialOptions(_signal?: AbortSignal): Promise<MaterialOpti
   // directory and profile routes, so navigating while it is in flight must
   // not cancel it for the next route.
   const requestGeneration = materialOptionsCacheGeneration
-  const request = apiRequest<MaterialOptionsPayload>('/api/v1/admin/material-options')
+  const request = apiRequest<MaterialOptionsPayload>('/api/v1/admin/material-editor-options')
     .then((payload) => {
       if (requestGeneration === materialOptionsCacheGeneration) materialOptionsCache = payload
       return payload

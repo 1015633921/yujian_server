@@ -422,7 +422,9 @@ def test_p1c_runtime_migration_round_trip(tmp_path):
     with sqlite3.connect(db_path) as connection:
         tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     assert {"runtime_task_leases", "runtime_task_runs"}.issubset(tables)
-    assert downgrade("sqlite", db_path, steps=19) == [
+    assert downgrade("sqlite", db_path, steps=21) == [
+        "20260807_25_material_catalog_v2",
+        "20260807_24_material_rule_cleanup",
         "20260807_23_community_post_image_gallery",
         "20260806_22_material_catalog_indexes",
         "20260806_21_material_sku_revisions",
@@ -464,4 +466,6 @@ def test_p1c_runtime_migration_round_trip(tmp_path):
         "20260806_21_material_sku_revisions",
         "20260806_22_material_catalog_indexes",
         "20260807_23_community_post_image_gallery",
+        "20260807_24_material_rule_cleanup",
+        "20260807_25_material_catalog_v2",
     ]

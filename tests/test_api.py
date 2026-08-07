@@ -271,6 +271,78 @@ def test_admin_material_options_expose_field_governance_specs(tmp_path):
     assert specs["governance"]["enum_first"] is True
 
 
+def test_material_editor_options_never_hydrates_the_catalog_tree(tmp_path, monkeypatch):
+    from app.admin_service import AdminService
+
+    service = AdminService(tmp_path / "material-editor-options.db")
+    monkeypatch.setattr(
+        service,
+        "_sync_material_taxonomy_from_materials",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("catalog sync must not run")),
+    )
+
+    payload = service.material_editor_options_payload()
+
+    assert payload["elements"]
+    assert payload["option_items"]
+    assert "taxonomy" not in payload
+    assert "material_types" not in payload
+    assert "field_specs" not in payload
+
+
+def test_public_material_queries_can_cut_over_to_catalog_v2(monkeypatch):
+    from uuid import uuid4
+
+    from app import admin_api as admin_api_module
+    from app.materials import list_db_materials, list_db_materials_page, material_catalog_version
+
+    token = uuid4().hex[:10]
+    category_name = f"v2-category-{token}"
+    series_name = f"v2-series-{token}"
+    category = admin_api_module.admin_service.save_material_category(
+        {"top": "bead", "name": category_name}
+    )
+    series = admin_api_module.admin_service.save_material_series(
+        {
+            "category_id": category["id"],
+            "name": series_name,
+            "material_code": f"v2_material_{token}",
+            "image_url": f"https://cdn.example.com/{token}-cover.webp",
+            "image_urls": [f"https://cdn.example.com/{token}-gallery.webp"],
+        }
+    )
+    saved = admin_api_module.admin_service.save_material(
+        {
+            "id": f"sku-v2-public-{token}",
+            "top": "bead",
+            "category": category_name,
+            "series": series_name,
+            "series_id": series["id"],
+            "name": f"{series_name} 8.375mm",
+            "price": "67.89",
+            "size": 8.375,
+            "weight": 1.125,
+            "stock": 9,
+            "enabled": True,
+        }
+    )
+    sku_id = saved["sku"]["id"]
+    monkeypatch.setenv("MATERIAL_CATALOG_V2_ENABLED", "true")
+
+    rows = list_db_materials(ids=[sku_id])
+    page = list_db_materials_page(category=category_name, page=1, page_size=10)
+
+    assert rows is not None and len(rows) == 1
+    assert rows[0]["id"] == sku_id
+    assert rows[0]["price"] == 67.89
+    assert rows[0]["size"] == 8.375
+    assert rows[0]["image_url"].endswith(f"/{token}-cover.webp")
+    assert rows[0]["image_urls"] == [f"https://cdn.example.com/{token}-gallery.webp"]
+    assert page is not None and page[1]["total"] == 1
+    assert page[0][0]["id"] == sku_id
+    assert material_catalog_version()["version"].startswith("v2:")
+
+
 def test_admin_material_requires_option_values_to_exist_in_dictionary(tmp_path):
     from app.admin_service import AdminService
 

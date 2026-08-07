@@ -47,12 +47,16 @@ def test_p0b_migration_is_additive_idempotent_and_independently_reversible(tmp_p
         "20260806_21_material_sku_revisions",
         "20260806_22_material_catalog_indexes",
         "20260807_23_community_post_image_gallery",
+        "20260807_24_material_rule_cleanup",
+        "20260807_25_material_catalog_v2",
     ]
     assert upgrade("sqlite", db_path) == []
     assert {"idempotency_key", "request_hash", "reservation_expires_at"}.issubset(columns(db_path, "orders"))
     assert "reserved_stock" in columns(db_path, "managed_materials")
     assert {"order_requests", "inventory_reservations", "user_sessions"}.issubset(tables(db_path))
 
+    assert downgrade("sqlite", db_path, steps=1) == ["20260807_25_material_catalog_v2"]
+    assert downgrade("sqlite", db_path, steps=1) == ["20260807_24_material_rule_cleanup"]
     assert downgrade("sqlite", db_path, steps=1) == ["20260807_23_community_post_image_gallery"]
     assert downgrade("sqlite", db_path, steps=1) == ["20260806_22_material_catalog_indexes"]
     assert downgrade("sqlite", db_path, steps=1) == ["20260806_21_material_sku_revisions"]
@@ -110,4 +114,6 @@ def test_p0b_migration_is_additive_idempotent_and_independently_reversible(tmp_p
         "20260806_21_material_sku_revisions",
         "20260806_22_material_catalog_indexes",
         "20260807_23_community_post_image_gallery",
+        "20260807_24_material_rule_cleanup",
+        "20260807_25_material_catalog_v2",
     ]
