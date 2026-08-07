@@ -160,6 +160,11 @@ function editCategory(item: Pick<MaterialDirectoryCategoryOption, 'id' | 'name' 
   wasEnabled.value = item.enabled
 }
 
+function categorySortLabel(item: Pick<MaterialDirectoryCategoryOption, 'sort_order'>): string {
+  const value = Number(item.sort_order || 0)
+  return value > 0 ? String(value) : '未设置'
+}
+
 function editSeries(item: MaterialSeries): void {
   Object.assign(editor, {
     kind: 'series',
@@ -462,6 +467,48 @@ onBeforeUnmount(() => {
             共 {{ total }} 个品种 · 当前页覆盖 {{ visibleCategoryCount }} 个分类 · {{ selectedType.sku_count }} 个 SKU
           </p>
         </div>
+
+        <section
+          v-if="selectedType && categoryOptions.length"
+          class="directory-category-order"
+          aria-label="二级分类排序"
+        >
+          <header>
+            <div>
+              <span>SECOND LEVEL</span>
+              <h3>二级分类排序</h3>
+              <p>数值越大越靠前；0 表示未设置，会排在已设置分类之后。</p>
+            </div>
+            <button
+              v-if="canManage"
+              class="directory-category-order__create"
+              type="button"
+              @click="resetEditor('category')"
+            >
+              新建二级分类
+            </button>
+          </header>
+          <div class="directory-category-order__list">
+            <button
+              v-for="item in categoryOptions"
+              :key="item.id"
+              class="directory-category-order__item"
+              :class="{
+                'is-current': editor.kind === 'category' && editor.id === item.id,
+                'is-disabled': !item.enabled,
+              }"
+              type="button"
+              @click="editCategory(item)"
+            >
+              <span class="directory-category-order__value">{{ categorySortLabel(item) }}</span>
+              <span class="directory-category-order__name">
+                <strong>{{ item.name }}</strong>
+                <small>{{ item.series_count }} 个品种 · {{ item.enabled ? '已启用' : '已停用' }}</small>
+              </span>
+              <span class="directory-category-order__action">{{ canManage ? '设置排序' : '查看排序' }} →</span>
+            </button>
+          </div>
+        </section>
 
         <form
           v-if="selectedType"
@@ -804,7 +851,7 @@ onBeforeUnmount(() => {
             ></label>
           </div>
           <label>
-            <span>排序值</span>
+            <span>{{ editor.kind === 'category' ? '二级分类排序值（数值越大越靠前）' : '排序值' }}</span>
             <input
               v-model.number="editor.sortOrder"
               :disabled="!canManage"
