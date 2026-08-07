@@ -432,9 +432,9 @@ def insert_material_knowledge(connection: Any, knowledge: dict[str, Any], timest
         INSERT INTO material_knowledge
         (code, name, primary_element, secondary_elements_json, chakras_json, chakra_weights_json,
          effects_json, wish_pools_json, color_family, mood_tags_json, visual_tags_json, story,
-         allowed_roles_json, conflict_codes_json, match_rules_json, care_tags_json,
+         allowed_roles_json, match_rules_json, care_tags_json,
          material_params_json, asset_json, enabled, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             item["code"],
@@ -450,7 +450,6 @@ def insert_material_knowledge(connection: Any, knowledge: dict[str, Any], timest
             item["visual_tags_json"],
             item["story"],
             item["allowed_roles_json"],
-            item["conflict_codes_json"],
             item["match_rules_json"],
             item["care_tags_json"],
             item["material_params_json"],

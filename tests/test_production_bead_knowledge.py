@@ -23,7 +23,6 @@ def test_all_production_bead_profiles_are_complete_and_use_supported_options():
         assert set(profile["care_tags"]) <= VALID_OPTIONS["care"], code
         assert profile["story"].count("。") >= 3, code
         assert "传统文化和设计灵感参考" in profile["story"], code
-        assert profile["conflict_codes"] == [], code
 
 
 def test_high_visual_weight_beads_have_density_or_balance_rules():

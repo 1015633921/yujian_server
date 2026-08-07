@@ -67,7 +67,6 @@ def knowledge(
         "visual_tags": visual_tags,
         "story": story,
         "allowed_roles": ["primary", "support", "accent"],
-        "conflict_codes": [],
         "match_rules": ["no_limit"],
         "care_tags": care_tags or ["clean_regularly", "storage_separate"],
         "material_params": {
@@ -905,7 +904,6 @@ KNOWLEDGE_COLUMNS = [
     "visual_tags_json",
     "story",
     "allowed_roles_json",
-    "conflict_codes_json",
     "match_rules_json",
     "care_tags_json",
     "material_params_json",
@@ -931,7 +929,6 @@ def db_item(code: str, item: dict[str, Any], timestamp: str) -> dict[str, Any]:
         "visual_tags_json": j(item["visual_tags"]),
         "story": item["story"],
         "allowed_roles_json": j(item["allowed_roles"]),
-        "conflict_codes_json": j(item["conflict_codes"]),
         "match_rules_json": j(item["match_rules"]),
         "care_tags_json": j(item["care_tags"]),
         "material_params_json": j(item["material_params"]),

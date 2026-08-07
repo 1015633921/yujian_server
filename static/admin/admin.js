@@ -1,6 +1,8 @@
 const $ = id => document.getElementById(id);
 const ADMIN_BASE_PATH = window.location.pathname.startsWith('/test-api/') ? '/test-api' : '';
 const ADMIN_TOKEN_KEY = ADMIN_BASE_PATH ? 'adminToken:test' : 'adminToken:prod';
+const MATERIAL_ADMIN_META_CACHE_TTL_MS = 5 * 60 * 1000;
+let materialOptionsRequest = null;
 const state = {
   token: localStorage.getItem(ADMIN_TOKEN_KEY) || '',
   admin: null,
@@ -260,7 +262,7 @@ async function printPackingSlip(id){
 }
 async function registerAdmin(){$('authMsg').textContent='公开注册已关闭，请由管理员在后台手动创建子账号'}
 async function login(){try{const d=await api('/api/v1/admin/login',{method:'POST',body:JSON.stringify({username:formValue('username'),password:formValue('password')})});state.token=d.token;state.admin=d.admin;localStorage.setItem(ADMIN_TOKEN_KEY,d.token);await boot();}catch(e){$('authMsg').textContent=e.message}}
-async function logout(){try{await api('/api/v1/admin/logout',{method:'POST'})}catch(e){}localStorage.removeItem(ADMIN_TOKEN_KEY);location.reload()}
+async function logout(){try{await api('/api/v1/admin/logout',{method:'POST'})}catch(e){}clearMaterialAdminMetaSessionCache();localStorage.removeItem(ADMIN_TOKEN_KEY);location.reload()}
 async function boot(){
   try{
     state.admin=state.admin||await api('/api/v1/admin/me');$('authView').classList.add('hide');$('appView').classList.remove('hide');
@@ -1538,12 +1540,49 @@ function seriesForCategoryName(top,categoryName,includeDisabled=false){
   const category=categoryForName(top,categoryName);
   return (category?.series||[]).filter(x=>includeDisabled||x.enabled!==false);
 }
+function materialAdminMetaCacheKey(){
+  const scope=String(state.admin?.admin_id||state.admin?.username||'session').trim()||'session';
+  return `materialAdminMeta:v1:${ADMIN_BASE_PATH||'prod'}:${scope}`;
+}
+function readMaterialAdminMetaSessionCache(){
+  try{
+    if(typeof sessionStorage==='undefined')return null;
+    const cached=JSON.parse(sessionStorage.getItem(materialAdminMetaCacheKey())||'null');
+    if(!cached||Date.now()-Number(cached.cachedAt||0)>MATERIAL_ADMIN_META_CACHE_TTL_MS||!cached.data)return null;
+    return cached.data;
+  }catch(e){return null}
+}
+function writeMaterialAdminMetaSessionCache(data){
+  try{
+    if(typeof sessionStorage!=='undefined')sessionStorage.setItem(materialAdminMetaCacheKey(),JSON.stringify({cachedAt:Date.now(),data}));
+  }catch(e){}
+}
+function clearMaterialAdminMetaSessionCache(){
+  try{if(typeof sessionStorage!=='undefined')sessionStorage.removeItem(materialAdminMetaCacheKey())}catch(e){}
+}
+function applyMaterialAdminMeta(data){
+  const payload=data&&typeof data==='object'?data:{};
+  state.cache.materialOptions={...DEFAULT_MATERIAL_OPTIONS,...payload};
+  state.cache.materialTypes=Array.isArray(payload.material_types)?payload.material_types:[];
+  state.cache.materialTaxonomy=Array.isArray(payload.taxonomy)?payload.taxonomy:[];
+  return payload;
+}
+async function requestMaterialAdminMeta(){
+  if(materialOptionsRequest)return materialOptionsRequest;
+  materialOptionsRequest=api('/api/v1/admin/material-options')
+    .then(data=>{
+      const payload=applyMaterialAdminMeta(data);
+      writeMaterialAdminMetaSessionCache(payload);
+      return payload;
+    })
+    .finally(()=>{materialOptionsRequest=null});
+  return materialOptionsRequest;
+}
 async function ensureMaterialAdminMeta(){
   if(!state.cache.materialOptions){
-    const data=await api('/api/v1/admin/material-options');
-    state.cache.materialOptions={...DEFAULT_MATERIAL_OPTIONS,...data};
-    state.cache.materialTypes=data.material_types||[];
-    state.cache.materialTaxonomy=data.taxonomy||[];
+    const cached=readMaterialAdminMetaSessionCache();
+    if(cached)applyMaterialAdminMeta(cached);
+    else await requestMaterialAdminMeta();
   }
   populateMaterialDirectoryControls();
   populateMaterialCategoryFilter();
@@ -1560,15 +1599,21 @@ function populateMaterialDirectoryControls(){
   setMaterialTypeSelectOptions('catalogCategoryTypeFilter',{includeAll:true});
   setMaterialTypeSelectOptions('catalogVarietyTypeFilter',{includeAll:true});
 }
+function materialCategoryFilterItems(top=''){
+  const seen=new Set();
+  return (top?categoriesForTop(top):taxonomyCategories()).filter(item=>{
+    const name=String(item?.name||'').trim();
+    if(!name||seen.has(name))return false;
+    seen.add(name);
+    return true;
+  });
+}
 function populateMaterialCategoryFilter(){
   const select=$('materialCategory');if(!select)return;
   const top=formValue('materialTop');
-  const show=!!top;
-  select.classList.toggle('hide',!show);
-  if(!show){select.value='';return}
   const current=select.value;
-  const categories=categoriesForTop(top);
-  select.innerHTML=`<option value="">全部${esc(topLabel(top))}分类</option>${categories.map(x=>`<option value="${esc(x.name)}">${esc(x.name)}</option>`).join('')}`;
+  const categories=materialCategoryFilterItems(top);
+  select.innerHTML=`<option value="">全部类目</option>${categories.map(x=>`<option value="${esc(x.name)}">${esc(x.name)}</option>`).join('')}`;
   select.value=categories.some(x=>x.name===current)?current:'';
 }
 async function handleMaterialTopChange(){populateMaterialCategoryFilter();await loadMaterials()}
@@ -1667,7 +1712,7 @@ function materialFilterParams(){
   return {
     keyword:formValue('materialKeyword').normalize('NFKC').replace(/[\u200b\u200c\u200d\ufeff]/g,'').replace(/\s+/g,' ').trim(),
     top:formValue('materialTop'),
-    category:formValue('materialTop')?formValue('materialCategory'):'',
+    category:formValue('materialCategory'),
     element:formValue('materialElement'),
     status:formValue('materialStatus'),
     stock_state:formValue('materialStockState'),
@@ -1910,7 +1955,7 @@ function renderMaterialsTable(){
 function toggleMaterialGroup(key,checked){const g=materialGroups().find(x=>x.key===key);(g?.items||[]).forEach(x=>checked?state.materialUi.selected.add(matSku(x).id):state.materialUi.selected.delete(matSku(x).id));renderMaterialsTable()}
 function toggleAllMaterials(checked){(state.cache.materials||[]).forEach(x=>checked?state.materialUi.selected.add(matSku(x).id):state.materialUi.selected.delete(matSku(x).id));renderMaterialsTable()}
 function selectedMaterialIds(){return [...state.materialUi.selected].filter(id=>(state.cache.materials||[]).some(x=>matSku(x).id===id))}
-async function newMaterial(){await Promise.all([ensureMaterialAdminMeta(),ensureMaterialRefs()]);renderMaterial({sku:{top:materialTypes()[0]?.code||'bead',size_mm:8,weight_g:1,price_per_bead:0.01,cost_price:0,safety_stock:0,supplier_name:'',purchase_note:'',stock:0,enabled:false,sort_order:0},energy:{primary_element:'water',secondary_elements:[],effects:[],chakras:[],wish_pools:[],mood_tags:[],visual_tags:[]},visual:{color_hex:'#dfe3e5',shine_hex:'#ffffff',image_urls:[]},rules:{allowed_roles:['primary','support','accent'],match_rules:['no_limit'],care_tags:[],conflict_codes:[]}})}
+async function newMaterial(){await Promise.all([ensureMaterialAdminMeta(),ensureMaterialRefs()]);renderMaterial({sku:{top:materialTypes()[0]?.code||'bead',size_mm:8,weight_g:1,price_per_bead:0.01,cost_price:0,safety_stock:0,supplier_name:'',purchase_note:'',stock:0,enabled:false,sort_order:0},energy:{primary_element:'water',secondary_elements:[],effects:[],chakras:[],wish_pools:[],mood_tags:[],visual_tags:[]},visual:{color_hex:'#dfe3e5',shine_hex:'#ffffff',image_urls:[]},rules:{allowed_roles:['primary','support','accent'],match_rules:['no_limit'],care_tags:[]}})}
 async function editMaterial(id){
   await Promise.all([ensureMaterialAdminMeta(),ensureMaterialRefs()]);
   const material=(state.cache.materials||[]).find(x=>matSku(x).id===id);
@@ -2018,10 +2063,7 @@ async function saveMaterial(){
   }catch(e){toast(e.message||'保存材料失败')}
 }
 async function refreshMaterialOptions(){
-  const data=await api('/api/v1/admin/material-options');
-  state.cache.materialOptions={...DEFAULT_MATERIAL_OPTIONS,...data};
-  state.cache.materialTypes=data.material_types||[];
-  state.cache.materialTaxonomy=data.taxonomy||[];
+  await requestMaterialAdminMeta();
   populateMaterialDirectoryControls();
   populateMaterialCategoryFilter();
 }
@@ -2255,7 +2297,7 @@ async function newMaterialSpecForSeries(seriesId,categoryId=''){
     },
     energy:{primary_element:'water',secondary_elements:[],effects:[],chakras:[],wish_pools:[],mood_tags:[],visual_tags:[]},
     visual:{color_hex:'#dfe3e5',shine_hex:'#ffffff',image_urls:[]},
-    rules:{allowed_roles:['primary','support','accent'],match_rules:['no_limit'],care_tags:[],conflict_codes:[]}
+    rules:{allowed_roles:['primary','support','accent'],match_rules:['no_limit'],care_tags:[]}
   });
 }
 
@@ -2313,7 +2355,7 @@ async function saveMaterialVarietyProfile(){
       effects:checkboxValues('tax_series_effects'),chakras:checkboxValues('tax_series_chakras'),wish_pools:checkboxValues('tax_series_wish_pools'),
       color_family:formValue('tax_series_color_family'),mood_tags:checkboxValues('tax_series_mood_tags'),visual_tags:checkboxValues('tax_series_visual_tags'),
       story:formValue('tax_series_story'),allowed_roles:checkboxValues('tax_series_allowed_roles'),match_rules:checkboxValues('tax_series_match_rules'),
-      care_tags:checkboxValues('tax_series_care_tags'),conflict_codes:[],material_params:seriesMaterialParamsPayload(),
+      care_tags:checkboxValues('tax_series_care_tags'),material_params:seriesMaterialParamsPayload(),
       sort_order:num(formValue('tax_series_sort')),enabled:formValue('tax_series_enabled')==='true'
     })});
     closeDrawer();await refreshMaterialOptions();populateVarietyCategoryFilter();renderMaterialVarietiesPage();toast('品种资料已保存');
@@ -2757,7 +2799,7 @@ async function saveMaterialSeries(){
     effects,chakras:checkboxValues('tax_series_chakras'),wish_pools:checkboxValues('tax_series_wish_pools'),
     color_family:formValue('tax_series_color_family'),mood_tags:checkboxValues('tax_series_mood_tags'),visual_tags:checkboxValues('tax_series_visual_tags'),
     story:formValue('tax_series_story'),allowed_roles:checkboxValues('tax_series_allowed_roles'),match_rules:checkboxValues('tax_series_match_rules'),
-    care_tags:checkboxValues('tax_series_care_tags'),conflict_codes:[],material_params:seriesMaterialParamsPayload(),
+    care_tags:checkboxValues('tax_series_care_tags'),material_params:seriesMaterialParamsPayload(),
     sort_order:num(formValue('tax_series_sort')),enabled
   })});
   await refreshMaterialOptions();renderMaterialTaxonomy({focusSeriesId:saved.id,focusCategoryId:saved.category_id,focusTop:saved.top});toast('品种已保存');

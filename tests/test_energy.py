@@ -598,7 +598,7 @@ def test_recommendation_respects_material_role_rules_for_primary():
     assert selected == "valid_primary_stone"
 
 
-def test_recommendation_filters_conflict_and_dense_support_rules():
+def test_recommendation_filters_dense_support_rules():
     request = make_request(core_wish="招财进宝/事业腾飞")
     energy = EnergyCalculator().calculate(request)
     context = RecommendationEngine.recommendation_context(request, energy)
@@ -612,14 +612,13 @@ def test_recommendation_filters_conflict_and_dense_support_rules():
             "allowed_roles": ["primary"],
             "match_rules": ["best_as_primary"],
         },
-        "conflict_support": {
+        "alternate_support": {
             "name": "互斥辅石",
             "element": "水",
             "secondary_elements": [],
             "color": "#88bbff",
             "effects": ["沟通"],
             "allowed_roles": ["support"],
-            "conflict_codes": ["primary_stone"],
         },
         "dense_support": {
             "name": "高密度辅石",

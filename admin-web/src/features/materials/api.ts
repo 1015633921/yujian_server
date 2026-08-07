@@ -123,7 +123,6 @@ export interface MaterialSeries {
   }
   rules?: {
     allowed_roles?: string[]
-    conflict_codes?: string[]
     match_rules?: string[]
     care_tags?: string[]
   }
@@ -243,7 +242,6 @@ export interface MaterialSeriesInput {
   visual_tags?: string[]
   story?: string
   allowed_roles?: string[]
-  conflict_codes?: string[]
   match_rules?: string[]
   care_tags?: string[]
   material_params?: Record<string, unknown>

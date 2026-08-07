@@ -365,7 +365,6 @@ def test_series_profile_read_returns_the_complete_series_owned_snapshot(tmp_path
             "visual_tags": ["transparent"],
             "story": "完整资料应由品种统一维护。",
             "allowed_roles": ["accent"],
-            "conflict_codes": ["not_together"],
             "match_rules": ["cool-tone"],
             "care_tags": ["avoid-sun"],
             "material_params": {"bead_shape": "nugget", "placement_mode": "threaded"},

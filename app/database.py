@@ -315,7 +315,7 @@ MYSQL_SCHEMA = [
       chakra_weights_json LONGTEXT NOT NULL, effects_json LONGTEXT NOT NULL,
       wish_pools_json LONGTEXT NOT NULL, color_family VARCHAR(80) NOT NULL DEFAULT '',
       mood_tags_json LONGTEXT NOT NULL, visual_tags_json LONGTEXT NOT NULL,
-      story LONGTEXT, allowed_roles_json LONGTEXT NOT NULL, conflict_codes_json LONGTEXT NOT NULL,
+      story LONGTEXT, allowed_roles_json LONGTEXT NOT NULL,
       match_rules_json LONGTEXT NOT NULL, care_tags_json LONGTEXT NOT NULL,
       material_params_json LONGTEXT NOT NULL, asset_json LONGTEXT NOT NULL,
       enabled TINYINT NOT NULL DEFAULT 1, created_at VARCHAR(40) NOT NULL, updated_at VARCHAR(40) NOT NULL,

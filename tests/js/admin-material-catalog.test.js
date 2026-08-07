@@ -9,10 +9,15 @@ const script = fs.readFileSync(path.join(root, 'static/admin/admin.js'), 'utf8')
 const html = fs.readFileSync(path.join(root, 'static/admin/index.html'), 'utf8');
 const css = fs.readFileSync(path.join(root, 'static/admin/admin.css'), 'utf8');
 
-function adminRuntime(elements = {}) {
+function adminRuntime(elements = {}, session = {}) {
   const context = {
     window: { location: { pathname: '/admin' } },
     localStorage: { getItem: () => '' },
+    sessionStorage: {
+      getItem: key => Object.prototype.hasOwnProperty.call(session, key) ? session[key] : null,
+      setItem: (key, value) => { session[key] = String(value); },
+      removeItem: key => { delete session[key]; },
+    },
     document: { getElementById: (id) => elements[id] || null },
     console,
     URLSearchParams,
@@ -202,6 +207,50 @@ test('SKU search ignores an older response that arrives after the latest query',
   assert.match(requests[1].path, /keyword=%E5%B9%BD%E7%81%B5/);
   assert.deepEqual(renders, ['latest']);
   assert.equal(vm.runInContext('state.cache.materialSpus[0].key', runtime), 'latest');
+});
+
+test('SKU directory keeps the category filter available when all material types are selected', () => {
+  const classList = { toggle() {} };
+  const elements = {
+    materialTop: { value: '' },
+    materialCategory: { value: '', innerHTML: '', classList },
+  };
+  const runtime = adminRuntime(elements);
+
+  runtime.populateMaterialCategoryFilter();
+  assert.match(elements.materialCategory.innerHTML, /全部类目/);
+  assert.match(elements.materialCategory.innerHTML, /幽灵水晶/);
+  assert.match(elements.materialCategory.innerHTML, /幽灵随形/);
+
+  elements.materialCategory.value = '幽灵随形';
+  assert.equal(runtime.materialFilterParams().category, '幽灵随形');
+  assert.match(html, /<select id="materialCategory"[\s\S]*?<option value="">全部类目/);
+});
+
+test('SKU directory defaults its enablement filter to enabled materials', () => {
+  assert.match(html, /<select id="materialStatus"[\s\S]*?<option value="enabled" selected>已启用/);
+});
+
+test('material details reuse metadata in flight and from the current tab session cache', async () => {
+  const session = {};
+  const payload = {
+    material_types: [{ code: 'bead', name: '珠子', enabled: true }],
+    taxonomy: [{ id: 'cat-bead', kind: 'category', top: 'bead', name: '水晶', enabled: true, series: [] }],
+  };
+  const firstRuntime = adminRuntime({}, session);
+  const requests = [];
+  firstRuntime.api = () => new Promise(resolve => requests.push(resolve));
+
+  const first = firstRuntime.ensureMaterialAdminMeta();
+  const second = firstRuntime.ensureMaterialAdminMeta();
+  assert.equal(requests.length, 1);
+  requests[0](payload);
+  await Promise.all([first, second]);
+
+  const secondRuntime = adminRuntime({}, session);
+  secondRuntime.api = () => assert.fail('session cache should avoid another metadata request');
+  await secondRuntime.ensureMaterialAdminMeta();
+  assert.equal(vm.runInContext('state.cache.materialTaxonomy[0].name', secondRuntime), '水晶');
 });
 
 test('material images belong exclusively to the variety', () => {

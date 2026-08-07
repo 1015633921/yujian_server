@@ -93,7 +93,7 @@ def create_database(path) -> None:
               chakra_weights_json TEXT NOT NULL, effects_json TEXT NOT NULL,
               wish_pools_json TEXT NOT NULL, color_family TEXT NOT NULL DEFAULT '',
               mood_tags_json TEXT NOT NULL, visual_tags_json TEXT NOT NULL,
-              story TEXT, allowed_roles_json TEXT NOT NULL, conflict_codes_json TEXT NOT NULL,
+              story TEXT, allowed_roles_json TEXT NOT NULL,
               match_rules_json TEXT NOT NULL, care_tags_json TEXT NOT NULL,
               material_params_json TEXT NOT NULL, asset_json TEXT NOT NULL,
               enabled INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL, updated_at TEXT NOT NULL

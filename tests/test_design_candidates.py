@@ -60,7 +60,6 @@ def material(material_id: str, **overrides) -> dict:
         "rules": {
             "allowed_roles": ["primary"],
             "match_rules": ["best_as_primary"],
-            "conflict_codes": [],
         },
         "material_params": {"bead_shape": "round", "placement_mode": "threaded"},
     }
@@ -84,7 +83,7 @@ def test_candidates_rank_live_gallery_materials_against_brief_without_auto_layou
             material(
                 "metal-support",
                 energy={"primary_element": "metal", "color_family": "clear", "visual_tags": ["icy"]},
-                rules={"allowed_roles": ["support"], "match_rules": ["best_as_support"], "conflict_codes": []},
+                rules={"allowed_roles": ["support"], "match_rules": ["best_as_support"]},
             ),
             material(
                 "silver-accent",
@@ -93,7 +92,7 @@ def test_candidates_rank_live_gallery_materials_against_brief_without_auto_layou
                 price=4,
                 size=0,
                 energy={"primary_element": "metal", "color_family": "gray", "visual_tags": []},
-                rules={"allowed_roles": ["accent"], "match_rules": ["accent_only"], "conflict_codes": []},
+                rules={"allowed_roles": ["accent"], "match_rules": ["accent_only"]},
             ),
         ],
     )
@@ -115,11 +114,8 @@ def test_candidates_rank_live_gallery_materials_against_brief_without_auto_layou
     assert "birthday" not in str(result)
 
 
-def test_candidates_exclude_incompatible_or_unsupported_materials_and_respect_conflicts():
-    selected = material(
-        "selected",
-        rules={"allowed_roles": ["primary"], "match_rules": [], "conflict_codes": ["conflicting"]},
-    )
+def test_candidates_exclude_incompatible_or_unsupported_materials_without_conflict_rules():
+    selected = material("selected", rules={"allowed_roles": ["primary"], "match_rules": []})
     materials = [
         selected,
         material("out-stock", stock=0, sku={"stock": 0}),
@@ -135,7 +131,8 @@ def test_candidates_exclude_incompatible_or_unsupported_materials_and_respect_co
     ids = {item["material_id"] for candidate_group in result["candidate_groups"] for item in candidate_group["items"]}
 
     assert "selected" in ids  # Re-using a material is a designer decision.
-    assert {"out-stock", "missing-gallery", "wrong-size", "black-avoid", "cap", "hanging", "conflict"}.isdisjoint(ids)
+    assert {"out-stock", "missing-gallery", "wrong-size", "black-avoid", "cap", "hanging"}.isdisjoint(ids)
+    assert "conflict" in ids
 
 
 def test_candidates_use_stable_tie_breaking_and_budget_is_advisory_not_a_filter():

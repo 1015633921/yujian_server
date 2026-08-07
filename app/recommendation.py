@@ -635,7 +635,6 @@ class RecommendationEngine:
             for code, crystal in catalog.items()
             if code != primary_code
             and RecommendationEngine.role_allowed(crystal, "support")
-            and not RecommendationEngine.conflicts_with(code, crystal, {primary_code}, catalog)
         ]
         strict_candidates = [
             code
@@ -659,7 +658,6 @@ class RecommendationEngine:
                 for code, crystal in catalog.items()
                 if code != primary_code
                 and code in available_codes
-                and not RecommendationEngine.conflicts_with(code, crystal, {primary_code}, catalog)
             ]
             support_candidates = (
                 available_strict or available_relaxed or available_role_candidates or available_fallback
@@ -684,7 +682,6 @@ class RecommendationEngine:
             for code, crystal in catalog.items()
             if code not in {primary_code, first}
             and RecommendationEngine.role_allowed(crystal, "accent")
-            and not RecommendationEngine.conflicts_with(code, crystal, {primary_code, first}, catalog)
         ]
         if available_codes is not None:
             available_accent_candidates = [code for code in accent_candidates if code in available_codes]
@@ -693,7 +690,6 @@ class RecommendationEngine:
                 for code, crystal in catalog.items()
                 if code not in {primary_code, first}
                 and code in available_codes
-                and not RecommendationEngine.conflicts_with(code, crystal, {primary_code, first}, catalog)
             ]
             accent_candidates = available_accent_candidates or available_relaxed_accents
         if not accent_candidates:
@@ -731,7 +727,6 @@ class RecommendationEngine:
             and (available_codes is None or code in available_codes)
             and RecommendationEngine.role_allowed(crystal, "support")
             and "avoid_dense" not in RecommendationEngine.rule_list(crystal, "match_rules")
-            and not RecommendationEngine.conflicts_with(code, crystal, selected_codes, catalog)
         ]
         ranked = RecommendationEngine.rank_aesthetic_candidates(
             candidates,
@@ -1055,7 +1050,6 @@ class RecommendationEngine:
             "image_url": image_url,
             "rules": {
                 "allowed_roles": allowed_roles,
-                "conflict_codes": RecommendationEngine.material_rule_values(material, "conflict_codes"),
                 "match_rules": match_rules,
                 "care_tags": RecommendationEngine.material_rule_values(material, "care_tags"),
             },
@@ -1598,18 +1592,6 @@ class RecommendationEngine:
                 score += 4
         return score
 
-    @staticmethod
-    def conflicts_with(code: str, crystal: dict, selected_codes: set[str], catalog: dict) -> bool:
-        conflicts = RecommendationEngine.rule_list(crystal, "conflict_codes")
-        if conflicts & selected_codes:
-            return True
-        for selected in selected_codes:
-            selected_crystal = catalog.get(selected) or {}
-            if code in RecommendationEngine.rule_list(selected_crystal, "conflict_codes"):
-                return True
-        return False
-
-    @staticmethod
     def build_item(
         code: str,
         role: str,
@@ -1673,7 +1655,6 @@ class RecommendationEngine:
             "image_url": material_image_url or (crystal.get("asset") or {}).get("thumbnail_url", ""),
             "rules": {
                 "allowed_roles": unique_list(crystal.get("allowed_roles")),
-                "conflict_codes": unique_list(crystal.get("conflict_codes")),
                 "match_rules": unique_list(crystal.get("match_rules")),
                 "care_tags": unique_list(crystal.get("care_tags")),
             },

@@ -162,7 +162,6 @@ def _material_view(material: dict[str, Any]) -> dict[str, Any]:
         "roles": roles,
         "match_rules": match_rules,
         "visual_tags": visual_tags,
-        "conflict_codes": set(_list(rules.get("conflict_codes") or material.get("conflict_codes"))),
         "params": params,
     }
 
@@ -199,7 +198,7 @@ def _role_is_allowed(item: dict[str, Any], role: str) -> bool:
     return not roles or "accent" in roles or "spacer" in roles
 
 
-def _material_is_supported(item: dict[str, Any], bead_size_mm: float, avoid_colors: set[str], selected_codes: set[str], selected_conflicts: set[str]) -> str:
+def _material_is_supported(item: dict[str, Any], bead_size_mm: float, avoid_colors: set[str]) -> str:
     if not item["id"]:
         return "缺少材料 ID"
     if item["top"] not in {"bead", "accessory"}:
@@ -219,10 +218,6 @@ def _material_is_supported(item: dict[str, Any], bead_size_mm: float, avoid_colo
         return "珠径与服务单不一致"
     if item["color_family"] and item["color_family"] in avoid_colors:
         return "命中用户明确避免的色彩"
-    if item["material_code"] and item["material_code"] in selected_conflicts:
-        return "与已选材料存在搭配冲突"
-    if item["conflict_codes"] & selected_codes:
-        return "与已选材料存在搭配冲突"
     return ""
 
 
@@ -377,9 +372,6 @@ def build_design_candidates(
         }
     selected_ids = {_text(value) for value in selected_material_ids or [] if _text(value)}
     views = [_material_view(_mapping(material)) for material in materials or []]
-    selected = [item for item in views if item["id"] in selected_ids]
-    selected_codes = {item["material_code"] for item in selected if item["material_code"]}
-    selected_conflicts = {code for item in selected for code in item["conflict_codes"]}
     avoid_colors = set(_palette_keys(brief, "avoid"))
     constraints = {
         _text(item.get("key")): item
@@ -401,7 +393,7 @@ def build_design_candidates(
     for role in ("primary", "support", "accent"):
         candidates: list[dict[str, Any]] = []
         for item in views:
-            unsupported = _material_is_supported(item, active_bead_size, avoid_colors, selected_codes, selected_conflicts)
+            unsupported = _material_is_supported(item, active_bead_size, avoid_colors)
             if unsupported or not _role_is_allowed(item, role):
                 if unsupported:
                     excluded_ids.add(item["id"])

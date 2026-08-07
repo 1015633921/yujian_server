@@ -31,7 +31,6 @@ JSON_LIST_FIELDS = {
     "mood_tags": "mood_tags_json",
     "visual_tags": "visual_tags_json",
     "allowed_roles": "allowed_roles_json",
-    "conflict_codes": "conflict_codes_json",
     "match_rules": "match_rules_json",
     "care_tags": "care_tags_json",
 }
@@ -323,7 +322,6 @@ def normalize_knowledge_payload(payload: dict[str, Any], material: dict[str, Any
         "visual_tags": visual_tags,
         "story": str(source.get("story") or taxonomy.get("story") or "").strip(),
         "allowed_roles": allowed_roles,
-        "conflict_codes": list_from_payload(source, "conflict_codes"),
         "match_rules": match_rules,
         "care_tags": care_tags,
         "material_params": material_params,
@@ -351,7 +349,6 @@ def has_explicit_knowledge(payload: dict[str, Any]) -> bool:
         "story",
         "allowed_roles",
         "roles",
-        "conflict_codes",
         "match_rules",
         "rule_tags",
         "care_tags",
@@ -420,7 +417,6 @@ def knowledge_to_db_item(knowledge: dict[str, Any], existing: dict[str, Any] | N
         "visual_tags_json": json_text(normalize_visual_tag_list(merged.get("visual_tags"))),
         "story": merged.get("story") or "",
         "allowed_roles_json": json_text(normalize_role_list(merged.get("allowed_roles")) or ["primary", "support", "accent"]),
-        "conflict_codes_json": json_text(unique_list(merged.get("conflict_codes"))),
         "match_rules_json": json_text(normalize_match_rule_list(merged.get("match_rules")) or ["no_limit"]),
         "care_tags_json": json_text(normalize_care_tag_list(merged.get("care_tags"))),
         "material_params_json": json_text(clean_dict(merged.get("material_params")), {}),
@@ -559,7 +555,6 @@ def enrich_materials_with_knowledge(
         }
         rules = {
             "allowed_roles": normalize_role_list(knowledge.get("allowed_roles")),
-            "conflict_codes": unique_list(knowledge.get("conflict_codes")),
             "match_rules": normalize_match_rule_list(knowledge.get("match_rules")),
             "care_tags": normalize_care_tag_list(knowledge.get("care_tags")),
         }
@@ -600,7 +595,6 @@ def enrich_materials_with_knowledge(
                 "visual_tags": energy["visual_tags"],
                 "story": knowledge.get("story") or "",
                 "allowed_roles": rules["allowed_roles"],
-                "conflict_codes": rules["conflict_codes"],
                 "match_rules": rules["match_rules"],
                 "care_tags": rules["care_tags"],
                 "available_sizes_mm": sizes,
@@ -645,7 +639,7 @@ def upsert_material_knowledge(
                 UPDATE material_knowledge SET
                 name=?, primary_element=?, secondary_elements_json=?, chakras_json=?, chakra_weights_json=?,
                 effects_json=?, wish_pools_json=?, color_family=?, mood_tags_json=?, visual_tags_json=?,
-                story=?, allowed_roles_json=?, conflict_codes_json=?, match_rules_json=?, care_tags_json=?,
+                story=?, allowed_roles_json=?, match_rules_json=?, care_tags_json=?,
                 material_params_json=?, asset_json=?,
                 enabled=?, updated_at=?
                 WHERE code=?
@@ -663,7 +657,6 @@ def upsert_material_knowledge(
                     item["visual_tags_json"],
                     item["story"],
                     item["allowed_roles_json"],
-                    item["conflict_codes_json"],
                     item["match_rules_json"],
                     item["care_tags_json"],
                     item["material_params_json"],
@@ -679,9 +672,9 @@ def upsert_material_knowledge(
                 INSERT INTO material_knowledge
                 (code, name, primary_element, secondary_elements_json, chakras_json, chakra_weights_json,
                  effects_json, wish_pools_json, color_family, mood_tags_json, visual_tags_json, story,
-                 allowed_roles_json, conflict_codes_json, match_rules_json, care_tags_json,
+                 allowed_roles_json, match_rules_json, care_tags_json,
                  material_params_json, asset_json, enabled, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     item["code"],
@@ -697,7 +690,6 @@ def upsert_material_knowledge(
                     item["visual_tags_json"],
                     item["story"],
                     item["allowed_roles_json"],
-                    item["conflict_codes_json"],
                     item["match_rules_json"],
                     item["care_tags_json"],
                     item["material_params_json"],
@@ -774,7 +766,6 @@ def build_recommendation_catalog(base_catalog: dict[str, dict[str, Any]]) -> dic
                 "visual_tags": unique_list(knowledge.get("visual_tags")),
                 "wish_pools": unique_list(knowledge.get("wish_pools")),
                 "allowed_roles": unique_list(knowledge.get("allowed_roles")),
-                "conflict_codes": unique_list(knowledge.get("conflict_codes")),
                 "match_rules": unique_list(knowledge.get("match_rules")),
                 "care_tags": unique_list(knowledge.get("care_tags")),
                 "story": knowledge.get("story") or base.get("story") or "",

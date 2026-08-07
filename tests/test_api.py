@@ -712,9 +712,9 @@ def test_admin_material_ignores_legacy_sku_image_when_series_is_unavailable(tmp_
             INSERT INTO material_knowledge
             (code, name, primary_element, secondary_elements_json, chakras_json, chakra_weights_json,
              effects_json, wish_pools_json, color_family, mood_tags_json, visual_tags_json, story,
-             allowed_roles_json, conflict_codes_json, match_rules_json, care_tags_json,
+             allowed_roles_json, match_rules_json, care_tags_json,
              material_params_json, asset_json, enabled, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 "shared_green_phantom",
@@ -730,7 +730,6 @@ def test_admin_material_ignores_legacy_sku_image_when_series_is_unavailable(tmp_
                 "[]",
                 "",
                 json.dumps(["primary"]),
-                "[]",
                 json.dumps(["no_limit"]),
                 "[]",
                 "{}",

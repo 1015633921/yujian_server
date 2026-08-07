@@ -1776,8 +1776,11 @@ button::after {
 
 .material-card {
   position: relative;
-  min-height: 138rpx;
-  padding: 18rpx 12rpx 14rpx 102rpx;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 144rpx;
+  padding: 16rpx 14rpx 16rpx 104rpx;
   box-sizing: border-box;
   border: 1rpx solid rgba(20, 20, 20, 0.06);
   border-radius: 20rpx;
@@ -1816,6 +1819,7 @@ button::after {
   white-space: nowrap;
   font-size: 24rpx;
   font-weight: 660;
+  line-height: 34rpx;
   color: #1f1f1d;
 }
 
@@ -1824,32 +1828,33 @@ button::after {
   align-items: center;
   justify-content: flex-start;
   min-width: 0;
-  margin-top: 12rpx;
+  min-height: 34rpx;
+  margin-top: 6rpx;
 }
 
 .material-price {
-  flex: 0 1 auto;
+  flex: 1 1 auto;
   min-width: 0;
   margin-right: 6rpx;
-  overflow: visible;
-  text-overflow: clip;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 26rpx;
+  font-size: 25rpx;
   font-weight: 700;
   color: #282824;
 }
 
 .size-pill {
   flex: 0 0 auto;
-  min-width: 48rpx;
+  min-width: 0;
   max-width: none;
   height: 34rpx;
-  padding: 0 7rpx;
+  padding: 0 6rpx;
   border-radius: 8rpx;
   background: #f0eee8;
-  overflow: visible;
+  overflow: hidden;
   text-align: center;
-  text-overflow: clip;
+  text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 17rpx;
   font-weight: 560;

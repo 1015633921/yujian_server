@@ -30,6 +30,7 @@ from app.migrations.versions import v20260806_20_material_asset_versions
 from app.migrations.versions import v20260806_21_material_sku_revisions
 from app.migrations.versions import v20260806_22_material_catalog_indexes
 from app.migrations.versions import v20260807_23_community_post_image_gallery
+from app.migrations.versions import v20260807_24_material_rule_cleanup
 
 MIGRATIONS = [
     v20260712_01_p0a_security,
@@ -55,6 +56,7 @@ MIGRATIONS = [
     v20260806_21_material_sku_revisions,
     v20260806_22_material_catalog_indexes,
     v20260807_23_community_post_image_gallery,
+    v20260807_24_material_rule_cleanup,
 ]
 
 

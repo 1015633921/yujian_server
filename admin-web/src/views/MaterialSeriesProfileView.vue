@@ -8,7 +8,6 @@ import PageHeading from '@/components/ui/PageHeading.vue'
 import {
   getMaterialSeries,
   listMaterialOptions,
-  listMaterialTaxonomy,
   updateMaterialSeries,
   type MaterialOption,
   type MaterialOptionsPayload,
@@ -36,7 +35,6 @@ interface SeriesDraft {
   visualTags: string[]
   story: string
   allowedRoles: string[]
-  conflictCodes: string[]
   matchRules: string[]
   careTags: string[]
   beadShape: string
@@ -56,7 +54,6 @@ const auth = useAuthStore()
 const profile = ref<MaterialSeries | null>(null)
 const draft = ref<SeriesDraft | null>(null)
 const materialOptions = ref<MaterialOptionsPayload | null>(null)
-const relatedSeries = ref<MaterialSeries[]>([])
 const loading = ref(true)
 const saving = ref(false)
 const error = ref('')
@@ -94,18 +91,6 @@ function secondaryElementOptions(selected: string[], primary: string): DisplayOp
   return optionsFor('elements', selected).filter(option => option.key !== primary)
 }
 
-const conflictOptions = computed<DisplayOption[]>(() => {
-  const selected = draft.value?.conflictCodes || []
-  const known = relatedSeries.value
-    .filter(item => item.id !== profile.value?.id && item.material_code)
-    .map(item => ({ key: String(item.material_code), label: item.name }))
-  const knownKeys = new Set(known.map(item => item.key))
-  return [
-    ...known,
-    ...selected.filter(code => !knownKeys.has(code)).map(code => ({ key: code, label: `历史关联：${code}` })),
-  ]
-})
-
 function makeDraft(item: MaterialSeries): SeriesDraft {
   const energy = item.energy || {}
   const rules = item.rules || {}
@@ -129,7 +114,6 @@ function makeDraft(item: MaterialSeries): SeriesDraft {
     visualTags: stringList(energy.visual_tags),
     story: energy.story || '',
     allowedRoles: stringList(rules.allowed_roles),
-    conflictCodes: stringList(rules.conflict_codes),
     matchRules: stringList(rules.match_rules),
     careTags: stringList(rules.care_tags),
     beadShape: String(params.bead_shape || 'round'),
@@ -158,10 +142,8 @@ async function load(): Promise<void> {
       getMaterialSeries(seriesId.value, controller.signal),
       listMaterialOptions(controller.signal),
     ])
-    const taxonomy = await listMaterialTaxonomy(item.top, true, controller.signal)
     profile.value = item
     materialOptions.value = nextOptions
-    relatedSeries.value = taxonomy.flatMap(category => category.series)
     draft.value = makeDraft(item)
   } catch (cause) {
     if (!(cause instanceof DOMException && cause.name === 'AbortError')) {
@@ -271,7 +253,6 @@ async function save(): Promise<void> {
     visual_tags: current.visualTags,
     story: current.story.trim(),
     allowed_roles: current.allowedRoles,
-    conflict_codes: current.conflictCodes,
     match_rules: current.matchRules,
     care_tags: current.careTags,
     material_params: materialParams,
@@ -604,15 +585,6 @@ onBeforeUnmount(() => controller?.abort())
                 label="适配角色"
                 :disabled="!canManage || saving"
                 :options="optionsFor('roles', draft.allowedRoles)"
-              />
-            </div>
-            <div class="material-profile__field">
-              <span>冲突品种</span><MaterialOptionChecks
-                v-model="draft.conflictCodes"
-                label="冲突品种"
-                :disabled="!canManage || saving"
-                :options="conflictOptions"
-                empty-text="暂无其他可选品种。"
               />
             </div>
             <div class="material-profile__field material-profile__full">

@@ -387,6 +387,20 @@ function materialTop(material = {}) {
   return String((material.sku && material.sku.top) || material.top || '').trim().toLowerCase();
 }
 
+function materialCardSpecText(physical = {}, isAccessory = false) {
+  if (!physical.specComplete) return '规格待补';
+  if (isAccessory || physical.isRound) return `${
+    isAccessory ? physical.stringAxisWidthMm : physical.sizeMm
+  }mm`;
+  return `${physical.bodyWidthMm}×${physical.bodyHeightMm}mm`;
+}
+
+function materialDetailSpecText(physical = {}, isAccessory = false) {
+  if (!physical.specComplete) return '规格待补';
+  if (isAccessory) return materialCardSpecText(physical, true);
+  return physical.specText || materialCardSpecText(physical);
+}
+
 function materialIsPendant(material = {}) {
   return materialTop(material) === 'pendant';
 }
@@ -1779,7 +1793,6 @@ Page({
       image_urls: imageUrls,
       image_pool: imageUrls,
       allowed_roles: rules.allowed_roles || item.allowed_roles || [],
-      conflict_codes: rules.conflict_codes || item.conflict_codes || [],
       material_params: materialParams,
       string_axis_width_mm: Number(
         materialParams.string_axis_width_mm
@@ -1788,13 +1801,14 @@ Page({
       )
     };
     const physical = resolveMaterialGeometry(normalized);
+    const isAccessory = materialTop(normalized) === 'accessory';
     return {
       ...normalized,
       bead_shape: physical.shape,
       placement_mode: physical.placementMode,
       physical_spec_complete: physical.specComplete,
-      physical_spec_text: physical.specText,
-      card_spec_text: physical.cardSpecText,
+      physical_spec_text: materialDetailSpecText(physical, isAccessory),
+      card_spec_text: materialCardSpecText(physical, isAccessory),
       display_size_rpx: physical.displaySizeRpx,
       material_shape_class: physical.shapeClass
     };
@@ -7918,10 +7932,11 @@ Page({
     const primaryImage = String(material.image_url || '').trim();
     // 图库优先；图库尚未配置时，详情仍应展示材料卡已在使用的主图。
     const images = galleryImages.length ? galleryImages : (primaryImage ? [primaryImage] : []);
+    const specText = materialDetailSpecText(physical, top === 'accessory');
     const fields = [
       { label: '分类', value: category },
       ...(series && series !== category ? [{ label: '品种', value: series }] : []),
-      { label: '规格', value: physical.specText || material.card_spec_text || '--' },
+      { label: '规格', value: specText },
       { label: '计价单位', value: `每${unit}` }
     ];
     const fallbackColor = String(material.color || '#d6d0c5');

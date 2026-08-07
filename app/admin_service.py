@@ -330,7 +330,6 @@ class AdminService:
                     visual_tags_json TEXT NOT NULL,
                     story TEXT,
                     allowed_roles_json TEXT NOT NULL,
-                    conflict_codes_json TEXT NOT NULL,
                     match_rules_json TEXT NOT NULL,
                     care_tags_json TEXT NOT NULL,
                     material_params_json TEXT NOT NULL,
@@ -1922,7 +1921,6 @@ class AdminService:
                     },
                     "rules": {
                         "allowed_roles": knowledge.get("allowed_roles") or [],
-                        "conflict_codes": knowledge.get("conflict_codes") or [],
                         "match_rules": knowledge.get("match_rules") or [],
                         "care_tags": knowledge.get("care_tags") or [],
                     },

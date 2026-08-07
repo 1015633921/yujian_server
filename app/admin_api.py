@@ -206,7 +206,6 @@ class MaterialPayload(BaseModel):
     visual_tags: list[str] = Field(default_factory=list)
     story: str | None = ""
     allowed_roles: list[str] = Field(default_factory=list)
-    conflict_codes: list[str] = Field(default_factory=list)
     match_rules: list[str] = Field(default_factory=list)
     care_tags: list[str] = Field(default_factory=list)
     material_params: dict = Field(default_factory=dict)
@@ -344,7 +343,6 @@ class MaterialSeriesPayload(BaseModel):
     visual_tags: list[str] = Field(default_factory=list)
     story: str | None = ""
     allowed_roles: list[str] = Field(default_factory=list)
-    conflict_codes: list[str] = Field(default_factory=list)
     match_rules: list[str] = Field(default_factory=list)
     care_tags: list[str] = Field(default_factory=list)
     material_params: dict = Field(default_factory=dict)

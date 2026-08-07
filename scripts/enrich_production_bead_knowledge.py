@@ -259,7 +259,6 @@ def build_profile(code: str, spec: dict[str, Any]) -> dict[str, Any]:
         "visual_tags": visual,
         "story": spec["story"],
         "allowed_roles": roles,
-        "conflict_codes": [],
         "match_rules": rules,
         "care_tags": care,
         "material_params": taxonomy.get("material_params") or {},
@@ -359,7 +358,6 @@ def upsert_profile(cursor, profile: dict[str, Any], timestamp: str) -> None:
         json_text(profile["visual_tags"]),
         profile["story"],
         json_text(profile["allowed_roles"]),
-        json_text(profile["conflict_codes"]),
         json_text(profile["match_rules"]),
         json_text(profile["care_tags"]),
         material_params,
@@ -374,7 +372,7 @@ def upsert_profile(cursor, profile: dict[str, Any], timestamp: str) -> None:
               name=%s, primary_element=%s, secondary_elements_json=%s, chakras_json=%s,
               chakra_weights_json=%s, effects_json=%s, wish_pools_json=%s, color_family=%s,
               mood_tags_json=%s, visual_tags_json=%s, story=%s, allowed_roles_json=%s,
-              conflict_codes_json=%s, match_rules_json=%s, care_tags_json=%s,
+              match_rules_json=%s, care_tags_json=%s,
               material_params_json=%s, asset_json=%s, enabled=%s, updated_at=%s
             WHERE code=%s
             """,
@@ -387,10 +385,10 @@ def upsert_profile(cursor, profile: dict[str, Any], timestamp: str) -> None:
               code, name, primary_element, secondary_elements_json, chakras_json,
               chakra_weights_json, effects_json, wish_pools_json, color_family,
               mood_tags_json, visual_tags_json, story, allowed_roles_json,
-              conflict_codes_json, match_rules_json, care_tags_json,
+              match_rules_json, care_tags_json,
               material_params_json, asset_json, enabled, created_at, updated_at
             ) VALUES (
-              %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+              %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
               %s, %s, %s, %s, %s, %s
             )
             """,
