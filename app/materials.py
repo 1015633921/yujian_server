@@ -601,11 +601,14 @@ def build_material_payload(materials: list[dict], version: dict | None = None) -
     series_by_category = {}
     series_sort_orders: dict[str, dict[str, int]] = {}
     db_facets = list_db_material_facets()
+    category_facets = list_db_material_category_facets()
     for tab in TOP_TABS:
         pool = db_facets if db_facets is not None else MATERIAL_CATALOG
         pool = [item for item in pool if item.get("top") == tab["key"]]
+        category_pool = category_facets if category_facets is not None else pool
+        category_pool = [item for item in category_pool if item.get("top") == tab["key"]]
         category_sort_orders: dict[str, int] = {}
-        for item in pool:
+        for item in category_pool:
             category = str(item.get("category") or "").strip()
             if not category:
                 continue
@@ -716,6 +719,38 @@ def list_db_material_facets() -> list[dict] | None:
                     WHERE enabled = 1
                     """
                 ).fetchall()
+    except Exception:
+        return None
+    return [dict(row) for row in rows]
+
+
+def list_db_material_category_facets() -> list[dict] | None:
+    """Read workspace categories independently from SKU/series joins.
+
+    The left-hand category rail needs only its category name and operator
+    priority.  Keeping this query independent means an incomplete optional
+    SKU identity migration cannot silently turn the whole rail into a
+    page-local, name-sorted list.
+    """
+    try:
+        from .repository import DB_PATH
+    except Exception:
+        return None
+    if not use_mysql() and not DB_PATH.exists():
+        return None
+    try:
+        with connect_database() as connection:
+            rows = connection.execute(
+                """
+                SELECT m.top, m.category,
+                       COALESCE(MAX(c.sort_order), 0) AS category_sort_order
+                FROM managed_materials m
+                LEFT JOIN material_taxonomy c
+                  ON c.kind='category' AND c.top=m.top AND c.name=m.category
+                WHERE m.enabled = 1
+                GROUP BY m.top, m.category
+                """
+            ).fetchall()
     except Exception:
         return None
     return [dict(row) for row in rows]

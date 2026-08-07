@@ -96,6 +96,16 @@ def test_public_material_payload_honors_category_sort_order(monkeypatch):
             {"top": "accessory", "category": "未配置分类", "series": "D", "name": "D", "category_sort_order": 0, "series_sort_order": 0},
         ],
     )
+    monkeypatch.setattr(
+        materials_module,
+        "list_db_material_category_facets",
+        lambda: [
+            {"top": "accessory", "category": "后置分类", "category_sort_order": 30},
+            {"top": "accessory", "category": "前置分类", "category_sort_order": 10},
+            {"top": "accessory", "category": "中间分类", "category_sort_order": 20},
+            {"top": "accessory", "category": "未配置分类", "category_sort_order": 0},
+        ],
+    )
 
     payload = materials_module.build_material_payload([], {"version": "test", "updated_at": ""})
 
@@ -143,10 +153,13 @@ def test_material_facets_keep_category_order_when_series_identity_column_is_miss
     monkeypatch.setattr(materials_module, "connect_database", connect_legacy_database)
 
     facets = materials_module.list_db_material_facets()
+    category_facets = materials_module.list_db_material_category_facets()
     payload = materials_module.build_material_payload([], {"version": "test", "updated_at": ""})
 
     assert facets is not None
+    assert category_facets is not None
     assert {item["category"]: item["category_sort_order"] for item in facets} == {"白水晶": 100, "紫水晶": 99}
+    assert {item["category"]: item["category_sort_order"] for item in category_facets} == {"白水晶": 100, "紫水晶": 99}
     assert payload["categories_by_top"]["bead"][:3] == ["全部", "白水晶", "紫水晶"]
 
 
