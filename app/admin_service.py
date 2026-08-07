@@ -1927,6 +1927,98 @@ class AdminService:
         with self.connect() as conn:
             return run(conn)
 
+    def list_material_taxonomy_page(
+        self,
+        *,
+        keyword: str = "",
+        top: str = "",
+        category_id: str = "",
+        status: str = "",
+        element: str = "",
+        chakra: str = "",
+        color_family: str = "",
+        asset_state: str = "",
+        page: int = 1,
+        page_size: int = 20,
+    ) -> dict[str, Any]:
+        """Return a paged, operator-oriented list of material varieties.
+
+        The hierarchy endpoint remains available for callers that need to edit
+        a complete category tree.  The directory screen uses this series-first
+        projection, so the browser only receives the rows for its current page.
+        """
+        page, page_size, offset = self.normalize_pagination(page, page_size)
+        # ``list_material_taxonomy`` centralises legacy image migration and
+        # series profile projection.  Flattening that trusted projection here
+        # keeps the paging response consistent with the detail editor.
+        taxonomy = self.list_material_taxonomy(top=top, include_disabled=True)
+        rows: list[dict[str, Any]] = []
+        categories: list[dict[str, Any]] = []
+        for category in taxonomy:
+            category_item = {
+                "id": str(category.get("id") or ""),
+                "name": str(category.get("name") or ""),
+                "enabled": bool(category.get("enabled")),
+                "sort_order": int(category.get("sort_order") or 0),
+                "series_count": len(category.get("series") or []),
+            }
+            categories.append(category_item)
+            for series in category.get("series") or []:
+                rows.append({
+                    **series,
+                    "category_id": category_item["id"],
+                    "category_name": category_item["name"],
+                    "category_enabled": category_item["enabled"],
+                })
+
+        normalized_keyword = str(keyword or "").strip().lower()
+        requested_status = str(status or "").strip().lower()
+        requested_element = str(element or "").strip()
+        requested_chakra = str(chakra or "").strip()
+        requested_color_family = str(color_family or "").strip()
+        requested_asset_state = str(asset_state or "").strip().lower()
+
+        def row_asset_state(item: dict[str, Any]) -> str:
+            if str(item.get("image_url") or "").strip():
+                return "ready"
+            return "missing"
+
+        def matches(item: dict[str, Any]) -> bool:
+            energy = item.get("energy") or {}
+            searchable = " ".join((
+                str(item.get("name") or ""),
+                str(item.get("material_code") or ""),
+                str(item.get("category_name") or ""),
+                str(item.get("top") or ""),
+            )).lower()
+            if normalized_keyword and normalized_keyword not in searchable:
+                return False
+            if category_id and str(item.get("category_id") or "") != category_id:
+                return False
+            if requested_status == "enabled" and not bool(item.get("enabled")):
+                return False
+            if requested_status == "disabled" and bool(item.get("enabled")):
+                return False
+            if requested_element and str(energy.get("primary_element") or "") != requested_element:
+                return False
+            if requested_chakra and requested_chakra not in set(energy.get("chakras") or []):
+                return False
+            if requested_color_family and str(energy.get("color_family") or "") != requested_color_family:
+                return False
+            return not requested_asset_state or row_asset_state(item) == requested_asset_state
+
+        filtered = [item for item in rows if matches(item)]
+        filtered.sort(key=lambda item: (
+            int(item.get("sort_order") or 0),
+            str(item.get("category_name") or ""),
+            str(item.get("name") or ""),
+            str(item.get("id") or ""),
+        ))
+        return {
+            **self.paginated_payload(filtered[offset : offset + page_size], len(filtered), page, page_size),
+            "categories": categories,
+        }
+
     def get_material_series(self, series_id: str) -> dict[str, Any]:
         """Return the complete, series-owned profile for one material variety.
 

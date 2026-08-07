@@ -11,13 +11,15 @@ import {
   deleteEmptyMaterialType,
   disableMaterialTaxonomyItem,
   disableMaterialType,
-  listMaterialTaxonomy,
+  listMaterialOptions,
+  listMaterialTaxonomyPage,
   listMaterialTypes,
   saveMaterialCategory,
   saveMaterialSeries,
   saveMaterialType,
   updateMaterialSeries,
-  type MaterialCategory,
+  type MaterialDirectoryCategoryOption,
+  type MaterialOptionsPayload,
   type MaterialSeries,
   type MaterialType,
 } from '@/features/materials/api'
@@ -42,11 +44,15 @@ const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
 const types = ref<MaterialType[]>([])
-const categories = ref<MaterialCategory[]>([])
+const seriesRows = ref<MaterialSeries[]>([])
+const categoryOptions = ref<MaterialDirectoryCategoryOption[]>([])
+const materialOptions = ref<MaterialOptionsPayload | null>(null)
 const loading = ref(true)
 const error = ref('')
 const notice = ref('')
 const saving = ref(false)
+const total = ref(0)
+const hasNext = ref(false)
 const wasEnabled = ref(true)
 const editor = reactive<DirectoryEditor>({
   kind: 'category',
@@ -61,22 +67,48 @@ const editor = reactive<DirectoryEditor>({
   enabled: true,
 })
 let typesController: AbortController | null = null
-let categoriesController: AbortController | null = null
-let categoryRequest = 0
+let directoryController: AbortController | null = null
+let directoryRequest = 0
 
 const canManage = computed(() => auth.admin?.role !== 'viewer')
 const selectedTop = computed(() => (typeof route.query.top === 'string' ? route.query.top : ''))
 const selectedType = computed(() => types.value.find((item) => item.code === selectedTop.value) || null)
-const selectedCategories = computed(() => categories.value.filter((item) => item.top === selectedTop.value))
-const selectedSeriesCount = computed(() => selectedCategories.value.reduce((total, item) => total + item.series.length, 0))
-const activeCategories = computed(() => selectedCategories.value.filter((item) => item.enabled).length)
+const keyword = computed(() => (typeof route.query.keyword === 'string' ? route.query.keyword : ''))
+const categoryId = computed(() => (typeof route.query.category_id === 'string' ? route.query.category_id : ''))
+const status = computed(() => (typeof route.query.status === 'string' ? route.query.status : ''))
+const element = computed(() => (typeof route.query.element === 'string' ? route.query.element : ''))
+const chakra = computed(() => (typeof route.query.chakra === 'string' ? route.query.chakra : ''))
+const colorFamily = computed(() => (typeof route.query.color_family === 'string' ? route.query.color_family : ''))
+const assetState = computed(() => (typeof route.query.asset_state === 'string' ? route.query.asset_state : ''))
+const page = computed(() => Math.max(1, Number(route.query.page) || 1))
+const visibleCategoryCount = computed(() => new Set(seriesRows.value.map((item) => item.parent_id)).size)
+const selectedCategory = computed(() => categoryOptions.value.find((item) => item.id === categoryId.value) || null)
+
+function updateQuery(updates: Record<string, string | undefined>): void {
+  const query = { ...route.query }
+  Object.entries(updates).forEach(([key, value]) => {
+    if (value) query[key] = value
+    else delete query[key]
+  })
+  void router.replace({ query })
+}
 
 function elementLabel(value?: string): string {
   return ({ metal: '金', wood: '木', water: '水', fire: '火', earth: '土', 金: '金', 木: '木', 水: '水', 火: '火', 土: '土' } as Record<string, string>)[value || ''] || '待补五行'
 }
 
+function optionLabel(type: keyof MaterialOptionsPayload, value?: string): string {
+  if (!value) return '待补'
+  return materialOptions.value?.[type]?.find((item) => item.key === value)?.label || value
+}
+
+function optionLabels(type: keyof MaterialOptionsPayload, values?: string[]): string {
+  const labels = (values || []).map((value) => optionLabel(type, value)).filter(Boolean)
+  return labels.length ? labels.join('、') : '待补'
+}
+
 function setTop(top: string): void {
-  void router.replace({ query: top ? { top } : {} })
+  updateQuery({ top: top || undefined, category_id: undefined, page: undefined })
 }
 
 function resetEditor(kind: EditorKind, parentId = ''): void {
@@ -112,7 +144,7 @@ function editType(item: MaterialType): void {
   wasEnabled.value = item.enabled
 }
 
-function editCategory(item: MaterialCategory): void {
+function editCategory(item: Pick<MaterialDirectoryCategoryOption, 'id' | 'name' | 'sort_order' | 'enabled'>): void {
   Object.assign(editor, {
     kind: 'category',
     id: item.id,
@@ -145,7 +177,7 @@ function editSeries(item: MaterialSeries): void {
 }
 
 function selectedCategoryName(): string {
-  return selectedCategories.value.find((item) => item.id === editor.parentId)?.name || '未选择分类'
+  return categoryOptions.value.find((item) => item.id === editor.parentId)?.name || '未选择分类'
 }
 
 async function requestWithTimeout<T>(
@@ -178,7 +210,7 @@ async function loadTypes(): Promise<void> {
     types.value = nextTypes
     const firstType = nextTypes.at(0)
     if (!selectedTop.value && firstType) setTop(firstType.code)
-    else if (selectedTop.value) await loadCategories(selectedTop.value)
+    else if (selectedTop.value) await loadDirectory()
   } catch (cause) {
     if (cause instanceof DOMException && cause.name === 'AbortError') return
     error.value = cause instanceof Error ? cause.message : '材料三级目录加载失败'
@@ -187,31 +219,50 @@ async function loadTypes(): Promise<void> {
   }
 }
 
-async function loadCategories(top: string): Promise<void> {
-  categoriesController?.abort()
+async function loadDirectory(): Promise<void> {
+  directoryController?.abort()
   const currentController = new AbortController()
-  categoriesController = currentController
-  const requestId = ++categoryRequest
-  if (!top) {
-    categories.value = []
+  directoryController = currentController
+  const requestId = ++directoryRequest
+  if (!selectedTop.value) {
+    seriesRows.value = []
+    categoryOptions.value = []
     loading.value = false
     return
   }
   loading.value = true
   error.value = ''
   try {
-    const nextCategories = await requestWithTimeout(
-      (signal) => listMaterialTaxonomy(top, true, signal),
+    const [result, options] = await requestWithTimeout(
+      (signal) => Promise.all([
+        listMaterialTaxonomyPage({
+          keyword: keyword.value,
+          top: selectedTop.value,
+          categoryId: categoryId.value,
+          status: status.value,
+          element: element.value,
+          chakra: chakra.value,
+          colorFamily: colorFamily.value,
+          assetState: assetState.value,
+          page: page.value,
+          pageSize: 20,
+        }, signal),
+        materialOptions.value ? Promise.resolve(materialOptions.value) : listMaterialOptions(signal),
+      ]),
       currentController,
-      '该类型的三级目录加载超时',
+      '目录分页加载超时',
     )
-    if (requestId !== categoryRequest) return
-    categories.value = nextCategories
+    if (requestId !== directoryRequest) return
+    seriesRows.value = result.items
+    categoryOptions.value = result.categories
+    total.value = result.pagination.total
+    hasNext.value = result.pagination.has_next
+    materialOptions.value = options
   } catch (cause) {
     if (cause instanceof DOMException && cause.name === 'AbortError') return
-    if (requestId === categoryRequest) error.value = cause instanceof Error ? cause.message : '材料三级目录加载失败'
+    if (requestId === directoryRequest) error.value = cause instanceof Error ? cause.message : '材料目录加载失败'
   } finally {
-    if (requestId === categoryRequest) loading.value = false
+    if (requestId === directoryRequest) loading.value = false
   }
 }
 
@@ -330,13 +381,17 @@ async function remove(kind: EditorKind, id: string, name: string): Promise<void>
 
 watch(selectedTop, (top, previousTop) => {
   if (editor.kind !== 'type') resetEditor('category')
-  if (top && top !== previousTop) void loadCategories(top)
+  if (top && top !== previousTop) void loadDirectory()
+})
+
+watch([keyword, categoryId, status, element, chakra, colorFamily, assetState, page], () => {
+  if (selectedTop.value) void loadDirectory()
 })
 
 void loadTypes()
 onBeforeUnmount(() => {
   typesController?.abort()
-  categoriesController?.abort()
+  directoryController?.abort()
 })
 </script>
 
@@ -400,13 +455,168 @@ onBeforeUnmount(() => {
       <div class="directory-tree">
         <div class="directory-tree__summary">
           <div>
-            <span>第二层 / 第三层</span>
+            <span>品种目录 · 分页查询</span>
             <h2>{{ selectedType?.name || '选择材料类型' }}</h2>
           </div>
           <p v-if="selectedType">
-            {{ activeCategories }} 个启用分类 · {{ selectedSeriesCount }} 个品种 · {{ selectedType.sku_count }} 个 SKU
+            共 {{ total }} 个品种 · 当前页覆盖 {{ visibleCategoryCount }} 个分类 · {{ selectedType.sku_count }} 个 SKU
           </p>
         </div>
+
+        <form
+          v-if="selectedType"
+          class="directory-filters"
+          @submit.prevent="updateQuery({ keyword: keyword || undefined, page: undefined })"
+        >
+          <input
+            :value="keyword"
+            type="search"
+            placeholder="搜索品种、分类或材料编码"
+            aria-label="搜索目录"
+            @input="updateQuery({ keyword: ($event.target as HTMLInputElement).value.trim() || undefined, page: undefined })"
+          >
+          <select
+            :value="categoryId"
+            aria-label="按分类筛选"
+            @change="updateQuery({ category_id: ($event.target as HTMLSelectElement).value || undefined, page: undefined })"
+          >
+            <option value="">
+              全部分类
+            </option>
+            <option
+              v-for="item in categoryOptions"
+              :key="item.id"
+              :value="item.id"
+            >
+              {{ item.name }}（{{ item.series_count }}）{{ item.enabled ? '' : ' · 已停用' }}
+            </option>
+          </select>
+          <select
+            :value="status"
+            aria-label="按状态筛选"
+            @change="updateQuery({ status: ($event.target as HTMLSelectElement).value || undefined, page: undefined })"
+          >
+            <option value="">
+              全部状态
+            </option><option value="enabled">
+              已启用
+            </option><option value="disabled">
+              已停用
+            </option>
+          </select>
+          <select
+            :value="element"
+            aria-label="按主五行筛选"
+            @change="updateQuery({ element: ($event.target as HTMLSelectElement).value || undefined, page: undefined })"
+          >
+            <option value="">
+              全部主五行
+            </option>
+            <option
+              v-for="item in materialOptions?.elements || []"
+              :key="item.key"
+              :value="item.key"
+            >
+              {{ item.label }}
+            </option>
+          </select>
+          <select
+            :value="chakra"
+            aria-label="按脉轮筛选"
+            @change="updateQuery({ chakra: ($event.target as HTMLSelectElement).value || undefined, page: undefined })"
+          >
+            <option value="">
+              全部脉轮
+            </option>
+            <option
+              v-for="item in materialOptions?.chakras || []"
+              :key="item.key"
+              :value="item.key"
+            >
+              {{ item.label }}
+            </option>
+          </select>
+          <select
+            :value="colorFamily"
+            aria-label="按色系筛选"
+            @change="updateQuery({ color_family: ($event.target as HTMLSelectElement).value || undefined, page: undefined })"
+          >
+            <option value="">
+              全部色系
+            </option>
+            <option
+              v-for="item in materialOptions?.color_families || []"
+              :key="item.key"
+              :value="item.key"
+            >
+              {{ item.label }}
+            </option>
+          </select>
+          <select
+            :value="assetState"
+            aria-label="按图片状态筛选"
+            @change="updateQuery({ asset_state: ($event.target as HTMLSelectElement).value || undefined, page: undefined })"
+          >
+            <option value="">
+              全部图片状态
+            </option><option value="ready">
+              已设主图
+            </option><option value="missing">
+              缺主图
+            </option>
+          </select>
+          <button
+            v-if="keyword || categoryId || status || element || chakra || colorFamily || assetState"
+            class="text-action"
+            type="button"
+            @click="updateQuery({ keyword: undefined, category_id: undefined, status: undefined, element: undefined, chakra: undefined, color_family: undefined, asset_state: undefined, page: undefined })"
+          >
+            清除筛选
+          </button>
+          <button
+            v-if="canManage"
+            class="text-action"
+            type="button"
+            @click="resetEditor('category')"
+          >
+            新建分类
+          </button>
+          <button
+            v-if="canManage && categoryOptions.length"
+            class="text-action"
+            type="button"
+            @click="resetEditor('series', categoryId)"
+          >
+            新建品种
+          </button>
+          <button
+            v-if="canManage && selectedCategory"
+            class="text-action"
+            type="button"
+            @click="editCategory(selectedCategory)"
+          >
+            编辑当前分类
+          </button>
+          <button
+            v-if="canManage && selectedCategory?.enabled"
+            class="text-action danger-text"
+            type="button"
+            @click="disable('category', selectedCategory.id, selectedCategory.name)"
+          >
+            停用当前分类
+          </button>
+          <button
+            v-if="canManage && selectedCategory"
+            class="text-action danger-text"
+            type="button"
+            @click="remove('category', selectedCategory.id, selectedCategory.name)"
+          >
+            删除空分类
+          </button>
+          <button type="submit">
+            查询
+          </button>
+        </form>
 
         <div
           v-if="loading"
@@ -432,133 +642,87 @@ onBeforeUnmount(() => {
           </template>
         </PageEmptyState>
         <PageEmptyState
-          v-else-if="!selectedCategories.length"
-          title="此类型还没有分类"
-          :message="`先为「${selectedType.name}」建立分类，SKU 才能选择到可用品种。`"
-          @clear="resetEditor('category')"
-        >
-          <template
-            v-if="canManage"
-            #action
-          >
-            新建分类
-          </template>
-        </PageEmptyState>
+          v-else-if="!seriesRows.length"
+          :title="categoryOptions.length ? '没有符合筛选条件的品种' : '此类型还没有分类'"
+          :message="categoryOptions.length ? '调整筛选条件，或新建一个材料品种。' : `先为「${selectedType.name}」建立分类，SKU 才能选择到可用品种。`"
+          @clear="categoryOptions.length ? updateQuery({ keyword: undefined, category_id: undefined, status: undefined, element: undefined, chakra: undefined, color_family: undefined, asset_state: undefined, page: undefined }) : resetEditor('category')"
+        />
         <div
           v-else
-          class="directory-categories"
+          class="directory-series-list directory-series-list--paged"
         >
-          <section
-            v-for="category in selectedCategories"
-            :key="category.id"
-            class="directory-category"
-            :class="{ 'is-disabled': !category.enabled }"
+          <article
+            v-for="series in seriesRows"
+            :key="series.id"
+            class="directory-series"
+            :class="{ 'is-disabled': !series.enabled }"
           >
-            <header>
-              <div>
-                <span>分类</span>
-                <h3>{{ category.name }}</h3>
-                <small>{{ category.series.length }} 个品种</small>
-              </div>
-              <div class="directory-row-actions">
-                <button
-                  v-if="canManage"
-                  type="button"
-                  @click="editCategory(category)"
-                >
-                  编辑
-                </button>
-                <button
-                  v-if="canManage"
-                  type="button"
-                  @click="resetEditor('series', category.id)"
-                >
-                  新增品种
-                </button>
-                <button
-                  v-if="canManage && category.enabled"
-                  class="danger-text"
-                  type="button"
-                  @click="disable('category', category.id, category.name)"
-                >
-                  停用
-                </button>
-                <button
-                  v-if="canManage"
-                  class="danger-text"
-                  type="button"
-                  @click="remove('category', category.id, category.name)"
-                >
-                  删除空分类
-                </button>
-              </div>
-            </header>
-            <div
-              v-if="category.series.length"
-              class="directory-series-list"
+            <img
+              v-if="series.image_url"
+              :src="series.image_url"
+              :alt="series.name"
             >
-              <article
-                v-for="series in category.series"
-                :key="series.id"
-                class="directory-series"
-                :class="{ 'is-disabled': !series.enabled }"
-              >
-                <img
-                  v-if="series.image_url"
-                  :src="series.image_url"
-                  :alt="series.name"
-                >
-                <i
-                  v-else
-                  aria-hidden="true"
-                  :style="{ background: series.color || '#dfe3e5' }"
-                />
-                <div>
-                  <strong>{{ series.name }}</strong>
-                  <small>主五行：{{ elementLabel(series.energy?.primary_element) }} · {{ series.image_url ? '已设主图' : '缺主图' }}</small>
-                </div>
-                <span>{{ series.enabled ? '已启用' : '已停用' }}</span>
-                <div class="directory-row-actions">
-                  <RouterLink
-                    class="directory-profile-link"
-                    :to="{ name: 'material-series-profile', params: { seriesId: series.id } }"
-                  >
-                    完善资料
-                  </RouterLink>
-                  <button
-                    v-if="canManage"
-                    type="button"
-                    @click="editSeries(series)"
-                  >
-                    编辑
-                  </button>
-                  <button
-                    v-if="canManage && series.enabled"
-                    class="danger-text"
-                    type="button"
-                    @click="disable('series', series.id, series.name)"
-                  >
-                    停用
-                  </button>
-                  <button
-                    v-if="canManage"
-                    class="danger-text"
-                    type="button"
-                    @click="remove('series', series.id, series.name)"
-                  >
-                    删除空品种
-                  </button>
-                </div>
-              </article>
-            </div>
-            <p
+            <i
               v-else
-              class="directory-category__empty"
-            >
-              暂未建立品种。
-            </p>
-          </section>
+              aria-hidden="true"
+              :style="{ background: series.color || '#dfe3e5' }"
+            />
+            <div>
+              <strong>{{ series.name }}</strong>
+              <small>{{ series.category_name || '未分配分类' }} · 主五行：{{ elementLabel(series.energy?.primary_element) }} · {{ optionLabels('chakras', series.energy?.chakras) }} · {{ optionLabel('color_families', series.energy?.color_family) }}</small>
+            </div>
+            <span>{{ series.enabled ? '已启用' : '已停用' }} · {{ series.image_url ? '已设主图' : '缺主图' }}</span>
+            <div class="directory-row-actions">
+              <RouterLink
+                class="directory-profile-link"
+                :to="{ name: 'material-series-profile', params: { seriesId: series.id } }"
+              >
+                完善资料
+              </RouterLink>
+              <button
+                v-if="canManage"
+                type="button"
+                @click="editSeries(series)"
+              >
+                编辑
+              </button>
+              <button
+                v-if="canManage && series.enabled"
+                class="danger-text"
+                type="button"
+                @click="disable('series', series.id, series.name)"
+              >
+                停用
+              </button>
+              <button
+                v-if="canManage"
+                class="danger-text"
+                type="button"
+                @click="remove('series', series.id, series.name)"
+              >
+                删除空品种
+              </button>
+            </div>
+          </article>
         </div>
+        <nav
+          v-if="selectedType && total"
+          class="design-pagination directory-pagination"
+        >
+          <button
+            :disabled="page === 1"
+            @click="updateQuery({ page: page > 2 ? String(page - 1) : undefined })"
+          >
+            ← 上一页
+          </button>
+          <span>第 {{ page }} 页 · 共 {{ total }} 个品种</span>
+          <button
+            :disabled="!hasNext"
+            @click="updateQuery({ page: String(page + 1) })"
+          >
+            下一页 →
+          </button>
+        </nav>
       </div>
 
       <aside
@@ -591,6 +755,20 @@ onBeforeUnmount(() => {
               maxlength="40"
               placeholder="例如 bead"
             >
+          </label>
+          <label v-if="editor.kind === 'series'">
+            <span>所属分类</span>
+            <select
+              v-model="editor.parentId"
+              :disabled="!canManage || Boolean(editor.id)"
+            >
+              <option value="">请选择分类</option>
+              <option
+                v-for="item in categoryOptions"
+                :key="item.id"
+                :value="item.id"
+              >{{ item.name }}{{ item.enabled ? '' : '（已停用）' }}</option>
+            </select>
           </label>
           <label>
             <span>{{ editor.kind === 'type' ? '类型名称' : editor.kind === 'category' ? '分类名称' : '品种名称' }}</span>

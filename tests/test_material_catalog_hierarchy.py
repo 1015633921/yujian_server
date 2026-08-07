@@ -29,6 +29,64 @@ def test_material_directory_is_managed_separately_from_skus(tmp_path):
     assert taxonomy[0]["series"][0]["id"] == variety["id"]
 
 
+def test_material_directory_page_filters_series_and_returns_pagination(tmp_path):
+    service = AdminService(tmp_path / "material-directory-page.db")
+    category = service.save_material_category({"top": "bead", "name": "分页筛选分类"})
+    matched = service.save_material_series(
+        {
+            "category_id": category["id"],
+            "name": "海蓝宝",
+            "material_code": "aquamarine",
+            "primary_element": "water",
+            "chakras": ["throat"],
+            "color_family": "blue",
+            "image_url": "https://example.com/aquamarine.webp",
+        }
+    )
+    service.save_material_series(
+        {
+            "category_id": category["id"],
+            "name": "白水晶",
+            "material_code": "clear-quartz",
+            "primary_element": "metal",
+            "chakras": ["crown"],
+            "color_family": "white",
+            "enabled": False,
+        }
+    )
+
+    result = service.list_material_taxonomy_page(
+        top="bead",
+        keyword="海蓝",
+        category_id=category["id"],
+        status="enabled",
+        element="water",
+        chakra="throat",
+        color_family="blue",
+        asset_state="ready",
+        page=1,
+        page_size=1,
+    )
+
+    assert result["pagination"] == {
+        "page": 1,
+        "page_size": 1,
+        "total": 1,
+        "total_pages": 1,
+        "has_next": False,
+        "has_prev": False,
+    }
+    assert result["items"][0]["id"] == matched["id"]
+    assert result["items"][0]["category_name"] == "分页筛选分类"
+    assert {
+        "id": category["id"],
+        "name": "分页筛选分类",
+        "enabled": True,
+        "sort_order": 0,
+        "series_count": 2,
+    } in result["categories"]
+
+
 def test_only_empty_material_categories_can_be_deleted_in_a_batch(tmp_path):
     service = AdminService(tmp_path / "empty-category-delete.db")
     empty = service.save_material_category({"top": "bead", "name": "待删除空分类"})

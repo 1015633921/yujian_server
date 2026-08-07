@@ -12,6 +12,7 @@ import {
   listMaterialOptions,
   listMaterialSpus,
   listMaterialTaxonomy,
+  listMaterialTaxonomyPage,
   listMaterialTypes,
   patchMaterialSku,
   saveMaterialSeries,
@@ -41,6 +42,25 @@ describe('material directory api', () => {
     const [, request] = fetchMock.mock.calls[1] as [string, RequestInit]
     expect(new Headers(request.headers).get('authorization')).toBe('Bearer operator-token')
     expect(String(fetchMock.mock.calls[2]?.[0])).toContain('material-taxonomy/series/series-1')
+  })
+
+  it('uses a compact paged query for the directory list and sends its filters', async () => {
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(
+      new Response(JSON.stringify({ code: 0, data: { items: [], categories: [], pagination: {} } }), { status: 200, headers: { 'content-type': 'application/json' } }),
+    ))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await listMaterialTaxonomyPage({
+      keyword: '海蓝宝', top: 'bead', categoryId: 'cat-1', status: 'enabled', element: 'water', chakra: 'throat', colorFamily: 'blue', assetState: 'ready', page: 2, pageSize: 20,
+    })
+
+    const [url, request] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toContain('material-taxonomy/page?')
+    expect(url).toContain('keyword=%E6%B5%B7%E8%93%9D%E5%AE%9D')
+    expect(url).toContain('category_id=cat-1')
+    expect(url).toContain('chakra=throat')
+    expect(url).toContain('page=2')
+    expect(new Headers(request.headers).get('authorization')).toBe('Bearer operator-token')
   })
 
   it('loads the shared material option dictionary for enum-driven editors', async () => {

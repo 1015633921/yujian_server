@@ -1687,6 +1687,37 @@ def material_taxonomy(
     return success(admin_service.list_material_taxonomy(top=top, include_disabled=include_disabled))
 
 
+@admin_router.get("/material-taxonomy/page", summary="后台材料目录分页列表")
+def material_taxonomy_page(
+    keyword: str = Query(default="", max_length=80),
+    top: str = Query(default="", max_length=40),
+    category_id: str = Query(default="", max_length=120),
+    status: str = Query(default="", max_length=20),
+    element: str = Query(default="", max_length=20),
+    chakra: str = Query(default="", max_length=40),
+    color_family: str = Query(default="", max_length=40),
+    asset_state: str = Query(default="", max_length=20),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+    authorization: str | None = Header(default=None),
+):
+    require_admin(authorization)
+    return success(
+        admin_service.list_material_taxonomy_page(
+            keyword=keyword,
+            top=top,
+            category_id=category_id,
+            status=status,
+            element=element,
+            chakra=chakra,
+            color_family=color_family,
+            asset_state=asset_state,
+            page=page,
+            page_size=page_size,
+        )
+    )
+
+
 @admin_router.get("/material-taxonomy/series/{series_id}", summary="后台材料品种完整资料")
 def material_series_detail(series_id: str, authorization: str | None = Header(default=None)):
     require_admin(authorization)

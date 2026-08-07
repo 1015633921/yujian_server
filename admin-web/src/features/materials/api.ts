@@ -150,6 +150,33 @@ export interface MaterialCategory {
   series: MaterialSeries[]
 }
 
+export interface MaterialDirectoryCategoryOption {
+  id: string
+  name: string
+  enabled: boolean
+  sort_order: number
+  series_count: number
+}
+
+export interface MaterialDirectoryPage {
+  items: MaterialSeries[]
+  categories: MaterialDirectoryCategoryOption[]
+  pagination: MaterialPage['pagination']
+}
+
+export interface MaterialDirectoryQuery {
+  keyword: string
+  top: string
+  categoryId: string
+  status: string
+  element: string
+  chakra: string
+  colorFamily: string
+  assetState: string
+  page: number
+  pageSize: number
+}
+
 export interface MaterialOption {
   key: string
   label: string
@@ -305,6 +332,22 @@ export function listMaterialOptions(signal?: AbortSignal): Promise<MaterialOptio
 export function listMaterialTaxonomy(top: string, includeDisabled = true, signal?: AbortSignal): Promise<MaterialCategory[]> {
   const params = new URLSearchParams({ top, include_disabled: String(includeDisabled) })
   return apiRequest(`/api/v1/admin/material-taxonomy?${params}`, { signal })
+}
+
+export function listMaterialTaxonomyPage(query: MaterialDirectoryQuery, signal?: AbortSignal): Promise<MaterialDirectoryPage> {
+  const params = new URLSearchParams({
+    keyword: query.keyword,
+    top: query.top,
+    category_id: query.categoryId,
+    status: query.status,
+    element: query.element,
+    chakra: query.chakra,
+    color_family: query.colorFamily,
+    asset_state: query.assetState,
+    page: String(query.page),
+    page_size: String(query.pageSize),
+  })
+  return apiRequest<MaterialDirectoryPage>(`/api/v1/admin/material-taxonomy/page?${params}`, { signal })
 }
 
 /** Reads the full series-owned profile before editing, so omitted fields cannot be overwritten. */
