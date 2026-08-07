@@ -270,7 +270,15 @@ def _ensure_category(
     enabled: int,
     created_at: str,
     updated_at: str,
-) -> None:
+) -> str:
+    existing = connection.execute(
+        "SELECT category_id FROM material_categories_v2 "
+        "WHERE category_id=? OR (type_code=? AND name=?) "
+        "ORDER BY CASE WHEN category_id=? THEN 0 ELSE 1 END, category_id LIMIT 1",
+        (category_id, type_code, name, category_id),
+    ).fetchone()
+    if existing:
+        return str(existing["category_id"])
     _insert_if_missing(
         connection,
         "material_categories_v2",
@@ -279,6 +287,7 @@ def _ensure_category(
         ["category_id", "type_code", "name", "description", "sort_order", "enabled", "created_at", "updated_at"],
         [category_id, type_code, name, "", sort_order, enabled, created_at, updated_at],
     )
+    return category_id
 
 
 def _backfill(connection, backend: str, database: str) -> None:
@@ -289,10 +298,15 @@ def _backfill(connection, backend: str, database: str) -> None:
     series_rows = [row for row in taxonomy if row.get("kind") == "series"]
     now = "1970-01-01T00:00:00+00:00"
 
-    for row in categories.values():
-        _ensure_category(
+    category_aliases: dict[str, str] = {}
+    for row in sorted(
+        categories.values(),
+        key=lambda item: (int(item.get("sort_order") or 0), str(item["item_id"])),
+    ):
+        original_category_id = str(row["item_id"])
+        category_aliases[original_category_id] = _ensure_category(
             connection,
-            category_id=str(row["item_id"]),
+            category_id=original_category_id,
             type_code=str(row.get("top") or "bead"),
             name=str(row.get("name") or "未分类"),
             sort_order=int(row.get("sort_order") or 0),
@@ -308,21 +322,35 @@ def _backfill(connection, backend: str, database: str) -> None:
 
     known_codes: set[str] = set()
     series_ids: set[str] = set()
-    for row in series_rows:
-        series_id = str(row["item_id"])
-        category_id = str(row.get("parent_id") or "")
-        category = categories.get(category_id)
+    series_aliases: dict[str, str] = {}
+    series_by_name: dict[tuple[str, str], str] = {}
+    for row in sorted(
+        series_rows,
+        key=lambda item: (int(item.get("sort_order") or 0), str(item["item_id"])),
+    ):
+        original_series_id = str(row["item_id"])
+        original_category_id = str(row.get("parent_id") or "")
+        category_id = category_aliases.get(original_category_id, original_category_id)
+        category = categories.get(original_category_id)
         if not category:
             type_code = str(row.get("top") or "bead")
             category_id = _slug_id("cat", type_code, "未分类")
-            _ensure_category(
+            category_id = _ensure_category(
                 connection, category_id=category_id, type_code=type_code, name="未分类",
                 sort_order=0, enabled=1, created_at=str(row.get("created_at") or now),
                 updated_at=str(row.get("updated_at") or now),
             )
+        series_name = str(row.get("name") or "未命名品种")
+        duplicate_series_id = series_by_name.get((category_id, series_name))
+        if duplicate_series_id:
+            series_aliases[original_series_id] = duplicate_series_id
+            continue
+        series_id = original_series_id
+        series_aliases[original_series_id] = series_id
+        series_by_name[(category_id, series_name)] = series_id
         code = str(row.get("material_code") or "").strip()
         if not code:
-            candidates = skus_by_series.get(series_id, [])
+            candidates = skus_by_series.get(original_series_id, [])
             code = next((str(item.get("material_code") or "").strip() for item in candidates if item.get("material_code")), "")
         if not code or code in known_codes:
             code = f"legacy-{series_id}"
@@ -331,7 +359,7 @@ def _backfill(connection, backend: str, database: str) -> None:
         _insert_if_missing(
             connection, "material_series_v2", "series_id", series_id,
             ["series_id", "category_id", "material_code", "name", "color", "shine", "asset_version", "sort_order", "enabled", "created_at", "updated_at"],
-            [series_id, category_id, code, str(row.get("name") or "未命名品种"), str(row.get("color") or ""),
+            [series_id, category_id, code, series_name, str(row.get("color") or ""),
              str(row.get("shine") or ""), max(1, int(row.get("asset_version") or 1)), int(row.get("sort_order") or 0),
              int(bool(row.get("enabled", 1))), str(row.get("created_at") or now), str(row.get("updated_at") or now)],
         )
@@ -363,12 +391,13 @@ def _backfill(connection, backend: str, database: str) -> None:
 
     # Legacy rows without a stable taxonomy link receive a deterministic fallback series.
     for sku in legacy_skus:
-        series_id = str(sku.get("series_id") or "").strip()
+        original_series_id = str(sku.get("series_id") or "").strip()
+        series_id = series_aliases.get(original_series_id, "")
         if not series_id or series_id not in series_ids:
             type_code = str(sku.get("top") or "bead")
             category_name = str(sku.get("category") or "未分类")
             category_id = _slug_id("cat", type_code, category_name)
-            _ensure_category(
+            category_id = _ensure_category(
                 connection, category_id=category_id, type_code=type_code, name=category_name,
                 sort_order=0, enabled=1, created_at=str(sku.get("created_at") or now),
                 updated_at=str(sku.get("updated_at") or now),

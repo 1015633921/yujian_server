@@ -42,44 +42,69 @@ def catalog_v2_available(connection) -> bool:
     return True
 
 
-def sync_legacy_category_to_v2(connection, category_id: str) -> None:
+def sync_legacy_category_to_v2(connection, category_id: str) -> str:
     if not catalog_v2_available(connection):
-        return
+        return category_id
     row = connection.execute(
         "SELECT * FROM material_taxonomy WHERE item_id=? AND kind='category'", (category_id,)
     ).fetchone()
     if not row:
-        return
+        return category_id
     item = dict(row)
+    type_code = str(item.get("top") or "bead")
+    name = str(item.get("name") or "未分类")
+    canonical = connection.execute(
+        "SELECT category_id FROM material_categories_v2 "
+        "WHERE type_code=? AND name=? ORDER BY category_id LIMIT 1",
+        (type_code, name),
+    ).fetchone()
+    if canonical and str(canonical["category_id"]) != category_id:
+        return str(canonical["category_id"])
     _upsert(connection, "material_categories_v2", "category_id", {
         "category_id": str(item["item_id"]),
-        "type_code": str(item.get("top") or "bead"),
-        "name": str(item.get("name") or "未分类"),
+        "type_code": type_code,
+        "name": name,
         "description": "",
         "sort_order": int(item.get("sort_order") or 0),
         "enabled": int(bool(item.get("enabled", 1))),
         "created_at": str(item.get("created_at") or item.get("updated_at") or ""),
         "updated_at": str(item.get("updated_at") or ""),
     })
+    return category_id
 
 
-def sync_legacy_series_to_v2(connection, series_id: str) -> None:
+def sync_legacy_series_to_v2(connection, series_id: str) -> str:
     if not catalog_v2_available(connection):
-        return
+        return series_id
     row = connection.execute(
         "SELECT * FROM material_taxonomy WHERE item_id=? AND kind='series'", (series_id,)
     ).fetchone()
     if not row:
-        return
+        return series_id
     item = dict(row)
-    category_id = str(item.get("parent_id") or "")
-    sync_legacy_category_to_v2(connection, category_id)
+    category_id = sync_legacy_category_to_v2(
+        connection, str(item.get("parent_id") or "")
+    )
+    name = str(item.get("name") or "未命名品种")
+    canonical = connection.execute(
+        "SELECT series_id FROM material_series_v2 "
+        "WHERE category_id=? AND name=? ORDER BY series_id LIMIT 1",
+        (category_id, name),
+    ).fetchone()
+    if canonical and str(canonical["series_id"]) != series_id:
+        return str(canonical["series_id"])
     code = str(item.get("material_code") or f"legacy-{series_id}")
+    code_owner = connection.execute(
+        "SELECT series_id FROM material_series_v2 WHERE material_code=?",
+        (code,),
+    ).fetchone()
+    if code_owner and str(code_owner["series_id"]) != series_id:
+        code = f"legacy-{series_id}"
     _upsert(connection, "material_series_v2", "series_id", {
         "series_id": series_id,
         "category_id": category_id,
         "material_code": code,
-        "name": str(item.get("name") or "未命名品种"),
+        "name": name,
         "color": str(item.get("color") or ""),
         "shine": str(item.get("shine") or ""),
         "asset_version": max(1, int(item.get("asset_version") or 1)),
@@ -121,6 +146,7 @@ def sync_legacy_series_to_v2(connection, series_id: str) -> None:
             "created_at": str(item.get("created_at") or item.get("updated_at") or ""),
             "updated_at": str(item.get("updated_at") or ""),
         })
+    return series_id
 
 
 def sync_legacy_sku_to_v2(connection, sku_id: str) -> None:
@@ -138,7 +164,7 @@ def sync_legacy_sku_to_v2(connection, sku_id: str) -> None:
         # break their original write; the readiness validator will report the
         # missing V2 SKU and block cutover until the import is repaired.
         return
-    sync_legacy_series_to_v2(connection, series_id)
+    series_id = sync_legacy_series_to_v2(connection, series_id)
     _upsert(connection, "material_skus_v2", "sku_id", {
         "sku_id": sku_id,
         "series_id": series_id,
@@ -326,6 +352,16 @@ def validate_material_catalog_v2(
         str(row["sku_id"]): dict(row)
         for row in connection.execute("SELECT * FROM material_inventory_v2").fetchall()
     }
+    hierarchy_rows = {
+        str(row["sku_id"]): dict(row)
+        for row in connection.execute(
+            "SELECT k.sku_id, t.type_code AS top, c.name AS category, s.name AS series "
+            "FROM material_skus_v2 k "
+            "JOIN material_series_v2 s ON s.series_id=k.series_id "
+            "JOIN material_categories_v2 c ON c.category_id=s.category_id "
+            "JOIN material_types t ON t.type_code=c.type_code"
+        ).fetchall()
+    }
     issues: list[dict[str, Any]] = []
 
     def add(code: str, entity_id: str, field: str = "", legacy: Any = None, v2: Any = None) -> None:
@@ -355,9 +391,12 @@ def validate_material_catalog_v2(
             actual = _decimal(sku.get(field)) if field in {"size_mm", "weight_g"} else int(sku.get(field) or 0)
             if actual != expected:
                 add("sku_field_mismatch", sku_id, field, str(expected), str(actual))
-        legacy_series_id = str(legacy.get("series_id") or "").strip()
-        if legacy_series_id and str(sku.get("series_id") or "") != legacy_series_id:
-            add("sku_field_mismatch", sku_id, "series_id", legacy_series_id, sku.get("series_id"))
+        hierarchy = hierarchy_rows.get(sku_id, {})
+        for field in ("top", "category", "series"):
+            expected = str(legacy.get(field) or "").strip()
+            actual = str(hierarchy.get(field) or "").strip()
+            if expected and actual != expected:
+                add("sku_field_mismatch", sku_id, field, expected, actual)
         if compare_legacy_inventory:
             for field in ("stock", "reserved_stock", "safety_stock"):
                 expected = max(0, int(legacy.get(field) or 0))

@@ -177,3 +177,41 @@ def test_material_catalog_v2_disambiguates_duplicate_legacy_sku_codes(tmp_path):
     assert rows["sku-moonstone-10"].startswith("1000010080-")
     assert len(set(rows.values())) == 2
     connection.close()
+
+
+def test_material_catalog_v2_merges_duplicate_named_legacy_hierarchy(tmp_path):
+    connection = _legacy_database(tmp_path / "duplicate-hierarchy.db")
+    connection.execute(
+        "INSERT INTO material_taxonomy VALUES "
+        "('cat-quartz-copy', '', 'category', 'bead', '水晶', '', '', '', NULL, NULL, NULL, "
+        "1, 11, 1, '2026-08-07', '2026-08-07')"
+    )
+    connection.execute(
+        "INSERT INTO material_taxonomy VALUES "
+        "('series-moonstone-copy', 'cat-quartz-copy', 'series', 'bead', '月光石', "
+        "'moonstone-copy', '', '', NULL, NULL, NULL, 1, 21, 1, '2026-08-07', '2026-08-07')"
+    )
+    connection.execute(
+        """
+        INSERT INTO managed_materials VALUES
+            ('sku-moonstone-copy-10', '1000010100', 'bead', '水晶', '月光石',
+             'series-moonstone-copy', 'moonstone-copy', '5A', '月光石 10mm',
+             88, 8800, 10, 2, 15, 5, '', '', '', '', '{}',
+             10, 0, 1, 9, 1, '2026-08-07', '2026-08-07')
+        """
+    )
+
+    v20260807_25_material_catalog_v2.upgrade(connection, "sqlite")
+
+    assert connection.execute(
+        "SELECT COUNT(*) FROM material_categories_v2 WHERE type_code='bead' AND name='水晶'"
+    ).fetchone()[0] == 1
+    assert connection.execute(
+        "SELECT COUNT(*) FROM material_series_v2 WHERE name='月光石'"
+    ).fetchone()[0] == 1
+    assert connection.execute(
+        "SELECT COUNT(DISTINCT series_id) FROM material_skus_v2 "
+        "WHERE sku_id IN ('sku-moonstone-8', 'sku-moonstone-copy-10')"
+    ).fetchone()[0] == 1
+    assert validate_material_catalog_v2(connection)["ready"] is True
+    connection.close()
