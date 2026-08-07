@@ -92,10 +92,19 @@ function switchTab(next:Tab):void { tab.value=next; void load() }; watch([keywor
       >
         <template v-if="'assessment_id'in item">
           <strong>{{ item.name||item.user_id }} · {{ item.core_wish||'未设愿望' }}</strong><p>{{ item.formula?.tags?.map(x=>`${x.role||'珠材'} ${x.name||''}`).join(' · ')||'暂无配方' }}</p><small>{{ item.summary||'暂无摘要' }} · {{ item.created_at||'—' }}</small>
+          <RouterLink :to="{ name: 'energy-assessment-detail', params: { assessmentId: item.assessment_id } }">
+            查看详情
+          </RouterLink>
         </template><template v-else-if="'energy_date'in item">
           <strong>{{ item.energy_date }} · {{ item.user_id }}</strong><p>{{ item.title||'今日能量' }} · {{ item.recommended_stone||'—' }}</p><small>{{ item.lucky_color||'—' }} · {{ item.score??'—' }} 分</small>
+          <RouterLink :to="{ name: 'energy-daily-detail', params: { userId: item.user_id, energyDate: item.energy_date } }">
+            查看详情
+          </RouterLink>
         </template><template v-else>
           <strong>{{ item.checkin_date }} · {{ item.user_id }}</strong><p>心情 {{ item.mood??'—' }} · 睡眠 {{ item.sleep??'—' }} · 压力 {{ item.stress??'—' }}</p><small>{{ item.updated_at||'—' }}</small>
+          <RouterLink :to="{ name: 'energy-checkin-detail', params: { userId: item.user_id, checkinDate: item.checkin_date } }">
+            查看详情
+          </RouterLink>
         </template>
       </article>
     </div>

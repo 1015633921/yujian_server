@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { storeToken } from '@/api/client'
 
-import { createAdmin, disableAdmin, getDailyRules, getSystemStatus, getUser, listAdmins, listAssessments, listCheckins, listDailyEnergies, listLoginLogs, listUsers, saveDailyRules, updateAdmin } from './api'
+import { createAdmin, disableAdmin, getAssessmentDetail, getCheckinDetail, getDailyEnergyDetail, getDailyRules, getSystemStatus, getUser, listAdmins, listAssessments, listCheckins, listDailyEnergies, listLoginLogs, listUsers, saveDailyRules, updateAdmin } from './api'
 
 describe('user api', () => {
   beforeEach(() => { window.history.replaceState({}, '', '/admin-v2/users'); storeToken('operator-token'); vi.restoreAllMocks() })
@@ -24,6 +24,18 @@ describe('user api', () => {
     expect(String(fetchMock.mock.calls[0]?.[0])).toContain('assessments?keyword=u-1&core_wish=%E6%8B%9B%E8%B4%A2&hide_tests=true&limit=200')
     expect(String(fetchMock.mock.calls[1]?.[0])).toContain('daily-energies?keyword=u-1&limit=200')
     expect(String(fetchMock.mock.calls[2]?.[0])).toContain('checkins?keyword=u-1&limit=200')
+  })
+
+  it('reads protected detail endpoints for all energy data records', async () => {
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(new Response(JSON.stringify({ code: 0, data: {} }), { status: 200, headers: { 'content-type': 'application/json' } })))
+    vi.stubGlobal('fetch', fetchMock)
+    await getAssessmentDetail('assessment-1')
+    await getDailyEnergyDetail('user/1', '2026-08-07')
+    await getCheckinDetail('user/1', '2026-08-07')
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain('assessments/assessment-1')
+    expect(String(fetchMock.mock.calls[1]?.[0])).toContain('daily-energies/user%2F1/2026-08-07')
+    expect(String(fetchMock.mock.calls[2]?.[0])).toContain('checkins/user%2F1/2026-08-07')
+    for (const [, init] of fetchMock.mock.calls) expect(new Headers((init as RequestInit).headers).get('authorization')).toBe('Bearer operator-token')
   })
 
   it('reads, saves and resets daily rules through the protected rules endpoint', async () => {

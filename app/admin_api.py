@@ -839,6 +839,15 @@ def assessments(
     return success(admin_service.list_assessments(keyword=keyword, core_wish=core_wish, hide_tests=hide_tests, limit=limit))
 
 
+@admin_router.get("/assessments/{assessment_id}", summary="分析记录详情")
+def assessment_detail(assessment_id: str, authorization: str | None = Header(default=None)):
+    require_admin(authorization)
+    try:
+        return success(admin_service.get_assessment_detail(assessment_id))
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
 @admin_router.get("/daily-energies", summary="每日搭配记录列表")
 def daily_energies(
     keyword: str = Query(default="", max_length=80),
@@ -847,6 +856,19 @@ def daily_energies(
 ):
     require_admin(authorization)
     return success(admin_service.list_daily_energies(keyword=keyword, limit=limit))
+
+
+@admin_router.get("/daily-energies/{user_id}/{energy_date}", summary="每日搭配记录详情")
+def daily_energy_detail(
+    user_id: str,
+    energy_date: str,
+    authorization: str | None = Header(default=None),
+):
+    require_admin(authorization)
+    try:
+        return success(admin_service.get_daily_energy_detail(user_id, energy_date))
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @admin_router.get("/daily-energy-rules", summary="每日搭配规则配置")
@@ -877,6 +899,19 @@ def checkins(
 ):
     require_admin(authorization)
     return success(admin_service.list_checkins(keyword=keyword, limit=limit))
+
+
+@admin_router.get("/checkins/{user_id}/{checkin_date}", summary="每日签到记录详情")
+def checkin_detail(
+    user_id: str,
+    checkin_date: str,
+    authorization: str | None = Header(default=None),
+):
+    require_admin(authorization)
+    try:
+        return success(admin_service.get_checkin_detail(user_id, checkin_date))
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @admin_router.get("/custom-design-requests", summary="人工搭配工单列表")

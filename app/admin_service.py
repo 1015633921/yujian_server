@@ -5210,6 +5210,63 @@ class AdminService:
             results.append(item)
         return results
 
+    def get_assessment_detail(self, assessment_id: str) -> dict[str, Any]:
+        """Return the complete operator-safe view of one energy assessment."""
+        clean_id = str(assessment_id or "").strip()
+        if not clean_id:
+            raise ValueError("测算记录 ID 不能为空")
+        with self.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT assessment_id, user_id, name, core_wish, created_at, result_json
+                FROM energy_assessments WHERE assessment_id = ?
+                """,
+                (clean_id,),
+            ).fetchone()
+            if not row:
+                raise ValueError("测算记录不存在")
+            order_rows = []
+            if self.table_exists(connection, "orders"):
+                order_rows = connection.execute(
+                    """
+                    SELECT order_id, user_id, status, payment_status, total_amount, created_at
+                    FROM orders WHERE user_id = ? ORDER BY created_at ASC
+                    """,
+                    (row["user_id"],),
+                ).fetchall()
+        item = dict(row)
+        try:
+            result = json.loads(item.pop("result_json") or "{}")
+        except json.JSONDecodeError:
+            result = {}
+        if not isinstance(result, dict):
+            result = {}
+        orders = [dict(order) for order in order_rows]
+        return {
+            **item,
+            "summary": result.get("report", {}).get("summary") or result.get("recommendation_copy") or "",
+            "input_summary": result.get("input_summary") or {},
+            "energy": {
+                "profile": result.get("final_energy_profile") or {},
+                "breakdown": result.get("energy_breakdown") or result.get("breakdown") or {},
+                "strongest_element": result.get("strongest_element") or "",
+                "weakest_element": result.get("weakest_element") or "",
+                "keywords": result.get("energy_keywords") or [],
+                "seasonal": result.get("seasonal_energy") or {},
+                "interpretation": result.get("interpretation") or "",
+            },
+            "formula": self.extract_assessment_formula(result),
+            "recommendation": {
+                "copy": result.get("recommendation_copy") or "",
+                "primary_crystal": result.get("primary_crystal") or {},
+                "supporting_crystals": result.get("supporting_crystals") or [],
+                "bracelet_plan": result.get("bracelet_plan") or {},
+                "care_tips": result.get("care_tips") or [],
+                "disclaimer": result.get("disclaimer") or "",
+            },
+            "conversion": self.assessment_conversion(item, orders),
+        }
+
     def extract_assessment_formula(self, result: dict[str, Any]) -> dict[str, Any]:
         primary = result.get("primary_crystal") or {}
         supporting = result.get("supporting_crystals") or []
@@ -5285,6 +5342,40 @@ class AdminService:
             results.append(item)
         return results
 
+    def get_daily_energy_detail(self, user_id: str, energy_date: str) -> dict[str, Any]:
+        clean_user_id = str(user_id or "").strip()
+        clean_date = str(energy_date or "").strip()
+        if not clean_user_id or not clean_date:
+            raise ValueError("每日能量记录参数不能为空")
+        with self.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT user_id, energy_date, mode, assessment_id, result_json, updated_at
+                FROM daily_energies WHERE user_id = ? AND energy_date = ?
+                """,
+                (clean_user_id, clean_date),
+            ).fetchone()
+        if not row:
+            raise ValueError("每日能量记录不存在")
+        item = dict(row)
+        try:
+            result = json.loads(item.pop("result_json") or "{}")
+        except json.JSONDecodeError:
+            result = {}
+        if not isinstance(result, dict):
+            result = {}
+        return {
+            **item,
+            "title": result.get("title") or result.get("theme") or "",
+            "score": result.get("score"),
+            "lucky_color": result.get("lucky_color") or "",
+            "recommended_stone": result.get("recommended_stone") or result.get("lucky_crystal") or "",
+            "energy_profile": result.get("energy_profile") or result.get("final_energy_profile") or {},
+            "keywords": result.get("energy_keywords") or result.get("keywords") or [],
+            "advice": result.get("advice") or result.get("suggestion") or result.get("copy") or "",
+            "lucky_time": result.get("lucky_time") or "",
+        }
+
     def list_checkins(self, keyword: str = "", limit: int = 100) -> list[dict[str, Any]]:
         keyword = keyword.strip()
         params: list[Any] = []
@@ -5305,6 +5396,23 @@ class AdminService:
                 params,
             ).fetchall()
         return [dict(row) for row in rows]
+
+    def get_checkin_detail(self, user_id: str, checkin_date: str) -> dict[str, Any]:
+        clean_user_id = str(user_id or "").strip()
+        clean_date = str(checkin_date or "").strip()
+        if not clean_user_id or not clean_date:
+            raise ValueError("签到记录参数不能为空")
+        with self.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT user_id, checkin_date, mood, sleep, stress, created_at, updated_at
+                FROM daily_checkins WHERE user_id = ? AND checkin_date = ?
+                """,
+                (clean_user_id, clean_date),
+            ).fetchone()
+        if not row:
+            raise ValueError("签到记录不存在")
+        return dict(row)
 
     def get_setting(self, setting_key: str) -> Any | None:
         with self.connect() as connection:
