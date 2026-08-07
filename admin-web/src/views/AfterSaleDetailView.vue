@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import PageErrorState from '@/components/ui/PageErrorState.vue'
 import { getAfterSale, retryAfterSaleRefund, reviewAfterSale, submitAfterSaleRefund, syncAfterSaleRefund } from '@/features/after-sales/api'
-import { actionConfig, afterSaleNextStep, afterSaleStatusLabel, afterSaleStatusTone, formatAfterSaleDate } from '@/features/after-sales/presentation'
+import { actionConfig, afterSaleEventLabel, afterSaleEventStatusText, afterSaleNextStep, afterSaleStatusLabel, afterSaleStatusTone, formatAfterSaleDate } from '@/features/after-sales/presentation'
 import type { AfterSaleCase } from '@/features/after-sales/types'
 
 const route = useRoute(); const item = ref<AfterSaleCase | null>(null); const loading = ref(true); const error = ref(''); const note = ref(''); const acting = ref(false); const message = ref('')
@@ -181,7 +181,7 @@ watch(caseId, () => void load(), { immediate: true }); onBeforeUnmount(() => con
                 v-for="(event, index) in [...(item.events || [])].reverse()"
                 :key="`${event.created_at || index}-${event.event_type || ''}`"
               >
-                <strong>{{ event.event_type || '状态更新' }}</strong><span>{{ afterSaleStatusLabel(event.from_status) }} → {{ afterSaleStatusLabel(event.to_status) }} · {{ formatAfterSaleDate(event.created_at) }}</span><small v-if="event.note">{{ event.note }}</small>
+                <strong>{{ afterSaleEventLabel(event.event_type) }}</strong><span>{{ afterSaleEventStatusText(event.from_status, event.to_status) }} · {{ formatAfterSaleDate(event.created_at) }}</span><small v-if="event.note">{{ event.note }}</small>
               </li><li
                 v-if="!item.events?.length"
                 class="empty-line"

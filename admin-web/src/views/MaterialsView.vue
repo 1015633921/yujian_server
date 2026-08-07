@@ -46,8 +46,6 @@ const top = queryValue('top')
 const category = queryValue('category')
 const status = queryValue('status')
 const stockState = queryValue('stock_state')
-const assetState = queryValue('asset_state')
-const specState = queryValue('spec_state')
 const profileState = queryValue('profile_state')
 const page = computed(() => Math.max(1, Number(route.query.page) || 1))
 const categories = computed(() => facets.value.category || [])
@@ -102,7 +100,7 @@ function toggleSelected(item: Material) {
   selected.value = next
 }
 function clearSelected() { selected.value = {} }
-function setQuickFilter(key: 'stock_state' | 'asset_state' | 'spec_state' | 'profile_state', value: string) {
+function setQuickFilter(key: 'stock_state' | 'profile_state', value: string) {
   updateQuery({ [key]: (route.query[key] === value ? undefined : value), page: undefined })
 }
 function newSkuId() {
@@ -141,7 +139,7 @@ async function load() {
   error.value = ''
   try {
     const [result, materialTypes, nextOptions] = await Promise.all([
-      listMaterialSpus({ keyword: keyword.value, top: top.value, category: category.value, status: status.value, stockState: stockState.value, assetState: assetState.value, specState: specState.value, profileState: profileState.value, page: page.value, pageSize: 20 }, controller.signal),
+      listMaterialSpus({ keyword: keyword.value, top: top.value, category: category.value, status: status.value, stockState: stockState.value, profileState: profileState.value, page: page.value, pageSize: 20 }, controller.signal),
       types.value.length ? Promise.resolve(types.value) : listMaterialTypes(false, controller.signal),
       materialOptions.value ? Promise.resolve(materialOptions.value) : listMaterialOptions(controller.signal),
     ])
@@ -214,7 +212,7 @@ async function applyBatch() {
     await load()
   } catch (cause) { error.value = cause instanceof Error ? cause.message : '批量操作失败' } finally { applyingBatch.value = false }
 }
-watch(() => [keyword.value, top.value, category.value, status.value, stockState.value, assetState.value, specState.value, profileState.value, page.value], () => void load(), { immediate: true })
+watch(() => [keyword.value, top.value, category.value, status.value, stockState.value, profileState.value, page.value], () => void load(), { immediate: true })
 onBeforeUnmount(() => controller?.abort())
 </script>
 
@@ -304,18 +302,6 @@ onBeforeUnmount(() => controller?.abort())
         缺货
       </button>
       <button
-        :class="{ active: assetState === 'missing_primary' }"
-        @click="setQuickFilter('asset_state', 'missing_primary')"
-      >
-        缺主图
-      </button>
-      <button
-        :class="{ active: specState === 'incomplete' }"
-        @click="setQuickFilter('spec_state', 'incomplete')"
-      >
-        规格不全
-      </button>
-      <button
         :class="{ active: profileState === 'incomplete' }"
         @click="setQuickFilter('profile_state', 'incomplete')"
       >
@@ -381,7 +367,7 @@ onBeforeUnmount(() => controller?.abort())
       v-else-if="!groups.length"
       title="暂无符合条件的品种"
       message="调整筛选条件，或在目录设置中建立新品种。"
-      @clear="updateQuery({ keyword: undefined, top: undefined, category: undefined, status: undefined, stock_state: undefined, asset_state: undefined, spec_state: undefined, profile_state: undefined })"
+      @clear="updateQuery({ keyword: undefined, top: undefined, category: undefined, status: undefined, stock_state: undefined, profile_state: undefined })"
     />
     <template v-else>
       <p
@@ -412,19 +398,6 @@ onBeforeUnmount(() => controller?.abort())
             <span class="material-spu-specs">{{ group.spu.size_values?.join(' / ') || '—' }}<small>规格（mm）</small></span>
             <span>¥{{ Number(group.spu.min_price || 0).toFixed(2) }}<template v-if="group.spu.max_price !== group.spu.min_price"> – ¥{{ Number(group.spu.max_price || 0).toFixed(2) }}</template><small>单颗售价</small></span>
             <span>{{ group.spu.total_stock || 0 }}<small>总库存</small></span>
-            <span class="material-spu-badges"><em
-              v-if="group.outStockCount"
-              class="risk"
-            >{{ group.outStockCount }} 缺货</em><em
-              v-else-if="group.lowStockCount"
-              class="warn"
-            >{{ group.lowStockCount }} 低库存</em><em
-              v-if="group.assetState !== 'ready'"
-              class="muted"
-            >图片待补</em><em
-              v-if="group.specStatus === 'partial'"
-              class="muted"
-            >规格待补</em></span>
           </button>
           <div
             v-if="isExpanded(group)"

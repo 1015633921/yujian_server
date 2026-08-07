@@ -87,7 +87,34 @@ function record(value: unknown): Record<string, unknown> {
 
 function arrayText(value: unknown): string {
   if (!Array.isArray(value)) return '未提供'
-  return value.map((item) => text(typeof item === 'object' ? record(item).label || record(item).element : item, '')).filter(Boolean).join('、') || '未提供'
+  return value.map((item) => text(typeof item === 'object' ? record(item).label || record(item).name || record(item).value || record(item).element : item, '')).filter(Boolean).join('、') || '未提供'
+}
+
+function joinText(values: unknown[]): string {
+  return values.map((value) => text(value, '')).filter(Boolean).join(' · ') || '未提供'
+}
+
+function elementDistribution(value: unknown): string {
+  if (!Array.isArray(value)) return '未提供'
+  return value.map((item) => {
+    const row = record(item)
+    const name = text(row.name || row.element, '')
+    const percent = row.percent ?? row.percentage
+    const metric = percent ?? row.score ?? row.raw_value
+    if (!name) return ''
+    if (percent !== undefined && percent !== null && percent !== '') return `${name} ${percent}%`
+    return metric !== undefined && metric !== null && metric !== '' ? `${name} ${metric}` : name
+  }).filter(Boolean).join(' · ') || '未提供'
+}
+
+function adjustmentText(value: unknown): string {
+  if (!Array.isArray(value)) return '未提供'
+  return value.map((item) => {
+    const row = record(item)
+    const role = text(row.role || row.label, '')
+    const element = text(row.element || row.value || row.name, '')
+    return role && element ? `${role}：${element}` : role || element
+  }).filter(Boolean).join(' · ') || '未提供'
 }
 
 function materialId(item: Record<string, unknown>): string {
@@ -130,14 +157,32 @@ const evidenceRows = computed(() => {
   const conclusion = record(summary.core_conclusion)
   const balance = record(summary.balance)
   const ranking = record(summary.ranking)
+  const guidance = record(summary.style_guidance)
+  const mbti = record(summary.mbti_analysis)
+  const chakra = record(summary.chakra_analysis)
+  const mood = record(summary.mood_analysis)
+  const zodiac = record(summary.zodiac_analysis)
   return [
-    ['测算结论', text(conclusion.summary || conclusion.title)],
-    ['平衡状态', text(balance.label || balance.status || balance.score)],
-    ['重点方向', arrayText(summary.adjustment_strategy || summary.useful_elements)],
-    ['现有气质', text(ranking.dominant || summary.strongest_element)],
+    ['测算结论', text(conclusion.title || conclusion.summary)],
+    ['元素分布均衡度', joinText([balance.label || balance.status, balance.score === undefined ? '' : `${balance.score} 分`])],
+    ['用户诉求', arrayText(summary.core_wishes)],
+    ['五行比例', elementDistribution(summary.elements)],
+    ['主导 / 次要', joinText([ranking.dominant, ranking.secondary])],
+    ['喜用方向', arrayText(summary.useful_elements)],
+    ['建议调整', adjustmentText(summary.adjustment_strategy)],
+    ['主导元素参考色', arrayText(guidance.recommended_colors)],
+    ['材质质感', text(guidance.recommended_texture, '')],
+    ['结构方向', text(guidance.structure_direction, '')],
+    ['应减少', text(guidance.reduce, '')],
     ['设计关键词', arrayText(summary.keywords)],
+    ['MBTI 倾向', mbti.selected === false ? '未选择' : joinText([mbti.type, arrayText(mbti.keywords)])],
+    ['脉轮侧重', joinText([chakra.primary_chakra_name || chakra.primary_chakra, arrayText(chakra.color_families)])],
+    ['情绪色彩', joinText([mood.name || mood.palette_name || mood.palette_id, arrayText(mood.visual_tags)])],
+    ['星座参考', joinText([zodiac.name, zodiac.element, zodiac.suggestion])],
   ].filter(([, value]) => value !== '未提供')
 })
+
+const evidenceConclusionSummary = computed(() => text(record((evidence.value || {}).core_conclusion).summary, ''))
 
 function resetRegions(): void {
   evidence.value = null
@@ -388,7 +433,7 @@ onBeforeUnmount(() => controller?.abort())
               {{ regionErrors.evidence }}
             </p>
             <dl
-              v-else
+              v-else-if="evidenceRows.length"
               class="detail-evidence-list"
             >
               <template
@@ -398,6 +443,18 @@ onBeforeUnmount(() => controller?.abort())
                 <dt>{{ row[0] }}</dt><dd>{{ row[1] }}</dd>
               </template>
             </dl>
+            <div
+              v-else
+              class="detail-empty-inline"
+            >
+              该报告未提供可展示的测算依据。
+            </div>
+            <p
+              v-if="evidenceConclusionSummary"
+              class="detail-evidence-summary"
+            >
+              {{ evidenceConclusionSummary }}
+            </p>
           </div>
         </section>
 

@@ -751,10 +751,12 @@ async function saveCustomDesignSettings(){
 }
 function afterSaleStatusPill(status,text){
   const cls=['requested','refund_pending','refund_submitting','refunding'].includes(status)?'danger':['awaiting_return','returning'].includes(status)?'warn':['resolved','rejected','canceled'].includes(status)?'muted':'';
-  return `<span class="status-pill ${cls}">${esc(text||status||'-')}</span>`;
+  return `<span class="status-pill ${cls}">${esc(text||afterSaleStatusText(status))}</span>`;
 }
-function afterSaleStatusText(status){return ({requested:'待审核',approved:'已同意',awaiting_return:'等待寄回',returning:'寄回中',service_processing:'服务处理中',refund_pending:'待确认退款',refund_submitting:'退款提交中',refunding:'退款处理中',resolved:'已完成',rejected:'已拒绝',canceled:'已取消'})[status]||status||'-'}
-function afterSaleEventText(type){return ({submitted:'用户提交售后',reject:'拒绝售后',approve_service:'接受服务处理',request_return:'要求寄回商品',return_shipped:'用户提交退回物流',canceled:'用户取消售后',prepare_direct_refund:'批准免退退款',confirm_return:'确认收到退回商品',complete:'服务处理完成',refund_submitting:'退款指令已登记',refund_submitted:'已提交微信退款',refund_failed:'微信退款未生效',refund_success:'微信原路退款成功'})[type]||type||'状态更新'}
+function afterSaleStatusText(status){return ({requested:'待审核',approved:'已同意',awaiting_return:'等待寄回',returning:'寄回中',service_processing:'服务处理中',refund_pending:'待确认退款',refund_submitting:'退款提交中',refunding:'退款处理中',resolved:'已完成',rejected:'已拒绝',canceled:'已取消'})[status]||'状态已更新'}
+function afterSaleEventText(type){return ({submitted:'用户提交售后申请',reject:'已拒绝售后申请',approve_service:'已接受服务处理',request_return:'已要求寄回商品',return_shipped:'用户已提交退回物流',canceled:'用户已取消售后申请',prepare_direct_refund:'已批准免退退款',confirm_return:'已确认收到退回商品',complete:'服务处理已完成',refund_submitting:'退款指令已登记',refund_submitted:'已提交原路退款',refund_failed:'退款未生效，等待核对',refund_success:'原路退款已成功'})[type]||'已记录处理动作'}
+function afterSaleEventStatusText(fromStatus,toStatus){if(!fromStatus&&!toStatus)return '已记录本次处理';if(!fromStatus)return `状态更新为「${afterSaleStatusText(toStatus)}」`;if(!toStatus||fromStatus===toStatus)return `状态保持为「${afterSaleStatusText(fromStatus)}」`;return `状态：${afterSaleStatusText(fromStatus)} → ${afterSaleStatusText(toStatus)}`}
+function afterSaleOperatorText(type){return ({user:'用户',admin:'运营人员',wechat:'微信支付',system:'系统'})[type]||'系统处理'}
 function afterSaleNextStep(x){
   if(x.status==='requested')return x.type==='return_refund'?'审核退货或免退退款':'审核是否接受服务';
   if(['awaiting_return','returning'].includes(x.status))return '等待商品寄回并确认收货';
@@ -824,7 +826,7 @@ async function openAfterSale(id){
   const x=await api(`/api/v1/admin/after-sales/${encodeURIComponent(id)}`);
   state.currentAfterSale=x;
   const order=x.order||{},snapshot=x.order_snapshot||{},receiver=order.receiver||snapshot.receiver||{},refund=order.refund||{};
-  const events=(x.events||[]).slice().reverse().map(event=>`<div class="timeline-item"><b>${esc(afterSaleEventText(event.event_type))}</b><span>${afterSaleStatusText(event.from_status)} → ${afterSaleStatusText(event.to_status)} · ${esc(event.operator_id||event.operator_type||'-')} · ${fmtTime(event.created_at)}</span>${event.note?`<p>${esc(event.note)}</p>`:''}</div>`).join('');
+  const events=(x.events||[]).slice().reverse().map(event=>`<div class="timeline-item"><b>${esc(afterSaleEventText(event.event_type))}</b><span>${esc(afterSaleEventStatusText(event.from_status,event.to_status))} · ${esc(afterSaleOperatorText(event.operator_type))} · ${fmtTime(event.created_at)}</span>${event.note?`<p>${esc(event.note)}</p>`:''}</div>`).join('');
   const refundSection=x.type==='return_refund'?`<section class="detail-section after-sale-refund-section">
     <div class="detail-section-head"><div><span>REFUND CONTROL</span><h3>退款金额与支付状态</h3></div>${afterSaleStatusPill(x.status,x.status_text)}</div>
     <div class="detail-grid">
@@ -3122,6 +3124,12 @@ async function saveHomeBanner(){
 }
 async function deleteHomeBanner(id){if(!confirm('确定删除这个首页 Banner 吗？'))return;await api(`/api/v1/admin/home-banners/${encodeURIComponent(id)}`,{method:'DELETE'});await loadHomeBanners();toast('Banner 已删除')}
 function splitList(value){return String(value||'').split(/[\n,，、]/).map(x=>x.trim()).filter(Boolean)}
+function communitySceneTags(value){return [...new Set(String(value||'').split(/[\n,，、；;]/).map(x=>x.trim()).filter(Boolean))]}
+function communitySceneTagsMarkup(tags){return tags.length?tags.map((tag,index)=>`<span>${esc(tag)}<button type="button" aria-label="移除场景标签 ${esc(tag)}" onclick="removeCommunitySceneTag(${index})">移除</button></span>`).join(''):'<small>暂未添加场景标签。</small>'}
+function renderCommunitySceneTags(){const hidden=$('community_scene'),list=$('community_scene_tag_list');if(!hidden||!list)return;const tags=communitySceneTags(hidden.value);hidden.value=tags.join('、');list.innerHTML=communitySceneTagsMarkup(tags)}
+function addCommunitySceneTags(){const hidden=$('community_scene'),input=$('community_scene_tag_input');if(!hidden||!input)return;const tags=communitySceneTags([...communitySceneTags(hidden.value),...communitySceneTags(input.value)].join('、'));if(tags.join('、').length>255){toast('适用场景标签合计不能超过 255 个字符');return}hidden.value=tags.join('、');input.value='';renderCommunitySceneTags();input.focus()}
+function removeCommunitySceneTag(index){const hidden=$('community_scene');if(!hidden)return;hidden.value=communitySceneTags(hidden.value).filter((_,itemIndex)=>itemIndex!==index).join('、');renderCommunitySceneTags()}
+function communitySceneTagPicker(value=''){const tags=communitySceneTags(value);return `<section class="full community-scene-tag-picker"><div class="relation-head"><div>${fieldLabel('适用场景')}<small>输入后按回车或点击添加，可配置多个场景标签。</small></div></div><div class="community-scene-tag-input"><input id="community_scene_tag_input" placeholder="例如：通勤、会议、约会" onkeydown="if(event.key==='Enter'){event.preventDefault();addCommunitySceneTags()}"><button type="button" class="mini-btn" onclick="addCommunitySceneTags()">添加</button></div><input id="community_scene" type="hidden" value="${esc(tags.join('、'))}"><div id="community_scene_tag_list" class="community-scene-tag-list">${communitySceneTagsMarkup(tags)}</div></section>`}
 function parseJsonArray(value){try{const parsed=JSON.parse(value||'[]');return Array.isArray(parsed)?parsed:[]}catch(e){return splitList(value)}}
 async function ensureMaterialCache(){if(!(state.cache.materials||[]).length)state.cache.materials=await api('/api/v1/admin/materials?sort_by=sort_order&sort_order=asc')}
 function fieldLabel(text,required=false){return `<span class="field-label">${esc(text)}${required?'<b>*</b>':''}</span>`}
@@ -3211,7 +3219,7 @@ function renderCommunityPost(x){openDrawer('COMMUNITY EDITOR',x.id?'编辑社区
   ${field('community_id','内容 ID',x.id||'')}${field('community_author','作者',x.author||'宇涧主理人')}
   <label class="full">${fieldLabel('标题',true)}<input id="community_title" value="${esc(x.title||'')}" placeholder="例如：通勤守护 · 白水晶叠戴灵感"></label>
   ${field('community_desc','列表摘要',x.desc||'','text','full')}
-  ${field('community_scene','适用场景',x.scene||'','text','full')}${imageUploadField('community_image','封面图片',x.image_url||'','community',true)}
+  ${communitySceneTagPicker(x.scene||'')}${imageUploadField('community_image','封面图片',x.image_url||'','community',true)}
   <label>${fieldLabel('点赞数')}<input id="community_likes" type="number" min="0" step="1" value="${esc(x.likes||0)}"></label>
   ${selectField('community_tone','色调',x.tone||'clear',[['clear','Clear · 清透白'],['gold','Gold · 暖金'],['zen','Zen · 禅意灰绿'],['dark','Dark · 深色质感'],['rose','Rose · 柔粉'],['earth','Earth · 大地色']])}
   ${field('community_sort','排序',x.sort_order||0,'number')}${selectField('community_status','状态',x.status||'draft',[['draft','草稿'],['published','已发布'],['hidden','隐藏']])}
@@ -3327,7 +3335,7 @@ function renderCommunityPost(x={}){
   ${field('community_id','内容 ID',x.id||'')}${field('community_author','作者',x.author||'宇涧主理人')}
   <label class="full">${fieldLabel('标题',true)}<input id="community_title" value="${esc(x.title||'')}" placeholder="例如：通勤守护 · 白水晶叠戴灵感"></label>
   ${field('community_desc','列表摘要',x.desc||'','text','full')}
-  ${field('community_scene','适用场景',x.scene||'','text','full')}${imageUploadField('community_image','封面图片',x.image_url||'','community',true)}
+  ${communitySceneTagPicker(x.scene||'')}${imageUploadField('community_image','封面图片',x.image_url||'','community',true)}
   <label>${fieldLabel('点赞数')}<input id="community_likes" type="number" min="0" step="1" value="${esc(x.likes||0)}"></label>
   ${selectField('community_tone','色调',x.tone||'clear',[['clear','Clear · 清透白'],['gold','Gold · 暖金'],['zen','Zen · 禅意灰绿'],['dark','Dark · 深色质感'],['rose','Rose · 柔粉'],['earth','Earth · 大地色']])}
   ${field('community_sort','排序',x.sort_order||0,'number')}${selectField('community_status','状态',x.status||'draft',[['draft','草稿'],['published','已发布'],['hidden','隐藏']])}

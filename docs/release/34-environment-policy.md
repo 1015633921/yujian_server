@@ -17,3 +17,10 @@ dev、test、prod 使用独立 env 文件、数据库名、API、COS、微信与
 `scripts/validate_release_env.py` 在不显示值的前提下检查 env；`app.runtime_health.assert_startup_configuration` 让 test/prod 缺少关键配置时拒绝启动。示例文件只有占位符，不是可部署配置。
 
 当前没有 Redis 依赖；引入前必须先增加独立实例/namespace、required config 和串线测试，不能复用未声明的生产连接。
+
+## 测试环境 MySQL 公网入口
+
+- `MYSQL_HOST=gz-cynosdbmysql-grp-8glxizb3.sql.tencentcdb.com`
+- `MYSQL_PORT=25460`
+
+此入口仅用于测试环境；`MYSQL_DATABASE` 必须为明确包含 `test` 的库名。账号、密码和任何连接 URI 都只能由部署环境或本机私有环境文件注入，禁止提交到仓库。

@@ -117,12 +117,14 @@ describe('material directory api', () => {
     ))
     vi.stubGlobal('fetch', fetchMock)
 
-    await listMaterialSpus({ keyword: '', top: 'bead', category: '', status: '', stockState: 'low', assetState: '', specState: '', profileState: '', page: 1, pageSize: 20 })
+    await listMaterialSpus({ keyword: '', top: 'bead', category: '', status: '', stockState: 'low', profileState: '', page: 1, pageSize: 20 })
     await batchUpdateMaterialSkus({ ids: ['sku-1'], action: 'stock', value: 12, expectedRevisions: { 'sku-1': 3 } })
     await createMaterialSku({ id: 'mat_retry_safe_id', top: 'bead', category: '水晶', series: '海蓝宝', name: '海蓝宝', price: 9.9, size: 8, weight: 1, stock: 0 })
 
     expect(String(fetchMock.mock.calls[0]?.[0])).toContain('material-spus?')
     expect(String(fetchMock.mock.calls[0]?.[0])).toContain('include_facets=true')
+    expect(String(fetchMock.mock.calls[0]?.[0])).not.toContain('asset_state=')
+    expect(String(fetchMock.mock.calls[0]?.[0])).not.toContain('spec_state=')
     expect(String(fetchMock.mock.calls[1]?.[0])).toContain('materials/batch')
     expect(String(fetchMock.mock.calls[1]?.[1]?.body)).toContain('"expected_revisions":{"sku-1":3}')
     expect(String(fetchMock.mock.calls[2]?.[0])).toContain('materials')

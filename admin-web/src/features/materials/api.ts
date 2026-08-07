@@ -66,19 +66,12 @@ export interface MaterialSpu {
     min_price?: number
     max_price?: number
     size_values?: number[]
-    missing_sizes?: number[]
-    spec_status?: string
-    asset_state?: string
     profile_state?: string
     image?: string
   }
   items: Material[]
   energy?: { primary_element?: string }
-  assetState?: string
   profileState?: string
-  specStatus?: string
-  lowStockCount?: number
-  outStockCount?: number
 }
 
 export interface MaterialSpuPage {
@@ -93,8 +86,6 @@ export interface MaterialSpuQuery {
   category: string
   status: string
   stockState: string
-  assetState: string
-  specState: string
   profileState: string
   page: number
   pageSize: number
@@ -329,8 +320,6 @@ export function listMaterialSpus(query: MaterialSpuQuery, signal?: AbortSignal):
     category: query.category,
     status: query.status,
     stock_state: query.stockState,
-    asset_state: query.assetState,
-    spec_state: query.specState,
     profile_state: query.profileState,
     include_facets: 'true',
     sort_by: 'sort_order',

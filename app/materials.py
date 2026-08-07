@@ -299,16 +299,15 @@ def material_image_identity(url: str | None) -> str:
 
 
 def clean_gallery_image_urls(value, primary_url: str = "", *, top: str = "") -> list[str]:
-    """Normalize only gallery entries; the primary image is a separate field."""
-    # 主图仅用于目录和材料详情展示，不能参与工作台的随机抽图。用去掉
-    # query string 的 identity 比较，避免同一 COS 文件因版本参数不同而绕过
-    # 校验；图库本身也以相同规则去重，保证每张图的随机概率一致。
-    primary_identity = material_image_identity(primary_url)
+    """Normalize gallery entries without excluding the primary image."""
+    # 图库以去掉 query string 的 identity 去重，避免同一 COS 文件因版本参数
+    # 不同而获得额外随机权重。主图可同时作为图库图片，primary_url 和 top 保留在
+    # 签名中，以兼容既有调用方。
     result: list[str] = []
     seen: set[str] = set()
     for url in clean_image_urls(value):
         identity = material_image_identity(url)
-        if not identity or identity == primary_identity or identity in seen:
+        if not identity or identity in seen:
             continue
         seen.add(identity)
         result.append(url)

@@ -38,8 +38,8 @@ def test_public_catalog_ignores_legacy_sku_images_and_uses_series_images():
     material = normalize_db_material(row, series_assets)
 
     assert material["image_url"] == series_image
-    assert material["image_urls"] == [gallery_image]
-    assert material["image_pool"] == [gallery_image]
+    assert material["image_urls"] == [series_image, gallery_image]
+    assert material["image_pool"] == [series_image, gallery_image]
     assert material["color"] == "#c49a42"
 
 
@@ -72,7 +72,7 @@ def test_public_catalog_falls_back_to_series_image_when_sku_has_no_image():
     material = normalize_db_material(row, series_assets)
 
     assert material["image_url"] == series_image
-    assert material["image_urls"] == []
+    assert material["image_urls"] == [series_image]
 
 
 def test_legacy_sku_image_payload_is_promoted_to_the_series(tmp_path):

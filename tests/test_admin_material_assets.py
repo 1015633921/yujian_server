@@ -247,27 +247,16 @@ def test_bead_series_are_always_exposed_as_round_while_accessory_shape_is_preser
     assert service.get_material("test-round-bead-01")["material_params"]["bead_shape"] == "round"
 
 
-def test_primary_and_gallery_images_are_stored_independently(tmp_path):
+def test_primary_image_can_also_be_kept_in_the_gallery(tmp_path):
     service = AdminService(tmp_path / "material-gallery-primary.db")
-    category = service.save_material_category({"top": "accessory", "name": "隔珠"})
-    with pytest.raises(ValueError, match="主图不能同时加入随机图库"):
-        service.save_material_series(
-            {
-                "category_id": category["id"],
-                "name": "测试隔珠",
-                "image_url": "https://cdn.example.com/main.webp",
-                "image_urls": [
-                    "https://cdn.example.com/main.webp",
-                    "https://cdn.example.com/side.webp",
-                ],
-            }
-        )
+    category = service.save_material_category({"top": "accessory", "name": "测试配饰"})
     series = service.save_material_series(
         {
             "category_id": category["id"],
-            "name": "测试隔珠",
+            "name": "测试珠子",
             "image_url": "https://cdn.example.com/main.webp",
             "image_urls": [
+                "https://cdn.example.com/main.webp",
                 "https://cdn.example.com/side.webp",
                 "https://cdn.example.com/angle.webp",
             ],
@@ -277,6 +266,7 @@ def test_primary_and_gallery_images_are_stored_independently(tmp_path):
     initially_saved = service.list_material_taxonomy(top="accessory", include_disabled=True)[0]["series"][0]
     assert initially_saved["image_url"] == "https://cdn.example.com/main.webp"
     assert initially_saved["image_urls"] == [
+        "https://cdn.example.com/main.webp",
         "https://cdn.example.com/side.webp",
         "https://cdn.example.com/angle.webp",
     ]
@@ -285,9 +275,10 @@ def test_primary_and_gallery_images_are_stored_independently(tmp_path):
         {
             "id": series["id"],
             "category_id": category["id"],
-            "name": "测试隔珠",
+            "name": "测试珠子",
             "image_url": "https://cdn.example.com/main.webp",
             "image_urls": [
+                "https://cdn.example.com/main.webp",
                 "https://cdn.example.com/side.webp",
                 "https://cdn.example.com/angle.webp",
             ],
@@ -296,12 +287,14 @@ def test_primary_and_gallery_images_are_stored_independently(tmp_path):
 
     assert saved["image_url"] == "https://cdn.example.com/main.webp"
     assert saved["image_urls"] == [
+        "https://cdn.example.com/main.webp",
         "https://cdn.example.com/side.webp",
         "https://cdn.example.com/angle.webp",
     ]
     stored = service.list_material_taxonomy(top="accessory", include_disabled=True)[0]["series"][0]
     assert stored["image_url"] == "https://cdn.example.com/main.webp"
     assert stored["image_urls"] == [
+        "https://cdn.example.com/main.webp",
         "https://cdn.example.com/side.webp",
         "https://cdn.example.com/angle.webp",
     ]
@@ -312,6 +305,7 @@ def test_primary_and_gallery_images_are_stored_independently(tmp_path):
         ).fetchone()
     assert row["image_url"] == "https://cdn.example.com/main.webp"
     assert json.loads(row["image_urls_json"]) == [
+        "https://cdn.example.com/main.webp",
         "https://cdn.example.com/side.webp",
         "https://cdn.example.com/angle.webp",
     ]

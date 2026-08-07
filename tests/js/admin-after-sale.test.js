@@ -39,6 +39,16 @@ test('admin exposes a dedicated after-sale review page backed by structured case
   assert.match(style, /\.after-sale-summary-grid/);
 });
 
+test('after-sale process records use operator-facing labels instead of internal enums', () => {
+  const { afterSaleEventText, afterSaleEventStatusText, afterSaleOperatorText } = adminRuntime();
+
+  assert.equal(afterSaleEventText('refund_submitted'), '已提交原路退款');
+  assert.equal(afterSaleEventText('unrecognized_internal_event'), '已记录处理动作');
+  assert.equal(afterSaleEventStatusText('refund_pending', 'refunding'), '状态：待确认退款 → 退款处理中');
+  assert.equal(afterSaleOperatorText('wechat'), '微信支付');
+  assert.equal(afterSaleOperatorText('internal_worker'), '系统处理');
+});
+
 test('after-sale detail names an unsaved DIY order from its immutable snapshot', () => {
   const { orderDesignLabel } = adminRuntime();
   assert.equal(

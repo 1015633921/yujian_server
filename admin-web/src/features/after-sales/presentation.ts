@@ -14,6 +14,19 @@ export const AFTER_SALE_TYPE_OPTIONS = [
 
 const statusLabels = Object.fromEntries(AFTER_SALE_STATUS_OPTIONS.filter((item) => item.value).map((item) => [item.value, item.label]))
 export function afterSaleStatusLabel(status?: string): string { return statusLabels[status || ''] || '状态更新' }
+const eventLabels: Record<string, string> = {
+  submitted: '用户提交售后申请', reject: '已拒绝售后申请', approve_service: '已接受服务处理', request_return: '已要求寄回商品',
+  return_shipped: '用户已提交退回物流', canceled: '用户已取消售后申请', prepare_direct_refund: '已批准免退退款',
+  confirm_return: '已确认收到退回商品', complete: '服务处理已完成', refund_submitting: '退款指令已登记',
+  refund_submitted: '已提交原路退款', refund_failed: '退款未生效，等待核对', refund_success: '原路退款已成功',
+}
+export function afterSaleEventLabel(eventType?: string): string { return eventLabels[eventType || ''] || '已记录处理动作' }
+export function afterSaleEventStatusText(fromStatus?: string, toStatus?: string): string {
+  if (!fromStatus && !toStatus) return '已记录本次处理'
+  if (!fromStatus) return `状态更新为「${afterSaleStatusLabel(toStatus)}」`
+  if (!toStatus || fromStatus === toStatus) return `状态保持为「${afterSaleStatusLabel(fromStatus)}」`
+  return `状态：${afterSaleStatusLabel(fromStatus)} → ${afterSaleStatusLabel(toStatus)}`
+}
 export function afterSaleStatusTone(status?: string): string {
   if (status === 'requested' || status?.startsWith('refund_')) return 'attention'
   if (status === 'awaiting_return' || status === 'returning') return 'waiting'

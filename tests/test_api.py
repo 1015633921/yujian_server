@@ -196,7 +196,7 @@ def test_material_api_returns_503_when_production_catalog_is_unavailable(monkeyp
     assert response.json()["detail"] == "服务暂时不可用"
 
 
-def test_slim_material_preserves_image_url_pool_for_workspace_randomization():
+def test_slim_material_allows_primary_image_as_workspace_gallery_fallback():
     from app.materials import slim_material
 
     image_urls = [
@@ -219,7 +219,7 @@ def test_slim_material_preserves_image_url_pool_for_workspace_randomization():
     })
 
     assert material["image_url"] == image_urls[0]
-    assert material["image_urls"] == [image_urls[1]]
+    assert material["image_urls"] == image_urls
 
 
 def test_admin_material_options_expose_field_governance_specs(tmp_path):
@@ -371,7 +371,7 @@ def test_pendant_material_allows_blank_primary_element(tmp_path):
     assert saved["energy"]["secondary_elements"] == []
 
 
-def test_admin_material_spu_reports_size_coverage_and_missing_specs(tmp_path):
+def test_admin_material_spu_exposes_sku_sizes_without_coverage_metadata(tmp_path):
     from app.admin_service import AdminService
 
     service = AdminService(tmp_path / "material-spec-coverage.db")
@@ -406,18 +406,13 @@ def test_admin_material_spu_reports_size_coverage_and_missing_specs(tmp_path):
     complete = service.list_material_spus(keyword="Coverage Quartz")[0]
     partial = service.list_material_spus(keyword="Partial Quartz")[0]
 
-    assert complete["specStatus"] == "complete"
-    assert complete["missingSizes"] == []
-    assert complete["specCoverage"] == 1
-    assert partial["specStatus"] == "partial"
-    assert partial["missingSizes"] == [9, 11, 12, 13, 14, 15]
-    assert partial["specCoverage"] == pytest.approx(0.25)
-    assert [group["key"] for group in service.list_material_spus(keyword="Coverage Quartz", spec_state="complete")] == [
-        "bead::quartz::Coverage Quartz::coverage_quartz"
-    ]
-    assert [group["key"] for group in service.list_material_spus(keyword="Partial Quartz", spec_state="incomplete")] == [
-        "bead::quartz::Partial Quartz::partial_quartz"
-    ]
+    assert complete["sizeValues"] == list(range(8, 16))
+    assert partial["sizeValues"] == [8, 10]
+    assert "specStatus" not in complete
+    assert "missingSizes" not in complete
+    assert "specCoverage" not in complete
+    assert "lowStockCount" not in complete
+    assert "outStockCount" not in complete
 
 
 def test_admin_material_spu_key_includes_series_when_material_code_is_shared(tmp_path):
@@ -906,7 +901,7 @@ def test_admin_material_accepts_multiple_image_urls(tmp_path):
     ]
 
 
-def test_material_spu_supports_sku_search_asset_profile_facets_and_test_price_guard(tmp_path):
+def test_material_spu_supports_sku_search_profile_facets_and_test_price_guard(tmp_path):
     from app.admin_service import AdminService
 
     service = AdminService(tmp_path / "material-spu-facets.db")
@@ -948,7 +943,6 @@ def test_material_spu_supports_sku_search_asset_profile_facets_and_test_price_gu
 
     result = service.list_material_spus(
         keyword="20000000008",
-        asset_state="missing_primary",
         profile_state="complete",
         include_facets=True,
         page=1,
@@ -956,9 +950,9 @@ def test_material_spu_supports_sku_search_asset_profile_facets_and_test_price_gu
     )
 
     assert result["pagination"]["total"] == 1
-    assert result["items"][0]["assetState"] == "missing_primary"
     assert result["items"][0]["profileState"] == "complete"
-    assert {item["value"] for item in result["facets"]["asset_state"]} == {"missing_primary"}
+    assert "assetState" not in result["items"][0]
+    assert "asset_state" not in result["facets"]
     assert {item["value"] for item in result["facets"]["profile_state"]} == {"complete"}
 
 
@@ -1292,6 +1286,7 @@ def test_order_material_snapshot_survives_material_update_and_delete(tmp_path, m
         assert item["price"] == "8.80"
         assert item["image_url"].endswith("/original.png")
         assert item["image_urls"] == [
+            "https://cdn-test.yustream.cn/materials/beads/original.png",
             "https://cdn-test.yustream.cn/materials/beads/original-side.png",
         ]
         assert bom["name"] == "Original Snapshot Bead"

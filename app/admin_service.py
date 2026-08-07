@@ -23,7 +23,6 @@ from .materials import (
     clean_image_urls,
     fetch_db_series_assets,
     invalidate_material_cache,
-    material_image_identity,
     material_url_from_path,
     normalize_material_image_url,
 )
@@ -106,7 +105,6 @@ DEFAULT_MATERIAL_TYPES = (
     ("incense", "合香珠", "历史合香珠目录", 30),
     ("pendant", "花托/吊坠", "历史花托与吊坠目录，后续可归入配饰", 40),
 )
-MATERIAL_REQUIRED_BEAD_SIZES = tuple(range(8, 16))
 MATERIAL_OPTION_TYPE_LABELS = {
     "wish_pools": "适用愿景池",
     "chakras": "对应脉轮",
@@ -1432,7 +1430,7 @@ class AdminService:
             row = dict(raw)
             row_path = str(row.get("image_path") or "").strip()
             row_url = normalize_material_image_url(row.get("image_url") or "")
-            urls = clean_gallery_image_urls(row.get("image_urls_json"), row_url)
+            urls = clean_gallery_image_urls(row.get("image_urls_json"), row_url, top=top)
             if not image_path and row_path:
                 image_path = row_path
             for url in urls:
@@ -1452,6 +1450,7 @@ class AdminService:
         image_urls = clean_gallery_image_urls(
             payload.get("image_urls") or payload.get("image_pool") or payload.get("image_urls_json"),
             image_url,
+            top=payload.get("top") or "bead",
         )
         if not image_path and not image_url and not image_urls:
             return
@@ -1479,6 +1478,7 @@ class AdminService:
         image_urls = clean_gallery_image_urls(
             row.get("image_urls_json") or row.get("image_urls"),
             image_url,
+            top=row.get("top") or "",
         )
         return {
             "material_code": row.get("material_code") or "",
@@ -2232,12 +2232,6 @@ class AdminService:
                         (payload[key] for key in ("image_urls", "image_pool", "image_urls_json") if key in payload),
                         [],
                     )
-                    primary_identity = material_image_identity(primary_image_url)
-                    if primary_identity and any(
-                        material_image_identity(url) == primary_identity
-                        for url in clean_image_urls(gallery_value)
-                    ):
-                        raise ValueError("主图不能同时加入随机图库，请移除重复图片后再保存")
                     image_urls = clean_gallery_image_urls(gallery_value, primary_image_url, top=top)
                 else:
                     image_urls = clean_gallery_image_urls((before or {}).get("image_urls_json"), primary_image_url, top=top)
@@ -2523,11 +2517,6 @@ class AdminService:
             if expected_version is not None and int(expected_version) != current_version:
                 raise ValueError("图库已被其他操作更新，请刷新后再发布")
             primary_url = normalize_material_image_url(item.get("image_url") or "")
-            primary_identity = material_image_identity(primary_url)
-            if primary_identity and any(
-                material_image_identity(url) == primary_identity for url in incoming
-            ):
-                raise ValueError("主图不能加入随机图库，请移除重复图片后再发布")
             current = clean_gallery_image_urls(item.get("image_urls_json"), primary_url, top=item.get("top") or "")
             final_urls = clean_gallery_image_urls(
                 [*current, *incoming] if mode == "append" else incoming,
@@ -2609,10 +2598,12 @@ class AdminService:
             self._ensure_material_taxonomy_schema(connection)
             rows = connection.execute(
                 """
-                SELECT asset_version, image_url, image_urls_json, source, actor_id, created_at
-                FROM material_asset_versions
-                WHERE series_id=?
-                ORDER BY asset_version DESC, created_at DESC
+                SELECT v.asset_version, v.image_url, v.image_urls_json, v.source, v.actor_id, v.created_at,
+                       COALESCE(s.top, '') AS top
+                FROM material_asset_versions v
+                LEFT JOIN material_taxonomy s ON s.item_id=v.series_id
+                WHERE v.series_id=?
+                ORDER BY v.asset_version DESC, v.created_at DESC
                 LIMIT ?
                 """,
                 (clean_id, max(1, min(int(limit or 30), 100))),
@@ -2621,7 +2612,7 @@ class AdminService:
             {
                 "asset_version": int(row["asset_version"] or 0),
                 "image_url": row["image_url"] or "",
-                "image_urls": clean_gallery_image_urls(row["image_urls_json"], row["image_url"] or ""),
+                "image_urls": clean_gallery_image_urls(row["image_urls_json"], row["image_url"] or "", top=row["top"] or ""),
                 "source": row["source"] or "",
                 "actor_id": row["actor_id"] or "",
                 "created_at": row["created_at"] or "",
@@ -6257,8 +6248,6 @@ class AdminService:
             sum(float((item.get("sku") or {}).get("inventory_margin_value") or 0) for item in sorted_items),
             2,
         )
-        low_stock_count = sum(1 for item in sorted_items if (item.get("sku") or {}).get("stock_status") == "low")
-        out_stock_count = sum(1 for item in sorted_items if (item.get("sku") or {}).get("stock_status") == "out")
         quality_scores = [int(((item.get("quality") or {}).get("score") or 0)) for item in sorted_items]
         quality_issue_count = sum(int(((item.get("quality") or {}).get("issue_count") or 0)) for item in sorted_items)
         quality_risk_count = sum(1 for item in sorted_items if (item.get("quality") or {}).get("level") == "risk")
@@ -6291,31 +6280,6 @@ class AdminService:
                 and float((item.get("sku") or {}).get("size_mm") or 0) > 0
             }
         )
-        required_sizes = list(MATERIAL_REQUIRED_BEAD_SIZES) if top == "bead" else []
-        missing_sizes = [size for size in required_sizes if size not in numeric_sizes]
-        if top != "bead":
-            spec_status = "not_applicable"
-        elif not numeric_sizes:
-            spec_status = "empty"
-        elif missing_sizes:
-            spec_status = "partial"
-        else:
-            spec_status = "complete"
-        spec_coverage = (
-            round((len(required_sizes) - len(missing_sizes)) / len(required_sizes), 4)
-            if required_sizes
-            else 1
-        )
-        gallery_urls = list((first_visual.get("image_urls") or first.get("image_urls") or []))
-        primary_image_url = str(first_visual.get("image_url") or first.get("image_url") or "").strip()
-        if not primary_image_url:
-            asset_state = "missing_primary"
-        elif not gallery_urls:
-            asset_state = "missing_gallery"
-        elif len(gallery_urls) == 1:
-            asset_state = "single_gallery"
-        else:
-            asset_state = "ready"
         profile_issue_keys: list[str] = []
         if not material_code:
             profile_issue_keys.append("material_code_missing")
@@ -6357,22 +6321,13 @@ class AdminService:
                 "inventory_cost_value": inventory_cost_value,
                 "inventory_retail_value": inventory_retail_value,
                 "inventory_margin_value": inventory_margin_value,
-                "low_stock_count": low_stock_count,
-                "out_stock_count": out_stock_count,
                 "quality_score": avg_quality_score,
                 "min_quality_score": min_quality_score,
                 "quality_issue_count": quality_issue_count,
                 "quality_risk_count": quality_risk_count,
                 "sizes": sizes,
                 "size_values": numeric_sizes,
-                "required_sizes": required_sizes,
-                "missing_sizes": missing_sizes,
-                "spec_status": spec_status,
-                "spec_coverage": spec_coverage,
                 "image": image,
-                "primary_image_url": primary_image_url,
-                "gallery_count": len(gallery_urls),
-                "asset_state": asset_state,
                 "profile_state": profile_state,
                 "profile_issue_keys": profile_issue_keys,
             },
@@ -6393,37 +6348,16 @@ class AdminService:
             "inventoryCostValue": inventory_cost_value,
             "inventoryRetailValue": inventory_retail_value,
             "inventoryMarginValue": inventory_margin_value,
-            "lowStockCount": low_stock_count,
-            "outStockCount": out_stock_count,
             "qualityScore": avg_quality_score,
             "minQualityScore": min_quality_score,
             "qualityIssueCount": quality_issue_count,
             "qualityRiskCount": quality_risk_count,
             "sizeValues": numeric_sizes,
-            "requiredSizes": required_sizes,
-            "missingSizes": missing_sizes,
-            "specStatus": spec_status,
-            "specCoverage": spec_coverage,
             "sizes": " / ".join(dict.fromkeys(sizes)),
             "image": image,
-            "primaryImageUrl": primary_image_url,
-            "galleryCount": len(gallery_urls),
-            "assetState": asset_state,
             "profileState": profile_state,
             "profileIssueKeys": profile_issue_keys,
         }
-
-    @staticmethod
-    def material_spu_matches_spec_state(group: dict[str, Any], spec_state: str = "") -> bool:
-        state = str(spec_state or "").strip().lower()
-        if not state:
-            return True
-        status = str(group.get("specStatus") or (group.get("spu") or {}).get("spec_status") or "").lower()
-        if state == "incomplete":
-            return status in {"partial", "empty"}
-        if state == "applicable":
-            return status != "not_applicable"
-        return status == state
 
     def list_material_spus(
         self,
@@ -6435,8 +6369,6 @@ class AdminService:
         quality: str = "",
         stock_state: str = "",
         margin: str = "",
-        spec_state: str = "",
-        asset_state: str = "",
         profile_state: str = "",
         include_facets: bool = False,
         sort_by: str = "sort_order",
@@ -6445,7 +6377,7 @@ class AdminService:
         page_size: int | None = None,
     ) -> list[dict[str, Any]] | dict[str, Any]:
         paginated = page is not None or page_size is not None
-        if paginated and not (quality or stock_state or margin or spec_state or asset_state or profile_state or include_facets):
+        if paginated and not (quality or stock_state or margin or profile_state or include_facets):
             return self.list_material_spus_paginated(
                 keyword=keyword,
                 top=top,
@@ -6484,14 +6416,6 @@ class AdminService:
             )
             groups.setdefault(key, []).append(item)
         result = [self.material_spu_group(items) for items in groups.values()]
-        if spec_state:
-            result = [group for group in result if self.material_spu_matches_spec_state(group, spec_state)]
-        if asset_state:
-            requested_states = {item.strip().lower() for item in str(asset_state).split(",") if item.strip()}
-            result = [
-                group for group in result
-                if str(group.get("assetState") or (group.get("spu") or {}).get("asset_state") or "").lower() in requested_states
-            ]
         if profile_state:
             requested_states = {item.strip().lower() for item in str(profile_state).split(",") if item.strip()}
             result = [
@@ -6516,9 +6440,7 @@ class AdminService:
             "top": lambda group: str((group.get("spu") or {}).get("top") or ""),
             "category": lambda group: str((group.get("spu") or {}).get("category") or ""),
             "element": lambda group: str((group.get("energy") or {}).get("primary_element") or ""),
-            "asset_state": lambda group: str(group.get("assetState") or ""),
             "profile_state": lambda group: str(group.get("profileState") or ""),
-            "spec_state": lambda group: str(group.get("specStatus") or ""),
         }
         facets: dict[str, list[dict[str, Any]]] = {}
         for name, resolver in definitions.items():
