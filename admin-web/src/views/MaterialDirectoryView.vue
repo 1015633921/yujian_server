@@ -51,6 +51,8 @@ const loading = ref(true)
 const error = ref('')
 const notice = ref('')
 const saving = ref(false)
+const editorActive = ref(false)
+const categoryOrderOpen = ref(false)
 const total = ref(0)
 const hasNext = ref(false)
 const wasEnabled = ref(true)
@@ -75,7 +77,7 @@ const selectedTop = computed(() => (typeof route.query.top === 'string' ? route.
 const selectedType = computed(() => types.value.find((item) => item.code === selectedTop.value) || null)
 const keyword = computed(() => (typeof route.query.keyword === 'string' ? route.query.keyword : ''))
 const categoryId = computed(() => (typeof route.query.category_id === 'string' ? route.query.category_id : ''))
-const status = computed(() => (typeof route.query.status === 'string' ? route.query.status : ''))
+const status = computed(() => (typeof route.query.status === 'string' ? route.query.status : 'enabled'))
 const element = computed(() => (typeof route.query.element === 'string' ? route.query.element : ''))
 const chakra = computed(() => (typeof route.query.chakra === 'string' ? route.query.chakra : ''))
 const colorFamily = computed(() => (typeof route.query.color_family === 'string' ? route.query.color_family : ''))
@@ -108,10 +110,13 @@ function optionLabels(type: keyof MaterialOptionsPayload, values?: string[]): st
 }
 
 function setTop(top: string): void {
+  if (top) window.sessionStorage.setItem('material-directory.top', top)
+  editorActive.value = false
   updateQuery({ top: top || undefined, category_id: undefined, page: undefined })
 }
 
 function resetEditor(kind: EditorKind, parentId = ''): void {
+  editorActive.value = true
   Object.assign(editor, {
     kind,
     id: '',
@@ -129,6 +134,7 @@ function resetEditor(kind: EditorKind, parentId = ''): void {
 }
 
 function editType(item: MaterialType): void {
+  editorActive.value = true
   Object.assign(editor, {
     kind: 'type',
     id: item.id,
@@ -145,6 +151,7 @@ function editType(item: MaterialType): void {
 }
 
 function editCategory(item: Pick<MaterialDirectoryCategoryOption, 'id' | 'name' | 'sort_order' | 'enabled'>): void {
+  editorActive.value = true
   Object.assign(editor, {
     kind: 'category',
     id: item.id,
@@ -166,6 +173,7 @@ function categorySortLabel(item: Pick<MaterialDirectoryCategoryOption, 'sort_ord
 }
 
 function editSeries(item: MaterialSeries): void {
+  editorActive.value = true
   Object.assign(editor, {
     kind: 'series',
     id: item.id,
@@ -213,8 +221,12 @@ async function loadTypes(): Promise<void> {
       '材料类型加载超时',
     )
     types.value = nextTypes
-    const firstType = nextTypes.at(0)
-    if (!selectedTop.value && firstType) setTop(firstType.code)
+    const rememberedTop = window.sessionStorage.getItem('material-directory.top') || ''
+    const preferredType = nextTypes.find((item) => item.code === rememberedTop && item.enabled)
+      || nextTypes.find((item) => item.code === 'bead' && item.enabled)
+      || [...nextTypes].filter((item) => item.enabled).sort((left, right) => right.sku_count - left.sku_count)[0]
+      || nextTypes.at(0)
+    if (!selectedTop.value && preferredType) setTop(preferredType.code)
     else if (selectedTop.value) await loadDirectory()
   } catch (cause) {
     if (cause instanceof DOMException && cause.name === 'AbortError') return
@@ -356,7 +368,7 @@ async function disable(kind: EditorKind, id: string, name: string): Promise<void
     if (kind === 'type') await disableMaterialType(id)
     else await disableMaterialTaxonomyItem(id)
     notice.value = `已停用「${name}」，关联销售材料已同步不可用。`
-    resetEditor('category')
+    editorActive.value = false
     await load()
   } catch (cause) {
     notice.value = cause instanceof Error ? cause.message : '停用失败，请刷新后重试。'
@@ -375,7 +387,7 @@ async function remove(kind: EditorKind, id: string, name: string): Promise<void>
     else if (kind === 'category') await deleteEmptyMaterialCategory(id)
     else await deleteEmptyMaterialSeries(id)
     notice.value = `已删除空${kind === 'type' ? '材料类型' : kind === 'category' ? '分类' : '品种'}「${name}」。`
-    resetEditor('category')
+    editorActive.value = false
     await load()
   } catch (cause) {
     notice.value = cause instanceof Error ? cause.message : '删除失败，请刷新后重试。'
@@ -385,7 +397,7 @@ async function remove(kind: EditorKind, id: string, name: string): Promise<void>
 }
 
 watch(selectedTop, (top, previousTop) => {
-  if (editor.kind !== 'type') resetEditor('category')
+  if (editor.kind !== 'type') editorActive.value = false
   if (top && top !== previousTop) void loadDirectory()
 })
 
@@ -404,8 +416,8 @@ onBeforeUnmount(() => {
   <section class="workspace-page material-directory-page">
     <PageHeading
       eyebrow="MATERIAL DIRECTORY"
-      title="材料三级目录"
-      description="先维护类型、分类与品种，再为品种建立可销售的 SKU。目录状态会约束工作台和销售可用性。"
+      title="材料目录"
+      description="按“材料类型 → 一级类目 → 品种 → SKU”维护。这里负责目录结构和品种资料，价格、库存与实物尺寸在 SKU 中维护。"
     >
       <template #actions>
         <RouterLink
@@ -416,6 +428,16 @@ onBeforeUnmount(() => {
         </RouterLink>
       </template>
     </PageHeading>
+
+    <ol
+      class="directory-workflow"
+      aria-label="材料目录层级"
+    >
+      <li><b>1</b><span><strong>材料类型</strong><small>珠子、配饰等业务形态</small></span></li>
+      <li><b>2</b><span><strong>一级类目</strong><small>稳定的运营筛选目录</small></span></li>
+      <li><b>3</b><span><strong>品种资料</strong><small>共享名称、图片和推荐资料</small></span></li>
+      <li><b>4</b><span><strong>可售 SKU</strong><small>具体规格、价格与库存</small></span></li>
+    </ol>
 
     <PageErrorState
       v-if="error && !loading"
@@ -475,20 +497,30 @@ onBeforeUnmount(() => {
         >
           <header>
             <div>
-              <span>SECOND LEVEL</span>
-              <h3>二级分类排序</h3>
-              <p>数值越大越靠前；0 表示未设置，会排在已设置分类之后。</p>
+              <span>LEVEL 2 · {{ categoryOptions.length }} 个类目</span>
+              <h3>一级类目与排序</h3>
+              <p>{{ categoryOrderOpen ? '选择类目可在右侧编辑名称、状态与排序。' : '默认收起，避免目录管理干扰日常查找。' }}</p>
             </div>
-            <button
-              v-if="canManage"
-              class="directory-category-order__create"
-              type="button"
-              @click="resetEditor('category')"
-            >
-              新建二级分类
-            </button>
+            <div class="directory-category-order__actions">
+              <button
+                type="button"
+                @click="categoryOrderOpen = !categoryOrderOpen"
+              >
+                {{ categoryOrderOpen ? '收起类目管理' : '展开类目管理' }}
+              </button>
+              <button
+                v-if="canManage"
+                type="button"
+                @click="resetEditor('category')"
+              >
+                新建一级类目
+              </button>
+            </div>
           </header>
-          <div class="directory-category-order__list">
+          <div
+            v-if="categoryOrderOpen"
+            class="directory-category-order__list"
+          >
             <button
               v-for="item in categoryOptions"
               :key="item.id"
@@ -505,7 +537,7 @@ onBeforeUnmount(() => {
                 <strong>{{ item.name }}</strong>
                 <small>{{ item.series_count }} 个品种 · {{ item.enabled ? '已启用' : '已停用' }}</small>
               </span>
-              <span class="directory-category-order__action">{{ canManage ? '设置排序' : '查看排序' }} →</span>
+              <span class="directory-category-order__action">{{ canManage ? '编辑类目' : '查看类目' }} →</span>
             </button>
           </div>
         </section>
@@ -541,14 +573,14 @@ onBeforeUnmount(() => {
           <select
             :value="status"
             aria-label="按状态筛选"
-            @change="updateQuery({ status: ($event.target as HTMLSelectElement).value || undefined, page: undefined })"
+            @change="updateQuery({ status: ($event.target as HTMLSelectElement).value === 'enabled' ? undefined : ($event.target as HTMLSelectElement).value, page: undefined })"
           >
-            <option value="">
-              全部状态
-            </option><option value="enabled">
+            <option value="enabled">
               已启用
             </option><option value="disabled">
               已停用
+            </option><option value="all">
+              全部状态
             </option>
           </select>
           <select
@@ -613,12 +645,12 @@ onBeforeUnmount(() => {
             </option>
           </select>
           <button
-            v-if="keyword || categoryId || status || element || chakra || colorFamily || assetState"
+            v-if="keyword || categoryId || status !== 'enabled' || element || chakra || colorFamily || assetState"
             class="text-action"
             type="button"
             @click="updateQuery({ keyword: undefined, category_id: undefined, status: undefined, element: undefined, chakra: undefined, color_family: undefined, asset_state: undefined, page: undefined })"
           >
-            清除筛选
+            恢复默认筛选
           </button>
           <button
             v-if="canManage"
@@ -626,7 +658,7 @@ onBeforeUnmount(() => {
             type="button"
             @click="resetEditor('category')"
           >
-            新建分类
+            新建一级类目
           </button>
           <button
             v-if="canManage && categoryOptions.length"
@@ -724,7 +756,7 @@ onBeforeUnmount(() => {
                 class="directory-profile-link"
                 :to="{ name: 'material-series-profile', params: { seriesId: series.id } }"
               >
-                完善资料
+                品种资料
               </RouterLink>
               <button
                 v-if="canManage"
@@ -776,158 +808,193 @@ onBeforeUnmount(() => {
         class="directory-editor"
         aria-label="目录编辑器"
       >
-        <div class="directory-editor__head">
-          <span>{{ editor.id ? 'EDIT DIRECTORY' : 'CREATE DIRECTORY' }}</span>
-          <h2>{{ editor.kind === 'type' ? '材料类型' : editor.kind === 'category' ? '材料分类' : '材料品种' }}</h2>
-          <p v-if="editor.kind === 'series'">
-            所属分类：{{ selectedCategoryName() }}
-          </p>
-          <p v-else-if="editor.kind === 'category'">
-            所属类型：{{ selectedType?.name || '请先选择' }}
-          </p>
-          <p v-else>
-            类型编码创建后不可修改。
-          </p>
-        </div>
-
-        <form
-          class="directory-form"
-          @submit.prevent="save"
-        >
-          <label v-if="editor.kind === 'type'">
-            <span>类型编码</span>
-            <input
-              v-model.trim="editor.code"
-              :disabled="Boolean(editor.id) || !canManage"
-              maxlength="40"
-              placeholder="例如 bead"
-            >
-          </label>
-          <label v-if="editor.kind === 'series'">
-            <span>所属分类</span>
-            <select
-              v-model="editor.parentId"
-              :disabled="!canManage || Boolean(editor.id)"
-            >
-              <option value="">请选择分类</option>
-              <option
-                v-for="item in categoryOptions"
-                :key="item.id"
-                :value="item.id"
-              >{{ item.name }}{{ item.enabled ? '' : '（已停用）' }}</option>
-            </select>
-          </label>
-          <label>
-            <span>{{ editor.kind === 'type' ? '类型名称' : editor.kind === 'category' ? '分类名称' : '品种名称' }}</span>
-            <input
-              v-model="editor.name"
-              :disabled="!canManage"
-              maxlength="160"
-              placeholder="请输入名称"
-            >
-          </label>
-          <label v-if="editor.kind === 'type'">
-            <span>说明</span>
-            <textarea
-              v-model="editor.description"
-              :disabled="!canManage"
-              maxlength="500"
-              placeholder="用于运营识别，不会展示给小程序用户"
-            />
-          </label>
-          <div
-            v-if="editor.kind === 'series'"
-            class="directory-form__colors"
-          >
-            <label><span>基础色</span><input
-              v-model="editor.color"
-              :disabled="!canManage"
-              type="color"
-            ></label>
-            <label><span>高光色</span><input
-              v-model="editor.shine"
-              :disabled="!canManage"
-              type="color"
-            ></label>
-          </div>
-          <label>
-            <span>{{ editor.kind === 'category' ? '二级分类排序值（数值越大越靠前）' : '排序值' }}</span>
-            <input
-              v-model.number="editor.sortOrder"
-              :disabled="!canManage"
-              type="number"
-              min="0"
-              max="99999"
-            >
-          </label>
-          <p
-            v-if="editor.id && !editor.enabled"
-            class="directory-form__warning"
-          >
-            该目录已停用。重新启用本项不会自动恢复已停用的子项或 SKU。
-          </p>
-          <label
-            v-if="editor.id"
-            class="directory-switch"
-          >
-            <input
-              v-model="editor.enabled"
-              :disabled="!canManage"
-              type="checkbox"
-            >
-            <span>此目录可用</span>
-          </label>
-          <button
-            class="primary-action"
-            type="submit"
-            :disabled="!canManage || saving"
-          >
-            {{ saving ? '正在保存…' : editor.kind === 'series' && !editor.id ? '创建并完善资料' : '保存目录' }}
-          </button>
-          <small v-if="editor.kind === 'series' && !editor.id">
-            创建后将进入完整资料页，继续选择五行、功效、形制和养护等标准选项。
-          </small>
-          <p
-            v-if="notice"
-            class="directory-notice"
-            :class="{ 'is-error': notice.includes('失败') || notice.includes('请先') || notice.includes('不能为空') }"
-          >
-            {{ notice }}
-          </p>
-        </form>
-
         <div
-          v-if="selectedType && editor.kind !== 'type'"
-          class="directory-editor__type-actions"
+          v-if="!editorActive"
+          class="directory-editor__empty"
         >
-          <span>当前类型</span>
-          <strong>{{ selectedType.name }}</strong>
-          <div class="directory-row-actions">
+          <span>DIRECTORY ACTIONS</span>
+          <h2>选择一项管理任务</h2>
+          <p>日常查找不会自动打开编辑表单，避免误改目录。</p>
+          <div>
             <button
               v-if="canManage"
+              type="button"
+              :disabled="!categoryId"
+              @click="resetEditor('series', categoryId)"
+            >
+              新建品种
+            </button>
+            <button
+              v-if="canManage"
+              type="button"
+              @click="resetEditor('category')"
+            >
+              新建一级类目
+            </button>
+            <button
+              v-if="canManage && selectedType"
               type="button"
               @click="editType(selectedType)"
             >
-              编辑类型
-            </button>
-            <button
-              v-if="canManage && selectedType.enabled"
-              class="danger-text"
-              type="button"
-              @click="disable('type', selectedType.code, selectedType.name)"
-            >
-              停用类型
-            </button>
-            <button
-              v-if="canManage"
-              class="danger-text"
-              type="button"
-              @click="remove('type', selectedType.code, selectedType.name)"
-            >
-              删除空类型
+              编辑当前类型
             </button>
           </div>
+          <small v-if="!categoryId">先在中间筛选一个类目，新建品种时会自动带入归属。</small>
         </div>
+        <template v-else>
+          <div class="directory-editor__head">
+            <span>{{ editor.id ? 'EDIT DIRECTORY' : 'CREATE DIRECTORY' }}</span>
+            <h2>{{ editor.kind === 'type' ? '材料类型' : editor.kind === 'category' ? '一级类目' : '材料品种' }}</h2>
+            <p v-if="editor.kind === 'series'">
+              所属分类：{{ selectedCategoryName() }}
+            </p>
+            <p v-else-if="editor.kind === 'category'">
+              所属类型：{{ selectedType?.name || '请先选择' }}
+            </p>
+            <p v-else>
+              类型编码创建后不可修改。
+            </p>
+          </div>
+
+          <form
+            class="directory-form"
+            @submit.prevent="save"
+          >
+            <label v-if="editor.kind === 'type'">
+              <span>类型编码</span>
+              <input
+                v-model.trim="editor.code"
+                :disabled="Boolean(editor.id) || !canManage"
+                maxlength="40"
+                placeholder="例如 bead"
+              >
+            </label>
+            <label v-if="editor.kind === 'series'">
+              <span>所属分类</span>
+              <select
+                v-model="editor.parentId"
+                :disabled="!canManage || Boolean(editor.id)"
+              >
+                <option value="">请选择分类</option>
+                <option
+                  v-for="item in categoryOptions"
+                  :key="item.id"
+                  :value="item.id"
+                >{{ item.name }}{{ item.enabled ? '' : '（已停用）' }}</option>
+              </select>
+            </label>
+            <label>
+              <span>{{ editor.kind === 'type' ? '类型名称' : editor.kind === 'category' ? '一级类目名称' : '品种名称' }}</span>
+              <input
+                v-model="editor.name"
+                :disabled="!canManage"
+                maxlength="160"
+                placeholder="请输入名称"
+              >
+            </label>
+            <label v-if="editor.kind === 'type'">
+              <span>说明</span>
+              <textarea
+                v-model="editor.description"
+                :disabled="!canManage"
+                maxlength="500"
+                placeholder="用于运营识别，不会展示给小程序用户"
+              />
+            </label>
+            <div
+              v-if="editor.kind === 'series'"
+              class="directory-form__colors"
+            >
+              <label><span>基础色</span><input
+                v-model="editor.color"
+                :disabled="!canManage"
+                type="color"
+              ></label>
+              <label><span>高光色</span><input
+                v-model="editor.shine"
+                :disabled="!canManage"
+                type="color"
+              ></label>
+            </div>
+            <label>
+              <span>{{ editor.kind === 'category' ? '类目排序值（数值越大越靠前）' : '排序值' }}</span>
+              <input
+                v-model.number="editor.sortOrder"
+                :disabled="!canManage"
+                type="number"
+                min="0"
+                max="99999"
+              >
+            </label>
+            <p
+              v-if="editor.id && !editor.enabled"
+              class="directory-form__warning"
+            >
+              该目录已停用。重新启用本项不会自动恢复已停用的子项或 SKU。
+            </p>
+            <label
+              v-if="editor.id"
+              class="directory-switch"
+            >
+              <input
+                v-model="editor.enabled"
+                :disabled="!canManage"
+                type="checkbox"
+              >
+              <span>此目录可用</span>
+            </label>
+            <button
+              class="primary-action"
+              type="submit"
+              :disabled="!canManage || saving"
+            >
+              {{ saving ? '正在保存…' : editor.kind === 'series' && !editor.id ? '创建并完善资料' : '保存目录' }}
+            </button>
+            <small v-if="editor.kind === 'series' && !editor.id">
+              创建后将进入完整资料页，继续选择五行、功效、形制和养护等标准选项。
+            </small>
+            <p
+              v-if="notice"
+              class="directory-notice"
+              :class="{ 'is-error': notice.includes('失败') || notice.includes('请先') || notice.includes('不能为空') }"
+            >
+              {{ notice }}
+            </p>
+          </form>
+
+          <div
+            v-if="selectedType && editor.kind !== 'type'"
+            class="directory-editor__type-actions"
+          >
+            <span>当前类型</span>
+            <strong>{{ selectedType.name }}</strong>
+            <div class="directory-row-actions">
+              <button
+                v-if="canManage"
+                type="button"
+                @click="editType(selectedType)"
+              >
+                编辑类型
+              </button>
+              <button
+                v-if="canManage && selectedType.enabled"
+                class="danger-text"
+                type="button"
+                @click="disable('type', selectedType.code, selectedType.name)"
+              >
+                停用类型
+              </button>
+              <button
+                v-if="canManage"
+                class="danger-text"
+                type="button"
+                @click="remove('type', selectedType.code, selectedType.name)"
+              >
+                删除空类型
+              </button>
+            </div>
+          </div>
+        </template>
       </aside>
     </div>
   </section>

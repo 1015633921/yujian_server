@@ -12,6 +12,8 @@ const route = useRoute()
 const router = useRouter()
 const groups = ref<MaterialSpu[]>([])
 const types = ref<MaterialType[]>([])
+const categoryFacets = ref<Array<{ value: string; count: number }>>([])
+const failedImages = ref(new Set<string>())
 const total = ref(0)
 const hasNext = ref(false)
 const loading = ref(true)
@@ -22,6 +24,8 @@ let sequence = 0
 
 const keyword = computed(() => typeof route.query.keyword === 'string' ? route.query.keyword : '')
 const top = computed(() => typeof route.query.top === 'string' ? route.query.top : '')
+const category = computed(() => typeof route.query.category === 'string' ? route.query.category : '')
+const status = computed(() => typeof route.query.status === 'string' ? route.query.status : 'enabled')
 const page = computed(() => Math.max(1, Number(route.query.page) || 1))
 const firstResult = computed(() => groups.value.length ? (page.value - 1) * PAGE_SIZE + 1 : 0)
 const lastResult = computed(() => (page.value - 1) * PAGE_SIZE + groups.value.length)
@@ -41,7 +45,15 @@ function submitSearch(event: Event): void {
 }
 
 function clearFilters(): void {
-  updateQuery({ keyword: undefined, top: undefined, page: undefined })
+  updateQuery({ keyword: undefined, top: undefined, category: undefined, status: undefined, page: undefined })
+}
+
+function selectType(value: string): void {
+  updateQuery({ top: value || undefined, category: undefined, page: undefined })
+}
+
+function markImageFailed(imageUrl: string): void {
+  failedImages.value = new Set(failedImages.value).add(imageUrl)
 }
 
 function changePage(nextPage: number): void {
@@ -64,13 +76,21 @@ async function load(silent = false): Promise<void> {
   error.value = ''
   try {
     const [result, materialTypes] = await Promise.all([
-      listMaterialSpus({ keyword: keyword.value, top: top.value, page: page.value, pageSize: PAGE_SIZE }, controller.signal),
+      listMaterialSpus({
+        keyword: keyword.value,
+        top: top.value,
+        category: category.value,
+        status: status.value,
+        page: page.value,
+        pageSize: PAGE_SIZE,
+      }, controller.signal),
       types.value.length ? Promise.resolve(types.value) : listMaterialTypes(false, controller.signal),
     ])
     if (current !== sequence) return
     groups.value = result.items
     total.value = result.pagination.total || 0
     hasNext.value = Boolean(result.pagination.has_next)
+    categoryFacets.value = result.facets?.category || (category.value ? [{ value: category.value, count: result.pagination.total || 0 }] : [])
     types.value = materialTypes
     if (!result.items.length && page.value > 1) changePage(page.value - 1)
   } catch (cause) {
@@ -89,7 +109,7 @@ async function load(silent = false): Promise<void> {
   }
 }
 
-watch(() => [keyword.value, top.value, page.value], () => void load(), { immediate: true })
+watch(() => [keyword.value, top.value, category.value, status.value, page.value], () => void load(), { immediate: true })
 onBeforeUnmount(() => controller?.abort())
 </script>
 
@@ -139,8 +159,9 @@ onBeforeUnmount(() => controller?.abort())
         <span>材料类型</span>
         <select
           :value="top"
+          aria-label="按材料类型筛选"
           :disabled="loading"
-          @change="updateQuery({ top: ($event.target as HTMLSelectElement).value || undefined, page: undefined })"
+          @change="selectType(($event.target as HTMLSelectElement).value)"
         >
           <option value="">
             全部类型
@@ -152,6 +173,37 @@ onBeforeUnmount(() => controller?.abort())
           >
             {{ type.name }}
           </option>
+        </select>
+      </label>
+      <label>
+        <span>一级类目</span>
+        <select
+          :value="category"
+          aria-label="按一级类目筛选"
+          :disabled="loading"
+          @change="updateQuery({ category: ($event.target as HTMLSelectElement).value || undefined, page: undefined })"
+        >
+          <option value="">全部类目</option>
+          <option
+            v-for="item in categoryFacets"
+            :key="item.value"
+            :value="item.value"
+          >
+            {{ item.value }}（{{ item.count }}）
+          </option>
+        </select>
+      </label>
+      <label>
+        <span>启用状态</span>
+        <select
+          :value="status"
+          aria-label="按启用状态筛选"
+          :disabled="loading"
+          @change="updateQuery({ status: ($event.target as HTMLSelectElement).value === 'enabled' ? undefined : ($event.target as HTMLSelectElement).value, page: undefined })"
+        >
+          <option value="enabled">已启用</option>
+          <option value="disabled">已停用</option>
+          <option value="all">全部状态</option>
         </select>
       </label>
       <button
@@ -207,7 +259,7 @@ onBeforeUnmount(() => controller?.abort())
           class="material-lookup-list__head"
           role="row"
         >
-          <span>品种</span><span>分类</span><span>规格</span><span>售价</span><span>操作</span>
+          <span>品种</span><span>一级类目</span><span>可售 SKU</span><span>售价</span><span>操作</span>
         </div>
         <article
           v-for="group in groups"
@@ -221,9 +273,10 @@ onBeforeUnmount(() => controller?.abort())
             role="cell"
           >
             <img
-              v-if="group.spu.image"
+              v-if="group.spu.image && !failedImages.has(group.spu.image)"
               :src="group.spu.image"
               alt=""
+              @error="markImageFailed(group.spu.image)"
             >
             <i v-else />
             <span>
@@ -237,14 +290,14 @@ onBeforeUnmount(() => controller?.abort())
           >{{ group.spu.category || '未分类' }}</span>
           <span
             class="material-lookup-row__specs"
-            data-label="规格"
+            data-label="可售 SKU"
             role="cell"
           ><RouterLink
             v-for="option in group.spu.sku_options || []"
             :key="option.id"
             :to="{ name: 'material-detail', params: { materialId: option.id } }"
-            :title="`编辑 ${option.size_mm ? `${option.size_mm}mm` : '该'} SKU 实物规格`"
-          >{{ option.size_mm ? `${option.size_mm} mm${option.grade ? ` · ${option.grade}` : ''}` : option.grade || '打开 SKU' }}</RouterLink><span v-if="!group.spu.sku_options?.length">—</span></span>
+            :title="`编辑 ${option.size_mm ? `${option.size_mm}mm` : '该'} SKU 的规格、价格和库存`"
+          ><b>{{ option.size_mm ? `${option.size_mm} mm` : '未填尺寸' }}</b><small>{{ option.grade || '常规' }} · 编辑 SKU</small></RouterLink><span v-if="!group.spu.sku_options?.length">尚未建立 SKU</span></span>
           <strong
             data-label="售价"
             role="cell"
@@ -258,7 +311,7 @@ onBeforeUnmount(() => controller?.abort())
               v-if="group.series_id"
               :to="{ name: 'material-series-profile', params: { seriesId: group.series_id } }"
             >
-              查看资料 →
+              品种资料 →
             </RouterLink>
             <RouterLink
               v-else

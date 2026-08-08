@@ -7,13 +7,19 @@ import { getMaterial, patchMaterialSku, type Material } from '@/features/materia
 import { useAuthStore } from '@/stores/auth'
 
 const physicalFields = [
-  { key: 'string_axis_width_mm', label: '穿线方向占位', suffix: 'mm' },
-  { key: 'body_width_mm', label: '外观宽度', suffix: 'mm' },
-  { key: 'body_height_mm', label: '外观高度', suffix: 'mm' },
-  { key: 'radial_depth_mm', label: '径向厚度', suffix: 'mm' },
-  { key: 'compatible_bead_size_mm', label: '适配主珠珠径', suffix: 'mm' },
-  { key: 'compatible_size_tolerance_mm', label: '适配误差 ±', suffix: 'mm' },
+  { key: 'string_axis_width_mm', label: '穿线方向占位', suffix: 'mm', kind: 'geometry' },
+  { key: 'body_width_mm', label: '外观宽度', suffix: 'mm', kind: 'geometry' },
+  { key: 'body_height_mm', label: '外观高度', suffix: 'mm', kind: 'geometry' },
+  { key: 'radial_depth_mm', label: '径向厚度', suffix: 'mm', kind: 'geometry' },
+  { key: 'compatible_bead_size_mm', label: '适配主珠珠径', suffix: 'mm', kind: 'bead_cap' },
+  { key: 'compatible_size_tolerance_mm', label: '适配误差 ±', suffix: 'mm', kind: 'bead_cap' },
 ] as const
+
+const shapeLabels: Record<string, string> = {
+  round: '圆珠', faceted_round: '切面圆珠', rondelle: '算盘珠', barrel: '桶珠', cube: '方糖', nugget: '随形',
+  double_terminated: '双尖', single_terminated: '单尖', triangle: '三角形', disc: '隔片', bead_cap: '包珠隔片 / 花托',
+  curved_tube: '弯管', connector: '连接扣', clasp: '扣件', charm: '挂坠', special: '异形',
+}
 
 const route = useRoute()
 const auth = useAuthStore()
@@ -26,6 +32,27 @@ let controller: AbortController | null = null
 
 const id = computed(() => String(route.params.materialId || ''))
 const canManage = computed(() => auth.admin?.role !== 'viewer')
+const resolvedShape = computed(() => {
+  const stored = String(item.value?.material_params?.bead_shape || '')
+  if (stored) return stored
+  if (item.value?.top === 'bead' || item.value?.top === 'incense') return 'round'
+  if (String(item.value?.category || '').includes('花托')) return 'bead_cap'
+  if (item.value?.top === 'pendant' || String(item.value?.category || '').includes('吊坠')) return 'charm'
+  return 'special'
+})
+const visiblePhysicalFields = computed(() => {
+  if (['round', 'faceted_round'].includes(resolvedShape.value)) return []
+  return physicalFields.filter((field) => field.kind === 'geometry' || resolvedShape.value === 'bead_cap')
+})
+const shapeLabel = computed(() => shapeLabels[resolvedShape.value] || '异形材料')
+const commercialWarnings = computed(() => {
+  if (!item.value?.sku) return []
+  const warnings: string[] = []
+  if (Number(item.value.sku.cost_price || 0) <= 0) warnings.push('成本价尚未维护，毛利数据会失真')
+  if (Number(item.value.sku.safety_stock || 0) <= 0) warnings.push('安全库存为 0，无法提前提示补货')
+  if (item.value.sku.enabled && Number(item.value.sku.price_per_bead || 0) <= 0.01) warnings.push('启用中的 SKU 售价异常，请确认是否为测试价格')
+  return warnings
+})
 
 function displayNumber(value: unknown): number | string {
   const number = Number(value)
@@ -44,6 +71,23 @@ function optionalPositive(data: FormData, name: string, label: string): number |
   const value = Number(raw)
   if (!Number.isFinite(value) || value <= 0) throw new Error(`${label}必须大于 0，或留空。`)
   return value
+}
+
+function requiredNonNegative(data: FormData, name: string, label: string, integer = false): number {
+  const value = Number(data.get(name))
+  if (!Number.isFinite(value) || value < 0 || (integer && !Number.isInteger(value))) {
+    throw new Error(`${label}必须是${integer ? '非负整数' : '大于或等于 0 的数字'}。`)
+  }
+  return value
+}
+
+function moneyInput(value: unknown): string {
+  const number = Number(value || 0)
+  return Number.isFinite(number) ? number.toFixed(2) : '0.00'
+}
+
+function typeLabel(value?: string): string {
+  return ({ bead: '珠子', accessory: '配饰', pendant: '花托/吊坠', incense: '合香珠' } as Record<string, string>)[value || ''] || value || '材料'
 }
 
 async function load(): Promise<void> {
@@ -68,25 +112,36 @@ async function save(event: Event): Promise<void> {
   message.value = ''
   let size: number
   let weight: number
-  const physicalSpecs: Record<string, number> = {}
+  const physicalSpecs: Record<string, number> = Object.fromEntries(
+    Object.entries(item.value.physical_specs || {}).filter((entry): entry is [string, number] => Number.isFinite(Number(entry[1]))).map(([key, value]) => [key, Number(value)]),
+  )
+  let price: number
+  let cost: number
+  let stock: number
+  let safety: number
   try {
     size = requiredPositive(data, 'size', '珠径 / 外观最大尺寸')
     weight = requiredPositive(data, 'weight', '重量')
-    for (const field of physicalFields) {
+    for (const field of visiblePhysicalFields.value) {
       const value = optionalPositive(data, `physical_${field.key}`, field.label)
       if (value !== undefined) physicalSpecs[field.key] = value
+      else delete physicalSpecs[field.key]
     }
+    price = requiredNonNegative(data, 'price', '单颗售价')
+    cost = requiredNonNegative(data, 'cost', '成本价')
+    stock = requiredNonNegative(data, 'stock', '库存', true)
+    safety = requiredNonNegative(data, 'safety', '安全库存', true)
   } catch (cause) {
     message.value = cause instanceof Error ? cause.message : '请检查实物规格。'
     return
   }
   const payload = {
-    price: Number(data.get('price')),
-    cost_price: Number(data.get('cost')),
+    price,
+    cost_price: cost,
     size,
     weight,
-    stock: Number(data.get('stock')),
-    safety_stock: Number(data.get('safety')),
+    stock,
+    safety_stock: safety,
     enabled: data.get('enabled') === 'true',
     physical_specs: physicalSpecs,
     expected_revision: item.value.sku?.revision,
@@ -132,7 +187,7 @@ onBeforeUnmount(() => controller?.abort())
         <div>
           <span>材料规格</span>
           <h1>{{ item.name || '未命名材料' }}</h1>
-          <p>{{ item.top || '-' }} · {{ item.sku?.size_mm || item.size || '-' }}mm · ¥{{ Number(item.sku?.price_per_bead || 0).toFixed(2) }}</p>
+          <p>{{ typeLabel(item.top) }} / {{ item.category || '未分类' }} · {{ item.sku?.size_mm || item.size || '-' }} mm · ¥{{ Number(item.sku?.price_per_bead || 0).toFixed(2) }}</p>
         </div>
       </header>
       <p
@@ -168,10 +223,10 @@ onBeforeUnmount(() => controller?.abort())
           </section>
           <section class="order-detail-section material-physical-section">
             <div class="detail-section-head">
-              <div><span>WORKBENCH GEOMETRY</span><h3>工作台实物规格</h3></div>
+              <div><span>WORKBENCH GEOMETRY</span><h3>工作台实物规格</h3></div><b class="material-shape-badge">{{ shapeLabel }}</b>
             </div>
             <p class="material-physical-section__intro">
-              圆珠通常只需确认外观最大尺寸；异形珠和配饰请按卡尺实测填写穿线占位、宽度与高度。
+              {{ visiblePhysicalFields.length ? '已根据品种形制显示需要测量的字段；请按卡尺实测，不相关字段已自动隐藏。' : '圆珠只需要确认珠径和重量，不再展示无意义的异形尺寸。' }}
             </p>
             <div class="material-physical-fields">
               <label><span>珠径 / 外观最大尺寸 <b>*</b></span><div><input
@@ -195,7 +250,7 @@ onBeforeUnmount(() => controller?.abort())
                 :value="displayNumber(item.sku?.weight_g || item.weight)"
               ><small>g</small></div></label>
               <label
-                v-for="field in physicalFields"
+                v-for="field in visiblePhysicalFields"
                 :key="field.key"
               ><span>{{ field.label }}</span><div><input
                 :name="`physical_${field.key}`"
@@ -214,6 +269,17 @@ onBeforeUnmount(() => controller?.abort())
             <div class="detail-section-head">
               <div><span>COMMERCIAL</span><h3>价格与库存</h3></div>
             </div>
+            <ul
+              v-if="commercialWarnings.length"
+              class="material-commercial-warnings"
+            >
+              <li
+                v-for="warning in commercialWarnings"
+                :key="warning"
+              >
+                {{ warning }}
+              </li>
+            </ul>
             <div class="shipment-form material-commercial-fields">
               <label><span>单颗售价</span><input
                 name="price"
@@ -221,7 +287,7 @@ onBeforeUnmount(() => controller?.abort())
                 min="0"
                 step="0.01"
                 :disabled="saving || !canManage"
-                :value="item.sku?.price_per_bead || 0"
+                :value="moneyInput(item.sku?.price_per_bead)"
               ></label>
               <label><span>成本价</span><input
                 name="cost"
@@ -229,7 +295,7 @@ onBeforeUnmount(() => controller?.abort())
                 min="0"
                 step="0.01"
                 :disabled="saving || !canManage"
-                :value="item.sku?.cost_price || 0"
+                :value="moneyInput(item.sku?.cost_price)"
               ></label>
               <label><span>库存</span><input
                 name="stock"

@@ -5,6 +5,7 @@ import { useRoute } from 'vue-router'
 import PageEmptyState from '@/components/ui/PageEmptyState.vue'
 import PageErrorState from '@/components/ui/PageErrorState.vue'
 import PageHeading from '@/components/ui/PageHeading.vue'
+import ActionConfirmDialog from '@/components/ui/ActionConfirmDialog.vue'
 import {
   bindMaterialAssets,
   listMaterialTaxonomy,
@@ -42,7 +43,9 @@ const categories = ref<MaterialCategory[]>([])
 const top = ref('')
 const categoryId = ref('')
 const seriesId = ref('')
-const mode = ref<'replace' | 'append'>('replace')
+const mode = ref<'replace' | 'append'>('append')
+const seriesKeyword = ref('')
+const bindConfirmOpen = ref(false)
 const queue = ref<AssetQueueItem[]>([])
 const loading = ref(true)
 const error = ref('')
@@ -56,10 +59,21 @@ const canManage = computed(() => auth.admin?.role !== 'viewer')
 const currentCategories = computed(() => categories.value.filter((item) => item.top === top.value))
 const currentCategory = computed(() => currentCategories.value.find((item) => item.id === categoryId.value) || null)
 const currentSeries = computed(() => currentCategory.value?.series.find((item) => item.id === seriesId.value) || null)
+const filteredSeries = computed(() => {
+  const query = seriesKeyword.value.trim().toLowerCase()
+  return (currentCategory.value?.series || []).filter((item) => !query || item.name.toLowerCase().includes(query))
+})
 const uploaded = computed(() => queue.value.filter((item) => item.status === 'uploaded').length)
 const ready = computed(() => queue.value.filter((item) => item.status === 'ready').length)
 const failed = computed(() => queue.value.filter((item) => item.status === 'error' || item.status === 'upload_error').length)
 const bindable = computed(() => Boolean(currentSeries.value) && queue.value.length > 0 && queue.value.every((item) => item.status === 'uploaded' && item.key))
+const bindConfirmTitle = computed(() => mode.value === 'replace' ? '确认替换整个品种图库' : '确认追加到品种图库')
+const bindConfirmDescription = computed(() => {
+  const currentCount = currentSeries.value?.image_urls?.length || 0
+  return mode.value === 'replace'
+    ? `将用本次 ${queue.value.length} 张图片替换「${currentSeries.value?.name || '当前品种'}」现有 ${currentCount} 张图库图片。主图不会修改，但旧图库将不再被引用。`
+    : `将本次 ${queue.value.length} 张图片追加到「${currentSeries.value?.name || '当前品种'}」现有 ${currentCount} 张图库图片之后。主图不会修改。`
+})
 
 function statusLabel(status: AssetStatus): string {
   return {
@@ -83,10 +97,12 @@ function createId(): string {
 function resetCategory(): void {
   categoryId.value = ''
   seriesId.value = ''
+  seriesKeyword.value = ''
 }
 
 function resetSeries(): void {
   seriesId.value = ''
+  seriesKeyword.value = ''
 }
 
 function revoke(item: AssetQueueItem): void {
@@ -248,10 +264,14 @@ async function upload(): Promise<void> {
   }
 }
 
+function requestBind(): void {
+  if (!canManage.value || busy.value || !currentSeries.value || !bindable.value) return
+  bindConfirmOpen.value = true
+}
+
 async function bind(): Promise<void> {
   if (!canManage.value || busy.value || !currentSeries.value || !bindable.value) return
-  const action = mode.value === 'append' ? '追加到' : '替换'
-  if (!window.confirm(`确认将 ${queue.value.length} 张图片${action}「${currentSeries.value.name}」的图库吗？主图不会被修改。`)) return
+  bindConfirmOpen.value = false
   busy.value = true
   notice.value = ''
   try {
@@ -265,7 +285,9 @@ async function bind(): Promise<void> {
       },
     )
     notice.value = `图库已更新，共 ${result.bound_count || queue.value.length} 张；主图未改动，材料缓存已刷新。`
-    await load()
+    queue.value.forEach(revoke)
+    queue.value = []
+    await loadCategories(top.value)
   } catch (cause) {
     notice.value = cause instanceof Error ? cause.message : '图库绑定失败，请刷新后重试。'
   } finally {
@@ -369,13 +391,20 @@ void load()
         </label>
         <label>
           <span>品种 / 款式</span>
+          <input
+            v-model="seriesKeyword"
+            class="material-assets__series-search"
+            type="search"
+            :disabled="busy || !currentCategory"
+            placeholder="输入品种名称快速筛选"
+          >
           <select
             v-model="seriesId"
             :disabled="busy || !currentCategory"
           >
             <option value="">{{ currentCategory ? '请选择品种 / 款式' : '请先选择材料分类' }}</option>
             <option
-              v-for="item in currentCategory?.series || []"
+              v-for="item in filteredSeries"
               :key="item.id"
               :value="item.id"
             >{{ item.name }}</option>
@@ -387,10 +416,16 @@ void load()
             v-model="mode"
             :disabled="busy"
           >
-            <option value="replace">替换品种图库</option>
             <option value="append">追加到品种图库</option>
+            <option value="replace">替换整个品种图库</option>
           </select>
         </label>
+        <p
+          v-if="mode === 'replace'"
+          class="material-assets__replace-warning"
+        >
+          替换会让现有图库停止引用，仅在需要整体重做图库时使用；提交前会再次展示数量差异。
+        </p>
         <div class="material-assets__summary">
           <strong v-if="currentSeries">{{ currentSeries.name }}</strong>
           <strong v-else>尚未选择品种</strong>
@@ -400,6 +435,20 @@ void load()
       </aside>
 
       <main class="material-assets__main">
+        <ol
+          class="material-assets__steps"
+          aria-label="素材处理步骤"
+        >
+          <li :class="{ 'is-current': !queue.length }">
+            <b>1</b><span>选择目标品种</span>
+          </li>
+          <li :class="{ 'is-current': queue.length && !uploaded }">
+            <b>2</b><span>检查并上传图片</span>
+          </li>
+          <li :class="{ 'is-current': uploaded > 0 }">
+            <b>3</b><span>确认写入图库</span>
+          </li>
+        </ol>
         <header class="material-assets__toolbar">
           <div>
             <span>处理队列</span>
@@ -544,7 +593,7 @@ void load()
             class="primary-action"
             type="button"
             :disabled="!canManage || busy || !bindable"
-            @click="bind"
+            @click="requestBind"
           >
             {{ mode === 'append' ? '追加到品种图库' : '替换品种图库' }}
           </button>
@@ -558,5 +607,15 @@ void load()
         </p>
       </main>
     </div>
+    <ActionConfirmDialog
+      :open="bindConfirmOpen"
+      :title="bindConfirmTitle"
+      :description="bindConfirmDescription"
+      :confirm-label="mode === 'replace' ? '确认替换图库' : '确认追加图片'"
+      :tone="mode === 'replace' ? 'danger' : 'default'"
+      :busy="busy"
+      @close="bindConfirmOpen = false"
+      @confirm="bind"
+    />
   </section>
 </template>

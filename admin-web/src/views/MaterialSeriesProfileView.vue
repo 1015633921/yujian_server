@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { onBeforeRouteLeave, useRoute } from 'vue-router'
 
 import MaterialOptionChecks from '@/components/materials/MaterialOptionChecks.vue'
 import PageErrorState from '@/components/ui/PageErrorState.vue'
@@ -46,6 +46,13 @@ interface SeriesDraft {
   batchVariation: string
 }
 
+interface GeometryPreset {
+  beadShape: string
+  placementMode: string
+  visualAxis: string
+  label: string
+}
+
 type MaterialOptionKey = Exclude<keyof MaterialOptionsPayload, 'option_items'>
 type DisplayOption = MaterialOption & { unavailable?: boolean }
 
@@ -59,11 +66,60 @@ const optionsLoading = ref(false)
 const saving = ref(false)
 const error = ref('')
 const notice = ref('')
+const initialDraft = ref('')
+const brokenImages = ref<Set<string>>(new Set())
 let controller: AbortController | null = null
 let loadRequest = 0
 
 const seriesId = computed(() => String(route.params.seriesId || '').trim())
 const canManage = computed(() => auth.admin?.role !== 'viewer')
+const supportsEnergy = computed(() => profile.value?.top !== 'pendant')
+const isDirty = computed(() => Boolean(draft.value) && JSON.stringify(draft.value) !== initialDraft.value)
+
+function geometryPresetFor(item: Pick<MaterialSeries, 'top' | 'category_name'>): GeometryPreset | null {
+  const category = String(item.category_name || '')
+  if (item.top === 'bead' || item.top === 'incense') {
+    return { beadShape: 'round', placementMode: 'threaded', visualAxis: 'radial', label: '圆珠穿线' }
+  }
+  if (category.includes('花托') || category.includes('包珠')) {
+    return { beadShape: 'bead_cap', placementMode: 'attached_side', visualAxis: 'radial', label: '包珠隔片 / 花托' }
+  }
+  if (item.top === 'pendant' || category.includes('吊坠') || category.includes('挂坠')) {
+    return { beadShape: 'charm', placementMode: 'hanging', visualAxis: 'vertical', label: '悬挂吊坠' }
+  }
+  return null
+}
+
+const geometryPreset = computed(() => profile.value ? geometryPresetFor(profile.value) : null)
+const geometryPresetIsConstraint = computed(() => {
+  const category = String(profile.value?.category_name || '')
+  return profile.value?.top === 'pendant' || category.includes('花托') || category.includes('包珠') || category.includes('吊坠') || category.includes('挂坠')
+})
+const geometryIssues = computed(() => {
+  if (!draft.value) return []
+  const issues: string[] = []
+  if (!draft.value.beadShape) issues.push('请选择形制')
+  if (!draft.value.placementMode) issues.push('请选择安装方式')
+  if (!draft.value.visualAxis) issues.push('请选择视觉轴向')
+  const preset = geometryPreset.value
+  if (preset && geometryPresetIsConstraint.value && draft.value.beadShape && draft.value.beadShape !== preset.beadShape) issues.push(`当前形制与“${preset.label}”不一致`)
+  if (preset && geometryPresetIsConstraint.value && draft.value.placementMode && draft.value.placementMode !== preset.placementMode) issues.push(`当前安装方式与“${preset.label}”不一致`)
+  return issues
+})
+
+const profileSteps = computed(() => {
+  if (!draft.value || !profile.value) return []
+  const current = draft.value
+  return [
+    { id: 'profile-basic', label: '基础资料', complete: Boolean(current.name.trim() && profile.value.category_name) },
+    { id: 'profile-images', label: '图片资料', complete: Boolean(current.imageUrl) },
+    ...(supportsEnergy.value ? [{ id: 'profile-energy', label: '推荐资料', complete: Boolean(current.primaryElement && current.colorFamily) }] : []),
+    { id: 'profile-geometry', label: '工作台表现', complete: geometryIssues.value.length === 0 },
+    { id: 'profile-rules', label: '使用规则', complete: Boolean(current.allowedRoles.length && current.matchRules.length) },
+  ]
+})
+const completedSteps = computed(() => profileSteps.value.filter((item) => item.complete).length)
+const completionPercent = computed(() => profileSteps.value.length ? Math.round(completedSteps.value / profileSteps.value.length * 100) : 0)
 
 function stringList(value: unknown): string[] {
   return Array.isArray(value) ? [...new Set(value.map(String).map(item => item.trim()).filter(Boolean))] : []
@@ -97,6 +153,7 @@ function makeDraft(item: MaterialSeries): SeriesDraft {
   const energy = item.energy || {}
   const rules = item.rules || {}
   const params = item.material_params || {}
+  const preset = geometryPresetFor(item)
   return {
     name: item.name || '',
     materialCode: item.material_code || '',
@@ -118,9 +175,9 @@ function makeDraft(item: MaterialSeries): SeriesDraft {
     allowedRoles: stringList(rules.allowed_roles),
     matchRules: stringList(rules.match_rules),
     careTags: stringList(rules.care_tags),
-    beadShape: String(params.bead_shape || 'round'),
-    placementMode: String(params.placement_mode || 'threaded'),
-    visualAxis: String(params.visual_axis || 'radial'),
+    beadShape: String(params.bead_shape || preset?.beadShape || ''),
+    placementMode: String(params.placement_mode || preset?.placementMode || ''),
+    visualAxis: String(params.visual_axis || preset?.visualAxis || ''),
     surfaceFinish: String(params.surface_finish || ''),
     transparencyLevel: String(params.transparency_level || ''),
     textureFeatures: stringList(params.texture_features),
@@ -146,6 +203,8 @@ async function load(): Promise<void> {
     if (requestId !== loadRequest) return
     profile.value = item
     draft.value = makeDraft(item)
+    initialDraft.value = JSON.stringify(draft.value)
+    brokenImages.value = new Set()
     // The options endpoint is slow. It is cached feature-wide and deliberately
     // kept out of the detail page's critical path.
     void listMaterialOptions().then((nextOptions) => {
@@ -198,12 +257,29 @@ function clearPrimary(): void {
   draft.value.imageUrl = ''
 }
 
+function markBrokenImage(url: string): void {
+  brokenImages.value = new Set([...brokenImages.value, url])
+}
+
+function applyGeometryPreset(): void {
+  if (!draft.value || !geometryPreset.value || !canManage.value || saving.value) return
+  draft.value.beadShape = geometryPreset.value.beadShape
+  draft.value.placementMode = geometryPreset.value.placementMode
+  draft.value.visualAxis = geometryPreset.value.visualAxis
+  notice.value = `已套用“${geometryPreset.value.label}”建议，请核对后保存。`
+}
+
 async function save(): Promise<void> {
   if (!profile.value || !draft.value || saving.value || !canManage.value) return
   const current = draft.value
   const name = current.name.trim()
   if (!name) {
     notice.value = '请先填写品种名称。'
+    return
+  }
+  if (geometryIssues.value.length) {
+    notice.value = `工作台表现需要确认：${geometryIssues.value.join('；')}。`
+    document.getElementById('profile-geometry')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
     return
   }
   const optionFields: Array<[MaterialOptionKey, string, string[]]> = [
@@ -284,7 +360,21 @@ async function save(): Promise<void> {
 }
 
 watch(seriesId, () => void load(), { immediate: true })
-onBeforeUnmount(() => controller?.abort())
+
+function beforeUnload(event: BeforeUnloadEvent): void {
+  if (!isDirty.value || saving.value) return
+  event.preventDefault()
+}
+
+onBeforeRouteLeave(() => {
+  if (!isDirty.value || saving.value) return true
+  return window.confirm('品种资料有未保存的修改，确定离开吗？')
+})
+onMounted(() => window.addEventListener('beforeunload', beforeUnload))
+onBeforeUnmount(() => {
+  controller?.abort()
+  window.removeEventListener('beforeunload', beforeUnload)
+})
 </script>
 
 <template>
@@ -328,7 +418,7 @@ onBeforeUnmount(() => controller?.abort())
             :disabled="!canManage || saving || optionsLoading"
             @click="save"
           >
-            {{ saving ? '正在保存…' : '保存完整资料' }}
+            {{ saving ? '正在保存…' : isDirty ? '保存修改' : '资料已保存' }}
           </button>
         </template>
       </PageHeading>
@@ -347,11 +437,36 @@ onBeforeUnmount(() => controller?.abort())
         {{ notice }}
       </p>
 
+      <nav
+        class="material-profile-progress"
+        aria-label="品种资料完成度"
+      >
+        <div>
+          <span>资料完成度</span>
+          <strong>{{ completionPercent }}%</strong>
+          <small>{{ completedSteps }} / {{ profileSteps.length }} 个模块已完成</small>
+        </div>
+        <ol>
+          <li
+            v-for="step in profileSteps"
+            :key="step.id"
+            :class="{ 'is-complete': step.complete }"
+          >
+            <a :href="`#${step.id}`"><i />{{ step.label }}<small>{{ step.complete ? '已完成' : '待完善' }}</small></a>
+          </li>
+        </ol>
+        <b v-if="isDirty">有未保存修改</b>
+        <span v-else>当前内容已保存</span>
+      </nav>
+
       <form
         class="material-profile"
         @submit.prevent="save"
       >
-        <section class="material-profile__overview">
+        <section
+          id="profile-basic"
+          class="material-profile__overview"
+        >
           <header><span>01 / 基础资料</span><h2>品种识别</h2><p>面向运营显示名称；材料编码仅在技术信息中保留。</p></header>
           <div class="material-profile__fields">
             <label><span>品种名称</span><input
@@ -385,16 +500,20 @@ onBeforeUnmount(() => controller?.abort())
           </div>
         </section>
 
-        <section class="material-profile__visual">
+        <section
+          id="profile-images"
+          class="material-profile__visual"
+        >
           <header><span>02 / 图片资料</span><h2>主图与共享图库</h2><p>新图片先在素材处理中标准化上传；这里选择主图、排序或移除已有图库。</p></header>
           <div class="material-profile__images">
             <div class="material-primary-image">
               <img
-                v-if="draft.imageUrl"
+                v-if="draft.imageUrl && !brokenImages.has(draft.imageUrl)"
                 :src="draft.imageUrl"
                 :alt="`${draft.name} 主图`"
+                @error="markBrokenImage(draft.imageUrl)"
               >
-              <span v-else>暂未设置主图</span>
+              <span v-else>{{ draft.imageUrl ? '主图加载失败，请移回图库或重新处理素材' : '暂未设置主图' }}</span>
               <div>
                 <strong>主图</strong><button
                   type="button"
@@ -414,9 +533,17 @@ onBeforeUnmount(() => controller?.abort())
                 :key="url"
               >
                 <img
+                  v-if="!brokenImages.has(url)"
                   :src="url"
                   :alt="`${draft.name} 图库 ${index + 1}`"
+                  @error="markBrokenImage(url)"
                 >
+                <p
+                  v-else
+                  class="material-gallery__broken"
+                >
+                  图片加载失败
+                </p>
                 <div>
                   <span>图库 {{ index + 1 }}</span><button
                     type="button"
@@ -450,7 +577,10 @@ onBeforeUnmount(() => controller?.abort())
           </div>
         </section>
 
-        <section>
+        <section
+          v-if="supportsEnergy"
+          id="profile-energy"
+        >
           <header><span>03 / 五行与推荐</span><h2>能量资料</h2><p>用于五行方案、推荐逻辑和用户侧材料说明。</p></header>
           <div class="material-profile__fields material-profile__fields--three">
             <label><span>主五行</span><select
@@ -526,13 +656,36 @@ onBeforeUnmount(() => controller?.abort())
           </div>
         </section>
 
-        <section>
+        <aside
+          v-else
+          class="material-profile-skip-note"
+        >
+          <strong>五行与推荐已按类型隐藏</strong>
+          <p>花托/吊坠不参与水晶能量推荐，页面只保留图片、工作台表现和使用规则，减少无意义录入。</p>
+        </aside>
+
+        <section id="profile-geometry">
           <header><span>04 / 工作台表现</span><h2>物理与视觉参数</h2><p>用于 DIY 工作台的材质表现，不同于单个 SKU 的尺寸和库存。</p></header>
+          <div
+            v-if="geometryIssues.length"
+            class="material-geometry-warning"
+            role="alert"
+          >
+            <div><strong>需要确认工作台表现</strong><p>{{ geometryIssues.join('；') }}</p></div>
+            <button
+              v-if="geometryPreset"
+              type="button"
+              :disabled="!canManage || saving"
+              @click="applyGeometryPreset"
+            >
+              套用“{{ geometryPreset.label }}”建议
+            </button>
+          </div>
           <div class="material-profile__fields material-profile__fields--four">
             <label><span>珠子形制</span><select
               v-model="draft.beadShape"
               :disabled="!canManage || saving"
-            ><option
+            ><option value="">请选择形制</option><option
               v-for="option in optionsFor('bead_shapes', [draft.beadShape])"
               :key="option.key"
               :value="option.key"
@@ -540,7 +693,7 @@ onBeforeUnmount(() => controller?.abort())
             <label><span>安装方式</span><select
               v-model="draft.placementMode"
               :disabled="!canManage || saving"
-            ><option
+            ><option value="">请选择安装方式</option><option
               v-for="option in optionsFor('placement_modes', [draft.placementMode])"
               :key="option.key"
               :value="option.key"
@@ -548,7 +701,7 @@ onBeforeUnmount(() => controller?.abort())
             <label><span>视觉轴向</span><select
               v-model="draft.visualAxis"
               :disabled="!canManage || saving"
-            ><option
+            ><option value="">请选择视觉轴向</option><option
               v-for="option in optionsFor('visual_axes', [draft.visualAxis])"
               :key="option.key"
               :value="option.key"
@@ -588,7 +741,7 @@ onBeforeUnmount(() => controller?.abort())
           </div>
         </section>
 
-        <section>
+        <section id="profile-rules">
           <header><span>05 / 搭配与养护</span><h2>使用规则</h2><p>这些信息只影响推荐和运营说明，不会替代库存或价格规则。</p></header>
           <div class="material-profile__fields material-profile__fields--two">
             <div class="material-profile__field">
@@ -628,7 +781,7 @@ onBeforeUnmount(() => controller?.abort())
             type="submit"
             :disabled="!canManage || saving || optionsLoading"
           >
-            {{ saving ? '正在保存…' : '保存完整资料' }}
+            {{ saving ? '正在保存…' : isDirty ? '保存修改' : '资料已保存' }}
           </button>
         </footer>
       </form>

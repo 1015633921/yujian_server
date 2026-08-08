@@ -20,6 +20,7 @@ const material = {
   size: 15.2,
   weight: 2.6,
   image_urls: ['https://cdn.example.com/accessory.webp'],
+  material_params: { bead_shape: 'bead_cap' },
   physical_specs: {
     string_axis_width_mm: 12.4,
     body_width_mm: 15.2,
@@ -102,5 +103,19 @@ describe('MaterialDetailView', () => {
     expect(wrapper.findAll('input, select, button[type="submit"]').every((field) => field.attributes('disabled') !== undefined)).toBe(true)
     await wrapper.get('form').trigger('submit')
     expect(api.patchMaterialSku).not.toHaveBeenCalled()
+  })
+
+  it('hides irrelevant geometry fields for a round bead', async () => {
+    api.getMaterial.mockResolvedValue({
+      ...structuredClone(material),
+      top: 'bead',
+      category: '白水晶',
+      material_params: { bead_shape: 'round' },
+    })
+    const wrapper = await createPage()
+
+    expect(wrapper.text()).toContain('圆珠只需要确认珠径和重量')
+    expect(wrapper.find('input[name="physical_body_width_mm"]').exists()).toBe(false)
+    expect(wrapper.find('input[name="physical_compatible_bead_size_mm"]').exists()).toBe(false)
   })
 })

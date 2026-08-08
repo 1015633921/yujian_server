@@ -11,6 +11,7 @@ export interface Material {
   weight?: number
   sort_order?: number
   physical_specs?: Record<string, unknown>
+  material_params?: Record<string, unknown>
   image_url?: string
   image_urls?: string[]
   asset_version?: number
@@ -73,11 +74,19 @@ export interface MaterialSpu {
 export interface MaterialSpuPage {
   items: MaterialSpu[]
   pagination: MaterialPage['pagination']
+  facets?: {
+    top?: Array<{ value: string; count: number }>
+    category?: Array<{ value: string; count: number }>
+    element?: Array<{ value: string; count: number }>
+    profile_state?: Array<{ value: string; count: number }>
+  }
 }
 
 export interface MaterialSpuQuery {
   keyword: string
   top: string
+  category: string
+  status: string
   page: number
   pageSize: number
 }
@@ -326,6 +335,9 @@ export function listMaterialSpus(query: MaterialSpuQuery, signal?: AbortSignal):
   const params = new URLSearchParams({
     keyword: query.keyword,
     top: query.top,
+    category: query.category,
+    status: query.status === 'all' ? '' : query.status,
+    include_facets: 'true',
     compact: 'true',
     sort_by: 'sort_order',
     sort_order: 'asc',
@@ -370,7 +382,7 @@ export function listMaterialTaxonomyPage(query: MaterialDirectoryQuery, signal?:
     keyword: query.keyword,
     top: query.top,
     category_id: query.categoryId,
-    status: query.status,
+    status: query.status === 'all' ? '' : query.status,
     element: query.element,
     chakra: query.chakra,
     color_family: query.colorFamily,
